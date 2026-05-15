@@ -24,7 +24,7 @@ export default function Footer({ copy }: Props) {
               <ul>
                 {col.items.map((item, j) => (
                   <li key={j}>
-                    <a href="#">{item}</a>
+                    <a href={item.href}>{item.label}</a>
                   </li>
                 ))}
               </ul>

@@ -58,7 +58,6 @@ export default function Nav({ lang, copy }: NavProps) {
             </div>
           </div>
 
-          <button className="btn btn-ghost">{copy.signin}</button>
           <button className="btn btn-primary">{copy.primary}</button>
         </div>
       </div>

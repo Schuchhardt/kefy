@@ -1,4 +1,23 @@
-export interface NavLink { id: string; label: string; }
+export interface NavLink { id: string; label: string; path?: string; }
+export interface FooterItem { label: string; href: string; }
+export interface WaitlistInterest { value: string; label: string; }
+export interface WaitlistCopy {
+  title: string;
+  subtitle: string;
+  nameLbl: string;
+  namePlaceholder: string;
+  emailLbl: string;
+  emailPlaceholder: string;
+  interestLbl: string;
+  interestPlaceholder: string;
+  interestOptions: WaitlistInterest[];
+  submit: string;
+  submitting: string;
+  successTitle: string;
+  successSub: string;
+  errorGeneric: string;
+  errorDuplicate: string;
+}
 export interface HeroStat { big: string; lbl: string; }
 export interface DemoOutput { channel: string; meta: string; body: string; }
 export interface Pain { num: string; t: string; d: string; }
@@ -18,7 +37,8 @@ export interface Plan { name: string; price: string; per: string; tagline: strin
 export interface Testimonial { q: string; name: string; role: string; flag: string; avatar: string; }
 
 export interface KefyCopy {
-  nav: { links: NavLink[]; signin: string; primary: string; };
+  nav: { links: NavLink[]; primary: string; };
+  waitlist: WaitlistCopy;
   hero: { tag: string; h1: string[]; h1em: string; sub: string; cta1: string; cta2: string; stats: HeroStat[]; };
   demo: {
     contextLbl: string; contextProduct: string; contextDesc: string;
@@ -40,7 +60,7 @@ export interface KefyCopy {
   pricing: { tag: string; h2: string; plans: Plan[]; closer: string; };
   testi: { tag: string; h2: string; items: Testimonial[]; };
   final: { tag: string; h2: string; sub: string; cta: string; note: string; };
-  footer: { tagline: string; cols: { h: string; items: string[] }[]; origin: string; copy: string; };
+  footer: { tagline: string; cols: { h: string; items: FooterItem[] }[]; origin: string; copy: string; };
 }
 
 const es: KefyCopy = {
@@ -49,10 +69,33 @@ const es: KefyCopy = {
       { id: 'how', label: 'Cómo funciona' },
       { id: 'features', label: 'Funcionalidades' },
       { id: 'pricing', label: 'Precios' },
-      { id: 'blog', label: 'Blog' },
+      { id: 'blog', label: 'Blog', path: '/blog' },
     ],
-    signin: 'Iniciar sesión',
-    primary: 'Empieza gratis',
+    primary: 'Únete a la lista',
+  },
+  waitlist: {
+    title: '¡Asegura tu lugar en la beta!',
+    subtitle: 'Quedan pocos accesos gratuitos. Te avisamos cuando esté listo.',
+    nameLbl: 'Nombre',
+    namePlaceholder: 'Tu nombre (opcional)',
+    emailLbl: 'Correo electrónico',
+    emailPlaceholder: 'tu@correo.com',
+    interestLbl: '¿Qué es lo que más te interesa?',
+    interestPlaceholder: 'Elige una opción (opcional)',
+    interestOptions: [
+      { value: 'content', label: 'Generación de contenido con IA' },
+      { value: 'multichannel', label: 'Publicación en múltiples canales' },
+      { value: 'multiply', label: 'Multiplicar mi contenido existente' },
+      { value: 'ads', label: 'Meta Ads integrados' },
+      { value: 'analytics', label: 'Analytics y métricas unificadas' },
+      { value: 'autopilot', label: 'Modo piloto automático' },
+    ],
+    submit: 'Únete a la lista',
+    submitting: 'Registrando...',
+    successTitle: '¡Ya estás en la lista! 🎉',
+    successSub: 'Te enviaremos un correo con acceso anticipado antes del lanzamiento.',
+    errorGeneric: 'Algo salió mal. Intenta de nuevo.',
+    errorDuplicate: 'Ese correo ya está en la lista. ¡Nos vemos en el lanzamiento!',
   },
   hero: {
     tag: 'Tu equipo de marketing en una sola plataforma',
@@ -344,10 +387,22 @@ const es: KefyCopy = {
   footer: {
     tagline: 'Tu equipo de marketing, en una sola plataforma.',
     cols: [
-      { h: 'Producto', items: ['Cómo funciona', 'Funcionalidades', 'Precios', 'Multiplicador', 'Piloto automático'] },
-      { h: 'Empresa', items: ['Sobre Kefy', 'Blog', 'Casos de éxito', 'Carreras'] },
-      { h: 'Recursos', items: ['Guías de marketing', 'Plantillas', 'API docs', 'Status'] },
-      { h: 'Legal', items: ['Términos', 'Privacidad', 'Cookies'] },
+      { h: 'Producto', items: [
+        { label: 'Cómo funciona', href: '#how' },
+        { label: 'Funcionalidades', href: '#features' },
+        { label: 'Precios', href: '#pricing' },
+        { label: 'Multiplicador', href: '#multiply' },
+        { label: 'Piloto automático', href: '#autopilot' },
+      ]},
+      { h: 'Empresa', items: [
+        { label: 'Sobre Kefy', href: '/sobre-kefy' },
+        { label: 'Blog', href: '/blog' },
+      ]},
+      { h: 'Legal', items: [
+        { label: 'Términos', href: '/terminos' },
+        { label: 'Privacidad', href: '/privacidad' },
+        { label: 'Cookies', href: '/cookies' },
+      ]},
     ],
     origin: 'Hecho en LATAM, para el mundo',
     copy: '© 2026 Kefy',
@@ -360,10 +415,33 @@ const en: KefyCopy = {
       { id: 'how', label: 'How it works' },
       { id: 'features', label: 'Features' },
       { id: 'pricing', label: 'Pricing' },
-      { id: 'blog', label: 'Blog' },
+      { id: 'blog', label: 'Blog', path: '/blog' },
     ],
-    signin: 'Sign in',
-    primary: 'Start for free',
+    primary: 'Join the list',
+  },
+  waitlist: {
+    title: 'Secure your beta spot!',
+    subtitle: "Only a few free spots left. We'll notify you when it's ready.",
+    nameLbl: 'Name',
+    namePlaceholder: 'Your name (optional)',
+    emailLbl: 'Email address',
+    emailPlaceholder: 'you@email.com',
+    interestLbl: 'What interests you most?',
+    interestPlaceholder: 'Pick an option (optional)',
+    interestOptions: [
+      { value: 'content', label: 'AI content generation' },
+      { value: 'multichannel', label: 'Multi-channel publishing' },
+      { value: 'multiply', label: 'Multiplying my existing content' },
+      { value: 'ads', label: 'Integrated Meta Ads' },
+      { value: 'analytics', label: 'Unified analytics & metrics' },
+      { value: 'autopilot', label: 'Autopilot mode' },
+    ],
+    submit: 'Join the waitlist',
+    submitting: 'Signing up...',
+    successTitle: "You're on the list! 🎉",
+    successSub: "We'll send you an early access email before launch.",
+    errorGeneric: 'Something went wrong. Please try again.',
+    errorDuplicate: 'That email is already on the list. See you at launch!',
   },
   hero: {
     tag: 'Your marketing team in one platform',
@@ -655,10 +733,22 @@ const en: KefyCopy = {
   footer: {
     tagline: 'Your marketing team, in one platform.',
     cols: [
-      { h: 'Product', items: ['How it works', 'Features', 'Pricing', 'Multiplier', 'Autopilot'] },
-      { h: 'Company', items: ['About Kefy', 'Blog', 'Case studies', 'Careers'] },
-      { h: 'Resources', items: ['Marketing guides', 'Templates', 'API docs', 'Status'] },
-      { h: 'Legal', items: ['Terms', 'Privacy', 'Cookies'] },
+      { h: 'Product', items: [
+        { label: 'How it works', href: '#how' },
+        { label: 'Features', href: '#features' },
+        { label: 'Pricing', href: '#pricing' },
+        { label: 'Multiplier', href: '#multiply' },
+        { label: 'Autopilot', href: '#autopilot' },
+      ]},
+      { h: 'Company', items: [
+        { label: 'About Kefy', href: '/sobre-kefy' },
+        { label: 'Blog', href: '/blog' },
+      ]},
+      { h: 'Legal', items: [
+        { label: 'Terms', href: '/terminos' },
+        { label: 'Privacy', href: '/privacidad' },
+        { label: 'Cookies', href: '/cookies' },
+      ]},
     ],
     origin: 'Made in LATAM, for the world',
     copy: '© 2026 Kefy',
