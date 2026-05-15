@@ -1,7 +1,7 @@
--- Migration: 002 — Create blog_posts table
+-- Migration: 002 — Create kefy_blog_posts table
 -- Created: 2026-05-14
 
-CREATE TABLE IF NOT EXISTS blog_posts (
+CREATE TABLE IF NOT EXISTS kefy_blog_posts (
   id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   slug         TEXT        NOT NULL,
   lang         TEXT        NOT NULL CHECK (lang IN ('es', 'en')),
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS blog_posts (
 );
 
 -- Index for fast lookups by slug + lang (used on post detail page)
-CREATE INDEX IF NOT EXISTS blog_posts_slug_lang_idx ON blog_posts (slug, lang);
+CREATE INDEX IF NOT EXISTS kefy_blog_posts_slug_lang_idx ON kefy_blog_posts (slug, lang);
 
 -- Index for listing pages ordered by date
-CREATE INDEX IF NOT EXISTS blog_posts_lang_date_idx ON blog_posts (lang, published_at DESC);
+CREATE INDEX IF NOT EXISTS kefy_blog_posts_lang_date_idx ON kefy_blog_posts (lang, published_at DESC);

@@ -1,8 +1,8 @@
--- Seed: blog_posts
+-- Seed: kefy_blog_posts
 -- Created: 2026-05-14
 -- Run AFTER migration 002
 
-INSERT INTO blog_posts (slug, lang, title, excerpt, content, author, cover_url, published_at) VALUES
+INSERT INTO kefy_blog_posts (slug, lang, title, excerpt, content, author, cover_url, published_at) VALUES
 
 -- ──────────────────────────────────────────────
 -- POST 1 · ES

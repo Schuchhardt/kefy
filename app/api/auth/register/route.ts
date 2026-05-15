@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   // Check email uniqueness
   const { data: existing } = await db
-    .from('users')
+    .from('kefy_users')
     .select('id')
     .eq('email', sanitizedEmail)
     .maybeSingle();
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
 
   // Create user
   const { data: user, error: userError } = await db
-    .from('users')
+    .from('kefy_users')
     .insert({ email: sanitizedEmail, password_hash: passwordHash, name: sanitizedName })
     .select('id')
     .single();
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
   const slug = `${baseSlug}-${user.id.slice(0, 8)}`;
 
   const { data: org, error: orgError } = await db
-    .from('organizations')
+    .from('kefy_organizations')
     .insert({ name: sanitizedOrgName, slug, plan: 'starter' })
     .select('id')
     .single();
@@ -97,14 +97,14 @@ export async function POST(req: NextRequest) {
   }
 
   // Create membership (owner)
-  await db.from('org_memberships').insert({
+  await db.from('kefy_org_memberships').insert({
     org_id: org.id,
     user_id: user.id,
     role: 'owner',
   });
 
   // Create starter subscription
-  await db.from('subscriptions').insert({
+  await db.from('kefy_subscriptions').insert({
     org_id: org.id,
     plan: 'starter',
     status: 'active',
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
 
   const { raw: refreshRaw, hash: refreshHash, expiresAt } = generateRefreshToken();
 
-  await db.from('refresh_tokens').insert({
+  await db.from('kefy_refresh_tokens').insert({
     user_id: user.id,
     token_hash: refreshHash,
     expires_at: expiresAt.toISOString(),

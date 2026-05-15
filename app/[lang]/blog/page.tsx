@@ -34,7 +34,7 @@ async function getPosts(lang: string): Promise<BlogPost[]> {
   try {
     const supabase = createSupabaseServer();
     const { data, error } = await supabase
-      .from('blog_posts')
+      .from('kefy_blog_posts')
       .select('id, slug, lang, title, excerpt, author, published_at, cover_url')
       .eq('lang', lang)
       .order('published_at', { ascending: false });

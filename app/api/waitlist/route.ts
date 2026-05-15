@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   const { error: dbError } = await supabase
-    .from('waitlist')
+    .from('kefy_waitlist')
     .insert({ email: sanitizedEmail, name: sanitizedName, interest: sanitizedInterest });
 
   if (dbError) {

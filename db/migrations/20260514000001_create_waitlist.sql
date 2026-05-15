@@ -1,7 +1,7 @@
--- Migration: 001 — Create waitlist table
+-- Migration: 001 — Create kefy_waitlist table
 -- Created: 2026-05-14
 
-CREATE TABLE IF NOT EXISTS waitlist (
+CREATE TABLE IF NOT EXISTS kefy_waitlist (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   email       TEXT        UNIQUE NOT NULL,
   name        TEXT,
@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS waitlist (
 );
 
 -- Index for fast lookups by email (used on duplicate check)
-CREATE INDEX IF NOT EXISTS waitlist_email_idx ON waitlist (email);
+CREATE INDEX IF NOT EXISTS kefy_waitlist_email_idx ON kefy_waitlist (email);

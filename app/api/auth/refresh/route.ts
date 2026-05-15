@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   const db = createSupabaseServer();
 
   const { data: storedToken } = await db
-    .from('refresh_tokens')
+    .from('kefy_refresh_tokens')
     .select('id, user_id, expires_at')
     .eq('token_hash', tokenHash)
     .maybeSingle();
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 
   if (new Date(storedToken.expires_at) < new Date()) {
     // Clean up expired token
-    await db.from('refresh_tokens').delete().eq('id', storedToken.id);
+    await db.from('kefy_refresh_tokens').delete().eq('id', storedToken.id);
     const res = NextResponse.json({ error: 'Refresh token expired' }, { status: 401 });
     res.cookies.set(REFRESH_COOKIE, '', clearCookieOptions('/api/auth/refresh'));
     res.cookies.set(ACCESS_COOKIE, '', clearCookieOptions());
@@ -40,11 +40,11 @@ export async function POST(req: NextRequest) {
   }
 
   // Rotate: delete old token, issue new one
-  await db.from('refresh_tokens').delete().eq('id', storedToken.id);
+  await db.from('kefy_refresh_tokens').delete().eq('id', storedToken.id);
 
   const { data: membership } = await db
-    .from('org_memberships')
-    .select('org_id, role, organizations(plan)')
+    .from('kefy_org_memberships')
+    .select('org_id, role, kefy_organizations(plan)')
     .eq('user_id', storedToken.user_id)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'User has no organization' }, { status: 500 });
   }
 
-  const org = membership.organizations as unknown as { plan: string } | null;
+  const org = membership.kefy_organizations as unknown as { plan: string } | null;
   const plan = (org?.plan ?? 'starter') as 'starter' | 'pro' | 'business';
   const role = membership.role as 'owner' | 'admin' | 'member';
 
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   });
 
   const { raw: newRefreshRaw, hash: newRefreshHash, expiresAt } = generateRefreshToken();
-  await db.from('refresh_tokens').insert({
+  await db.from('kefy_refresh_tokens').insert({
     user_id: storedToken.user_id,
     token_hash: newRefreshHash,
     expires_at: expiresAt.toISOString(),

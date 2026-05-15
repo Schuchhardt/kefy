@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const db = createSupabaseServer();
 
   const { data: user } = await db
-    .from('users')
+    .from('kefy_users')
     .select('id, email, name, created_at')
     .eq('id', auth.userId)
     .maybeSingle();
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: org } = await db
-    .from('organizations')
+    .from('kefy_organizations')
     .select('id, name, slug, plan')
     .eq('id', auth.orgId)
     .maybeSingle();

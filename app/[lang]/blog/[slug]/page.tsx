@@ -24,7 +24,7 @@ async function getPost(slug: string, lang: string): Promise<BlogPost | null> {
   try {
     const supabase = createSupabaseServer();
     const { data, error } = await supabase
-      .from('blog_posts')
+      .from('kefy_blog_posts')
       .select('*')
       .eq('slug', slug)
       .eq('lang', lang)
@@ -41,7 +41,7 @@ export async function generateStaticParams() {
   try {
     const supabase = createSupabaseServer();
     const { data } = await supabase
-      .from('blog_posts')
+      .from('kefy_blog_posts')
       .select('slug, lang');
 
     return (data ?? []).map((row: { slug: string; lang: string }) => ({

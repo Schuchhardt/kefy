@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   if (rawRefresh) {
     const db = createSupabaseServer();
     await db
-      .from('refresh_tokens')
+      .from('kefy_refresh_tokens')
       .delete()
       .eq('token_hash', hashToken(rawRefresh));
   }

@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   const db = createSupabaseServer();
 
   const { data: user } = await db
-    .from('users')
+    .from('kefy_users')
     .select('id, email, name, password_hash')
     .eq('email', sanitizedEmail)
     .maybeSingle();
@@ -54,8 +54,8 @@ export async function POST(req: NextRequest) {
 
   // Get membership (most recent org, prefer owner role)
   const { data: membership } = await db
-    .from('org_memberships')
-    .select('org_id, role, organizations(plan)')
+    .from('kefy_org_memberships')
+    .select('org_id, role, kefy_organizations(plan)')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No organization found' }, { status: 500 });
   }
 
-  const org = membership.organizations as unknown as { plan: string } | null;
+  const org = membership.kefy_organizations as unknown as { plan: string } | null;
   const plan = (org?.plan ?? 'starter') as 'starter' | 'pro' | 'business';
   const role = membership.role as 'owner' | 'admin' | 'member';
 
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
 
   const { raw: refreshRaw, hash: refreshHash, expiresAt } = generateRefreshToken();
 
-  await db.from('refresh_tokens').insert({
+  await db.from('kefy_refresh_tokens').insert({
     user_id: user.id,
     token_hash: refreshHash,
     expires_at: expiresAt.toISOString(),
