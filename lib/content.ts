@@ -44,7 +44,7 @@ export interface KefyCopy {
     contextLbl: string; contextProduct: string; contextDesc: string;
     channelsLbl: string; goalLbl: string; goalK: string; goalV: string;
     audienceK: string; audienceV: string; url: string;
-    outputs: { linkedin: DemoOutput; meta: DemoOutput; x: DemoOutput };
+    outputs: { linkedin: DemoOutput; meta: DemoOutput; x: DemoOutput, facebook: DemoOutput};
   };
   problem: { tag: string; h2: string; intro: string; pains: Pain[]; stats: StatCard[]; };
   how: { tag: string; h2: string; intro: string; steps: Step[]; closer: string[]; };
@@ -120,7 +120,7 @@ const es: KefyCopy = {
     goalV: 'Piloto automático',
     audienceK: 'Calendario',
     audienceV: '12 piezas / semana',
-    url: 'app.kefy.io / dashboard',
+    url: 'kefy.app / dashboard',
     outputs: {
       linkedin: {
         channel: 'LinkedIn',
@@ -128,7 +128,7 @@ const es: KefyCopy = {
         body: 'Llevo tres años manejando una tienda de ropa sola. Tres.\n\nPublicaba cuando me acordaba — una vez por semana en el mejor caso. Cero LinkedIn. Cero ads.\n\nDesde que activé @Kefy en modo automático:\n→ 12 piezas por semana en 4 redes\n→ Las ventas por Instagram subieron 60%\n\nLo único que hago ahora es revisar y aprobar. →',
       },
       meta: {
-        channel: 'Meta Ads',
+        channel: 'Instagram & Facebook',
         meta: '· ad copy · 4 variantes',
         body: 'Texto principal:\nNo tienes equipo de marketing. Tienes Kefy.\n\nTitular:\nTu marketing en piloto automático.\n\nCTA: Registrarse',
       },
@@ -136,6 +136,11 @@ const es: KefyCopy = {
         channel: 'X',
         meta: '· thread · 5 tweets',
         body: 'cosas que hacía mal en mi negocio:\n\n— publicaba 1 vez por semana\n— mi instagram tenía 3 estilos distintos\n— nunca corrí un ad\n\nhoy kefy hace todo eso. yo solo apruebo.\n\n1/5 →',
+      },
+      facebook: {
+        channel: 'Facebook',
+        meta: '· post · 1,247 caracteres',
+        body: 'Llevo tres años manejando una tienda de ropa sola. Tres.\n\nPublicaba cuando me acordaba — una vez por semana en el mejor caso. Cero Facebook. Cero ads.\n\nDesde que activé @Kefy en modo automático:\n→ 12 piezas por semana en 4 redes\n→ Las ventas por Facebook subieron 60%\n\nLo único que hago ahora es revisar y aprobar. →',
       },
     },
   },
@@ -149,7 +154,7 @@ const es: KefyCopy = {
       { num: '03', t: 'Las campañas pagadas te dan miedo', d: 'Sabes que deberías pautar en Meta. Pero abrir Ads Manager es entrar a otra dimensión.' },
     ],
     stats: [
-      { v: 8.5, pre: '$', suf: 'k/mes', d: 'Costo promedio de un equipo de marketing junior (3 personas) en LATAM', warm: true },
+      { v: 1.5, pre: '$', suf: 'k/mes', d: 'Costo promedio de un equipo de marketing junior (3 personas) en LATAM', warm: true },
       { v: 2.7, d: 'Posts promedio por semana de una pyme sin equipo dedicado' },
       { v: 89, suf: '%', d: 'Negocios pequeños que nunca han hecho una campaña pagada de ads' },
     ],
@@ -466,7 +471,7 @@ const en: KefyCopy = {
     goalV: 'Autopilot',
     audienceK: 'Schedule',
     audienceV: '12 pieces / week',
-    url: 'app.kefy.io / dashboard',
+    url: 'kefy.app / dashboard',
     outputs: {
       linkedin: {
         channel: 'LinkedIn',
@@ -474,7 +479,7 @@ const en: KefyCopy = {
         body: "I've been running a clothing store alone for three years. Three.\n\nI posted when I remembered — once a week at best. Zero LinkedIn. Zero ads.\n\nSince I turned on @Kefy autopilot mode:\n→ 12 pieces per week across 4 networks\n→ Instagram sales up 60%\n\nAll I do now is review and approve. →",
       },
       meta: {
-        channel: 'Meta Ads',
+        channel: 'Instagram',
         meta: '· ad copy · 4 variants',
         body: "Primary text:\nYou don't have a marketing team. You have Kefy.\n\nHeadline:\nYour marketing on autopilot.\n\nCTA: Sign up",
       },
@@ -482,6 +487,11 @@ const en: KefyCopy = {
         channel: 'X',
         meta: '· thread · 5 tweets',
         body: "things I was doing wrong in my business:\n\n— posting once a week\n— my instagram had 3 different styles\n— never ran an ad\n\ntoday kefy does all that. i just approve.\n\n1/5 →",
+      },
+      facebook: {
+        channel: 'Facebook',
+        meta: '· post · 1,247 characters',
+        body: "I've been running a clothing store alone for three years. Three.\n\nI posted when I remembered — once a week at best. Zero Facebook. Zero ads.\n\nSince I turned on @Kefy autopilot mode:\n→ 12 pieces per week across 4 networks\n→ Facebook sales up 60%\n\nAll I do now is review and approve. →",
       },
     },
   },
@@ -495,7 +505,7 @@ const en: KefyCopy = {
       { num: '03', t: 'Paid campaigns scare you', d: "You know you should run Meta ads. But opening Ads Manager feels like entering another dimension." },
     ],
     stats: [
-      { v: 8.5, pre: '$', suf: 'k/mo', d: 'Average cost of a junior marketing team (3 people) in LATAM', warm: true },
+      { v: 1.5, pre: '$', suf: 'k/mo', d: 'Average cost of a junior marketing team (3 people) in LATAM', warm: true },
       { v: 2.7, d: 'Average posts per week from an SMB without a dedicated team' },
       { v: 89, suf: '%', d: 'Small businesses that have never run a paid ad campaign' },
     ],

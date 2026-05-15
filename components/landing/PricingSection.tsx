@@ -5,9 +5,10 @@ import type { KefyCopy, PlanFeature } from '@/lib/content';
 
 interface Props {
   copy: KefyCopy['pricing'];
+  onOpenWaitlist: () => void;
 }
 
-export default function PricingSection({ copy }: Props) {
+export default function PricingSection({ copy, onOpenWaitlist }: Props) {
   const [headRef, headSeen] = useReveal();
   const [plansRef, plansSeen] = useReveal();
 
@@ -54,6 +55,7 @@ export default function PricingSection({ copy }: Props) {
               <button
                 className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} btn-lg`}
                 style={{ width: '100%', justifyContent: 'center' }}
+                onClick={onOpenWaitlist}
               >
                 {plan.cta}
               </button>

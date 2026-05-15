@@ -5,9 +5,10 @@ import type { KefyCopy } from '@/lib/content';
 
 interface Props {
   copy: KefyCopy['final'];
+  onOpenWaitlist: () => void;
 }
 
-export default function FinalCTA({ copy }: Props) {
+export default function FinalCTA({ copy, onOpenWaitlist }: Props) {
   const [ref, seen] = useReveal();
 
   return (
@@ -19,7 +20,7 @@ export default function FinalCTA({ copy }: Props) {
       <span className="label">{copy.tag}</span>
       <h2 className="h2">{copy.h2}</h2>
       <p>{copy.sub}</p>
-      <button className="btn btn-primary btn-lg">{copy.cta}</button>
+      <button className="btn btn-primary btn-lg" onClick={onOpenWaitlist}>{copy.cta}</button>
       <div className="final-note">
         <span className="pulse" />
         {copy.note}

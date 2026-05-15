@@ -25,7 +25,7 @@ export async function generateStaticParams() {
   return locales.map((lang) => ({ lang }));
 }
 
-const BASE_URL = 'https://kefy.io';
+const BASE_URL = 'https://kefy.app';
 
 export async function generateMetadata({
   params,
@@ -84,11 +84,15 @@ export default async function LangLayout({
       className={`${syne.variable} ${dmSans.variable} ${jetbrains.variable}`}
     >
       <head>
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+        <link rel="manifest" href="/site.webmanifest" />
         <link rel="alternate" hrefLang="es" href={`${BASE_URL}/es`} />
         <link rel="alternate" hrefLang="en" href={`${BASE_URL}/en`} />
         <link rel="alternate" hrefLang="x-default" href={`${BASE_URL}/es`} />
       </head>
-      <body>{children}</body>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

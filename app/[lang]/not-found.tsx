@@ -1,4 +1,18 @@
+'use client';
+
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+
+const labels: Record<string, { msg: string; cta: string }> = {
+  es: { msg: 'Página no encontrada', cta: 'Volver al inicio' },
+  en: { msg: 'Page not found', cta: 'Go home' },
+};
+
 export default function NotFound() {
+  const params = useParams();
+  const lang = (params?.lang as string) ?? 'es';
+  const l = labels[lang] ?? labels['es'];
+
   return (
     <div
       style={{
@@ -25,10 +39,10 @@ export default function NotFound() {
         404
       </span>
       <p style={{ fontFamily: 'var(--font-syne), serif', fontWeight: 600, fontSize: '20px' }}>
-        Page not found
+        {l.msg}
       </p>
-      <a
-        href="/"
+      <Link
+        href={`/${lang}`}
         style={{
           marginTop: '12px',
           display: 'inline-flex',
@@ -43,8 +57,9 @@ export default function NotFound() {
           textDecoration: 'none',
         }}
       >
-        Go home
-      </a>
+        {l.cta}
+      </Link>
     </div>
   );
 }
+

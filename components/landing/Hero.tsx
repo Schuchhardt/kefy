@@ -54,8 +54,7 @@ export default function Hero({ lang, copy, demoCopy }: HeroProps) {
           className={`hero-ctas reveal${ctaSeen ? ' is-in' : ''}`}
           style={{ transitionDelay: '0.22s' }}
         >
-          <button className="btn btn-primary btn-lg">{copy.cta1}</button>
-          <a href="#how" className="btn btn-secondary btn-lg">
+          <a href="#how" className="btn btn-primary btn-lg">
             {copy.cta2} →
           </a>
         </div>

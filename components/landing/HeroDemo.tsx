@@ -8,11 +8,11 @@ interface HeroDemoProps {
   copy: KefyCopy['demo'];
 }
 
-const TABS = ['LinkedIn', 'Meta Ads', 'X'] as const;
+const TABS = ['Instagram', 'Facebook', 'X', 'LinkedIn'] as const;
 type Tab = typeof TABS[number];
 
 export default function HeroDemo({ copy }: HeroDemoProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('LinkedIn');
+  const [activeTab, setActiveTab] = useState<Tab>('Instagram');
   const [started, setStarted] = useState(false);
 
   useEffect(() => {
@@ -32,7 +32,8 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
 
   const outputMap: Record<Tab, typeof copy.outputs.linkedin> = {
     LinkedIn: copy.outputs.linkedin,
-    'Meta Ads': copy.outputs.meta,
+    'Instagram': copy.outputs.meta,
+    Facebook: copy.outputs.facebook,
     X: copy.outputs.x,
   };
 
@@ -58,7 +59,7 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
           <span />
         </div>
         <div className="demo-url">
-          <span className="acc">app</span>.kefy.io /&nbsp;
+          <span className="acc"></span>kefy.app /&nbsp;
           <span>dashboard</span>
         </div>
       </div>
@@ -117,7 +118,8 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
               <div className="demo-output-channel">
                 <div className="ic">
                   {activeTab === 'LinkedIn' && 'in'}
-                  {activeTab === 'Meta Ads' && '◆'}
+                  {activeTab === 'Instagram' && '◆'}
+                  {activeTab === 'Facebook' && 'f'}
                   {activeTab === 'X' && '𝕏'}
                 </div>
                 {currentOutput.channel}
@@ -125,7 +127,7 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
               <div className="demo-output-meta">{currentOutput.meta}</div>
             </div>
 
-            {activeTab === 'Meta Ads' ? (
+            {activeTab === 'Instagram' ? (
               <>
                 <div className="demo-typewriter" style={{ whiteSpace: 'pre-wrap' }}>
                   {currentOutput.body}

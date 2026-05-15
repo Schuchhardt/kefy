@@ -2,31 +2,43 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useScrolled } from '@/hooks/useScrolled';
 import type { KefyCopy } from '@/lib/content';
 
 interface NavProps {
   lang: string;
   copy: KefyCopy['nav'];
+  onOpenWaitlist: () => void;
 }
 
-export default function Nav({ lang, copy }: NavProps) {
+export default function Nav({ lang, copy, onOpenWaitlist }: NavProps) {
   const scrolled = useScrolled(40);
   const [langOpen, setLangOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const closeMenu = () => setMenuOpen(false);
 
   return (
-    <nav className={`nav${scrolled ? ' scrolled' : ''}`}>
+    <nav className={`nav${scrolled ? ' scrolled' : ''}${menuOpen ? ' menu-open' : ''}`}>
       <div className="nav-inner">
-        <Link href={`/${lang}`} className="logo">
-          Kef<span className="y">y</span>
+        <Link href={`/${lang}`} className="logo" onClick={closeMenu}>
+          <Image src="/apple-touch-icon.png" alt="Kefy" width={24} height={24} />
+          <span>Kef<span className="y">y</span></span>
         </Link>
 
         <div className="nav-links">
-          {copy.links.map((link) => (
-            <a key={link.id} href={`#${link.id}`}>
-              {link.label}
-            </a>
-          ))}
+          {copy.links.map((link) =>
+            link.path ? (
+              <a key={link.id} href={`/${lang}${link.path}`}>
+                {link.label}
+              </a>
+            ) : (
+              <a key={link.id} href={`#${link.id}`}>
+                {link.label}
+              </a>
+            )
+          )}
         </div>
 
         <div className="nav-right">
@@ -58,8 +70,38 @@ export default function Nav({ lang, copy }: NavProps) {
             </div>
           </div>
 
-          <button className="btn btn-primary">{copy.primary}</button>
+          <button className="btn btn-primary nav-cta-desktop" onClick={onOpenWaitlist}>{copy.primary}</button>
+
+          <button
+            className="nav-burger"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}
+            aria-expanded={menuOpen}
+          >
+            <span className={`burger-icon${menuOpen ? ' open' : ''}`} />
+          </button>
         </div>
+      </div>
+
+      <div className={`nav-mobile${menuOpen ? ' open' : ''}`} aria-hidden={!menuOpen}>
+        {copy.links.map((link) =>
+          link.path ? (
+            <a key={link.id} href={`/${lang}${link.path}`} className="nav-mobile-link" onClick={closeMenu}>
+              {link.label}
+            </a>
+          ) : (
+            <a key={link.id} href={`#${link.id}`} className="nav-mobile-link" onClick={closeMenu}>
+              {link.label}
+            </a>
+          )
+        )}
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }}
+          onClick={() => { onOpenWaitlist(); closeMenu(); }}
+        >
+          {copy.primary}
+        </button>
       </div>
     </nav>
   );
