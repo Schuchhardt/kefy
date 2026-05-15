@@ -43,13 +43,13 @@ const aboutContent: Record<string, {
     ],
   },
   en: {
-    title: 'We're a team that',
+    title: "We're a team that",
     titleEm: 'lived the problem.',
     sub: 'Kefy was born from a real frustration: doing marketing for our own businesses was expensive, fragmented and time-consuming.',
     story: [
       {
         h: 'The origin',
-        p: 'We're a multidisciplinary team of developers, entrepreneurs and designers. Together we manage or have managed SMBs, online stores and software projects. And we all faced the same problem: marketing was the hardest part.',
+        p: "We're a multidisciplinary team of developers, entrepreneurs and designers. Together we manage or have managed SMBs, online stores and software projects. And we all faced the same problem: marketing was the hardest part.",
       },
       {
         h: 'The problem we lived',
@@ -57,7 +57,7 @@ const aboutContent: Record<string, {
       },
       {
         h: 'The solution we built',
-        p: 'We decided to build the platform we wanted to use. One that would learn our brand identity, generate content across all formats, schedule it intelligently and give us real visibility into what worked. That's Kefy.',
+        p: "We decided to build the platform we wanted to use. One that would learn our brand identity, generate content across all formats, schedule it intelligently and give us real visibility into what worked. That's Kefy.",
       },
       {
         h: 'Why we launched it publicly',
@@ -65,7 +65,7 @@ const aboutContent: Record<string, {
       },
       {
         h: 'Made in LATAM',
-        p: 'We're a distributed team across Latin America. We know the nuances of the Hispanic market, the particularities of Spanish in each region, and the real challenges of growing a business in LATAM. That's reflected in every decision we make.',
+        p: "We're a distributed team across Latin America. We know the nuances of the Hispanic market, the particularities of Spanish in each region, and the real challenges of growing a business in LATAM. That's reflected in every decision we make.",
       },
     ],
     teamTitle: 'The team',
