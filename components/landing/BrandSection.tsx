@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -10,19 +7,13 @@ interface Props {
 const PALETTE = ['#F5F0E8', '#C6FF4B', '#1E1E24', '#08080A', '#FF8C42'];
 
 export default function BrandSection({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [kitRef, kitSeen] = useReveal();
-
   return (
     <section className="section" id="brand">
       <div className="container">
         <div className="brand-grid">
           {/* Left */}
           <div>
-            <div
-              ref={headRef as React.RefObject<HTMLDivElement>}
-              className={`reveal${headSeen ? ' is-in' : ''}`}
-            >
+            <div className="reveal">
               <span className="label">{copy.tag}</span>
               <h2 className="h2" style={{ marginTop: '18px', marginBottom: '16px' }}>
                 {copy.h2[0]}{' '}
@@ -44,9 +35,8 @@ export default function BrandSection({ copy }: Props) {
 
           {/* Right: Brand kit visual */}
           <div
-            ref={kitRef as React.RefObject<HTMLDivElement>}
-            className={`brand-kit reveal${kitSeen ? ' is-in' : ''}`}
-            style={{ transitionDelay: '0.15s' }}
+            className="brand-kit reveal"
+            style={{ animationDelay: '0.15s' }}
           >
             <div className="brand-kit-head">
               <div className="brand-kit-title">Brand Kit · Trazo Studio</div>

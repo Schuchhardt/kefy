@@ -1,32 +1,24 @@
 'use client';
 
-import { useReveal } from '@/hooks/useReveal';
+import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
 import type { KefyCopy, PlanFeature } from '@/lib/content';
 
 interface Props {
   copy: KefyCopy['pricing'];
-  onOpenWaitlist: () => void;
 }
 
-export default function PricingSection({ copy, onOpenWaitlist }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [plansRef, plansSeen] = useReveal();
+export default function PricingSection({ copy }: Props) {
+  const openWaitlist = useWaitlistOpen();
 
   return (
     <section className="section" id="pricing">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">{copy.h2}</h2>
         </div>
 
-        <div
-          ref={plansRef as React.RefObject<HTMLDivElement>}
-          className={`plans reveal${plansSeen ? ' is-in' : ''}`}
-        >
+        <div className="plans reveal" style={{ animationDelay: '0.1s' }}>
           {copy.plans.map((plan, i) => (
             <div
               key={i}
@@ -55,7 +47,7 @@ export default function PricingSection({ copy, onOpenWaitlist }: Props) {
               <button
                 className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} btn-lg`}
                 style={{ width: '100%', justifyContent: 'center' }}
-                onClick={onOpenWaitlist}
+                onClick={openWaitlist}
               >
                 {plan.cta}
               </button>

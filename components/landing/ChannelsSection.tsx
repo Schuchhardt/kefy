@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import type { KefyCopy } from '@/lib/content';
 
@@ -9,15 +6,10 @@ interface Props {
 }
 
 export default function ChannelsSection({ copy }: Props) {
-  const [ref, seen] = useReveal();
-
   return (
     <section className="channels-section" style={{ borderTop: '1px solid var(--border)' }}>
       <div className="container">
-        <div
-          ref={ref as React.RefObject<HTMLDivElement>}
-          className={`channels-inner reveal${seen ? ' is-in' : ''}`}
-        >
+        <div className="channels-inner reveal">
           <div>
             <h3 className="h3">
               {copy.h3[0]}{' '}

@@ -1,5 +1,3 @@
-'use client';
-
 interface ChannelIconProps {
   name: string;
   size?: number;

@@ -1,8 +1,11 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
 import { createSupabaseServer } from '@/lib/supabase';
 import type { BlogPost } from '@/lib/supabase';
+import { KEFY_COPY } from '@/lib/content';
+import BlogNav from '@/components/blog/BlogNav';
+import BlogCoverImage from '@/components/blog/BlogCoverImage';
+import Footer from '@/components/landing/Footer';
 
 const labels: Record<string, { back: string; by: string }> = {
   es: { back: 'Volver al blog', by: 'Por' },
@@ -59,10 +62,14 @@ export default async function BlogPostPage({
   const post = await getPost(slug, lang);
   const l = labels[lang] ?? labels['es'];
 
+  const copy = KEFY_COPY[lang] ?? KEFY_COPY['es'];
+
   if (!post) notFound();
 
   return (
-    <div className="page-layout">
+    <>
+      <BlogNav lang={lang} nav={copy.nav} waitlist={copy.waitlist} />
+      <div className="page-layout">
       <div className="container">
         <Link href={`/${lang}/blog`} className="back-link">
           ← {l.back}
@@ -77,13 +84,7 @@ export default async function BlogPostPage({
         </div>
 
         {post.cover_url && (
-          <Image
-            src={post.cover_url}
-            alt={post.title}
-            width={960}
-            height={420}
-            className="blog-post-cover"
-          />
+          <BlogCoverImage src={post.cover_url} alt={post.title} />
         )}
 
         <div className="prose">
@@ -93,5 +94,7 @@ export default async function BlogPostPage({
         </div>
       </div>
     </div>
+      <Footer copy={copy.footer} lang={lang} />
+    </>
   );
 }

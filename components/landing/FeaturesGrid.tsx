@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -8,24 +5,15 @@ interface Props {
 }
 
 export default function FeaturesGrid({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [gridRef, gridSeen] = useReveal();
-
   return (
     <section className="section" id="features">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">{copy.h2}</h2>
         </div>
 
-        <div
-          ref={gridRef as React.RefObject<HTMLDivElement>}
-          className={`fgrid reveal${gridSeen ? ' is-in' : ''}`}
-        >
+        <div className="fgrid reveal" style={{ animationDelay: '0.12s' }}>
           {copy.items.map((item, i) => (
             <div key={i} className="fcard">
               <div className="ic">{item.ic}</div>

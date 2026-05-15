@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kefy
 
-## Getting Started
+Landing page de **Kefy** — plataforma de contenido para redes sociales con IA. Gestiona tu presencia en LinkedIn, Meta, X y más desde un solo lugar, en español e inglés.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| Capa | Tecnología |
+|---|---|
+| Framework | Next.js 16 (App Router) |
+| UI | React 19 + Tailwind CSS 4 |
+| 3D | Three.js |
+| Base de datos | Supabase (PostgreSQL) |
+| Emails | Resend + React Email |
+| Despliegue | Netlify |
+
+## Características
+
+- **Internacionalización** — rutas `/es` y `/en` con contenido completo en ambos idiomas
+- **Waitlist** — formulario con guardado en Supabase y email de confirmación vía Resend
+- **Blog** — artículos guardados en Supabase con rutas dinámicas por slug
+- **Landing modular** — secciones independientes: Hero, HowSection, FeaturesGrid, PricingSection, Testimonials, etc.
+
+## Estructura del proyecto
+
+```
+app/
+  [lang]/           # Rutas internacionalizadas (es/en)
+    blog/           # Listado y detalle de posts
+    sobre-kefy/     # Página "Sobre nosotros"
+  api/
+    waitlist/       # Endpoint POST para waitlist
+components/
+  landing/          # Secciones de la landing page
+  ui/               # Componentes reutilizables
+lib/
+  content.ts        # Contenido bilingüe (tipado)
+  i18n.ts           # Configuración de locales
+  supabase.ts       # Cliente Supabase
+db/
+  migrations/       # SQL de esquema
+  seeds/            # Datos iniciales del blog
+emails/             # Plantillas con React Email
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Variables de entorno
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Crea un archivo `.env.local` con:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+RESEND_API_KEY=
+```
 
-## Learn More
+## Desarrollo
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm install
+npm run dev        # http://localhost:3097
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Build y despliegue
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run build      # Verifica tipos y genera build de producción
+```
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+El despliegue se realiza automáticamente en **Netlify** al hacer push a `main` usando el plugin `@netlify/plugin-nextjs`.

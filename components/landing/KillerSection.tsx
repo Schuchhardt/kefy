@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -9,7 +6,7 @@ interface Props {
 
 const BAR_HEIGHTS = [30, 55, 45, 70, 60, 85, 75, 90, 80, 95, 88, 100];
 
-function EngagementChart({ seen }: { seen: boolean }) {
+function EngagementChart() {
   const chartH = 80;
   const barW = 8;
   const gap = 4;
@@ -23,7 +20,7 @@ function EngagementChart({ seen }: { seen: boolean }) {
       className="dash-chart-svg"
     >
       {BAR_HEIGHTS.map((h, i) => {
-        const barH = seen ? (h / 100) * chartH : 0;
+        const barH = (h / 100) * chartH;
         const x = i * (barW + gap);
         const isAccent = h > 80;
         return (
@@ -36,8 +33,16 @@ function EngagementChart({ seen }: { seen: boolean }) {
             rx="2"
             fill={isAccent ? 'var(--accent)' : 'var(--border)'}
             style={{
-              transition: `height 0.8s cubic-bezier(0.16,1,0.3,1) ${i * 0.04}s, y 0.8s cubic-bezier(0.16,1,0.3,1) ${i * 0.04}s`,
-            }}
+              transformBox: 'fill-box' as React.CSSProperties['transformBox'],
+              transformOrigin: 'bottom center',
+              animationName: 'barGrow',
+              animationDuration: '0.8s',
+              animationTimingFunction: 'cubic-bezier(0.16,1,0.3,1)',
+              animationDelay: `${i * 0.04}s`,
+              animationFillMode: 'both',
+              animationTimeline: 'view(block)',
+              animationRange: 'entry 0% entry 35%',
+            } as React.CSSProperties}
           />
         );
       })}
@@ -46,19 +51,13 @@ function EngagementChart({ seen }: { seen: boolean }) {
 }
 
 export default function KillerSection({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [dashRef, dashSeen] = useReveal();
-
   return (
     <section className="section" id="metrics">
       <div className="container">
         <div className="killer">
           {/* Left */}
           <div>
-            <div
-              ref={headRef as React.RefObject<HTMLDivElement>}
-              className={`reveal${headSeen ? ' is-in' : ''}`}
-            >
+            <div className="reveal">
               <span className="label">{copy.tag}</span>
               <h2 className="h2" style={{ marginTop: '18px', marginBottom: '16px' }}>
                 {copy.h2[0]}
@@ -82,9 +81,8 @@ export default function KillerSection({ copy }: Props) {
 
           {/* Right: Dashboard mock */}
           <div
-            ref={dashRef as React.RefObject<HTMLDivElement>}
-            className={`dash reveal${dashSeen ? ' is-in' : ''}`}
-            style={{ transitionDelay: '0.15s' }}
+            className="dash reveal"
+            style={{ animationDelay: '0.15s' }}
           >
             <div className="dash-head">
               <div className="dash-title">{copy.dash.title}</div>
@@ -123,7 +121,7 @@ export default function KillerSection({ copy }: Props) {
 
             <div className="dash-chart">
               <div className="dash-chart-lbl">Engagement trend</div>
-              <EngagementChart seen={dashSeen} />
+              <EngagementChart />
             </div>
           </div>
         </div>

@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -8,16 +5,10 @@ interface Props {
 }
 
 export default function HowSection({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [closerRef, closerSeen] = useReveal();
-
   return (
     <section className="section" id="how">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">{copy.h2}</h2>
           <p className="intro">{copy.intro}</p>
@@ -26,14 +17,11 @@ export default function HowSection({ copy }: Props) {
         <div className="steps">
           {copy.steps.map((step, i) => {
             const isLast = i === copy.steps.length - 1;
-            // eslint-disable-next-line react-hooks/rules-of-hooks
-            const [ref, seen] = useReveal();
             return (
               <div
                 key={i}
-                ref={ref as React.RefObject<HTMLDivElement>}
-                className={`step${isLast ? ' last' : ''} reveal${seen ? ' is-in' : ''}`}
-                style={{ transitionDelay: `${i * 0.08}s` }}
+                className={`step${isLast ? ' last' : ''} reveal`}
+                style={{ animationDelay: `${i * 0.08}s` }}
               >
                 <div className="step-ic">{step.ic}</div>
                 <h3>{step.t}</h3>
@@ -44,10 +32,7 @@ export default function HowSection({ copy }: Props) {
           })}
         </div>
 
-        <div
-          ref={closerRef as React.RefObject<HTMLDivElement>}
-          className={`how-closer reveal${closerSeen ? ' is-in' : ''}`}
-        >
+        <div className="how-closer reveal">
           {copy.closer[0]}{' '}
           <span className="how-closer-pill">{copy.closer[1]}</span>{' '}
           {copy.closer[2]}

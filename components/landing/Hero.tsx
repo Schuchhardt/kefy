@@ -1,7 +1,3 @@
-'use client';
-
-import { useRef } from 'react';
-import { useReveal } from '@/hooks/useReveal';
 import HeroDemo from './HeroDemo';
 import type { KefyCopy } from '@/lib/content';
 
@@ -11,48 +7,37 @@ interface HeroProps {
   demoCopy: KefyCopy['demo'];
 }
 
-export default function Hero({ lang, copy, demoCopy }: HeroProps) {
-  const [tagRef, tagSeen] = useReveal();
-  const [h1Ref, h1Seen] = useReveal();
-  const [subRef, subSeen] = useReveal();
-  const [ctaRef, ctaSeen] = useReveal();
-  const [statsRef, statsSeen] = useReveal();
-
+export default function Hero({ lang: _lang, copy, demoCopy }: HeroProps) {
   return (
     <section className="hero">
       <div className="hero-bg" />
       <div className="container hero-inner">
-        <div
-          ref={tagRef as React.RefObject<HTMLDivElement>}
-          className={`hero-tag reveal${tagSeen ? ' is-in' : ''}`}
-        >
+        <div className="hero-tag reveal">
           <span className="dot" />
           {copy.tag}
         </div>
 
         <h1
-          ref={h1Ref as React.RefObject<HTMLHeadingElement>}
-          className={`h1 reveal${h1Seen ? ' is-in' : ''}`}
-          style={{ transitionDelay: '0.08s' }}
+          className="h1 reveal"
+          style={{ animationDelay: '0.08s' }}
         >
           {copy.h1[0]}
           <br />
-          {copy.h1[1]}{' '}
+          {copy.h1[1]}
+          <br />
           <em className="em">{copy.h1em}</em>
         </h1>
 
         <p
-          ref={subRef as React.RefObject<HTMLParagraphElement>}
-          className={`hero-sub reveal${subSeen ? ' is-in' : ''}`}
-          style={{ transitionDelay: '0.16s' }}
+          className="hero-sub reveal"
+          style={{ animationDelay: '0.16s' }}
         >
           {copy.sub}
         </p>
 
         <div
-          ref={ctaRef as React.RefObject<HTMLDivElement>}
-          className={`hero-ctas reveal${ctaSeen ? ' is-in' : ''}`}
-          style={{ transitionDelay: '0.22s' }}
+          className="hero-ctas reveal"
+          style={{ animationDelay: '0.22s' }}
         >
           <a href="#how" className="btn btn-primary btn-lg">
             {copy.cta2} →
@@ -60,9 +45,8 @@ export default function Hero({ lang, copy, demoCopy }: HeroProps) {
         </div>
 
         <div
-          ref={statsRef as React.RefObject<HTMLDivElement>}
-          className={`hero-stats reveal${statsSeen ? ' is-in' : ''}`}
-          style={{ transitionDelay: '0.3s' }}
+          className="hero-stats reveal"
+          style={{ animationDelay: '0.3s' }}
         >
           {copy.stats.map((stat, i) => (
             <div key={i} className="hero-stat">

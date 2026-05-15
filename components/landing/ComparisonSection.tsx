@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -15,24 +12,15 @@ function CellValue({ val, partial }: { val: string; partial: string }) {
 }
 
 export default function ComparisonSection({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [tableRef, tableSeen] = useReveal();
-
   return (
     <section className="section" id="compare">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">{copy.h2}</h2>
         </div>
 
-        <div
-          ref={tableRef as React.RefObject<HTMLDivElement>}
-          className={`cmp-wrap reveal${tableSeen ? ' is-in' : ''}`}
-        >
+        <div className="cmp-wrap reveal" style={{ animationDelay: '0.12s' }}>
           <table className="cmp">
             <thead>
               <tr>

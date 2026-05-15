@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { createSupabaseServer } from '@/lib/supabase';
 import type { BlogPost } from '@/lib/supabase';
+import { KEFY_COPY } from '@/lib/content';
+import BlogNav from '@/components/blog/BlogNav';
+import Footer from '@/components/landing/Footer';
 
 const blogLabels: Record<string, { title: string; sub: string; readMore: string; empty: string; back: string }> = {
   es: {
@@ -48,8 +51,12 @@ export default async function BlogPage({ params }: { params: Promise<{ lang: str
   const labels = blogLabels[lang] ?? blogLabels['es'];
   const posts = await getPosts(lang);
 
+  const copy = KEFY_COPY[lang] ?? KEFY_COPY['es'];
+
   return (
-    <div className="page-layout">
+    <>
+      <BlogNav lang={lang} nav={copy.nav} waitlist={copy.waitlist} />
+      <div className="page-layout">
       <div className="container" style={{ maxWidth: '960px' }}>
         <Link href={`/${lang}`} className="back-link">
           ← {labels.back}
@@ -73,5 +80,7 @@ export default async function BlogPage({ params }: { params: Promise<{ lang: str
         )}
       </div>
     </div>
+      <Footer copy={copy.footer} lang={lang} />
+    </>
   );
 }

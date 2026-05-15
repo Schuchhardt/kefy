@@ -92,13 +92,41 @@ img { display: block; max-width: 100%; }
 .accent { color: var(--accent); }
 .warm { color: var(--warm); }
 
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0);     }
+}
+
+@keyframes barGrow {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+/* CSS scroll-driven reveal — no JS required, Server Components friendly */
 .reveal {
-  opacity: 0;
-  transform: translateY(24px);
-  transition: opacity 0.8s var(--easing), transform 0.8s var(--easing);
+  animation: revealUp 0.8s var(--easing) both;
+  animation-timeline: view(block);
+  animation-range: entry 0% entry 28%;
   will-change: opacity, transform;
 }
-.reveal.is-in { opacity: 1; transform: translateY(0); }
+
+/* When JS (Client Components) manages the reveal, lock the final state */
+.reveal.is-in {
+  animation: none;
+  opacity: 1;
+  transform: translateY(0);
+  will-change: auto;
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .reveal { animation: none; opacity: 1; transform: none; }
+}
+
+/* Fallback: browsers without scroll animation support show content immediately */
+@supports not (animation-timeline: view()) {
+  .reveal:not(.is-in) { animation: none; opacity: 1; transform: none; }
+}
 
 .nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -659,6 +687,7 @@ img { display: block; max-width: 100%; }
 .blog-card-cta { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 4px; }
 .blog-empty { color: var(--muted); font-size: 15px; margin-top: 32px; }
 .blog-post-cover { width: 100%; aspect-ratio: 16/7; object-fit: cover; border-radius: 12px; margin: 32px 0; }
+.blog-cover-fallback { display: flex; align-items: center; justify-content: center; background: var(--surface, #111); opacity: 0.6; }
 .blog-post-meta { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; font-size: 13px; color: var(--muted); }
 
 /* ── About page ──────────────────────────────────────────── */

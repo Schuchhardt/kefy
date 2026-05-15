@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -8,17 +5,13 @@ interface Props {
 }
 
 export default function Testimonials({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
   // Duplicate for seamless marquee loop
   const items = [...copy.items, ...copy.items];
 
   return (
     <section className="section" id="testimonials">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">{copy.h2}</h2>
         </div>

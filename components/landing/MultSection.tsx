@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -8,17 +5,10 @@ interface Props {
 }
 
 export default function MultSection({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [vizRef, vizSeen] = useReveal();
-  const [bulletsRef, bulletsSeen] = useReveal();
-
   return (
     <section className="section" id="multiply">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">
             {copy.h2[0]}
@@ -29,10 +19,7 @@ export default function MultSection({ copy }: Props) {
         </div>
 
         {/* Visual */}
-        <div
-          ref={vizRef as React.RefObject<HTMLDivElement>}
-          className={`mult-viz reveal${vizSeen ? ' is-in' : ''}`}
-        >
+        <div className="mult-viz reveal" style={{ animationDelay: '0.1s' }}>
           {/* Input */}
           <div>
             <div className="mult-input-lbl">{copy.inLbl}</div>
@@ -85,12 +72,9 @@ export default function MultSection({ copy }: Props) {
         </div>
 
         {/* Bullets */}
-        <div
-          ref={bulletsRef as React.RefObject<HTMLDivElement>}
-          className={`mult-bullets reveal${bulletsSeen ? ' is-in' : ''}`}
-        >
+        <div className="mult-bullets reveal" style={{ animationDelay: '0.18s' }}>
           {copy.bullets.map((b, i) => (
-            <div key={i} className="mult-bullet" style={{ transitionDelay: `${i * 0.07}s` }}>
+            <div key={i} className="mult-bullet">
               <div className="ic">{b.ic}</div>
               {b.t}
             </div>

@@ -35,28 +35,47 @@ export async function generateMetadata({
   const { lang } = await params;
 
   const isEs = lang === 'es';
+  const title = isEs
+    ? 'Kefy — Tu equipo de marketing en piloto automático'
+    : 'Kefy — Your Marketing Team on Autopilot';
+  const description = isEs
+    ? 'Kefy unifica generación de texto, imagen, video, programación, analytics y ads en una sola plataforma para startups, pymes y tiendas online.'
+    : 'Kefy unifies text, image, video generation, scheduling, analytics and ads in one platform for startups, SMBs and online stores.';
+  const ogImage = `${BASE_URL}/og-image.png`;
 
   return {
-    title: isEs
-      ? 'Kefy — Tu equipo de marketing en piloto automático'
-      : 'Kefy — Your Marketing Team on Autopilot',
-    description: isEs
-      ? 'Kefy unifica generación de texto, imagen, video, programación, analytics y ads en una sola plataforma para startups, pymes y tiendas online.'
-      : 'Kefy unifies text, image, video generation, scheduling, analytics and ads in one platform for startups, SMBs and online stores.',
+    title,
+    description,
     keywords: isEs
-      ? 'marketing automation, content creation, AI marketing, LATAM'
-      : 'marketing automation, content creation, AI marketing',
+      ? ['marketing automation', 'creación de contenido', 'IA marketing', 'LATAM', 'startups', 'pymes', 'redes sociales', 'programación de contenido']
+      : ['marketing automation', 'content creation', 'AI marketing', 'startups', 'SMB', 'social media scheduling'],
+    authors: [{ name: 'Kefy', url: BASE_URL }],
+    creator: 'Kefy',
+    publisher: 'Kefy',
+    metadataBase: new URL(BASE_URL),
     openGraph: {
       type: 'website',
       locale: isEs ? 'es_ES' : 'en_US',
       siteName: 'Kefy',
-      title: isEs
-        ? 'Kefy — Tu equipo de marketing en piloto automático'
-        : 'Kefy — Your Marketing Team on Autopilot',
-      description: isEs
-        ? 'Kefy unifica generación de texto, imagen, video, programación, analytics y ads en una sola plataforma para startups, pymes y tiendas online.'
-        : 'Kefy unifies text, image, video generation, scheduling, analytics and ads in one platform for startups, SMBs and online stores.',
+      title,
+      description,
       url: `${BASE_URL}/${lang}`,
+      images: [
+        {
+          url: ogImage,
+          width: 1200,
+          height: 630,
+          alt: title,
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [ogImage],
+      creator: '@kefyapp',
+      site: '@kefyapp',
     },
     alternates: {
       canonical: `${BASE_URL}/${lang}`,
@@ -64,6 +83,17 @@ export async function generateMetadata({
         es: `${BASE_URL}/es`,
         en: `${BASE_URL}/en`,
         'x-default': `${BASE_URL}/es`,
+      },
+    },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-video-preview': -1,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
       },
     },
   };

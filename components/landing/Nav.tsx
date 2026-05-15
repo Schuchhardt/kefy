@@ -4,18 +4,19 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useScrolled } from '@/hooks/useScrolled';
+import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
 import type { KefyCopy } from '@/lib/content';
 
 interface NavProps {
   lang: string;
   copy: KefyCopy['nav'];
-  onOpenWaitlist: () => void;
 }
 
-export default function Nav({ lang, copy, onOpenWaitlist }: NavProps) {
+export default function Nav({ lang, copy }: NavProps) {
   const scrolled = useScrolled(40);
   const [langOpen, setLangOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const openWaitlist = useWaitlistOpen();
 
   const closeMenu = () => setMenuOpen(false);
 
@@ -70,7 +71,7 @@ export default function Nav({ lang, copy, onOpenWaitlist }: NavProps) {
             </div>
           </div>
 
-          <button className="btn btn-primary nav-cta-desktop" onClick={onOpenWaitlist}>{copy.primary}</button>
+          <button className="btn btn-primary nav-cta-desktop" onClick={openWaitlist}>{copy.primary}</button>
 
           <button
             className="nav-burger"
@@ -98,7 +99,7 @@ export default function Nav({ lang, copy, onOpenWaitlist }: NavProps) {
         <button
           className="btn btn-primary"
           style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }}
-          onClick={() => { onOpenWaitlist(); closeMenu(); }}
+          onClick={() => { openWaitlist(); closeMenu(); }}
         >
           {copy.primary}
         </button>

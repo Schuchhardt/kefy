@@ -1,6 +1,3 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/lib/content';
 
 interface Props {
@@ -8,16 +5,10 @@ interface Props {
 }
 
 export default function WhoSection({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-  const [gridRef, gridSeen] = useReveal();
-
   return (
     <section className="section" id="who">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">
             {copy.h2[0]}{' '}
@@ -26,12 +17,9 @@ export default function WhoSection({ copy }: Props) {
           </h2>
         </div>
 
-        <div
-          ref={gridRef as React.RefObject<HTMLDivElement>}
-          className={`who-grid reveal${gridSeen ? ' is-in' : ''}`}
-        >
+        <div className="who-grid reveal" style={{ animationDelay: '0.12s' }}>
           {copy.segments.map((seg, i) => (
-            <div key={i} className="who-card" style={{ transitionDelay: `${i * 0.08}s` }}>
+            <div key={i} className="who-card" style={{ animationDelay: `${i * 0.08}s` }}>
               <div className="who-ic">{seg.ic}</div>
               <div>
                 <h3>{seg.t}</h3>
