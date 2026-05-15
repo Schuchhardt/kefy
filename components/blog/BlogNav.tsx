@@ -16,7 +16,7 @@ export default function BlogNav({ lang, nav, waitlist }: BlogNavProps) {
 
   return (
     <>
-      <Nav lang={lang} copy={nav} onOpenWaitlist={open} />
+      <Nav lang={lang} copy={nav} />
       <WaitlistModal isOpen={isOpen} onClose={close} copy={waitlist} />
     </>
   );
