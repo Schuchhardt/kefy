@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { resizeForPlatform, base64ToBuffer } from '@/lib/image-processor';
+import { resizeForPlatform } from '@/lib/image-processor';
 import { uploadBase64Image } from '@/lib/storage';
 import type { ContentChannel } from '@/lib/ai';
 

@@ -210,8 +210,7 @@ export async function generateContentImage(
     size:            (opts.size === 'auto' || !opts.size) ? '1024x1024' : opts.size,
     quality:         opts.quality === 'auto' ? 'medium' : (opts.quality ?? 'medium'),
     output_format:   'jpeg',
-    response_format: 'b64_json',
-  } as Parameters<typeof client.images.generate>[0]);
+  } as Parameters<typeof client.images.generate>[0]) as unknown as { data: Array<{ b64_json?: string; revised_prompt?: string }> };
 
   const img = response.data?.[0];
   const b64 = (img as { b64_json?: string })?.b64_json;

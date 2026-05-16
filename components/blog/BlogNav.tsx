@@ -12,7 +12,7 @@ interface BlogNavProps {
 }
 
 export default function BlogNav({ lang, nav, waitlist }: BlogNavProps) {
-  const { isOpen, open, close } = useWaitlist();
+  const { isOpen, close } = useWaitlist();
 
   return (
     <>

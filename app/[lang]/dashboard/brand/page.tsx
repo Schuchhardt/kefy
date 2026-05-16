@@ -22,10 +22,11 @@ const T: Record<Locale, {
   socialUrls: string; language: string; customerLocations: string;
   usesEmojis: string; communicationStyle: string; mission: string;
   tone: string; primaryColor: string; secondaryColor: string; accentColor: string;
-  fontHeading: string; fontBody: string; notes: string;
+  fontHeading: string; fontBody: string; logo: string; notes: string;
   companySize: string; differentiators: string; challenges: string;
   niche: string; competitors: string; targetAudience: string;
   q_name: string; q_websiteUrl: string; q_mission: string; q_industry: string;
+  q_logo: string;
   q_language: string; q_customerLocations: string; q_usesEmojis: string;
   q_communicationStyle: string; q_tone: string; q_tagline: string;
   q_colors: string; q_fonts: string; q_notes: string;
@@ -54,7 +55,7 @@ const T: Record<Locale, {
     communicationStyle: 'Estilo de comunicación', mission: 'Misión / Qué hacen',
     tone: 'Tono de voz', primaryColor: 'Color primario', secondaryColor: 'Color secundario',
     accentColor: 'Color de acento', fontHeading: 'Fuente de títulos', fontBody: 'Fuente de texto',
-    notes: 'Notas adicionales', companySize: 'Tamaño de la empresa', differentiators: 'Diferenciadores',
+    logo: 'Logo de la marca', notes: 'Notas adicionales', companySize: 'Tamaño de la empresa', differentiators: 'Diferenciadores',
     challenges: 'Dificultades / Retos', niche: 'Nicho', competitors: 'Competidores',
     targetAudience: 'Público objetivo',
     q_name: '¿Cuál es el nombre de tu marca?',
@@ -73,6 +74,7 @@ const T: Record<Locale, {
     q_companySize: '¿Cuántos empleados tiene tu empresa?',
     q_niche: '¿Cuál es el nicho específico de tu marca?',
     q_targetAudience: '¿Quién es tu público objetivo?',
+    q_logo: '¿Tenés el logo de tu marca? Podés subir un archivo o pegar una URL.',
     q_differentiators: '¿Qué diferencia a tu marca de la competencia?',
     q_challenges: '¿Cuáles son los principales retos o dificultades de tu negocio?',
     q_competitors: '¿Quiénes son tus principales competidores?',
@@ -100,7 +102,7 @@ const T: Record<Locale, {
     communicationStyle: 'Communication style', mission: 'Mission / What you do',
     tone: 'Brand voice', primaryColor: 'Primary color', secondaryColor: 'Secondary color',
     accentColor: 'Accent color', fontHeading: 'Heading font', fontBody: 'Body font',
-    notes: 'Additional notes', companySize: 'Company size', differentiators: 'Differentiators',
+    logo: 'Brand logo', notes: 'Additional notes', companySize: 'Company size', differentiators: 'Differentiators',
     challenges: 'Challenges', niche: 'Niche', competitors: 'Competitors',
     targetAudience: 'Target audience',
     q_name: 'What is your brand name?',
@@ -119,6 +121,7 @@ const T: Record<Locale, {
     q_companySize: 'How many employees does your company have?',
     q_niche: "What is your brand's specific niche?",
     q_targetAudience: 'Who is your target audience?',
+    q_logo: 'Do you have a logo? Upload a file or paste a URL.',
     q_differentiators: 'What differentiates your brand from competitors?',
     q_challenges: 'What are the main challenges of your business?',
     q_competitors: 'Who are your main competitors?',
@@ -267,7 +270,7 @@ function ArrayChips({
 type WizardStepId =
   | 'name' | 'website' | 'mission' | 'industry' | 'language'
   | 'locations' | 'emojis' | 'comm_style' | 'tone' | 'tagline'
-  | 'colors' | 'fonts' | 'notes'
+  | 'colors' | 'fonts' | 'logo' | 'notes'
   | 'company_size' | 'niche' | 'target_audience' | 'differentiators'
   | 'challenges' | 'competitors';
 
@@ -282,6 +285,7 @@ interface WizardStep {
   isFont?: boolean;
   isBoolean?: boolean;
   isUrl?: boolean;
+  isLogo?: boolean;
   isCompanySize?: boolean;
   isSelect?: boolean;
   selectOptions?: { value: string; label: string }[];
@@ -300,6 +304,7 @@ const WIZARD_STEPS: WizardStep[] = [
   { id: 'tagline',         section: 1, field: 'tagline', aiField: 'tagline' },
   { id: 'colors',          section: 1, field: null, isColor: true },
   { id: 'fonts',           section: 1, field: null, isFont: true },
+  { id: 'logo',            section: 1, field: 'logo_url', isLogo: true },
   { id: 'notes',           section: 1, field: 'notes' },
   { id: 'company_size',    section: 2, field: 'company_size', isCompanySize: true },
   { id: 'niche',           section: 2, field: 'niche', aiField: 'niche' },
@@ -348,6 +353,10 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
   const [enrichResult, setEnrichResult] = useState<Partial<BrandKit> | null>(null);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
+  // Logo upload state
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
   // Array field suggestions
   const [arraySugg, setArraySugg] = useState<Record<string, string[]>>({});
   const [arraySuggLoading, setArraySuggLoading] = useState<Record<string, boolean>>({});
@@ -362,15 +371,38 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
         // Pre-fill name with org name if not yet customized
         if ((!k.name || k.name === 'Mi marca') && org?.name) k.name = org.name;
         setForm(k);
+        // If kit already has data, default to form mode (wizard is only for first time)
+        const hasData = !!(k.mission || k.industry || k.tagline || k.website_url || k.primary_color);
+        if (hasData) setMode('form');
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setFetching(false));
-  }, [authLoading]);
+  }, [authLoading, org?.name]);
 
-  // Sync refs on every render so callbacks always see latest values without re-creating
-  formRef.current = form;
-  suggCacheRef.current = suggCache;
-  localeRef.current = locale;
+  async function handleLogoUpload(file: File) {
+    setLogoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('type', 'logo');
+      fd.append('label', 'Logo');
+      const res = await fetch('/api/brand-kit/assets', { method: 'POST', credentials: 'include', body: fd });
+      if (!res.ok) throw new Error('upload failed');
+      const { asset } = await res.json() as { asset: { public_url: string } };
+      updateField('logo_url', asset.public_url);
+    } catch {
+      // silently ignore — user can retry
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  // Sync refs after every render so callbacks always see latest values without re-creating
+  useEffect(() => {
+    formRef.current = form;
+    suggCacheRef.current = suggCache;
+    localeRef.current = locale;
+  }); // intentionally no deps — runs after every render
 
   function updateField<K extends keyof BrandKit>(key: K, value: BrandKit[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -401,7 +433,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
       suggInflight.current = null;
       setLoadingSugg(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load suggestions only when the wizard step changes (not on every re-render)
   useEffect(() => {
@@ -411,7 +443,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     if (step?.aiField && !step.isArray && !step.isTone) {
       void fetchSuggestions(step.aiField);
     }
-  }, [wizardStep]); // fetchSuggestions is stable (empty deps), safe to omit
+  }, [wizardStep, fetchSuggestions]);
 
   // Enrich from URL
   async function handleEnrich(urlOverride?: string) {
@@ -482,7 +514,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
       mission: form.mission ?? null, tone: form.tone ?? [],
       primary_color: form.primary_color ?? null, secondary_color: form.secondary_color ?? null,
       accent_color: form.accent_color ?? null, font_heading: form.font_heading ?? null,
-      font_body: form.font_body ?? null, notes: form.notes ?? null,
+      font_body: form.font_body ?? null, logo_url: form.logo_url ?? null, notes: form.notes ?? null,
       company_size: form.company_size ?? null, differentiators: form.differentiators ?? [],
       challenges: form.challenges ?? [], niche: form.niche ?? null,
       competitors: form.competitors ?? [], target_audience: form.target_audience ?? null,
@@ -543,7 +575,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     name: t.q_name, website: t.q_websiteUrl, mission: t.q_mission,
     industry: t.q_industry, language: t.q_language, locations: t.q_customerLocations,
     emojis: t.q_usesEmojis, comm_style: t.q_communicationStyle, tone: t.q_tone,
-    tagline: t.q_tagline, colors: t.q_colors, fonts: t.q_fonts, notes: t.q_notes,
+    tagline: t.q_tagline, colors: t.q_colors, fonts: t.q_fonts, logo: t.q_logo, notes: t.q_notes,
     company_size: t.q_companySize, niche: t.q_niche, target_audience: t.q_targetAudience,
     differentiators: t.q_differentiators, challenges: t.q_challenges, competitors: t.q_competitors,
   };
@@ -712,6 +744,40 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
           loadingSugg={step.aiField ? (arraySuggLoading[step.aiField] ?? false) : false}
           onLoadSuggestions={step.aiField ? () => void loadArraySugg(step.aiField!) : undefined}
         />
+      );
+    }
+
+    // Logo upload
+    if (step.isLogo) {
+      return (
+        <div>
+          {form.logo_url && (
+            <div style={{ marginBottom: 16 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={form.logo_url} alt="Logo" style={{ maxHeight: 80, maxWidth: 200, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--border)', padding: 8, background: '#fff' }} />
+            </div>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+            <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLogoUpload(f); }} />
+            <button type="button" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}
+              style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, cursor: logoUploading ? 'not-allowed' : 'pointer', opacity: logoUploading ? 0.7 : 1 }}>
+              {logoUploading ? (locale === 'es' ? 'Subiendo...' : 'Uploading...') : (locale === 'es' ? '↑ Subir archivo' : '↑ Upload file')}
+            </button>
+            {form.logo_url && (
+              <button type="button" onClick={() => updateField('logo_url', null)}
+                style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: '#ff6b6b', fontSize: 13, cursor: 'pointer' }}>
+                {locale === 'es' ? 'Quitar logo' : 'Remove logo'}
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>URL:</span>
+            <input style={inputStyle} value={form.logo_url ?? ''}
+              onChange={(e) => updateField('logo_url', e.target.value || null)}
+              placeholder="https://..." type="url" />
+          </div>
+        </div>
       );
     }
 
@@ -933,7 +999,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
               <ColorField label={t.secondaryColor} value={form.secondary_color ?? '#ffffff'} onChange={(v) => updateField('secondary_color', v)} />
               <ColorField label={t.accentColor} value={form.accent_color ?? '#c6ff4b'} onChange={(v) => updateField('accent_color', v)} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
               <Field label={t.fontHeading}>
                 <input style={inputStyle} value={form.font_heading ?? ''} onChange={(e) => updateField('font_heading', e.target.value || null)} placeholder="Syne, Playfair..." />
               </Field>
@@ -941,6 +1007,29 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
                 <input style={inputStyle} value={form.font_body ?? ''} onChange={(e) => updateField('font_body', e.target.value || null)} placeholder="DM Sans, Inter..." />
               </Field>
             </div>
+            <Field label={t.logo}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+                {form.logo_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={form.logo_url} alt="Logo" style={{ height: 56, maxWidth: 140, objectFit: 'contain', borderRadius: 6, border: '1px solid var(--border)', padding: 6, background: '#fff' }} />
+                )}
+                <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLogoUpload(f); }} />
+                <button type="button" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}
+                  style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, cursor: logoUploading ? 'not-allowed' : 'pointer', opacity: logoUploading ? 0.7 : 1 }}>
+                  {logoUploading ? (locale === 'es' ? 'Subiendo...' : 'Uploading...') : (locale === 'es' ? '↑ Subir logo' : '↑ Upload logo')}
+                </button>
+                {form.logo_url && (
+                  <button type="button" onClick={() => updateField('logo_url', null)}
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: '#ff6b6b', fontSize: 13, cursor: 'pointer' }}>
+                    {locale === 'es' ? 'Quitar' : 'Remove'}
+                  </button>
+                )}
+                <input style={{ ...inputStyle, flex: 1, minWidth: 200 }} value={form.logo_url ?? ''}
+                  onChange={(e) => updateField('logo_url', e.target.value || null)}
+                  placeholder="https://..." type="url" />
+              </div>
+            </Field>
           </SectionCard>
 
           <SectionCard title={t.notes}>

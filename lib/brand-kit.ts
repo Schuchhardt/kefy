@@ -45,6 +45,7 @@ export interface BrandKit {
   accent_color:         string | null;
   font_heading:         string | null;
   font_body:            string | null;
+  logo_url:             string | null;
   notes:                string | null;
   // Sección 2: Tu mercado
   company_size:         CompanySize | null;
@@ -89,6 +90,7 @@ export type BrandKitUpdateInput = Partial<
     | 'accent_color'
     | 'font_heading'
     | 'font_body'
+    | 'logo_url'
     | 'notes'
     | 'company_size'
     | 'differentiators'
@@ -144,6 +146,11 @@ export function validateBrandKitUpdate(input: Record<string, unknown>): string |
   if (website_url !== undefined && website_url !== null) {
     if (typeof website_url !== 'string') return 'website_url must be a string';
     try { new URL(website_url); } catch { return 'website_url must be a valid URL'; }
+  }
+  const { logo_url } = input;
+  if (logo_url !== undefined && logo_url !== null) {
+    if (typeof logo_url !== 'string') return 'logo_url must be a string';
+    try { new URL(logo_url); } catch { return 'logo_url must be a valid URL'; }
   }
   if (social_urls !== undefined && social_urls !== null) {
     if (typeof social_urls !== 'object' || Array.isArray(social_urls)) return 'social_urls must be an object';

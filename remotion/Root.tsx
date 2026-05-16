@@ -17,7 +17,8 @@ export const RemotionRoot: React.FC = () => {
     <>
       <Composition
         id="KefyReel"
-        component={ReelComposition}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        component={ReelComposition as any}
         durationInFrames={getTotalFrames(SAMPLE_SCENES, SAMPLE_FPS)}
         fps={SAMPLE_FPS}
         width={1080}

@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { KEFY_COPY } from '@/lib/content';
 
 const legalContent: Record<string, { title: string; sub: string; sections: { h: string; p: string }[] }> = {
   es: {
@@ -35,7 +34,6 @@ const legalContent: Record<string, { title: string; sub: string; sections: { h: 
 export default async function TerminosPage({ params }: { params: Promise<{ lang: string }> }) {
   const { lang } = await params;
   const content = legalContent[lang] ?? legalContent['es'];
-  const copy = KEFY_COPY[lang] ?? KEFY_COPY['es'];
 
   return (
     <div className="page-layout">

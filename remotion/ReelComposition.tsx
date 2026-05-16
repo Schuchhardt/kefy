@@ -6,7 +6,6 @@ import {
   useCurrentFrame,
   useVideoConfig,
   Sequence,
-  Audio,
 } from 'remotion';
 
 // ─── Types ────────────────────────────────────────────────────────────────────

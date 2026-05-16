@@ -86,7 +86,7 @@ export async function PATCH(req: NextRequest) {
   const allowed: (keyof BrandKitUpdateInput)[] = [
     'name', 'tagline', 'industry', 'tone',
     'primary_color', 'secondary_color', 'accent_color',
-    'font_heading', 'font_body', 'notes',
+    'font_heading', 'font_body', 'logo_url', 'notes',
     'website_url', 'social_urls', 'language', 'customer_locations',
     'uses_emojis', 'communication_style', 'mission',
     'company_size', 'differentiators', 'challenges',

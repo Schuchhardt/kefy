@@ -4,7 +4,6 @@ import { createSupabaseServer } from '@/lib/supabase';
 import {
   signAccessToken,
   generateRefreshToken,
-  hashToken,
   accessCookieOptions,
   refreshCookieOptions,
   ACCESS_COOKIE,

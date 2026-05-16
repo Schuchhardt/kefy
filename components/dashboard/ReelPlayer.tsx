@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useMemo } from 'react';
+import { type ComponentType, useMemo } from 'react';
 import type { ReelSceneProps } from '@/remotion/ReelComposition';
 import { getTotalFrames, ReelComposition } from '@/remotion/ReelComposition';
 
@@ -44,7 +44,8 @@ export function ReelPlayer({ scenes, brandName, accentColor = '#c6ff4b', height 
   return (
     <div style={{ width: playerWidth, height, margin: '0 auto', borderRadius: 12, overflow: 'hidden' }}>
       <Player
-        component={ReelComposition}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        component={ReelComposition as any}
         compositionWidth={1080}
         compositionHeight={1920}
         durationInFrames={totalFrames}

@@ -38,8 +38,8 @@ export async function GET(req: NextRequest) {
       engagement_rate,
       kefy_scheduled_posts!inner (
         id,
-        platform,
         status,
+        kefy_social_accounts!inner ( id, platform ),
         kefy_content_items!inner ( id, channel, body )
       )
     `)
@@ -86,8 +86,10 @@ export async function GET(req: NextRequest) {
   // Per-platform breakdown
   const byPlatform: Record<string, { posts: number; impressions: number; engagement_rate: number }> = {};
   for (const r of rows) {
-    const postRow = (Array.isArray(r.kefy_scheduled_posts) ? r.kefy_scheduled_posts[0] : r.kefy_scheduled_posts) as { platform: string } | null;
-    const platform = postRow?.platform ?? 'unknown';
+    type PostRowP = { kefy_social_accounts: { platform: string } | { platform: string }[] | null };
+    const postRow = (Array.isArray(r.kefy_scheduled_posts) ? r.kefy_scheduled_posts[0] : r.kefy_scheduled_posts) as PostRowP | null;
+    const acct = Array.isArray(postRow?.kefy_social_accounts) ? postRow?.kefy_social_accounts[0] : postRow?.kefy_social_accounts;
+    const platform = acct?.platform ?? 'unknown';
     if (!byPlatform[platform]) byPlatform[platform] = { posts: 0, impressions: 0, engagement_rate: 0 };
     byPlatform[platform].posts        += 1;
     byPlatform[platform].impressions  += r.impressions;
@@ -102,12 +104,13 @@ export async function GET(req: NextRequest) {
     .sort((a, b) => Number(b.engagement_rate ?? 0) - Number(a.engagement_rate ?? 0))
     .slice(0, 5)
     .map((r) => {
-      type PostRow = { id: string; platform: string; kefy_content_items: Array<{ id: string; channel: string; body: string }> | null };
+      type PostRow = { id: string; kefy_social_accounts: { platform: string } | { platform: string }[] | null; kefy_content_items: Array<{ id: string; channel: string; body: string }> | null };
       const post = (Array.isArray(r.kefy_scheduled_posts) ? r.kefy_scheduled_posts[0] : r.kefy_scheduled_posts) as PostRow | null;
+      const postAcct = Array.isArray(post?.kefy_social_accounts) ? post?.kefy_social_accounts?.[0] : post?.kefy_social_accounts;
       const content = Array.isArray(post?.kefy_content_items) ? post!.kefy_content_items[0] : null;
       return {
         scheduled_post_id: r.scheduled_post_id,
-        platform:          post?.platform ?? 'unknown',
+        platform:          postAcct?.platform ?? 'unknown',
         content_id:        content?.id ?? null,
         body_preview:      (content?.body ?? '').slice(0, 80),
         impressions:       r.impressions,

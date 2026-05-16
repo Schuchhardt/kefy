@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import { locales, defaultLocale, isValidLocale } from '@/lib/i18n';
+import { defaultLocale, isValidLocale } from '@/lib/i18n';
 
 const ACCESS_COOKIE = 'kefy_access';
 

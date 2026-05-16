@@ -19,7 +19,9 @@ function navItems(lang: string): NavItem[] {
     { href: `/${lang}/dashboard/calendar`,  label: 'Calendario',   icon: '◫' },
     { href: `/${lang}/dashboard/analytics`, label: 'Analytics',    icon: '◉' },
     { href: `/${lang}/dashboard/autopilot`, label: 'Autopilot',    icon: '◎' },
-    { href: `/${lang}/dashboard/ads`,       label: 'Ads',          icon: '◈', soon: true },
+    { href: `/${lang}/dashboard/inbox`,     label: 'Inbox',        icon: '✉' },
+    { href: `/${lang}/dashboard/engage`,    label: 'Engage',       icon: '◫' },
+    { href: `/${lang}/dashboard/ads`,       label: 'Ads',          icon: '⚡' },
     { href: `/${lang}/dashboard/settings`,  label: 'Ajustes',      icon: '⚙' },
   ];
 }

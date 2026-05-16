@@ -4,6 +4,24 @@ import { useEffect, useState } from 'react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface FollowerSnapshot {
+  measured_at:     string;
+  followers_count: number;
+}
+
+interface FollowerAccount {
+  account: { id: string; platform: string; username: string; avatar_url: string | null };
+  snapshots:        FollowerSnapshot[];
+  latest_followers: number;
+  latest_following: number;
+}
+
+interface FollowersResponse {
+  accounts: FollowerAccount[];
+  from:     string;
+  to:       string;
+}
+
 interface Totals {
   impressions: number;
   reach:       number;
@@ -70,12 +88,30 @@ function fmt(n: number) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
-  const [data, setData]       = useState<AnalyticsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
-  const [range, setRange]     = useState<'7' | '30' | '90'>('30');
+  const [data, setData]             = useState<AnalyticsResponse | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [range, setRange]           = useState<'7' | '30' | '90'>('30');
+  const [followers, setFollowers]   = useState<FollowerAccount[]>([]);
+  const [syncing, setSyncing]       = useState(false);
+  const [accountsReady, setAccountsReady] = useState(false);
+  const [hasAccounts, setHasAccounts]     = useState(false);
+
+  // Check connected accounts first
+  useEffect(() => {
+    fetch('/api/social/accounts', { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = await res.json() as { accounts: { id: string }[] };
+        setHasAccounts((json.accounts ?? []).length > 0);
+      })
+      .catch(() => {})
+      .finally(() => setAccountsReady(true));
+  }, []);
 
   useEffect(() => {
+    if (!accountsReady) return;
+    if (!hasAccounts) { setLoading(false); return; }
     setLoading(true);
     const to   = new Date();
     const from = new Date(Date.now() - Number(range) * 24 * 60 * 60 * 1000);
@@ -91,7 +127,47 @@ export default function AnalyticsPage() {
       .then(setData)
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
+  }, [range, accountsReady, hasAccounts]);
+
+  // Fetch follower data (latest snapshot per account)
+  useEffect(() => {
+    const to   = new Date();
+    const from = new Date(Date.now() - Number(range) * 24 * 60 * 60 * 1000);
+    fetch(
+      `/api/analytics/followers?from=${from.toISOString()}&to=${to.toISOString()}`,
+      { credentials: 'include' },
+    )
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = await res.json() as FollowersResponse;
+        setFollowers(json.accounts ?? []);
+      })
+      .catch(() => { /* non-critical, ignore */ });
   }, [range]);
+
+  function handleSyncFollowers() {
+    setSyncing(true);
+    fetch('/api/analytics/sync/followers', {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        // Re-fetch after sync
+        const to   = new Date();
+        const from = new Date(Date.now() - Number(range) * 24 * 60 * 60 * 1000);
+        return fetch(
+          `/api/analytics/followers?from=${from.toISOString()}&to=${to.toISOString()}`,
+          { credentials: 'include' },
+        ).then(async (r) => {
+          if (!r.ok) return;
+          const json = await r.json() as FollowersResponse;
+          setFollowers(json.accounts ?? []);
+        });
+      })
+      .catch(() => { /* ignore */ })
+      .finally(() => setSyncing(false));
+  }
 
   return (
     <div style={{ padding: '40px 48px', maxWidth: 900 }}>
@@ -130,7 +206,33 @@ export default function AnalyticsPage() {
         <p style={{ color: '#ff6b6b', fontSize: 14 }}>{error}</p>
       )}
 
-      {data && !loading && (
+      {/* No connected accounts */}
+      {accountsReady && !hasAccounts && (
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 16, padding: '48px 32px', textAlign: 'center', maxWidth: 480,
+        }}>
+          <p style={{ fontSize: 32, marginBottom: 16 }}>📊</p>
+          <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            Conecta tus redes sociales
+          </h2>
+          <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>
+            Para ver tus analytics necesitas tener al menos una cuenta de red social conectada.
+          </p>
+          <a
+            href="../social"
+            style={{
+              display: 'inline-block', padding: '10px 24px', borderRadius: 10,
+              background: 'var(--accent)', color: '#000', fontWeight: 700, fontSize: 14,
+              textDecoration: 'none',
+            }}
+          >
+            Conectar cuenta →
+          </a>
+        </div>
+      )}
+
+      {accountsReady && hasAccounts && data && !loading && (
         <>
           {/* Totals */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 32 }}>
@@ -270,6 +372,89 @@ export default function AnalyticsPage() {
           )}
         </>
       )}
+
+      {/* ── Followers section (always visible) ─────────────────────────── */}
+      <div style={{ marginTop: 40 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700 }}>
+            Seguidores
+          </h2>
+          <button
+            onClick={handleSyncFollowers}
+            disabled={syncing}
+            style={{
+              padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: syncing ? 'default' : 'pointer',
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: syncing ? 'var(--muted)' : 'var(--text)', opacity: syncing ? 0.6 : 1,
+            }}
+          >
+            {syncing ? 'Sincronizando...' : '↻ Sincronizar'}
+          </button>
+        </div>
+
+        {followers.length === 0 ? (
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: '32px 24px', textAlign: 'center',
+          }}>
+            <p style={{ color: 'var(--muted)', fontSize: 14 }}>
+              Sin datos de seguidores. Haz clic en &ldquo;Sincronizar&rdquo; para obtener los últimos conteos.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+            {followers.map((fa) => {
+              const first = fa.snapshots[0]?.followers_count ?? 0;
+              const last  = fa.latest_followers;
+              const delta = last - first;
+              const pct   = first > 0 ? ((delta / first) * 100).toFixed(1) : null;
+
+              return (
+                <div key={fa.account.id} style={{
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 12, padding: '18px 20px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 18 }}>{PLATFORM_ICONS[fa.account.platform] ?? '◉'}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>
+                      {fa.account.platform}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>@{fa.account.username}</p>
+                  <p style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700, marginBottom: 6 }}>
+                    {fmt(last)}
+                  </p>
+                  {delta !== 0 && (
+                    <p style={{ fontSize: 12, color: delta > 0 ? 'var(--accent)' : '#ff6b6b' }}>
+                      {delta > 0 ? '▲' : '▼'} {fmt(Math.abs(delta))}
+                      {pct !== null && ` (${pct}%)`}
+                      <span style={{ color: 'var(--muted)', marginLeft: 4 }}>vs inicio</span>
+                    </p>
+                  )}
+                  {fa.snapshots.length > 1 && (
+                    <div style={{ marginTop: 10, height: 32, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
+                      {fa.snapshots.slice(-14).map((s, i) => {
+                        const max = Math.max(...fa.snapshots.map((x) => x.followers_count), 1);
+                        const h = Math.round((s.followers_count / max) * 32);
+                        return (
+                          <div
+                            key={i}
+                            style={{
+                              flex: 1, height: h, borderRadius: 2,
+                              background: i === fa.snapshots.slice(-14).length - 1
+                                ? 'var(--accent)' : 'var(--border)',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

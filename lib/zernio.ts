@@ -193,3 +193,230 @@ export function buildOAuthUrl(
   });
   return `${base}/oauth/authorize?${params.toString()}`;
 }
+
+// ─── Account Metrics (followers) ──────────────────────────────────────────────
+
+export interface ZernioAccountMetrics {
+  followers_count: number;
+  following_count: number;
+  posts_count:     number;
+}
+
+/**
+ * Fetch follower / following / post counts for a connected account.
+ */
+export async function getAccountMetrics(
+  zernioAccountId: string,
+): Promise<ZernioAccountMetrics> {
+  return zernioFetch<ZernioAccountMetrics>(
+    'GET',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/metrics`,
+  );
+}
+
+// ─── Messaging (DMs) ──────────────────────────────────────────────────────────
+
+export interface ZernioMessage {
+  message_id:    string;
+  thread_id:     string;
+  sender_id:     string;
+  sender_name:   string | null;
+  sender_avatar: string | null;
+  body:          string;
+  direction:     'inbound' | 'outbound';
+  read_at:       string | null;
+  created_at:    string;
+}
+
+export interface ZernioThread {
+  thread_id:         string;
+  participant_id:    string;
+  participant_name:  string | null;
+  participant_avatar: string | null;
+  last_message_body: string;
+  last_message_at:   string;
+  unread_count:      number;
+}
+
+export interface ListMessagesParams {
+  thread_id?: string;
+  limit?:     number;
+  before?:    string; // ISO cursor for pagination
+}
+
+/**
+ * List threads (or messages in a specific thread) for an account.
+ */
+export async function listMessages(
+  zernioAccountId: string,
+  params: ListMessagesParams = {},
+): Promise<{ threads?: ZernioThread[]; messages?: ZernioMessage[] }> {
+  const qs = new URLSearchParams();
+  if (params.thread_id) qs.set('thread_id', params.thread_id);
+  if (params.limit)     qs.set('limit', String(params.limit));
+  if (params.before)    qs.set('before', params.before);
+  const q = qs.toString();
+  return zernioFetch(
+    'GET',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/messages${q ? `?${q}` : ''}`,
+  );
+}
+
+/**
+ * Send a reply to a DM thread.
+ */
+export async function sendMessage(
+  zernioAccountId: string,
+  threadId: string,
+  text: string,
+): Promise<ZernioMessage> {
+  return zernioFetch<ZernioMessage>(
+    'POST',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/messages/${encodeURIComponent(threadId)}/reply`,
+    { text },
+  );
+}
+
+/**
+ * Mark a specific message as read.
+ */
+export async function markMessageRead(
+  zernioAccountId: string,
+  messageId: string,
+): Promise<void> {
+  await zernioFetch<void>(
+    'POST',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/messages/${encodeURIComponent(messageId)}/read`,
+  );
+}
+
+// ─── Comments ─────────────────────────────────────────────────────────────────
+
+export interface ZernioComment {
+  comment_id:    string;
+  post_id:       string;
+  author_id:     string;
+  author_name:   string | null;
+  author_avatar: string | null;
+  body:          string;
+  created_at:    string;
+}
+
+/**
+ * List comments for a post (or all recent comments for an account).
+ */
+export async function listComments(
+  zernioAccountId: string,
+  postId?: string,
+): Promise<ZernioComment[]> {
+  const qs = postId ? `?post_id=${encodeURIComponent(postId)}` : '';
+  const res = await zernioFetch<{ comments: ZernioComment[] }>(
+    'GET',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/comments${qs}`,
+  );
+  return res.comments;
+}
+
+/**
+ * Reply to a comment.
+ */
+export async function replyToComment(
+  zernioAccountId: string,
+  commentId: string,
+  text: string,
+): Promise<ZernioComment> {
+  return zernioFetch<ZernioComment>(
+    'POST',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/comments/${encodeURIComponent(commentId)}/reply`,
+    { text },
+  );
+}
+
+// ─── Reviews ──────────────────────────────────────────────────────────────────
+
+export interface ZernioReview {
+  review_id:       string;
+  reviewer_id:     string;
+  reviewer_name:   string | null;
+  reviewer_avatar: string | null;
+  rating:          number | null;
+  body:            string | null;
+  published_at:    string | null;
+}
+
+/**
+ * List reviews for a connected account (Facebook, LinkedIn).
+ */
+export async function listReviews(
+  zernioAccountId: string,
+): Promise<ZernioReview[]> {
+  const res = await zernioFetch<{ reviews: ZernioReview[] }>(
+    'GET',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/reviews`,
+  );
+  return res.reviews;
+}
+
+/**
+ * Reply to a review.
+ */
+export async function replyToReview(
+  zernioAccountId: string,
+  reviewId: string,
+  text: string,
+): Promise<void> {
+  await zernioFetch<void>(
+    'POST',
+    `/accounts/${encodeURIComponent(zernioAccountId)}/reviews/${encodeURIComponent(reviewId)}/reply`,
+    { text },
+  );
+}
+
+// ─── Ads / Boost ──────────────────────────────────────────────────────────────
+
+export type ZernioBoostObjective = 'reach' | 'engagement' | 'traffic' | 'leads';
+
+export interface ZernioBoostPayload {
+  account_id:    string;
+  post_id:       string;          // Zernio post ID (zernio_post_id)
+  budget_cents:  number;
+  currency:      string;
+  duration_days: number;
+  objective:     ZernioBoostObjective;
+  targeting?:    Record<string, unknown>;
+}
+
+export interface ZernioBoostResult {
+  boost_id:       string;
+  platform_ad_id: string | null;
+  status:         'pending' | 'active' | 'completed' | 'cancelled' | 'failed';
+  started_at:     string | null;
+  ended_at:       string | null;
+}
+
+/**
+ * Boost an existing published post.
+ */
+export async function boostPost(
+  payload: ZernioBoostPayload,
+): Promise<ZernioBoostResult> {
+  return zernioFetch<ZernioBoostResult>('POST', '/ads/boost', payload);
+}
+
+/**
+ * List boosts — optionally scoped to a Zernio account.
+ */
+export async function listBoosts(
+  zernioAccountId?: string,
+): Promise<ZernioBoostResult[]> {
+  const qs = zernioAccountId ? `?account_id=${encodeURIComponent(zernioAccountId)}` : '';
+  const res = await zernioFetch<{ boosts: ZernioBoostResult[] }>('GET', `/ads/boost${qs}`);
+  return res.boosts;
+}
+
+/**
+ * Cancel an active boost by its Zernio boost ID.
+ */
+export async function cancelBoost(zernioBoostId: string): Promise<void> {
+  await zernioFetch<void>('DELETE', `/ads/boost/${encodeURIComponent(zernioBoostId)}`);
+}

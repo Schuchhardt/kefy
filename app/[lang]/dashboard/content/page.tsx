@@ -118,6 +118,26 @@ export default function ContentPage() {
   // Selected item
   const [selected, setSelected] = useState<ContentItem | null>(null);
 
+  // AI re-generation for selected item
+  const [regenTextFeedback, setRegenTextFeedback]   = useState('');
+  const [regenImageFeedback, setRegenImageFeedback] = useState('');
+  const [regenTextLoading, setRegenTextLoading]     = useState(false);
+  const [regenImageLoading, setRegenImageLoading]   = useState(false);
+  const [regenTextError, setRegenTextError]         = useState<string | null>(null);
+  const [regenImageError, setRegenImageError]       = useState<string | null>(null);
+  const [regenTextOk, setRegenTextOk]               = useState(false);
+  const [regenImageOk, setRegenImageOk]             = useState(false);
+
+  // Reset regen state when selection changes
+  useEffect(() => {
+    setRegenTextFeedback('');
+    setRegenImageFeedback('');
+    setRegenTextError(null);
+    setRegenImageError(null);
+    setRegenTextOk(false);
+    setRegenImageOk(false);
+  }, [selected?.id]);
+
   const fetchItems = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ limit: '50' });
@@ -200,6 +220,69 @@ export default function ContentPage() {
       const { item: updated } = await res.json() as { item: ContentItem };
       setItems((prev) => prev.map((i) => i.id === updated.id ? updated : i));
       if (selected?.id === updated.id) setSelected(updated);
+    }
+  }
+
+  async function handleRegenText() {
+    if (!selected) return;
+    setRegenTextLoading(true);
+    setRegenTextError(null);
+    setRegenTextOk(false);
+    try {
+      const existingBody = selected.body?.slice(0, 250) ?? selected.title ?? '';
+      const topic = regenTextFeedback.trim()
+        ? existingBody
+          ? `Reescribe este post aplicando el siguiente feedback: "${regenTextFeedback.trim()}". Post actual: ${existingBody}`
+          : regenTextFeedback.trim()
+        : existingBody || 'contenido de calidad';
+      const res = await fetch('/api/content/generate', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: selected.channel, topic: topic.slice(0, 480), itemId: selected.id, save: true }),
+      });
+      const data = await res.json() as { body?: string; hashtags?: string[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Error al generar');
+      const patch = { body: data.body ?? selected.body, hashtags: data.hashtags ?? selected.hashtags };
+      setSelected((prev) => prev ? { ...prev, ...patch } : prev);
+      setItems((prev) => prev.map((i) => i.id === selected.id ? { ...i, ...patch } : i));
+      setRegenTextOk(true);
+      setRegenTextFeedback('');
+      setTimeout(() => setRegenTextOk(false), 3000);
+    } catch (err) {
+      setRegenTextError(err instanceof Error ? err.message : 'Error desconocido');
+    } finally {
+      setRegenTextLoading(false);
+    }
+  }
+
+  async function handleRegenImage() {
+    if (!selected) return;
+    setRegenImageLoading(true);
+    setRegenImageError(null);
+    setRegenImageOk(false);
+    try {
+      const base = selected.body?.slice(0, 350) ?? selected.title ?? 'imagen para post de redes sociales';
+      const prompt = regenImageFeedback.trim()
+        ? `${base}. Estilo visual: ${regenImageFeedback.trim()}`
+        : base;
+      const res = await fetch('/api/content/image', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium', itemId: selected.id }),
+      });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Error al generar imagen');
+      setSelected((prev) => prev ? { ...prev, image_url: data.url ?? prev.image_url } : prev);
+      setItems((prev) => prev.map((i) => i.id === selected.id ? { ...i, image_url: data.url ?? i.image_url } : i));
+      setRegenImageOk(true);
+      setRegenImageFeedback('');
+      setTimeout(() => setRegenImageOk(false), 3000);
+    } catch (err) {
+      setRegenImageError(err instanceof Error ? err.message : 'Error desconocido');
+    } finally {
+      setRegenImageLoading(false);
     }
   }
 
@@ -521,6 +604,75 @@ export default function ContentPage() {
               </div>
             </div>
           )}
+
+          {/* ── IA: Regenerar texto ───────────────────────────────── */}
+          {(selected.content_type === 'post' || selected.content_type === 'carousel') && (
+            <div style={{ marginBottom: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.06em', marginBottom: 8 }}>
+                ✦ REGENERAR TEXTO CON IA
+              </p>
+              <textarea
+                placeholder="Feedback opcional: ej. 'más corto y directo', 'añade emojis', 'tono más profesional'..."
+                value={regenTextFeedback}
+                onChange={(e) => setRegenTextFeedback(e.target.value)}
+                rows={3}
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+              />
+              {regenTextError && (
+                <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 6 }}>{regenTextError}</p>
+              )}
+              {regenTextOk && (
+                <p style={{ fontSize: 12, color: 'var(--accent)', marginTop: 6 }}>✓ Texto actualizado</p>
+              )}
+              <button
+                onClick={handleRegenText}
+                disabled={regenTextLoading}
+                style={{
+                  width: '100%', marginTop: 8, background: 'rgba(198,255,75,0.08)',
+                  border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8,
+                  padding: '9px 0', fontSize: 13, fontWeight: 600,
+                  cursor: regenTextLoading ? 'not-allowed' : 'pointer',
+                  opacity: regenTextLoading ? 0.6 : 1,
+                }}
+              >
+                {regenTextLoading ? 'Generando...' : '✦ Regenerar texto'}
+              </button>
+            </div>
+          )}
+
+          {/* ── IA: Generar / Regenerar imagen ───────────────────────── */}
+          {selected.content_type !== 'reel' && (
+            <div style={{ marginBottom: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.06em', marginBottom: 8 }}>
+                {selected.image_url ? '🖼 REGENERAR IMAGEN CON IA' : '🖼 GENERAR IMAGEN CON IA'}
+              </p>
+              <textarea
+                placeholder="Feedback visual opcional: ej. 'fondo oscuro minimalista', 'colores vibrantes', 'estilo fotográfico'..."
+                value={regenImageFeedback}
+                onChange={(e) => setRegenImageFeedback(e.target.value)}
+                rows={2}
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+              />
+              {regenImageError && (
+                <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 6 }}>{regenImageError}</p>
+              )}
+              {regenImageOk && (
+                <p style={{ fontSize: 12, color: 'var(--accent)', marginTop: 6 }}>✓ Imagen generada</p>
+              )}
+              <button
+                onClick={handleRegenImage}
+                disabled={regenImageLoading}
+                style={{
+                  width: '100%', marginTop: 8, background: 'rgba(198,255,75,0.05)',
+                  border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8,
+                  padding: '9px 0', fontSize: 13, fontWeight: 600,
+                  cursor: regenImageLoading ? 'not-allowed' : 'pointer',
+                  opacity: regenImageLoading ? 0.6 : 1,
+                }}
+              >
+                {regenImageLoading ? 'Generando imagen...' : (selected.image_url ? '🖼 Regenerar imagen' : '🖼 Generar imagen')}
+              </button>
+            </div>
           )}
 
           <button

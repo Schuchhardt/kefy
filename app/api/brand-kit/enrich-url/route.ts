@@ -117,6 +117,9 @@ export async function POST(req: NextRequest) {
 
     // ── Visual identity from branding profile ────────────────────────────────
     if (branding) {
+      const logoUrl = (branding.logo ?? (branding.images as Record<string, unknown>)?.logo) as string | undefined;
+      if (typeof logoUrl === 'string' && logoUrl.startsWith('http')) extracted.logo_url = logoUrl;
+
       const colors = branding.colors as Record<string, string> | undefined;
       if (typeof colors?.primary === 'string')   extracted.primary_color   = colors.primary;
       if (typeof colors?.secondary === 'string') extracted.secondary_color = colors.secondary;
