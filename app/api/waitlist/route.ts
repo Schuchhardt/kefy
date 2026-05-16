@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { email, name, interest } = body as Record<string, unknown>;
+  const { email, name, interest, lang } = body as Record<string, unknown>;
 
   if (typeof email !== 'string' || !isValidEmail(email)) {
     return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
   const sanitizedEmail = email.trim().toLowerCase();
   const sanitizedName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 100) : null;
   const sanitizedInterest = typeof interest === 'string' && interest.trim() ? interest.trim().slice(0, 50) : null;
+  const emailLang: 'es' | 'en' = typeof lang === 'string' && lang.startsWith('en') ? 'en' : 'es';
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -59,13 +60,15 @@ export async function POST(req: NextRequest) {
   try {
     const resend = new Resend(resendApiKey);
     const html = await render(
-      WaitlistConfirmation({ name: sanitizedName, email: sanitizedEmail })
+      WaitlistConfirmation({ name: sanitizedName, email: sanitizedEmail, lang: emailLang })
     );
 
     await resend.emails.send({
       from: fromEmail,
       to: sanitizedEmail,
-      subject: '¡Ya estás en la lista de Kefy! 🎉',
+      subject: emailLang === 'en'
+        ? "You're on the Kefy waitlist! 🎉"
+        : '¡Ya estás en la lista de Kefy! 🎉',
       html,
     });
   } catch (emailError) {

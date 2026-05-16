@@ -47,11 +47,19 @@ emails/             # Plantillas con React Email
 Crea un archivo `.env.local` con:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-RESEND_API_KEY=
+# Supabase (server-only — never expose to client)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your-service-role-key
+
+# JWT (genera un string aleatorio seguro, mín. 32 caracteres)
+JWT_SECRET=your-super-secret-jwt-key-min-32-chars
+
+# Resend
+RESEND_API_KEY=re_your_resend_api_key
+RESEND_FROM_EMAIL=Kefy <no-reply@email.kefy.app>
 ```
+
+Copia `.env.example` como `.env.local` y rellena los valores reales.
 
 ## Desarrollo
 

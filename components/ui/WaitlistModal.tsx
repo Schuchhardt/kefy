@@ -65,6 +65,7 @@ export default function WaitlistModal({ copy, isOpen, onClose }: WaitlistModalPr
           email: email.trim().toLowerCase(),
           name: name.trim() || null,
           interest: interest || null,
+          lang: navigator.language,
         }),
       });
 

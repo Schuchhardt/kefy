@@ -66,6 +66,21 @@ export function AuthProvider({ children, lang }: { children: ReactNode; lang: st
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Refresca el access token automáticamente antes de que expire.
+  // Por defecto cada 23 horas; configurable con NEXT_PUBLIC_REFRESH_INTERVAL_HOURS.
+  useEffect(() => {
+    const hours = parseFloat(process.env.NEXT_PUBLIC_REFRESH_INTERVAL_HOURS ?? '23');
+    const ms = hours * 60 * 60 * 1000;
+    const id = setInterval(async () => {
+      const res = await fetch('/api/auth/refresh', { method: 'POST' });
+      if (!res.ok) {
+        // Si el refresh falla, actualizar estado (sesión expirada)
+        setState({ user: null, org: null, role: null, plan: null, loading: false });
+      }
+    }, ms);
+    return () => clearInterval(id);
+  }, []);
+
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setState({ user: null, org: null, role: null, plan: null, loading: false });

@@ -33,7 +33,11 @@ export interface CalDay { day: string; items: { ic: string; t: string }[] }
 export interface FeatureItem { ic: string; t: string; d: string; }
 export interface WhoSegment { ic: string; t: string; d: string; }
 export interface PlanFeature { dim?: boolean; t: string; }
-export interface Plan { name: string; price: string; per: string; tagline: string; features: (string | PlanFeature)[]; cta: string; featured?: boolean; badge?: string; }
+export interface Plan { name: string; price: string; annualPrice?: string; annualBilled?: string; per: string; tagline: string; features: (string | PlanFeature)[]; cta: string; featured?: boolean; badge?: string; }
+export interface CreditItem { ic: string; label: string; }
+export interface CreditPack { credits: string; price: string; popular?: boolean; }
+export interface CmpRow { feature: string; values: string[]; }
+export interface FaqItem { q: string; a: string; }
 export interface Testimonial { q: string; name: string; role: string; flag: string; avatar: string; }
 
 export interface KefyCopy {
@@ -57,7 +61,18 @@ export interface KefyCopy {
   channels: { h3: string[]; sub: string; items: string[]; };
   cmp: { tag: string; h2: string; cols: string[]; rows: (string | string[])[]; partial: string; };
   lang: { h2: string[]; em: string; sub: string; more: string; };
-  pricing: { tag: string; h2: string; plans: Plan[]; closer: string; };
+  pricing: {
+    tag: string; h2: string; sub: string;
+    billingToggle: { monthly: string; annual: string };
+    trialBadge: string; trialSub: string; trialCta: string; trialNote: string;
+    plans: Plan[];
+    closer: string;
+    creditTitle: string; creditItems: CreditItem[]; creditNote: string; creditPacksCta: string;
+    packTitle: string; packs: CreditPack[]; packPopular: string; packNote: string;
+    cmpFeature: string; cmpRows: CmpRow[];
+    faqTitle: string; faq: FaqItem[];
+    enterpriseTitle: string; enterpriseSub: string; enterpriseCta: string;
+  };
   testi: { tag: string; h2: string; items: Testimonial[]; };
   final: { tag: string; h2: string; sub: string; cta: string; note: string; };
   footer: { tagline: string; cols: { h: string; items: FooterItem[] }[]; origin: string; copy: string; };
@@ -316,33 +331,45 @@ const es: KefyCopy = {
   },
   pricing: {
     tag: 'Precios',
-    h2: 'Mucho menos que contratar a alguien. Mucho más que cualquier otra herramienta.',
+    h2: 'Prueba 14 días gratis.\nSin sorpresas, sin contratos.',
+    sub: 'Acceso completo. Sin tarjeta para empezar. Cancela cuando quieras.',
+    billingToggle: { monthly: 'Mensual', annual: 'Anual — 20% OFF' },
+    trialBadge: 'Prueba 14 días gratis',
+    trialSub: 'Sin tarjeta. Acceso completo al plan Starter.',
+    trialCta: 'Comenzar prueba gratuita →',
+    trialNote: 'Luego $19/mes. Cancela cuando quieras.',
     plans: [
       {
         name: 'Starter',
-        price: '0',
-        per: '/ siempre',
-        tagline: 'Para probar antes de comprometerte.',
+        price: '19',
+        annualPrice: '15',
+        annualBilled: 'facturado $182/año',
+        per: '/ mes',
+        tagline: 'Para creadores y solopreneurs.',
         features: [
           '1 marca',
-          '20 piezas de contenido al mes',
-          '2 canales',
-          { dim: true, t: 'Sin programación automática' },
-          { dim: true, t: 'Sin pauta de ads' },
-          { dim: true, t: 'Sin piloto automático' },
+          '3 conexiones sociales',
+          '150 créditos IA / mes',
+          'Scheduling + calendario',
+          'Analytics básicas',
+          { dim: true, t: 'Ads' },
+          { dim: true, t: 'Piloto automático' },
         ],
-        cta: 'Empieza gratis',
+        cta: 'Comenzar por $19',
       },
       {
         name: 'Pro',
         badge: 'Más popular',
-        price: '49',
+        price: '69',
+        annualPrice: '55',
+        annualBilled: 'facturado $660/año',
         per: '/ mes',
         tagline: 'Para negocios que publican en serio.',
         features: [
-          '3 marcas',
-          'Contenido ilimitado',
-          '6 canales (IG, FB, LinkedIn, TikTok, X, Email)',
+          '5 marcas',
+          '20 conexiones sociales',
+          '500 créditos IA / mes',
+          'Todos los canales (IG, FB, LinkedIn, TikTok, X, Email)',
           'Multiplicador de contenido',
           'Calendario y programación',
           'Analytics completas',
@@ -353,22 +380,78 @@ const es: KefyCopy = {
       },
       {
         name: 'Business',
-        price: '149',
+        price: '199',
+        annualPrice: '159',
+        annualBilled: 'facturado $1,908/año',
         per: '/ mes',
         tagline: 'Para equipos que gestionan varias marcas.',
         features: [
-          'Marcas ilimitadas',
-          '5 miembros del equipo',
+          '15 marcas',
+          '60 conexiones sociales',
+          '2,000 créditos IA / mes',
           'Todo de Pro',
           'Modo piloto automático',
           'Brand kits multi-marca',
           'Reportes white-label',
-          'Soporte prioritario · API access',
+          '5 miembros del equipo',
+          'API access + soporte prioritario',
+        ],
+        cta: 'Hablar con ventas',
+      },
+      {
+        name: 'Agency',
+        price: '399',
+        annualPrice: '319',
+        annualBilled: 'facturado $3,828/año',
+        per: '/ mes',
+        tagline: 'Para agencias y equipos grandes.',
+        features: [
+          '40 marcas',
+          '200 conexiones sociales',
+          '6,000 créditos IA / mes',
+          'Miembros ilimitados',
+          'White-label completo + custom domain',
+          'Soporte dedicado',
         ],
         cta: 'Hablar con ventas',
       },
     ],
     closer: 'Sin contrato. Cancela cuando quieras. Migración gratuita desde otras plataformas.',
+    creditTitle: '¿Cómo funcionan los créditos?',
+    creditItems: [
+      { ic: '✍️', label: '1 crédito = 1 post de texto generado' },
+      { ic: '🖼️', label: '8 créditos = 1 imagen generada' },
+      { ic: '🎬', label: '50 créditos = 1 video corto (próximamente)' },
+    ],
+    creditNote: 'Los créditos se renuevan cada mes. La mayoría de usuarios no los agota. ¿Necesitas más? Puedes comprar packs adicionales.',
+    creditPacksCta: 'Ver packs de créditos ↓',
+    packTitle: 'Packs de créditos adicionales',
+    packs: [
+      { credits: '200 créditos', price: '$14' },
+      { credits: '600 créditos', price: '$38', popular: true },
+      { credits: '1,500 créditos', price: '$85' },
+      { credits: '5,000 créditos', price: '$250' },
+    ],
+    packPopular: 'Más popular',
+    packNote: 'Los créditos no vencen. Úsalos cuando los necesites.',
+    cmpFeature: 'Feature',
+    cmpRows: [
+      { feature: 'Créditos IA / mes', values: ['150', '500', '2,000', '6,000'] },
+      { feature: 'Marcas', values: ['1', '5', '15', '40'] },
+      { feature: 'Conexiones sociales', values: ['3', '20', '60', '200'] },
+      { feature: 'Miembros del equipo', values: ['1', '1', '5', 'Ilimitados'] },
+      { feature: 'Generación de video', values: ['🔜', '🔜', '🔜', '🔜'] },
+    ],
+    faqTitle: 'Preguntas frecuentes',
+    faq: [
+      { q: '¿Qué pasa si se me acaban los créditos?', a: 'Tu cuenta sigue activa, solo se pausa la generación de contenido con IA. Puedes comprar un pack adicional o esperar al próximo ciclo.' },
+      { q: '¿Puedo cambiar de plan?', a: 'Sí, en cualquier momento. Los créditos no usados del plan anterior se prorratean.' },
+      { q: '¿El video ya está disponible?', a: 'Próximamente. Los usuarios actuales tendrán acceso anticipado.' },
+      { q: '¿Qué es una "conexión social"?', a: 'Es cada cuenta de red social que conectas. Por ejemplo: el Instagram de tu marca + su LinkedIn = 2 conexiones.' },
+    ],
+    enterpriseTitle: '¿Gestionas más de 10 marcas?',
+    enterpriseSub: 'Hablemos de un plan a medida.',
+    enterpriseCta: 'Agendar llamada →',
   },
   testi: {
     tag: 'Voces',
@@ -667,33 +750,45 @@ const en: KefyCopy = {
   },
   pricing: {
     tag: 'Pricing',
-    h2: 'Way less than hiring someone. Way more than any other tool.',
+    h2: 'Try free for 14 days.\nNo surprises, no contracts.',
+    sub: 'Full access. No card to start. Cancel anytime.',
+    billingToggle: { monthly: 'Monthly', annual: 'Annual — 20% OFF' },
+    trialBadge: 'Try free for 14 days',
+    trialSub: 'No card required. Full access to the Starter plan.',
+    trialCta: 'Start free trial →',
+    trialNote: 'Then $19/month. Cancel anytime.',
     plans: [
       {
         name: 'Starter',
-        price: '0',
-        per: '/ forever',
-        tagline: 'Try before you commit.',
+        price: '19',
+        annualPrice: '15',
+        annualBilled: 'billed $182/year',
+        per: '/ month',
+        tagline: 'For creators and solopreneurs.',
         features: [
           '1 brand',
-          '20 content pieces per month',
-          '2 channels',
-          { dim: true, t: 'No auto scheduling' },
-          { dim: true, t: 'No ad campaigns' },
-          { dim: true, t: 'No autopilot mode' },
+          '3 social connections',
+          '150 AI credits / month',
+          'Scheduling + calendar',
+          'Basic analytics',
+          { dim: true, t: 'Ads' },
+          { dim: true, t: 'Autopilot mode' },
         ],
-        cta: 'Start for free',
+        cta: 'Start for $19',
       },
       {
         name: 'Pro',
         badge: 'Most popular',
-        price: '49',
+        price: '69',
+        annualPrice: '55',
+        annualBilled: 'billed $660/year',
         per: '/ month',
         tagline: 'For businesses that publish seriously.',
         features: [
-          '3 brands',
-          'Unlimited content',
-          '6 channels (IG, FB, LinkedIn, TikTok, X, Email)',
+          '5 brands',
+          '20 social connections',
+          '500 AI credits / month',
+          'All channels (IG, FB, LinkedIn, TikTok, X, Email)',
           'Content multiplier',
           'Calendar & scheduling',
           'Full analytics',
@@ -704,22 +799,78 @@ const en: KefyCopy = {
       },
       {
         name: 'Business',
-        price: '149',
+        price: '199',
+        annualPrice: '159',
+        annualBilled: 'billed $1,908/year',
         per: '/ month',
         tagline: 'For teams managing multiple brands.',
         features: [
-          'Unlimited brands',
-          '5 team members',
+          '15 brands',
+          '60 social connections',
+          '2,000 AI credits / month',
           'Everything in Pro',
           'Autopilot mode',
           'Multi-brand kits',
           'White-label reports',
-          'Priority support · API access',
+          '5 team members',
+          'API access + priority support',
+        ],
+        cta: 'Talk to sales',
+      },
+      {
+        name: 'Agency',
+        price: '399',
+        annualPrice: '319',
+        annualBilled: 'billed $3,828/year',
+        per: '/ month',
+        tagline: 'For agencies and large teams.',
+        features: [
+          '40 brands',
+          '200 social connections',
+          '6,000 AI credits / month',
+          'Unlimited members',
+          'Full white-label + custom domain',
+          'Dedicated support',
         ],
         cta: 'Talk to sales',
       },
     ],
     closer: 'No contract. Cancel anytime. Free migration from other platforms.',
+    creditTitle: 'How do credits work?',
+    creditItems: [
+      { ic: '✍️', label: '1 credit = 1 text post generated' },
+      { ic: '🖼️', label: '8 credits = 1 image generated' },
+      { ic: '🎬', label: '50 credits = 1 short video (coming soon)' },
+    ],
+    creditNote: 'Credits renew every month. Most users never run out. Need more? Buy additional packs.',
+    creditPacksCta: 'View credit packs ↓',
+    packTitle: 'Additional credit packs',
+    packs: [
+      { credits: '200 credits', price: '$14' },
+      { credits: '600 credits', price: '$38', popular: true },
+      { credits: '1,500 credits', price: '$85' },
+      { credits: '5,000 credits', price: '$250' },
+    ],
+    packPopular: 'Most popular',
+    packNote: 'Credits never expire. Use them when you need them.',
+    cmpFeature: 'Feature',
+    cmpRows: [
+      { feature: 'AI credits / month', values: ['150', '500', '2,000', '6,000'] },
+      { feature: 'Brands', values: ['1', '5', '15', '40'] },
+      { feature: 'Social connections', values: ['3', '20', '60', '200'] },
+      { feature: 'Team members', values: ['1', '1', '5', 'Unlimited'] },
+      { feature: 'Video generation', values: ['🔜', '🔜', '🔜', '🔜'] },
+    ],
+    faqTitle: 'Frequently asked questions',
+    faq: [
+      { q: 'What happens when I run out of credits?', a: 'Your account stays active, only AI content generation pauses. You can buy an additional pack or wait for your next billing cycle.' },
+      { q: 'Can I change plans?', a: 'Yes, at any time. Unused credits from your previous plan are prorated.' },
+      { q: 'Is video available yet?', a: 'Coming soon. Current users will get early access.' },
+      { q: 'What is a "social connection"?', a: "It's each social media account you connect. For example: your brand's Instagram + its LinkedIn = 2 connections." },
+    ],
+    enterpriseTitle: 'Managing more than 10 brands?',
+    enterpriseSub: "Let's talk about a custom plan.",
+    enterpriseCta: 'Schedule a call →',
   },
   testi: {
     tag: 'Voices',

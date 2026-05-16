@@ -8,7 +8,10 @@ function getJWTSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-const ACCESS_TOKEN_TTL  = '15m';
+// ACCESS_TOKEN_TTL_HOURS — configurable vía env var, por defecto 24 horas
+const ACCESS_TTL_HOURS  = parseInt(process.env.ACCESS_TOKEN_TTL_HOURS ?? '24', 10);
+const ACCESS_TOKEN_TTL  = `${ACCESS_TTL_HOURS}h`;
+const ACCESS_TOKEN_MAX_AGE = ACCESS_TTL_HOURS * 60 * 60; // en segundos
 const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
 
 export interface JWTPayload {
@@ -63,7 +66,7 @@ export function accessCookieOptions() {
     secure: IS_PROD,
     sameSite: 'lax' as const,
     path: '/',
-    maxAge: 15 * 60, // 15 minutes in seconds
+    maxAge: ACCESS_TOKEN_MAX_AGE,
   };
 }
 
