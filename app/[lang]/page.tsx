@@ -8,6 +8,7 @@ import MultSection from '@/components/landing/MultSection';
 import BrandSection from '@/components/landing/BrandSection';
 import KillerSection from '@/components/landing/KillerSection';
 import AutopilotSection from '@/components/landing/AutopilotSection';
+import StrategySection from '@/components/landing/StrategySection';
 import FeaturesGrid from '@/components/landing/FeaturesGrid';
 import WhoSection from '@/components/landing/WhoSection';
 import ChannelsSection from '@/components/landing/ChannelsSection';
@@ -122,6 +123,7 @@ export default async function LandingPage({
         </BendsSection>
 
         <AutopilotSection copy={copy.autopilot} />
+        <StrategySection copy={copy.strategy} />
         <FeaturesGrid copy={copy.features} />
         <WhoSection copy={copy.who} />
         <ChannelsSection copy={copy.channels} />

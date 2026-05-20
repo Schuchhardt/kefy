@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+
+import esT from '@/locales/es/dashboard/autopilot';
+import enT from '@/locales/en/dashboard/autopilot';
+
+const T = { es: esT, en: enT } as const;
+type Locale = keyof typeof T;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,21 +40,21 @@ interface SocialAccount {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CHANNELS: { value: Channel; label: string }[] = [
+const CHANNELS_BASE: { value: Channel; label: string }[] = [
   { value: 'linkedin',  label: 'LinkedIn'  },
   { value: 'instagram', label: 'Instagram' },
   { value: 'facebook',  label: 'Facebook'  },
   { value: 'twitter',   label: 'X/Twitter' },
   { value: 'tiktok',    label: 'TikTok'    },
   { value: 'threads',   label: 'Threads'   },
-  { value: 'generic',   label: 'Genérico'  },
+  { value: 'generic',   label: ''          },
 ];
 
-const FREQUENCIES: { value: Frequency; label: string }[] = [
-  { value: 'daily',    label: 'Diario'    },
-  { value: 'weekly',   label: 'Semanal'   },
-  { value: 'biweekly', label: 'Bisemanal' },
-  { value: 'monthly',  label: 'Mensual'   },
+const FREQUENCIES_BASE: { value: Frequency; label: string }[] = [
+  { value: 'daily',    label: '' },
+  { value: 'weekly',   label: '' },
+  { value: 'biweekly', label: '' },
+  { value: 'monthly',  label: '' },
 ];
 
 const DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -77,6 +84,12 @@ const labelStyle: React.CSSProperties = {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AutopilotPage() {
+  const { lang } = useParams<{ lang: string }>();
+  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
+  const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
+  const CHANNELS   = CHANNELS_BASE.map((c) => c.value === 'generic' ? { ...c, label: t.channelGeneric } : c);
+  const FREQUENCIES = FREQUENCIES_BASE.map((f) => ({ ...f, label: t.frequencies[f.value] ?? f.value }));
+  const DAYS = t.days;
   const [rules, setRules]       = useState<AutopilotRule[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -140,12 +153,12 @@ export default function AutopilotPage() {
         }),
       });
       const data = await res.json() as { rule?: AutopilotRule; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Error al crear regla');
+      if (!res.ok) throw new Error(data.error ?? t.errorCreate);
       setShowForm(false);
       setFormName(''); setFormHint(''); setFormAccounts([]);
       fetchData();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Error desconocido');
+      setFormError(err instanceof Error ? err.message : t.errorUnknown);
     } finally {
       setSaving(false);
     }
@@ -162,7 +175,7 @@ export default function AutopilotPage() {
   }
 
   async function handleDelete(ruleId: string) {
-    if (!confirm('¿Eliminar esta regla de autopilot?')) return;
+    if (!confirm(t.confirmDelete)) return;
     await fetch(`/api/autopilot/rules/${ruleId}`, { method: 'DELETE', credentials: 'include' });
     setRules((prev) => prev.filter((r) => r.id !== ruleId));
   }
@@ -178,11 +191,11 @@ export default function AutopilotPage() {
         body: JSON.stringify({ rule_ids: [ruleId] }),
       });
       const data = await res.json() as { processed?: number; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Error al ejecutar');
-      setRunMsg(`✓ Ejecutado: ${data.processed ?? 0} publicación(es) generadas`);
+      if (!res.ok) throw new Error(data.error ?? t.errorRun);
+      setRunMsg(t.runSuccess(data.processed ?? 0));
       fetchData();
     } catch (err) {
-      setRunMsg(err instanceof Error ? err.message : 'Error desconocido');
+      setRunMsg(err instanceof Error ? err.message : t.errorUnknown);
     } finally {
       setRunning(false);
     }
@@ -195,7 +208,7 @@ export default function AutopilotPage() {
         <div>
           <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>Autopilot</h1>
           <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>
-            Reglas que generan y publican contenido automáticamente según tu calendario
+            {t.subtitle}
           </p>
         </div>
         <button
@@ -205,7 +218,7 @@ export default function AutopilotPage() {
             padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer', flexShrink: 0,
           }}
         >
-          {showForm ? 'Cancelar' : '+ Nueva regla'}
+          {showForm ? t.cancelBtn : t.newRuleBtn}
         </button>
       </div>
 
@@ -225,27 +238,27 @@ export default function AutopilotPage() {
           borderRadius: 12, padding: '20px 24px', marginBottom: 28,
         }}>
           <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 15, fontWeight: 700, marginBottom: 18 }}>
-            Nueva regla de autopilot
+            {t.formTitle}
           </h2>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Nombre de la regla</label>
+            <label style={labelStyle}>{t.nameLabel}</label>
             <input
               style={inputStyle} value={formName} required
               onChange={(e) => setFormName(e.target.value)}
-              placeholder="Ej: Posts de LinkedIn cada semana"
+              placeholder={t.namePlaceholder}
             />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
             <div>
-              <label style={labelStyle}>Canal</label>
+              <label style={labelStyle}>{t.channelLabel}</label>
               <select style={inputStyle} value={formChannel} onChange={(e) => setFormChannel(e.target.value as Channel)}>
                 {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
             <div>
-              <label style={labelStyle}>Modelo IA</label>
+              <label style={labelStyle}>{t.modelLabel}</label>
               <select style={inputStyle} value={formModel} onChange={(e) => setFormModel(e.target.value as AIModel)}>
                 <option value="claude">Claude</option>
                 <option value="gpt">GPT-4o</option>
@@ -254,11 +267,11 @@ export default function AutopilotPage() {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Cuentas sociales</label>
+            <label style={labelStyle}>{t.accountsLabel}</label>
             {accounts.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--muted)' }}>
-                Sin cuentas conectadas.{' '}
-                <a href="settings" style={{ color: 'var(--accent)' }}>Conecta en Ajustes</a>
+                {t.noAccounts}{' '}
+                <a href="settings" style={{ color: 'var(--accent)' }}>{t.connectSettings}</a>
               </p>
             ) : (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -285,37 +298,37 @@ export default function AutopilotPage() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
             <div>
-              <label style={labelStyle}>Frecuencia</label>
+              <label style={labelStyle}>{t.freqLabel}</label>
               <select style={inputStyle} value={formFreq} onChange={(e) => setFormFreq(e.target.value as Frequency)}>
                 {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
               </select>
             </div>
             {['weekly', 'biweekly'].includes(formFreq) && (
               <div>
-                <label style={labelStyle}>Día</label>
+                <label style={labelStyle}>{t.dayLabel}</label>
                 <select style={inputStyle} value={formDay} onChange={(e) => setFormDay(Number(e.target.value))}>
                   {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
                 </select>
               </div>
             )}
             <div>
-              <label style={labelStyle}>Hora</label>
+              <label style={labelStyle}>{t.timeLabel}</label>
               <input type="time" style={inputStyle} value={formTime} onChange={(e) => setFormTime(e.target.value)} />
             </div>
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Zona horaria</label>
+            <label style={labelStyle}>{t.tzLabel}</label>
             <input style={inputStyle} value={formTz} onChange={(e) => setFormTz(e.target.value)} placeholder="America/Mexico_City" />
           </div>
 
           <div style={{ marginBottom: 18 }}>
-            <label style={labelStyle}>Pista para la IA (opcional)</label>
+            <label style={labelStyle}>{t.hintLabel}</label>
             <textarea
               style={{ ...inputStyle, minHeight: 64, resize: 'vertical' }}
               value={formHint}
               onChange={(e) => setFormHint(e.target.value)}
-              placeholder="Escribe sobre noticias de la industria, tendencias, tips..."
+              placeholder={t.hintPlaceholder}
             />
           </div>
 
@@ -328,7 +341,7 @@ export default function AutopilotPage() {
                 cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
               }}
             >
-              {saving ? 'Guardando...' : 'Crear regla'}
+              {saving ? t.saving : t.createBtn}
             </button>
             {formError && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{formError}</span>}
           </div>
@@ -337,12 +350,12 @@ export default function AutopilotPage() {
 
       {/* Rules list */}
       {loading ? (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>Cargando...</p>
+        <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</p>
       ) : rules.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 0' }}>
-          <p style={{ color: 'var(--muted)', fontSize: 15 }}>Sin reglas de autopilot</p>
+          <p style={{ color: 'var(--muted)', fontSize: 15 }}>{t.noRules}</p>
           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
-            Crea tu primera regla para publicar contenido automáticamente
+            {t.noRulesHint}
           </p>
         </div>
       ) : (
@@ -368,7 +381,7 @@ export default function AutopilotPage() {
                       color: rule.is_active ? 'var(--accent)' : 'var(--muted)',
                       border: `1px solid ${rule.is_active ? 'var(--accent)' : 'var(--border)'}`,
                     }}>
-                      {rule.is_active ? 'Activo' : 'Pausado'}
+                      {rule.is_active ? t.active : t.paused}
                     </span>
                   </div>
                   <p style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{rule.name}</p>
@@ -378,14 +391,14 @@ export default function AutopilotPage() {
                     {rule.time_of_day} ({rule.timezone}) ·{' '}
                     {rule.ai_model === 'claude' ? 'Claude' : 'GPT-4o'}
                   </p>
-                  {rule.next_run_at && (
-                    <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                      Próxima ejecución:{' '}
-                      {new Date(rule.next_run_at).toLocaleString('es-ES', {
-                        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                      })}
-                    </p>
-                  )}
+                    {rule.next_run_at && (
+                      <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                        {t.nextRun}{' '}
+                        {new Date(rule.next_run_at).toLocaleString(dateLocale, {
+                          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </p>
+                    )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                   <button
@@ -409,7 +422,7 @@ export default function AutopilotPage() {
                       color: rule.is_active ? 'var(--accent)' : 'var(--muted)',
                     }}
                   >
-                    {rule.is_active ? 'Pausar' : 'Activar'}
+                    {rule.is_active ? t.pauseBtn : t.activateBtn}
                   </button>
                   <button
                     onClick={() => handleDelete(rule.id)}

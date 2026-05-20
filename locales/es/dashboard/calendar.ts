@@ -1,0 +1,33 @@
+const es = {
+  title: 'Calendario',
+  subtitle: 'Programa y gestiona tus publicaciones en redes sociales',
+  scheduleBtn: '+ Programar',
+  newScheduled: 'Nueva publicación programada',
+  contentLabel: 'CONTENIDO',
+  selectContent: 'Seleccionar pieza...',
+  accountLabel: 'CUENTA',
+  selectAccount: 'Seleccionar cuenta...',
+  dateLabel: 'FECHA Y HORA',
+  scheduling: 'Programando...',
+  schedule: 'Programar',
+  cancel: 'Cancelar',
+  allStatuses: 'Todos los estados',
+  noAccounts: 'Sin cuentas conectadas.',
+  noAccountsGo: 'Ve a',
+  noAccountsLink: 'Ajustes',
+  noAccountsHint: 'para conectar tus redes sociales.',
+  loading: 'Cargando...',
+  noPosts: 'No hay publicaciones programadas',
+  noText: '(sin texto)',
+  unknownAccount: 'Cuenta desconocida',
+  cancelPost: 'Cancelar',
+  statusLabels: {
+    pending: 'Pendiente',
+    scheduled: 'Programado',
+    published: 'Publicado',
+    failed: 'Fallido',
+    cancelled: 'Cancelado',
+  } as Record<string, string>,
+};
+
+export default es;

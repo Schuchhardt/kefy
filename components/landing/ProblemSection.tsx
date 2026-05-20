@@ -47,10 +47,10 @@ export default function ProblemSection({ copy }: Props) {
         >
           <span className="label">{copy.tag}</span>
           <h2 className="h2">{copy.h2}</h2>
-          <p className="intro">{copy.intro}</p>
+          {copy.intro && <p className="intro">{copy.intro}</p>}
         </div>
 
-        <div className="problem-grid">
+        <div className={`problem-grid${copy.stats.length === 0 ? ' no-stats' : ''}`}>
           <div className="pain-list">
             {copy.pains.map((pain, i) => {
               // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -72,11 +72,13 @@ export default function ProblemSection({ copy }: Props) {
             })}
           </div>
 
-          <div className="stat-cards">
-            {copy.stats.map((stat, i) => (
-              <StatCard key={i} stat={stat} index={i} />
-            ))}
-          </div>
+          {copy.stats.length > 0 && (
+            <div className="stat-cards">
+              {copy.stats.map((stat, i) => (
+                <StatCard key={i} stat={stat} index={i} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </section>

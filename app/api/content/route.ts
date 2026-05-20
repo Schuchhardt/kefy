@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   let query = db
     .from('kefy_content_items')
-    .select('id, channel, status, title, body, image_url, hashtags, created_by, created_at, updated_at')
+    .select('id, channel, content_type, status, title, body, image_url, hashtags, slides, video_url, created_by, created_at, updated_at')
     .eq('org_id', auth.orgId)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);

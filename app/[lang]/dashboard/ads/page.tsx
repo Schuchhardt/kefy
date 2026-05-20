@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+
+import esT from '@/locales/es/dashboard/ads';
+import enT from '@/locales/en/dashboard/ads';
+
+const T = { es: esT, en: enT } as const;
+type Locale = keyof typeof T;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,38 +51,22 @@ const PLATFORM_ICONS: Record<string, string> = {
   twitter: '𝕏', tiktok: '♪', threads: '@',
 };
 
-const OBJECTIVE_LABELS: Record<BoostObjective, string> = {
-  reach:       'Alcance',
-  engagement:  'Engagement',
-  traffic:     'Tráfico',
-  leads:       'Leads',
-};
+// OBJECTIVE_LABELS and STATUS_LABELS are now locale-aware via T[locale]
+// Keep type-only constants for static typing
+const OBJECTIVE_LABEL_KEYS = ['reach', 'engagement', 'traffic', 'leads'] as const;
+void OBJECTIVE_LABEL_KEYS; // suppress unused warning
 
-const STATUS_LABELS: Record<BoostStatus, { label: string; color: string }> = {
-  pending:   { label: 'Pendiente', color: '#f0a500' },
-  active:    { label: 'Activo',    color: 'var(--accent)' },
-  completed: { label: 'Completado', color: 'var(--muted)' },
-  cancelled: { label: 'Cancelado', color: '#ff6b6b' },
-  failed:    { label: 'Fallido',   color: '#ff6b6b' },
-};
-
-function fmt(cents: number, currency = 'USD'): string {
-  return new Intl.NumberFormat('es-ES', { style: 'currency', currency, minimumFractionDigits: 2 })
+function fmt(cents: number, currency = 'USD', locale = 'en-US'): string {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: 2 })
     .format(cents / 100);
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const d = Math.floor(diff / 86_400_000);
-  if (d < 1) return 'hoy';
-  if (d === 1) return 'ayer';
-  return `hace ${d}d`;
 }
 
 // ─── Boost Modal ──────────────────────────────────────────────────────────────
 
 interface BoostModalProps {
   post:     PublishedPost;
+  t:        typeof T.es;
+  locale:   string;
   onClose:  () => void;
   onBoost:  (data: {
     budget_cents: number; currency: string;
@@ -83,7 +74,7 @@ interface BoostModalProps {
   }) => Promise<{ error?: string } | void>;
 }
 
-function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
+function BoostModal({ post, t, locale, onClose, onBoost }: BoostModalProps) {
   const [budgetStr, setBudgetStr]   = useState('50');
   const [currency, setCurrency]     = useState('USD');
   const [duration, setDuration]     = useState(7);
@@ -94,7 +85,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
   async function handle() {
     const budget = parseFloat(budgetStr);
     if (!Number.isFinite(budget) || budget <= 0) {
-      setError('Introduce un presupuesto válido');
+      setError(t.invalidBudget);
       return;
     }
     setSubmitting(true);
@@ -106,7 +97,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
       objective,
     });
     if (result && 'error' in result) {
-      setError(result.error ?? 'Error al crear boost');
+      setError(result.error ?? t.errorBoost);
     } else {
       onClose();
     }
@@ -117,7 +108,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
   const username = post.kefy_social_accounts?.username ?? '';
   const title    = post.kefy_content_items?.title
     ?? post.kefy_content_items?.body?.slice(0, 60)
-    ?? 'Publicación sin título';
+    ?? t.modalNoTitle;
 
   return (
     <div
@@ -134,7 +125,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 18, fontWeight: 700 }}>
-            Impulsar publicación
+            {t.modalTitle}
           </h2>
           <button
             onClick={onClose}
@@ -163,9 +154,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
           {/* Budget */}
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-              Presupuesto
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
+              {t.budgetLabel}
               <input
                 type="number"
                 min="1"
@@ -191,13 +180,13 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
-            </div>
+            </label>
           </div>
 
           {/* Duration */}
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-              Duración: {duration} {duration === 1 ? 'día' : 'días'}
+              {t.durationLabel(duration)} {duration === 1 ? t.day : t.days}
             </label>
             <input
               type="range"
@@ -215,10 +204,8 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
           {/* Objective */}
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-              Objetivo
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {(Object.entries(OBJECTIVE_LABELS) as [BoostObjective, string][]).map(([value, label]) => (
+              {t.objectiveLabel}
+              {(Object.entries(t.objectiveLabels) as [BoostObjective, string][]).map(([value, label]) => (
                 <button
                   key={value}
                   onClick={() => setObjective(value)}
@@ -233,7 +220,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
                   {label}
                 </button>
               ))}
-            </div>
+            </label>
           </div>
         </div>
 
@@ -248,7 +235,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
               color: 'var(--text)', cursor: 'pointer', fontSize: 14,
             }}
           >
-            Cancelar
+            {t.cancelBtn}
           </button>
           <button
             onClick={handle}
@@ -260,7 +247,7 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
               opacity: submitting ? 0.6 : 1,
             }}
           >
-            {submitting ? 'Creando...' : `Impulsar · ${fmt(Math.round(parseFloat(budgetStr || '0') * 100), currency)}`}
+            {submitting ? t.creating : t.boostPay(fmt(Math.round(parseFloat(budgetStr || '0') * 100), currency, locale))}
           </button>
         </div>
       </div>
@@ -271,6 +258,19 @@ function BoostModal({ post, onClose, onBoost }: BoostModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdsPage() {
+  const { lang } = useParams<{ lang: string }>();
+  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
+  const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
+  const OBJECTIVE_LABELS = t.objectiveLabels as Record<BoostObjective, string>;
+  const STATUS_LABELS    = t.statusLabels    as Record<BoostStatus, { label: string; color: string }>;
+  function timeAgo(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const d = Math.floor(diff / 86_400_000);
+    if (d < 1) return t.timeToday;
+    if (d === 1) return t.timeYesterday;
+    return t.timeAgo(d);
+  }
+  void dateLocale; void OBJECTIVE_LABELS;
   const [boosts, setBoosts]           = useState<AdBoost[]>([]);
   const [posts, setPosts]             = useState<PublishedPost[]>([]);
   const [loadingBoosts, setLoadingBoosts] = useState(true);
@@ -333,7 +333,7 @@ export default function AdsPage() {
     });
     if (!res.ok) {
       const err = await res.json() as { error?: string };
-      return { error: err.error ?? 'Error al crear boost' };
+      return { error: err.error ?? t.errorBoost };
     }
     const json = await res.json() as { boost: AdBoost };
     setBoosts((prev) => [json.boost, ...prev]);
@@ -357,7 +357,7 @@ export default function AdsPage() {
         <div>
           <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>Ads</h1>
           <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>
-            Impulsa tus publicaciones directamente desde Kefy
+            {t.subtitle}
           </p>
         </div>
       </div>
@@ -370,10 +370,10 @@ export default function AdsPage() {
         }}>
           <p style={{ fontSize: 32, marginBottom: 16 }}>⚡</p>
           <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-            Conecta tus redes sociales
+            {t.noAccountsTitle}
           </h2>
           <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>
-            Para impulsar publicaciones necesitas tener al menos una cuenta de red social conectada.
+            {t.noAccountsBody}
           </p>
           <a
             href="../social"
@@ -383,7 +383,7 @@ export default function AdsPage() {
               textDecoration: 'none',
             }}
           >
-            Conectar cuenta →
+            {t.connectBtn}
           </a>
         </div>
       )}
@@ -393,18 +393,18 @@ export default function AdsPage() {
       {/* ── Published posts — choose one to boost ───────────────────────── */}
       <div style={{ marginBottom: 40 }}>
         <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700, marginBottom: 14 }}>
-          Publicaciones disponibles
+          {t.postsTitle}
         </h2>
 
-        {loadingPosts && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Cargando publicaciones...</p>}
+        {loadingPosts && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.loadingPosts}</p>}
         {!loadingPosts && posts.length === 0 && (
           <div style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 12, padding: '32px 24px', textAlign: 'center',
           }}>
-            <p style={{ color: 'var(--muted)', fontSize: 14 }}>Sin publicaciones publicadas todavía</p>
+            <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.noPosts}</p>
             <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
-              Solo puedes impulsar publicaciones que ya estén publicadas
+              {t.noPostsHint}
             </p>
           </div>
         )}
@@ -415,7 +415,7 @@ export default function AdsPage() {
             const username = post.kefy_social_accounts?.username ?? '';
             const title    = post.kefy_content_items?.title
               ?? post.kefy_content_items?.body?.slice(0, 60)
-              ?? 'Sin título';
+              ?? t.noTitle;
 
             return (
               <div key={post.id} style={{
@@ -450,7 +450,7 @@ export default function AdsPage() {
                     color: 'var(--accent)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
                   }}
                 >
-                  ⚡ Impulsar
+                  {t.boostBtn}
                 </button>
               </div>
             );
@@ -462,7 +462,7 @@ export default function AdsPage() {
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700 }}>
-            Mis boosts
+            {t.boostsTitle}
           </h2>
           {/* Status filter */}
           <div style={{ display: 'flex', gap: 6 }}>
@@ -477,21 +477,21 @@ export default function AdsPage() {
                   color: statusFilter === s ? 'var(--accent)' : 'var(--muted)',
                 }}
               >
-                {s === 'all' ? 'Todos' : STATUS_LABELS[s as BoostStatus]?.label ?? s}
+                {s === 'all' ? t.all : STATUS_LABELS[s as BoostStatus]?.label ?? s}
               </button>
             ))}
           </div>
         </div>
 
-        {loadingBoosts && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Cargando boosts...</p>}
+        {loadingBoosts && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.loadingBoosts}</p>}
         {!loadingBoosts && boosts.length === 0 && (
           <div style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 12, padding: '32px 24px', textAlign: 'center',
           }}>
-            <p style={{ color: 'var(--muted)', fontSize: 14 }}>Sin boosts activos</p>
+            <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.noBoosts}</p>
             <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
-              Impulsa una publicación para verla aquí
+              {t.noBoostsHint}
             </p>
           </div>
         )}
@@ -503,7 +503,7 @@ export default function AdsPage() {
             const username = boost.kefy_scheduled_posts?.kefy_social_accounts?.username ?? '';
             const title    = boost.kefy_scheduled_posts?.kefy_content_items?.title
               ?? boost.kefy_scheduled_posts?.kefy_content_items?.body?.slice(0, 60)
-              ?? 'Publicación';
+              ?? t.defaultPost;
             const canCancel = ['pending', 'active'].includes(boost.status);
 
             return (
@@ -534,15 +534,15 @@ export default function AdsPage() {
 
                 <div style={{ flexShrink: 0, display: 'flex', gap: 20, alignItems: 'center' }}>
                   <div style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: 11, color: 'var(--muted)' }}>Presupuesto</p>
-                    <p style={{ fontSize: 13, fontWeight: 600 }}>{fmt(boost.budget_cents, boost.currency)}</p>
+                    <p style={{ fontSize: 11, color: 'var(--muted)' }}>{t.budgetCol}</p>
+                    <p style={{ fontSize: 13, fontWeight: 600 }}>{fmt(boost.budget_cents, boost.currency, dateLocale)}</p>
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: 11, color: 'var(--muted)' }}>Duración</p>
+                    <p style={{ fontSize: 11, color: 'var(--muted)' }}>{t.durationCol}</p>
                     <p style={{ fontSize: 13, fontWeight: 600 }}>{boost.duration_days}d</p>
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: 11, color: 'var(--muted)' }}>Objetivo</p>
+                    <p style={{ fontSize: 11, color: 'var(--muted)' }}>{t.objectiveCol}</p>
                     <p style={{ fontSize: 13, fontWeight: 600 }}>{OBJECTIVE_LABELS[boost.objective]}</p>
                   </div>
                   {canCancel && (
@@ -556,7 +556,7 @@ export default function AdsPage() {
                         opacity: cancellingId === boost.id ? 0.5 : 1,
                       }}
                     >
-                      {cancellingId === boost.id ? '...' : 'Cancelar'}
+                      {cancellingId === boost.id ? '...' : t.cancelBoost}
                     </button>
                   )}
                 </div>
@@ -570,6 +570,8 @@ export default function AdsPage() {
       {boostingPost && (
         <BoostModal
           post={boostingPost}
+          t={t}
+          locale={dateLocale}
           onClose={() => setBoostingPost(null)}
           onBoost={(data) => handleBoost(boostingPost, data)}
         />

@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
       title:        generated.hook || scenes[0]?.title || null,
       body:         generated.hook || null,
       image_url:    coverImage,
-      slides:       JSON.stringify(scenes),   // scenes stored in slides column
+      slides:       scenes,   // scenes stored in slides column
       hashtags:     generated.hashtags,
       status:       'draft',
       metadata:     { scene_count: scenes.length, model: generated.model },

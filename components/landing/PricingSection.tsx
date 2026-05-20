@@ -12,6 +12,128 @@ export default function PricingSection({ copy }: Props) {
   const [annual, setAnnual] = useState(false);
   const openWaitlist = useWaitlistOpen();
 
+  /* ── Beta closed mode ─────────────────────────────────── */
+  if (copy.betaMode) {
+    return (
+      <section className="section" id="pricing">
+        <div className="container">
+
+          <div className="section-head reveal">
+            <span className="label">{copy.tag}</span>
+            <h2 className="h2">{copy.h2}</h2>
+          </div>
+
+          <div className="beta-pricing-copy reveal" style={{ animationDelay: '0.05s' }}>
+            {copy.sub.split('\n').map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
+          </div>
+
+          {/* ── Beta plans ─────────────────────────────────── */}
+          <div className="plans plans-3 reveal" style={{ animationDelay: '0.1s' }}>
+            {copy.plans.map((plan, i) => (
+              <div
+                key={i}
+                className={`plan${plan.featured ? ' featured' : ''}`}
+                style={{ transitionDelay: `${i * 0.08}s` }}
+              >
+                {plan.badge && <div className="plan-badge">{plan.badge}</div>}
+                <div className="plan-name">{plan.name}</div>
+                <div className="plan-price">
+                  <span className="num beta-free">Gratis</span>
+                  <span className="per">/ beta</span>
+                </div>
+                {plan.launchPrice && (
+                  <p className="plan-launch-price">Al lanzar: {plan.launchPrice}</p>
+                )}
+                <p className="plan-tagline">{plan.tagline}</p>
+                <ul className="plan-features">
+                  {plan.features.map((feat, fi) => {
+                    if (typeof feat === 'string') {
+                      return <li key={fi}>{feat}</li>;
+                    }
+                    return (
+                      <li key={fi} className="dim">
+                        {(feat as PlanFeature).t}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <button
+                  className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} btn-lg`}
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={openWaitlist}
+                >
+                  {plan.cta}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Beta feature table ─────────────────────────── */}
+          <div className="pricing-cmp reveal" style={{ animationDelay: '0.15s' }}>
+            <div className="pricing-cmp-scroll">
+              <table className="pricing-cmp-table">
+                <thead>
+                  <tr>
+                    <th>{copy.cmpFeature}</th>
+                    {copy.plans.map((p, i) => (
+                      <th key={i} className={p.featured ? 'featured' : ''}>{p.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {copy.cmpRows.map((row, i) => (
+                    <tr key={i}>
+                      <td>{row.feature}</td>
+                      {row.values.map((v, j) => (
+                        <td key={j} className={copy.plans[j]?.featured ? 'featured' : ''}>{v}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* ── Single beta CTA ────────────────────────────── */}
+          <div className="beta-pricing-cta reveal" style={{ animationDelay: '0.2s' }}>
+            <button className="btn btn-primary btn-lg" onClick={openWaitlist}>
+              {copy.betaCta}
+            </button>
+            {copy.betaCtaNote && (
+              <p className="beta-cta-note">{copy.betaCtaNote}</p>
+            )}
+          </div>
+
+          {/* ── FAQ ─────────────────────────────────────────── */}
+          <div className="pricing-faq reveal" style={{ animationDelay: '0.25s' }}>
+            <h3 className="h3">{copy.faqTitle}</h3>
+            <div className="faq-list">
+              {copy.faq.map((item, i) => (
+                <div key={i} className="faq-item">
+                  <p className="faq-q">{item.q}</p>
+                  <p className="faq-a">{item.a}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Enterprise CTA ──────────────────────────────── */}
+          <div className="enterprise-cta reveal" style={{ animationDelay: '0.3s' }}>
+            <p className="enterprise-title">{copy.enterpriseTitle}</p>
+            <p className="enterprise-sub">{copy.enterpriseSub}</p>
+            <button className="btn btn-secondary btn-lg" onClick={openWaitlist}>
+              {copy.enterpriseCta}
+            </button>
+          </div>
+
+        </div>
+      </section>
+    );
+  }
+
+  /* ── Standard (non-beta) mode ─────────────────────────── */
   return (
     <section className="section" id="pricing">
       <div className="container">

@@ -1,3 +1,6 @@
+'use client';
+
+import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
 import HeroDemo from './HeroDemo';
 import type { KefyCopy } from '@/lib/content';
 
@@ -8,6 +11,8 @@ interface HeroProps {
 }
 
 export default function Hero({ lang: _lang, copy, demoCopy }: HeroProps) {
+  const openWaitlist = useWaitlistOpen();
+
   return (
     <section className="hero">
       <div className="hero-bg" />
@@ -22,10 +27,8 @@ export default function Hero({ lang: _lang, copy, demoCopy }: HeroProps) {
           style={{ animationDelay: '0.08s' }}
         >
           {copy.h1[0]}
-          <br />
-          {copy.h1[1]}
-          <br />
-          <em className="em">{copy.h1em}</em>
+          {copy.h1[1] && <><br />{copy.h1[1]}</>}
+          {copy.h1em && <><br /><em className="em">{copy.h1em}</em></>}
         </h1>
 
         <p
@@ -39,22 +42,27 @@ export default function Hero({ lang: _lang, copy, demoCopy }: HeroProps) {
           className="hero-ctas reveal"
           style={{ animationDelay: '0.22s' }}
         >
-          <a href="#how" className="btn btn-primary btn-lg">
+          <button className="btn btn-primary btn-lg" onClick={openWaitlist}>
             {copy.cta2} →
-          </a>
+          </button>
+          {copy.ctaNote && (
+            <p className="hero-cta-note">{copy.ctaNote}</p>
+          )}
         </div>
 
-        <div
-          className="hero-stats reveal"
-          style={{ animationDelay: '0.3s' }}
-        >
-          {copy.stats.map((stat, i) => (
-            <div key={i} className="hero-stat">
-              <div className="big">{stat.big}</div>
-              <div className="lbl">{stat.lbl}</div>
-            </div>
-          ))}
-        </div>
+        {copy.stats.length > 0 && (
+          <div
+            className="hero-stats reveal"
+            style={{ animationDelay: '0.3s' }}
+          >
+            {copy.stats.map((stat, i) => (
+              <div key={i} className="hero-stat">
+                <div className="big">{stat.big}</div>
+                <div className="lbl">{stat.lbl}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <HeroDemo copy={demoCopy} />
       </div>

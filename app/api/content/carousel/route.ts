@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
       title:        firstSlide?.title ?? null,
       body:         firstSlide?.body  ?? null,
       image_url:    firstSlide?.image_url ?? null,
-      slides:       JSON.stringify(slides),
+      slides:       slides,
       hashtags:     [],
       status:       'draft',
       metadata:     { slide_count: slides.length, model: generated.model },

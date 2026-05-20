@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { sendMessage } from '@/lib/zernio';
+import { getConversationMessages, sendConversationMessage } from '@/lib/zernio';
 
 // ─── GET /api/messaging/[threadId] ────────────────────────────────────────────
 // Returns all messages in a thread (ordered ascending for conversation view).
@@ -33,12 +33,48 @@ export async function GET(
 
   if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 404 });
 
+  // ── Fetch message history from Zernio and upsert ──────────────────────────
+  if (account.zernio_account_id) {
+    try {
+      const zernioRes = await getConversationMessages(threadId, account.zernio_account_id, {
+        sortOrder: 'asc',
+        limit: 100,
+      });
+
+      if (zernioRes.messages && zernioRes.messages.length > 0) {
+        const rows = zernioRes.messages.map((m) => ({
+          org_id:              auth.orgId,
+          social_account_id:   account.id,
+          platform:            account.platform,
+          platform_thread_id:  threadId,
+          platform_message_id: m.id,
+          zernio_message_id:   m.id,
+          sender_id:           m.senderId,
+          sender_name:         m.senderName ?? null,
+          sender_avatar:       null as null,
+          body:                m.message,
+          direction:           m.direction === 'incoming' ? 'inbound' : 'outbound',
+          read_at:             m.direction === 'outgoing' ? new Date().toISOString() : null as null,
+          created_at:          m.createdAt,
+        }));
+
+        await db
+          .from('kefy_messages')
+          .upsert(rows, { onConflict: 'social_account_id,platform_message_id', ignoreDuplicates: false });
+      }
+    } catch (err) {
+      // Non-fatal — fall back to whatever is already in the DB
+      console.error('getConversationMessages error:', err instanceof Error ? err.message : err);
+    }
+  }
+
   const { data: messages, error } = await db
     .from('kefy_messages')
     .select('id, sender_id, sender_name, sender_avatar, body, direction, read_at, created_at')
     .eq('org_id', auth.orgId)
     .eq('social_account_id', accountId)
     .eq('platform_thread_id', threadId)
+    .not('platform_message_id', 'ilike', 'sync:%')
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -106,13 +142,13 @@ export async function POST(
   if (!account) return NextResponse.json({ error: 'Account not found or inactive' }, { status: 404 });
   if (!account.zernio_account_id) return NextResponse.json({ error: 'Account not connected to Zernio' }, { status: 422 });
 
-  // Send via Zernio
+  // Send via Zernio inbox conversations endpoint
   let sent;
   try {
-    sent = await sendMessage(account.zernio_account_id, threadId, (input.text as string).trim());
+    sent = await sendConversationMessage(threadId, account.zernio_account_id, (input.text as string).trim());
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to send message';
-    console.error('sendMessage error:', msg);
+    console.error('sendConversationMessage error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
@@ -124,8 +160,8 @@ export async function POST(
       social_account_id:    account.id,
       platform:             account.platform,
       platform_thread_id:   threadId,
-      platform_message_id:  sent.message_id,
-      zernio_message_id:    sent.message_id,
+      platform_message_id:  sent.messageId,
+      zernio_message_id:    sent.messageId,
       sender_id:            'self',
       sender_name:          account.username ?? null,
       sender_avatar:        null,

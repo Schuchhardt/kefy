@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { generateContentImage } from '@/lib/ai';
+import { generateContentImage, BrandImageContext } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
 const VALID_SIZES    = new Set(['1024x1024', '1536x1024', '1024x1536', '1080x1080', '1080x1920', 'auto']);
@@ -45,12 +45,48 @@ export async function POST(req: NextRequest) {
 
   const sanitizedPrompt = (input.prompt as string).trim().slice(0, 1000);
 
+  // ── Fetch brand kit for this org ──────────────────────────────────────────
+  const db = createSupabaseServer();
+  const { data: brandKit } = await db
+    .from('kefy_brand_kits')
+    .select('name, tone, primary_color, secondary_color, accent_color, logo_url')
+    .eq('org_id', auth.orgId)
+    .maybeSingle();
+
+  // Download logo to base64 if available (SSRF-safe: only Supabase Storage URLs)
+  let logoB64: string | undefined;
+  let logoMimeType: string | undefined;
+  const logoUrl: string | null = brandKit?.logo_url ?? null;
+  if (logoUrl) {
+    try {
+      const logoRes = await fetch(logoUrl);
+      if (logoRes.ok) {
+        const buf = await logoRes.arrayBuffer();
+        logoB64      = Buffer.from(buf).toString('base64');
+        logoMimeType = logoRes.headers.get('content-type') ?? 'image/png';
+      }
+    } catch {
+      // Non-fatal: proceed without logo reference
+    }
+  }
+
+  const brand: BrandImageContext | undefined = brandKit ? {
+    name:           brandKit.name          ?? undefined,
+    primaryColor:   brandKit.primary_color   ?? undefined,
+    secondaryColor: brandKit.secondary_color ?? undefined,
+    accentColor:    brandKit.accent_color    ?? undefined,
+    tone:           brandKit.tone            ?? undefined,
+    logoB64,
+    logoMimeType,
+  } : undefined;
+
   let result;
   try {
     result = await generateContentImage({
       prompt:  sanitizedPrompt,
       size:    (input.size    as '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1080x1920' | 'auto' | undefined) ?? '1024x1024',
       quality: (input.quality as 'low' | 'medium' | 'high' | 'auto' | undefined) ?? 'medium',
+      brand,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Image generation failed';
@@ -72,7 +108,6 @@ export async function POST(req: NextRequest) {
 
   // Optionally link to a content item
   if (typeof input.itemId === 'string' && input.itemId) {
-    const db = createSupabaseServer();
     const { error } = await db
       .from('kefy_content_items')
       .update({ image_url: publicUrl, image_prompt: sanitizedPrompt })

@@ -1,0 +1,33 @@
+const en = {
+  subtitle: 'Performance of your social media posts',
+  loading: 'Loading data...',
+  noAccountsTitle: 'Connect your social accounts',
+  noAccountsDesc: 'To see your analytics you need at least one connected social media account.',
+  noAccountsCta: 'Connect account →',
+  posts: 'Posts',
+  byPlatform: 'By platform',
+  topPosts: 'Top posts',
+  noText: '(no text)',
+  noData: 'No data for this period',
+  noDataHint: 'Publish content and come back here to see your metrics',
+  followers: 'Followers',
+  syncing: 'Syncing...',
+  sync: '↻ Sync',
+  syncingMetrics: 'Syncing...',
+  syncMetrics: '↻ Sync metrics',
+  noFollowers: 'No follower data. Click "Sync" to get the latest counts.',
+  vsStart: 'vs start',
+  postsLabel: 'Posts',
+  impressions: 'Impressions',
+  engagement: 'Engagement',
+  metricLabels: {
+    impressions: 'Impressions',
+    reach: 'Reach',
+    likes: 'Likes',
+    comments: 'Comments',
+    shares: 'Shares',
+    clicks: 'Clicks',
+  },
+};
+
+export default en;

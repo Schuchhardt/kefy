@@ -5,6 +5,22 @@ interface Props {
 }
 
 export default function Testimonials({ copy }: Props) {
+  if (copy.items.length === 0) {
+    return (
+      <section className="section" id="testimonials">
+        <div className="container">
+          <div className="section-head reveal">
+            <span className="label">{copy.tag}</span>
+            <h2 className="h2">{copy.h2}</h2>
+            {copy.placeholder && (
+              <p className="testi-placeholder">{copy.placeholder}</p>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   // Duplicate for seamless marquee loop
   const items = [...copy.items, ...copy.items];
 

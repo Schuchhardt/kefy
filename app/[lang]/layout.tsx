@@ -3,6 +3,11 @@ import { Syne, DM_Sans, JetBrains_Mono } from 'next/font/google';
 import '../globals.css';
 import { locales } from '@/lib/i18n';
 import SetLang from './SetLang';
+import { ThemeProvider } from '@/lib/theme-context';
+import esCommon from '@/locales/es/common';
+import enCommon from '@/locales/en/common';
+
+const commonCopy = { es: esCommon, en: enCommon };
 
 const syne = Syne({
   subsets: ['latin'],
@@ -35,28 +40,21 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { lang } = await params;
 
-  const isEs = lang === 'es';
-  const title = isEs
-    ? 'Kefy — Tu equipo de marketing en piloto automático'
-    : 'Kefy — Your Marketing Team on Autopilot';
-  const description = isEs
-    ? 'Kefy unifica generación de texto, imagen, video, programación, analytics y ads en una sola plataforma para startups, pymes y tiendas online.'
-    : 'Kefy unifies text, image, video generation, scheduling, analytics and ads in one platform for startups, SMBs and online stores.';
+  const c = commonCopy[(lang as 'es' | 'en')] ?? commonCopy.es;
+  const { title, description, keywords, ogLocale } = c.metadata;
   const ogImage = `${BASE_URL}/og-image.png`;
 
   return {
     title,
     description,
-    keywords: isEs
-      ? ['marketing automation', 'creación de contenido', 'IA marketing', 'LATAM', 'startups', 'pymes', 'redes sociales', 'programación de contenido']
-      : ['marketing automation', 'content creation', 'AI marketing', 'startups', 'SMB', 'social media scheduling'],
+    keywords,
     authors: [{ name: 'Kefy', url: BASE_URL }],
     creator: 'Kefy',
     publisher: 'Kefy',
     metadataBase: new URL(BASE_URL),
     openGraph: {
       type: 'website',
-      locale: isEs ? 'es_ES' : 'en_US',
+      locale: ogLocale,
       siteName: 'Kefy',
       title,
       description,
@@ -119,7 +117,9 @@ export default async function LangLayout({
   return (
     <div className={`${syne.variable} ${dmSans.variable} ${jetbrains.variable}`}>
       <SetLang lang={lang} />
-      {children}
+      <ThemeProvider>
+        {children}
+      </ThemeProvider>
     </div>
   );
 }

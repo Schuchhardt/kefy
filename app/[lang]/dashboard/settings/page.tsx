@@ -1,7 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useParams, useSearchParams } from 'next/navigation';
+
+import esT from '@/locales/es/dashboard/settings';
+import enT from '@/locales/en/dashboard/settings';
+
+const T = { es: esT, en: enT } as const;
+type Locale = keyof typeof T;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,8 +89,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function SettingsPage() {
+function SettingsPageInner() {
   const { user, org } = useAuth();
+  const { lang } = useParams<{ lang: string }>();
+  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
+  const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
+  const searchParams = useSearchParams();
 
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [loadingAccts, setLoadingAccts] = useState(true);
@@ -91,6 +102,31 @@ export default function SettingsPage() {
   // Connecting OAuth
   const [connecting, setConnecting] = useState<Platform | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectSuccess, setConnectSuccess] = useState<string | null>(null);
+
+  const fetchAccounts = useCallback(async () => {
+    const res = await fetch('/api/social/accounts', { credentials: 'include' });
+    const { accounts: data } = await res.json() as { accounts: SocialAccount[] };
+    setAccounts(data ?? []);
+    setLoadingAccts(false);
+  }, []);
+
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+
+  // Handle redirect back from OAuth callback
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    const error     = searchParams.get('error');
+    if (connected) {
+      setConnectSuccess(connected);
+      fetchAccounts();
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (error) {
+      setConnectError(error === 'oauth_failed' ? t.oauthError : t.unknownError);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Profile form
   const [name, setName]   = useState('');
@@ -102,39 +138,29 @@ export default function SettingsPage() {
     if (user?.name) setName(user.name);
   }, [user]);
 
-  const fetchAccounts = useCallback(async () => {
-    const res = await fetch('/api/social/accounts', { credentials: 'include' });
-    const { accounts: data } = await res.json() as { accounts: SocialAccount[] };
-    setAccounts(data ?? []);
-    setLoadingAccts(false);
-  }, []);
-
-  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
-
   async function handleConnectPlatform(platform: Platform) {
     setConnecting(platform);
     setConnectError(null);
 
     try {
-      const redirectUri = `${window.location.origin}/api/social/oauth/callback`;
       const state = crypto.randomUUID();
       sessionStorage.setItem('oauth_state', state);
 
       const res = await fetch(
-        `/api/social/oauth/url?platform=${platform}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
+        `/api/social/oauth/url?platform=${platform}&state=${state}`,
         { credentials: 'include' },
       );
       const data = await res.json() as { url?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Error al generar URL de OAuth');
+      if (!res.ok) throw new Error(data.error ?? t.oauthError);
       window.location.href = data.url!;
     } catch (err) {
-      setConnectError(err instanceof Error ? err.message : 'Error desconocido');
+      setConnectError(err instanceof Error ? err.message : t.unknownError);
       setConnecting(null);
     }
   }
 
   async function handleDisconnect(accountId: string) {
-    if (!confirm('¿Desconectar esta cuenta? Las reglas de autopilot que la usen dejarán de funcionar.')) return;
+    if (!confirm(t.confirmDisconnect)) return;
     await fetch(`/api/social/accounts/${accountId}`, { method: 'DELETE', credentials: 'include' });
     setAccounts((prev) => prev.filter((a) => a.id !== accountId));
   }
@@ -162,20 +188,20 @@ export default function SettingsPage() {
   return (
     <div style={{ padding: '40px 48px', maxWidth: 720 }}>
       <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>Ajustes</h1>
-        <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>Gestiona tu perfil, organización y cuentas sociales</p>
+        <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>{t.title}</h1>
+        <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>{t.subtitle}</p>
       </div>
 
       {/* Profile */}
-      <Section title="Perfil">
+      <Section title={t.sectionProfile}>
         <form onSubmit={handleSaveProfile}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <div>
-              <label style={labelStyle}>Nombre</label>
-              <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" />
+              <label style={labelStyle}>{t.nameLabel}</label>
+              <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder={t.nameLabel} />
             </div>
             <div>
-              <label style={labelStyle}>Email</label>
+              <label style={labelStyle}>{t.emailLabel}</label>
               <input style={{ ...inputStyle, opacity: 0.6 }} value={user?.email ?? ''} disabled />
             </div>
           </div>
@@ -188,43 +214,48 @@ export default function SettingsPage() {
                 cursor: savingProfile ? 'not-allowed' : 'pointer', opacity: savingProfile ? 0.7 : 1,
               }}
             >
-              {savingProfile ? 'Guardando...' : 'Guardar'}
+              {savingProfile ? t.saving : t.save}
             </button>
-            {profileSaved && <span style={{ color: 'var(--accent)', fontSize: 13 }}>✓ Guardado</span>}
+            {profileSaved && <span style={{ color: 'var(--accent)', fontSize: 13 }}>{t.saved}</span>}
             {profileError && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{profileError}</span>}
           </div>
         </form>
       </Section>
 
       {/* Organization */}
-      <Section title="Organización">
+      <Section title={t.sectionOrg}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
-            <label style={labelStyle}>Nombre</label>
+            <label style={labelStyle}>{t.nameLabel}</label>
             <input style={{ ...inputStyle, opacity: 0.6 }} value={org?.name ?? ''} disabled />
           </div>
           <div>
-            <label style={labelStyle}>Plan</label>
+            <label style={labelStyle}>{t.planLabel}</label>
             <input style={{ ...inputStyle, opacity: 0.6 }} value={org?.plan ?? ''} disabled />
           </div>
         </div>
         <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
-          Para cambiar el plan, contacta a{' '}
+          {t.planChangeNote}{' '}
           <a href="mailto:hola@kefy.app" style={{ color: 'var(--accent)' }}>hola@kefy.app</a>
         </p>
       </Section>
 
       {/* Social accounts */}
-      <Section title="Cuentas sociales">
+      <Section title={t.sectionSocial}>
         {connectError && (
           <p style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 12 }}>{connectError}</p>
+        )}
+        {connectSuccess && (
+          <p style={{ color: '#4caf50', fontSize: 13, marginBottom: 12 }}>
+            ✓ {connectSuccess.charAt(0).toUpperCase() + connectSuccess.slice(1)} conectado correctamente
+          </p>
         )}
 
         {/* Connected accounts */}
         {!loadingAccts && accounts.length > 0 && (
           <div style={{ marginBottom: 20 }}>
             <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Conectadas
+              {t.connected}
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {accounts.map((acc) => (
@@ -241,7 +272,7 @@ export default function SettingsPage() {
                     <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
                       {acc.platform} · {acc.status}
                       {acc.token_expires_at && (
-                        <> · expira {new Date(acc.token_expires_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</>
+                        <> · {t.expires} {new Date(acc.token_expires_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}</>
                       )}
                     </p>
                   </div>
@@ -252,7 +283,7 @@ export default function SettingsPage() {
                       padding: '5px 12px', fontSize: 12, cursor: 'pointer', color: '#ff6b6b',
                     }}
                   >
-                    Desconectar
+                    {t.disconnect}
                   </button>
                 </div>
               ))}
@@ -262,7 +293,7 @@ export default function SettingsPage() {
 
         {/* Connect new */}
         <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Conectar nueva cuenta
+          {t.connectNew}
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {PLATFORMS.map((platform) => {
@@ -283,7 +314,7 @@ export default function SettingsPage() {
               >
                 <span style={{ fontWeight: 700, fontSize: 14 }}>{PLATFORM_ICONS[platform]}</span>
                 <span style={{ fontSize: 13, fontWeight: 500 }}>
-                  {connecting === platform ? 'Redirigiendo...' : PLATFORM_LABELS[platform]}
+                  {connecting === platform ? t.redirecting : PLATFORM_LABELS[platform]}
                 </span>
                 {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--accent)' }}>✓</span>}
               </button>
@@ -292,5 +323,13 @@ export default function SettingsPage() {
         </div>
       </Section>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense>
+      <SettingsPageInner />
+    </Suspense>
   );
 }

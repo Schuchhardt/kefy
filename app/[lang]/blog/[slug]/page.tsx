@@ -6,11 +6,10 @@ import { KEFY_COPY } from '@/lib/content';
 import BlogNav from '@/components/blog/BlogNav';
 import BlogCoverImage from '@/components/blog/BlogCoverImage';
 import Footer from '@/components/landing/Footer';
+import esBlog from '@/locales/es/blog';
+import enBlog from '@/locales/en/blog';
 
-const labels: Record<string, { back: string; by: string }> = {
-  es: { back: 'Volver al blog', by: 'Por' },
-  en: { back: 'Back to blog', by: 'By' },
-};
+const labels: Record<string, typeof esBlog> = { es: esBlog, en: enBlog };
 
 function formatDate(dateStr: string, lang: string): string {
   return new Date(dateStr).toLocaleDateString(lang === 'en' ? 'en-US' : 'es-CL', {

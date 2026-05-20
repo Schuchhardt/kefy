@@ -3,18 +3,27 @@
 //
 // Required env vars:
 //   ZERNIO_API_KEY  — your Zernio API key
-//   ZERNIO_API_URL  — base URL (default: https://api.zernio.com/v1)
+//   ZERNIO_API_URL  — base URL (default: https://zernio.com/api/v1)
 //
 // Zernio acts as an abstraction layer over LinkedIn, Meta, X, TikTok, etc.
 // This client wraps its REST API with typed methods.
 
 export type ZernioPlatform =
-  | 'linkedin'
-  | 'instagram'
   | 'facebook'
+  | 'instagram'
+  | 'linkedin'
   | 'twitter'
   | 'tiktok'
-  | 'threads';
+  | 'youtube'
+  | 'threads'
+  | 'reddit'
+  | 'pinterest'
+  | 'bluesky'
+  | 'googlebusiness'
+  | 'telegram'
+  | 'snapchat'
+  | 'discord'
+  | 'whatsapp';
 
 export interface ZernioAccount {
   id:           string;   // Zernio account ID
@@ -56,7 +65,7 @@ export interface ZernioConnectResult {
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 function getBaseUrl(): string {
-  return (process.env.ZERNIO_API_URL ?? 'https://api.zernio.com/v1').replace(/\/$/, '');
+  return (process.env.ZERNIO_API_URL ?? 'https://zernio.com/api/v1').replace(/\/$/, '');
 }
 
 function getApiKey(): string {
@@ -65,6 +74,8 @@ function getApiKey(): string {
   return key;
 }
 
+const ZERNIO_DEBUG = process.env.ZERNIO_DEBUG === '1' || process.env.ZERNIO_DEBUG === 'true';
+
 async function zernioFetch<T>(
   method: 'GET' | 'POST' | 'DELETE' | 'PATCH',
   path: string,
@@ -72,6 +83,11 @@ async function zernioFetch<T>(
 ): Promise<T> {
   const url  = `${getBaseUrl()}${path}`;
   const key  = getApiKey();
+
+  console.log(`[Zernio] → ${method} ${url}`);
+  if (ZERNIO_DEBUG && body !== undefined) {
+    console.log('[Zernio]   body:', JSON.stringify(body));
+  }
 
   const res = await fetch(url, {
     method,
@@ -85,16 +101,29 @@ async function zernioFetch<T>(
     cache: 'no-store',
   });
 
+  console.log(`[Zernio] ← ${res.status} ${res.statusText}`);
+
   if (!res.ok) {
     let errorMsg = `Zernio API error ${res.status}`;
     try {
-      const errBody = await res.json() as { message?: string; error?: string };
-      errorMsg = errBody.message ?? errBody.error ?? errorMsg;
+      const errBody = await res.json() as { message?: unknown; error?: unknown };
+      if (ZERNIO_DEBUG) console.log('[Zernio]   error body:', JSON.stringify(errBody));
+      const raw = errBody.message ?? errBody.error;
+      if (typeof raw === 'string' && raw) {
+        errorMsg = raw;
+      } else if (raw != null) {
+        errorMsg = JSON.stringify(raw);
+      }
     } catch { /* ignore parse errors */ }
     throw new ZernioError(errorMsg, res.status);
   }
 
-  return res.json() as Promise<T>;
+  const data = await res.json() as T;
+  if (ZERNIO_DEBUG) {
+    const preview = JSON.stringify(data);
+    console.log('[Zernio]   response:', preview.length > 1000 ? `${preview.slice(0, 1000)}…` : preview);
+  }
+  return data;
 }
 
 export class ZernioError extends Error {
@@ -125,9 +154,17 @@ export async function connectAccount(
 /**
  * List all accounts connected under the API key (workspace-level).
  */
-export async function listAccounts(): Promise<ZernioAccount[]> {
-  const res = await zernioFetch<{ accounts: ZernioAccount[] }>('GET', '/accounts');
-  return res.accounts;
+export async function listAccounts(opts?: {
+  profileId?: string;
+  platform?: ZernioPlatform | string;
+}): Promise<ZernioAccount[]> {
+  const q = new URLSearchParams();
+  if (opts?.profileId) q.set('profileId', opts.profileId);
+  if (opts?.platform)  q.set('platform', opts.platform);
+  const path = '/accounts' + (q.toString() ? `?${q}` : '');
+  // Zernio returns `_id` in the accounts list; normalise to `id`
+  const res = await zernioFetch<{ accounts: Array<ZernioAccount & { _id?: string }> }>('GET', path);
+  return res.accounts.map(a => ({ ...a, id: a.id ?? a._id ?? '' }));
 }
 
 /**
@@ -174,24 +211,46 @@ export async function getPostStatus(zernioPostId: string): Promise<ZernioPublish
   return zernioFetch<ZernioPublishResult>('GET', `/posts/${encodeURIComponent(zernioPostId)}`);
 }
 
-// ─── OAuth URL helper ─────────────────────────────────────────────────────────
+// ─── Profiles ─────────────────────────────────────────────────────────────────
+
+export interface ZernioProfile {
+  _id:         string;
+  name:        string;
+  description: string | null;
+  created_at:  string;
+}
 
 /**
- * Build the Zernio OAuth authorization URL for a platform.
- * The user is redirected here to connect their account.
+ * Create a Zernio profile.
+ * Profiles group social accounts — one profile per Kefy organization (brand).
  */
-export function buildOAuthUrl(
+export async function createProfile(
+  name: string,
+  description?: string,
+): Promise<ZernioProfile> {
+  const body: Record<string, string> = { name };
+  if (description) body.description = description;
+  const res = await zernioFetch<{ profile: ZernioProfile }>('POST', '/profiles', body);
+  return res.profile;
+}
+
+// ─── Connect URL ──────────────────────────────────────────────────────────────
+
+/**
+ * Get the Zernio OAuth authorization URL for a platform.
+ * Requires a profileId (from createProfile) to associate the account.
+ * The user is redirected to the returned authUrl to complete OAuth.
+ */
+export async function getConnectUrl(
   platform: ZernioPlatform,
-  redirectUri: string,
-  state: string,
-): string {
-  const base = getBaseUrl();
-  const params = new URLSearchParams({
-    platform,
-    redirect_uri: redirectUri,
-    state,
-  });
-  return `${base}/oauth/authorize?${params.toString()}`;
+  profileId: string,
+  redirectUrl: string,
+): Promise<{ authUrl: string; state: string }> {
+  const params = new URLSearchParams({ profileId, redirect_url: redirectUrl });
+  return zernioFetch<{ authUrl: string; state: string }>(
+    'GET',
+    `/connect/${encodeURIComponent(platform)}?${params}`,
+  );
 }
 
 // ─── Account Metrics (followers) ──────────────────────────────────────────────
@@ -203,14 +262,98 @@ export interface ZernioAccountMetrics {
 }
 
 /**
- * Fetch follower / following / post counts for a connected account.
+ * Fetch follower count for a connected account.
+ * Uses GET /v1/accounts/follower-stats?accountIds={id}
+ * following_count and posts_count are not available via this endpoint (default 0).
  */
 export async function getAccountMetrics(
   zernioAccountId: string,
 ): Promise<ZernioAccountMetrics> {
-  return zernioFetch<ZernioAccountMetrics>(
+  const params = new URLSearchParams({ accountIds: zernioAccountId });
+  const res = await zernioFetch<{
+    accounts: Array<{ _id: string; currentFollowers: number }>;
+  }>('GET', `/accounts/follower-stats?${params}`);
+  const account = res.accounts?.[0];
+  return {
+    followers_count: account?.currentFollowers ?? 0,
+    following_count: 0,
+    posts_count:     0,
+  };
+}
+
+// ─── Post Analytics ───────────────────────────────────────────────────────────
+
+export interface ZernioPostAnalytics {
+  impressions:    number;
+  reach:          number;
+  likes:          number;
+  comments:       number;
+  shares:         number;
+  saves:          number;
+  clicks:         number;
+  views:          number;
+  engagementRate: number;
+}
+
+/**
+ * Fetch analytics for a single published post.
+ * Uses GET /v1/analytics?postId={id}
+ * May return 202 (sync pending) — the caller should handle ZernioError with statusCode 202.
+ */
+export async function getPostAnalytics(
+  zernioPostId: string,
+): Promise<ZernioPostAnalytics> {
+  const params = new URLSearchParams({ postId: zernioPostId });
+  const res = await zernioFetch<{ analytics: ZernioPostAnalytics }>(
     'GET',
-    `/accounts/${encodeURIComponent(zernioAccountId)}/metrics`,
+    `/analytics?${params}`,
+  );
+  return res.analytics;
+}
+
+// ─── Instagram Account Insights ───────────────────────────────────────────────
+
+export interface ZernioInstagramInsightsMetric {
+  total: number;
+  values?: Array<{ date: string; value: number }>;
+}
+
+export interface ZernioInstagramInsights {
+  success:    boolean;
+  accountId:  string;
+  platform:   string;
+  dateRange:  { since: string; until: string };
+  metricType: string;
+  metrics:    Record<string, ZernioInstagramInsightsMetric>;
+  dataDelay?: string;
+}
+
+/**
+ * Fetch account-level Instagram insights (reach, views, accounts_engaged, etc.).
+ * Uses GET /v1/analytics/instagram/account-insights
+ *
+ * Default metrics: reach, views, accounts_engaged, total_interactions.
+ * Only "reach" supports metricType=time_series; all others are total_value only.
+ * Dates must be in YYYY-MM-DD format. Max 90 days range.
+ * Requires the Analytics add-on on the Zernio plan.
+ */
+export async function getInstagramAccountInsights(params: {
+  accountId:   string;
+  metrics?:    string;   // comma-separated, e.g. "reach,views,likes,comments,shares,saves"
+  since?:      string;   // YYYY-MM-DD
+  until?:      string;   // YYYY-MM-DD
+  metricType?: 'total_value' | 'time_series';
+  breakdown?:  string;
+}): Promise<ZernioInstagramInsights> {
+  const qs = new URLSearchParams({ accountId: params.accountId });
+  if (params.metrics)    qs.set('metrics',    params.metrics);
+  if (params.since)      qs.set('since',      params.since);
+  if (params.until)      qs.set('until',      params.until);
+  if (params.metricType) qs.set('metricType', params.metricType);
+  if (params.breakdown)  qs.set('breakdown',  params.breakdown);
+  return zernioFetch<ZernioInstagramInsights>(
+    'GET',
+    `/analytics/instagram/account-insights?${qs}`,
   );
 }
 
@@ -288,6 +431,149 @@ export async function markMessageRead(
     'POST',
     `/accounts/${encodeURIComponent(zernioAccountId)}/messages/${encodeURIComponent(messageId)}/read`,
   );
+}
+
+// ─── Inbox conversations ───────────────────────────────────────────────────────
+
+export interface ZernioInboxConversation {
+  id:                       string;          // Zernio conversation ID
+  platform:                 string;          // "facebook" | "instagram" | "twitter" | "bluesky" | "reddit" | "telegram"
+  accountId:                string;          // Zernio account ID that received the message
+  accountUsername:          string;
+  participantId:            string;          // platform user ID of the contact
+  participantName:          string | null;
+  participantPicture:       string | null;
+  participantVerifiedType:  string | null;   // "blue" if verified
+  lastMessage:              string;          // preview text of the last message
+  updatedTime:              string;          // ISO 8601 — last activity
+  status:                   'active' | 'archived';
+  unreadCount:              number;
+  url:                      string | null;   // direct URL to the conversation on the platform
+  instagramProfile?: {
+    isFollower:    boolean;
+    isFollowing:   boolean;
+    followerCount: number;
+    isVerified:    boolean;
+    fetchedAt:     string;
+  } | null;
+}
+
+export interface ZernioInboxResponse {
+  data:       ZernioInboxConversation[];
+  pagination: { hasMore: boolean; nextCursor: string | null };
+  meta: {
+    accountsQueried: number;
+    accountsFailed:  number;
+    failedAccounts:  Array<{
+      accountId:       string;
+      accountUsername: string;
+      platform:        string;
+      error:           string;
+      code:            string;
+      retryAfter:      number | null;
+    }>;
+    lastUpdated: string;
+  };
+}
+
+/**
+ * Fetch conversations (DMs) from all connected messaging accounts.
+ * Aggregates across all accounts in one call.
+ * Supported platforms: Facebook, Instagram, Twitter/X, Bluesky, Reddit, Telegram.
+ * Docs: https://docs.zernio.com/messages/list-inbox-conversations
+ */
+export async function getInboxConversations(params: {
+  profileId?: string;
+  platform?:  string;
+  status?:    'active' | 'archived';
+  sortOrder?: 'asc' | 'desc';
+  limit?:     number;
+  cursor?:    string;
+  accountId?: string;
+} = {}): Promise<ZernioInboxResponse> {
+  const qs = new URLSearchParams();
+  if (params.profileId) qs.set('profileId', params.profileId);
+  if (params.platform)  qs.set('platform',  params.platform);
+  if (params.status)    qs.set('status',     params.status);
+  if (params.sortOrder) qs.set('sortOrder',  params.sortOrder);
+  if (params.limit)     qs.set('limit',      String(params.limit));
+  if (params.cursor)    qs.set('cursor',     params.cursor);
+  if (params.accountId) qs.set('accountId',  params.accountId);
+  const q = qs.toString();
+  return zernioFetch<ZernioInboxResponse>('GET', `/inbox/conversations${q ? `?${q}` : ''}`);
+}
+
+// ─── Inbox conversation messages ──────────────────────────────────────────────
+
+export interface ZernioInboxMessage {
+  id:                  string;
+  conversationId:      string;
+  accountId:           string;
+  platform:            string;
+  message:             string;        // message text
+  senderId:            string;
+  senderName:          string | null;
+  direction:           'incoming' | 'outgoing';
+  createdAt:           string;        // ISO 8601
+  attachments?: Array<{
+    id:         string;
+    type:       string;
+    url:        string;
+    filename?:  string;
+    previewUrl?: string;
+  }>;
+}
+
+export interface ZernioInboxMessagesResponse {
+  status:            string;
+  pagination:        { hasMore: boolean; nextCursor: string | null };
+  sortOrderApplied:  'asc' | 'desc';
+  messages:          ZernioInboxMessage[];
+  lastUpdated:       string;
+}
+
+export interface ZernioSendMessageResponse {
+  messageId:      string;
+  conversationId: string;
+}
+
+/**
+ * Fetch messages for a specific inbox conversation.
+ * GET /v1/inbox/conversations/{conversationId}/messages
+ * Docs: https://docs.zernio.com/messages/get-inbox-conversation-messages
+ */
+export async function getConversationMessages(
+  conversationId: string,
+  zernioAccountId: string,
+  params?: { limit?: number; cursor?: string; sortOrder?: 'asc' | 'desc' },
+): Promise<ZernioInboxMessagesResponse> {
+  const qs = new URLSearchParams({ accountId: zernioAccountId });
+  if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params?.cursor)              qs.set('cursor', params.cursor);
+  if (params?.sortOrder)           qs.set('sortOrder', params.sortOrder);
+  return zernioFetch<ZernioInboxMessagesResponse>(
+    'GET',
+    `/inbox/conversations/${encodeURIComponent(conversationId)}/messages?${qs}`,
+  );
+}
+
+/**
+ * Send a message in an inbox conversation.
+ * POST /v1/inbox/conversations/{conversationId}/messages
+ * Docs: https://docs.zernio.com/messages/send-inbox-message
+ */
+export async function sendConversationMessage(
+  conversationId: string,
+  zernioAccountId: string,
+  text: string,
+): Promise<ZernioSendMessageResponse> {
+  // Actual Zernio response: { success: true, data: { messageId, conversationId } }
+  const res = await zernioFetch<{ success: boolean; data: ZernioSendMessageResponse }>(
+    'POST',
+    `/inbox/conversations/${encodeURIComponent(conversationId)}/messages`,
+    { accountId: zernioAccountId, message: text },
+  );
+  return res.data;
 }
 
 // ─── Comments ─────────────────────────────────────────────────────────────────

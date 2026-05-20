@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+
+import esT from '@/locales/es/dashboard/analytics';
+import enT from '@/locales/en/dashboard/analytics';
+
+const T = { es: esT, en: enT } as const;
+type Locale = keyof typeof T;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,13 +77,13 @@ const PLATFORM_ICONS: Record<string, string> = {
   unknown:   '?',
 };
 
-const METRIC_CARDS = [
-  { key: 'impressions', label: 'Impresiones', icon: '◎' },
-  { key: 'reach',       label: 'Alcance',     icon: '◉' },
-  { key: 'likes',       label: 'Me gusta',    icon: '♡' },
-  { key: 'comments',    label: 'Comentarios', icon: '◫' },
-  { key: 'shares',      label: 'Compartidos', icon: '↗' },
-  { key: 'clicks',      label: 'Clics',       icon: '⊕' },
+const METRIC_CARD_KEYS = [
+  { key: 'impressions', icon: '◎' },
+  { key: 'reach',       icon: '◉' },
+  { key: 'likes',       icon: '♡' },
+  { key: 'comments',    icon: '◫' },
+  { key: 'shares',      icon: '↗' },
+  { key: 'clicks',      icon: '⊕' },
 ] as const;
 
 function fmt(n: number) {
@@ -88,12 +95,16 @@ function fmt(n: number) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
+  const { lang } = useParams<{ lang: string }>();
+  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
+
   const [data, setData]             = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
   const [range, setRange]           = useState<'7' | '30' | '90'>('30');
   const [followers, setFollowers]   = useState<FollowerAccount[]>([]);
-  const [syncing, setSyncing]       = useState(false);
+  const [syncing, setSyncing]             = useState(false);
+  const [syncingMetrics, setSyncingMetrics] = useState(false);
   const [accountsReady, setAccountsReady] = useState(false);
   const [hasAccounts, setHasAccounts]     = useState(false);
 
@@ -122,7 +133,21 @@ export default function AnalyticsPage() {
     )
       .then(async (res) => {
         if (!res.ok) throw new Error('Error al cargar analytics');
-        return res.json() as Promise<AnalyticsResponse>;
+        const raw = await res.json() as {
+          totals: AnalyticsResponse['totals'];
+          by_platform: AnalyticsResponse['byPlatform'];
+          top_posts: AnalyticsResponse['top5'];
+          from: string;
+          to: string;
+          period?: { from: string; to: string };
+        };
+        return {
+          totals:     raw.totals,
+          byPlatform: raw.by_platform ?? {},
+          top5:       raw.top_posts   ?? [],
+          from:       raw.period?.from ?? raw.from,
+          to:         raw.period?.to   ?? raw.to,
+        } satisfies AnalyticsResponse;
       })
       .then(setData)
       .catch((err: Error) => setError(err.message))
@@ -144,6 +169,42 @@ export default function AnalyticsPage() {
       })
       .catch(() => { /* non-critical, ignore */ });
   }, [range]);
+
+  function handleSyncMetrics() {
+    setSyncingMetrics(true);
+    fetch('/api/analytics/sync', {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        // Re-fetch analytics after sync
+        const to   = new Date();
+        const from = new Date(Date.now() - Number(range) * 24 * 60 * 60 * 1000);
+        return fetch(
+          `/api/analytics?from=${from.toISOString()}&to=${to.toISOString()}`,
+          { credentials: 'include' },
+        ).then(async (r) => {
+          if (!r.ok) return;
+          const raw = await r.json() as {
+            totals: AnalyticsResponse['totals'];
+            by_platform: AnalyticsResponse['byPlatform'];
+            top_posts: AnalyticsResponse['top5'];
+            period?: { from: string; to: string };
+            from: string; to: string;
+          };
+          setData({
+            totals:     raw.totals,
+            byPlatform: raw.by_platform ?? {},
+            top5:       raw.top_posts   ?? [],
+            from:       raw.period?.from ?? raw.from,
+            to:         raw.period?.to   ?? raw.to,
+          });
+        });
+      })
+      .catch(() => { /* ignore */ })
+      .finally(() => setSyncingMetrics(false));
+  }
 
   function handleSyncFollowers() {
     setSyncing(true);
@@ -176,11 +237,26 @@ export default function AnalyticsPage() {
         <div>
           <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>Analytics</h1>
           <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>
-            Rendimiento de tus publicaciones en redes sociales
+            {t.subtitle}
           </p>
         </div>
-        {/* Range selector */}
-        <div style={{ display: 'flex', gap: 6 }}>
+        {/* Range selector + sync metrics */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {hasAccounts && (
+            <button
+              onClick={handleSyncMetrics}
+              disabled={syncingMetrics}
+              style={{
+                padding: '7px 14px', borderRadius: 8, fontSize: 13,
+                cursor: syncingMetrics ? 'default' : 'pointer',
+                border: '1px solid var(--border)', background: 'var(--surface)',
+                color: syncingMetrics ? 'var(--muted)' : 'var(--text)',
+                opacity: syncingMetrics ? 0.6 : 1, marginRight: 6,
+              }}
+            >
+              {syncingMetrics ? t.syncingMetrics : t.syncMetrics}
+            </button>
+          )}
           {(['7', '30', '90'] as const).map((r) => (
             <button
               key={r}
@@ -200,7 +276,7 @@ export default function AnalyticsPage() {
       </div>
 
       {loading && (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>Cargando datos...</p>
+        <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</p>
       )}
       {error && (
         <p style={{ color: '#ff6b6b', fontSize: 14 }}>{error}</p>
@@ -214,10 +290,10 @@ export default function AnalyticsPage() {
         }}>
           <p style={{ fontSize: 32, marginBottom: 16 }}>📊</p>
           <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-            Conecta tus redes sociales
+            {t.noAccountsTitle}
           </h2>
           <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>
-            Para ver tus analytics necesitas tener al menos una cuenta de red social conectada.
+            {t.noAccountsDesc}
           </p>
           <a
             href="../social"
@@ -227,7 +303,7 @@ export default function AnalyticsPage() {
               textDecoration: 'none',
             }}
           >
-            Conectar cuenta →
+            {t.noAccountsCta}
           </a>
         </div>
       )}
@@ -236,7 +312,9 @@ export default function AnalyticsPage() {
         <>
           {/* Totals */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 32 }}>
-            {METRIC_CARDS.map(({ key, label, icon }) => (
+            {METRIC_CARD_KEYS.map(({ key, icon }) => {
+              const label = t.metricLabels[key] ?? key;
+              return (
               <div key={key} style={{
                 background: 'var(--surface)', border: '1px solid var(--border)',
                 borderRadius: 12, padding: '18px 20px',
@@ -251,7 +329,8 @@ export default function AnalyticsPage() {
                   {fmt(data.totals[key])}
                 </p>
               </div>
-            ))}
+            );
+            })}
 
             {/* Posts published */}
             <div style={{
@@ -261,7 +340,7 @@ export default function AnalyticsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <span style={{ fontSize: 16, opacity: 0.6 }}>✦</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Publicaciones
+                  {t.posts}
                 </span>
               </div>
               <p style={{ fontFamily: 'var(--font-syne)', fontSize: 28, fontWeight: 700 }}>
@@ -274,7 +353,7 @@ export default function AnalyticsPage() {
           {Object.keys(data.byPlatform).length > 0 && (
             <div style={{ marginBottom: 32 }}>
               <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700, marginBottom: 14 }}>
-                Por plataforma
+                {t.byPlatform}
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {Object.entries(data.byPlatform).map(([platform, stats]) => (
@@ -291,15 +370,15 @@ export default function AnalyticsPage() {
                     </span>
                     <div style={{ flex: 1, display: 'flex', gap: 24 }}>
                       <div>
-                        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Publicaciones</p>
+                        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{t.postsLabel}</p>
                         <p style={{ fontSize: 15, fontWeight: 600 }}>{stats.posts}</p>
                       </div>
                       <div>
-                        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Impresiones</p>
+                        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{t.impressions}</p>
                         <p style={{ fontSize: 15, fontWeight: 600 }}>{fmt(stats.impressions)}</p>
                       </div>
                       <div>
-                        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Engagement</p>
+                        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{t.engagement}</p>
                         <p style={{ fontSize: 15, fontWeight: 600 }}>{(stats.engagement_rate * 100).toFixed(2)}%</p>
                       </div>
                     </div>
@@ -321,7 +400,7 @@ export default function AnalyticsPage() {
           {data.top5.length > 0 && (
             <div>
               <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700, marginBottom: 14 }}>
-                Top publicaciones
+                {t.topPosts}
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {data.top5.map((post, i) => (
@@ -340,7 +419,7 @@ export default function AnalyticsPage() {
                       {PLATFORM_ICONS[post.platform] ?? '◉'}
                     </span>
                     <p style={{ flex: 1, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
-                      {post.body_preview || '(sin texto)'}
+                      {post.body_preview || t.noText}
                     </p>
                     <div style={{ flexShrink: 0, display: 'flex', gap: 16 }}>
                       <div style={{ textAlign: 'center' }}>
@@ -364,9 +443,9 @@ export default function AnalyticsPage() {
 
           {data.totals.posts === 0 && (
             <div style={{ textAlign: 'center', padding: '60px 0' }}>
-              <p style={{ color: 'var(--muted)', fontSize: 15 }}>Sin datos para este período</p>
+              <p style={{ color: 'var(--muted)', fontSize: 15 }}>{t.noData}</p>
               <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
-                Publica contenido y vuelve aquí para ver tus métricas
+                {t.noDataHint}
               </p>
             </div>
           )}
@@ -377,7 +456,7 @@ export default function AnalyticsPage() {
       <div style={{ marginTop: 40 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700 }}>
-            Seguidores
+            {t.followers}
           </h2>
           <button
             onClick={handleSyncFollowers}
@@ -388,7 +467,7 @@ export default function AnalyticsPage() {
               color: syncing ? 'var(--muted)' : 'var(--text)', opacity: syncing ? 0.6 : 1,
             }}
           >
-            {syncing ? 'Sincronizando...' : '↻ Sincronizar'}
+            {syncing ? t.syncing : t.sync}
           </button>
         </div>
 
@@ -398,7 +477,7 @@ export default function AnalyticsPage() {
             borderRadius: 12, padding: '32px 24px', textAlign: 'center',
           }}>
             <p style={{ color: 'var(--muted)', fontSize: 14 }}>
-              Sin datos de seguidores. Haz clic en &ldquo;Sincronizar&rdquo; para obtener los últimos conteos.
+              {t.noFollowers}
             </p>
           </div>
         ) : (
@@ -428,7 +507,7 @@ export default function AnalyticsPage() {
                     <p style={{ fontSize: 12, color: delta > 0 ? 'var(--accent)' : '#ff6b6b' }}>
                       {delta > 0 ? '▲' : '▼'} {fmt(Math.abs(delta))}
                       {pct !== null && ` (${pct}%)`}
-                      <span style={{ color: 'var(--muted)', marginLeft: 4 }}>vs inicio</span>
+                      <span style={{ color: 'var(--muted)', marginLeft: 4 }}>{t.vsStart}</span>
                     </p>
                   )}
                   {fa.snapshots.length > 1 && (

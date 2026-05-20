@@ -4,22 +4,29 @@ import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
+import esT from '@/locales/es/dashboard/home';
+import enT from '@/locales/en/dashboard/home';
+
+const T = { es: esT, en: enT } as const;
+type Locale = keyof typeof T;
+
 export default function DashboardPage() {
   const { user, org, plan, loading } = useAuth();
   const { lang } = useParams<{ lang: string }>();
+  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
 
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '60vh' }}>
-        <span style={{ color: 'var(--muted)', fontSize: 14 }}>Cargando...</span>
+        <span style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</span>
       </div>
     );
   }
 
   const quickLinks = [
-    { href: `/${lang}/dashboard/brand`,    label: 'Configurar Brand Kit',  desc: 'Define la identidad y voz de tu marca',     icon: '◈' },
-    { href: `/${lang}/dashboard/content`,  label: 'Crear contenido',       desc: 'Genera texto e imágenes con IA',            icon: '✦' },
-    { href: `/${lang}/dashboard/calendar`, label: 'Programar publicación', desc: 'Conecta redes y planifica tu calendario',   icon: '◫' },
+    { href: `/${lang}/dashboard/brand`,    label: t.brandLabel,    desc: t.brandDesc,    icon: '◈' },
+    { href: `/${lang}/dashboard/content`,  label: t.contentLabel,  desc: t.contentDesc,  icon: '✦' },
+    { href: `/${lang}/dashboard/calendar`, label: t.calendarLabel, desc: t.calendarDesc, icon: '◫' },
   ];
 
   return (
@@ -27,10 +34,10 @@ export default function DashboardPage() {
       {/* Header */}
       <div style={{ marginBottom: 40 }}>
         <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
-          Hola, {user?.name?.split(' ')[0] ?? 'allí'} 👋
+          {t.hello}, {user?.name?.split(' ')[0] ?? t.there} 👋
         </h1>
         <p style={{ color: 'var(--muted)', fontSize: 15 }}>
-          Bienvenido a <strong style={{ color: 'var(--text)' }}>{org?.name}</strong>. Empieza configurando tu brand kit.
+          <strong style={{ color: 'var(--text)' }}>{org?.name}</strong> · {t.welcome}
         </p>
       </div>
 
@@ -74,10 +81,8 @@ export default function DashboardPage() {
           }}
         >
           <div>
-            <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Plan gratuito activo</p>
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>
-              20 piezas/mes · 1 marca · 2 canales. Actualiza a Pro para acceso ilimitado.
-            </p>
+            <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{t.freePlan}</p>
+            <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.freePlanDesc}</p>
           </div>
           <Link
             href={`/${lang}/dashboard/settings/billing`}
@@ -93,7 +98,7 @@ export default function DashboardPage() {
               flexShrink: 0,
             }}
           >
-            Ver planes
+            {t.viewPlans}
           </Link>
         </div>
       )}

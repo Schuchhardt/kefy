@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+
+import esT from '@/locales/es/dashboard/inbox';
+import enT from '@/locales/en/dashboard/inbox';
+
+const T = { es: esT, en: enT } as const;
+type Locale = keyof typeof T;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,8 +58,7 @@ const PLATFORM_ICONS: Record<Platform | 'unknown', string> = {
   unknown:   '?',
 };
 
-const PLATFORMS: { value: Platform | 'all'; label: string }[] = [
-  { value: 'all',       label: 'Todos'     },
+const PLATFORMS_BASE: { value: Platform | 'all'; label: string }[] = [
   { value: 'linkedin',  label: 'LinkedIn'  },
   { value: 'instagram', label: 'Instagram' },
   { value: 'facebook',  label: 'Facebook'  },
@@ -61,20 +67,23 @@ const PLATFORMS: { value: Platform | 'all'; label: string }[] = [
   { value: 'threads',   label: 'Threads'   },
 ];
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60_000);
-  if (m < 1)  return 'ahora';
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function InboxPage() {
+  const { lang } = useParams<{ lang: string }>();
+  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
+  const PLATFORMS: { value: Platform | 'all'; label: string }[] = [
+    { value: 'all', label: t.all },
+    ...PLATFORMS_BASE,
+  ];
+  function timeAgo(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60_000);
+    if (m < 1) return t.timeNow;
+    const h = Math.floor(m / 60);
+    const d = Math.floor(h / 24);
+    return t.timeAgo(m, h, d);
+  }
   const [threads, setThreads]       = useState<ThreadPreview[]>([]);
   const [loading, setLoading]       = useState(true);
   const [platformFilter, setPlatformFilter] = useState<Platform | 'all'>('all');
@@ -89,7 +98,34 @@ export default function InboxPage() {
   const [sending, setSending]     = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
+  const [syncing, setSyncing]   = useState(false);
+  const [syncMsg, setSyncMsg]   = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  async function handleSync() {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch('/api/messaging/sync', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        setSyncMsg(err.error ?? t.syncError);
+        return;
+      }
+      const json = await res.json() as { synced: number };
+      setSyncMsg(t.syncDone(json.synced));
+      fetchThreads();
+      setTimeout(() => setSyncMsg(null), 4000);
+    } catch {
+      setSyncMsg(t.syncError);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const fetchThreads = useCallback(() => {
     setLoading(true);
@@ -159,15 +195,27 @@ export default function InboxPage() {
       );
       if (!res.ok) {
         const err = await res.json() as { error?: string };
-        setSendError(err.error ?? 'Error al enviar');
+        setSendError(err.error ?? t.errorSend);
         return;
       }
-      const json = await res.json() as { message: Message };
-      setMessages((prev) => [...prev, json.message]);
+
       setReplyText('');
+
+      // Re-fetch messages so we always show DB state with proper IDs
+      const accountId2 = activeThread.kefy_social_accounts.id;
+      const threadId2  = activeThread.platform_thread_id;
+      const messagesRes = await fetch(
+        `/api/messaging/${encodeURIComponent(threadId2)}?account_id=${accountId2}`,
+        { credentials: 'include' },
+      );
+      if (messagesRes.ok) {
+        const refreshed = await messagesRes.json() as { messages: Message[] };
+        setMessages(refreshed.messages ?? []);
+      }
+
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     } catch {
-      setSendError('Error de conexión');
+      setSendError(t.errorConn);
     } finally {
       setSending(false);
     }
@@ -199,17 +247,42 @@ export default function InboxPage() {
                 </span>
               )}
             </h1>
-            <button
-              onClick={fetchThreads}
-              style={{
-                background: 'none', border: '1px solid var(--border)',
-                borderRadius: 6, padding: '4px 8px', cursor: 'pointer',
-                color: 'var(--muted)', fontSize: 13,
-              }}
-            >
-              ↻
-            </button>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button
+                onClick={fetchThreads}
+                disabled={loading || syncing}
+                title="Refrescar"
+                style={{
+                  background: 'none', border: '1px solid var(--border)',
+                  borderRadius: 6, padding: '4px 8px', cursor: 'pointer',
+                  color: 'var(--muted)', fontSize: 13,
+                  opacity: (loading || syncing) ? 0.5 : 1,
+                }}
+              >
+                ↻
+              </button>
+              <button
+                onClick={handleSync}
+                disabled={syncing || loading}
+                style={{
+                  background: syncing ? 'transparent' : 'var(--accent)',
+                  border: `1px solid ${syncing ? 'var(--border)' : 'var(--accent)'}`,
+                  borderRadius: 6, padding: '4px 10px', cursor: (syncing || loading) ? 'default' : 'pointer',
+                  color: syncing ? 'var(--muted)' : '#000',
+                  fontSize: 12, fontWeight: 600,
+                  opacity: (syncing || loading) ? 0.6 : 1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {syncing ? t.syncing : t.syncBtn}
+              </button>
+            </div>
           </div>
+          {syncMsg && (
+            <p style={{ fontSize: 11, color: syncMsg === t.syncError ? '#ff6b6b' : 'var(--accent)', marginBottom: 6 }}>
+              {syncMsg}
+            </p>
+          )}
 
           {/* Unread toggle */}
           <button
@@ -222,7 +295,7 @@ export default function InboxPage() {
               marginBottom: 10,
             }}
           >
-            Solo no leídos
+            {t.unreadOnly}
           </button>
 
           {/* Platform filter */}
@@ -247,13 +320,13 @@ export default function InboxPage() {
         {/* Thread list */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading && (
-            <p style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>Cargando...</p>
+            <p style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>{t.loading}</p>
           )}
           {!loading && threads.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center' }}>
-              <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin mensajes</p>
+              <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.noMessages}</p>
               <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
-                Los DMs llegan aquí vía webhook de Zernio
+                {t.noMessagesHint}
               </p>
             </div>
           )}
@@ -323,7 +396,7 @@ export default function InboxPage() {
         {!activeThread ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
             <p style={{ fontSize: 32 }}>✉</p>
-            <p style={{ color: 'var(--muted)', fontSize: 14 }}>Selecciona un mensaje para verlo</p>
+            <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.selectMessage}</p>
           </div>
         ) : (
           <>
@@ -357,7 +430,7 @@ export default function InboxPage() {
             {/* Messages */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
               {threadLoading && (
-                <p style={{ color: 'var(--muted)', fontSize: 13 }}>Cargando conversación...</p>
+                <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.loadingConvo}</p>
               )}
               {!threadLoading && messages.map((msg) => {
                 const isOut = msg.direction === 'outbound';
@@ -403,7 +476,7 @@ export default function InboxPage() {
                 <textarea
                   value={replyText}
                   onChange={(e) => setReplyText(e.target.value)}
-                  placeholder="Escribe una respuesta..."
+                  placeholder={t.replyPlaceholder}
                   rows={2}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -431,7 +504,7 @@ export default function InboxPage() {
                     opacity: sending ? 0.6 : 1,
                   }}
                 >
-                  {sending ? '...' : '↑ Enviar'}
+                  {sending ? '...' : t.sendBtn}
                 </button>
               </div>
             </div>

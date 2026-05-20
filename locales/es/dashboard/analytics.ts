@@ -1,0 +1,33 @@
+const es = {
+  subtitle: 'Rendimiento de tus publicaciones en redes sociales',
+  loading: 'Cargando datos...',
+  noAccountsTitle: 'Conecta tus redes sociales',
+  noAccountsDesc: 'Para ver tus analytics necesitas tener al menos una cuenta de red social conectada.',
+  noAccountsCta: 'Conectar cuenta →',
+  posts: 'Publicaciones',
+  byPlatform: 'Por plataforma',
+  topPosts: 'Top publicaciones',
+  noText: '(sin texto)',
+  noData: 'Sin datos para este período',
+  noDataHint: 'Publica contenido y vuelve aquí para ver tus métricas',
+  followers: 'Seguidores',
+  syncing: 'Sincronizando...',
+  sync: '↻ Sincronizar',
+  syncingMetrics: 'Sincronizando...',
+  syncMetrics: '↻ Sync métricas',
+  noFollowers: 'Sin datos de seguidores. Haz clic en "Sincronizar" para obtener los últimos conteos.',
+  vsStart: 'vs inicio',
+  postsLabel: 'Publicaciones',
+  impressions: 'Impresiones',
+  engagement: 'Engagement',
+  metricLabels: {
+    impressions: 'Impresiones',
+    reach: 'Alcance',
+    likes: 'Me gusta',
+    comments: 'Comentarios',
+    shares: 'Compartidos',
+    clicks: 'Clics',
+  },
+};
+
+export default es;

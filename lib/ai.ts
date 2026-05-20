@@ -15,6 +15,16 @@ function getOpenAI(): OpenAI {
   return new OpenAI({ apiKey: key });
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Strip markdown code fences that Claude sometimes wraps around JSON output. */
+function stripJsonFences(text: string): string {
+  return text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type ContentChannel =
@@ -46,10 +56,21 @@ export interface GenerateTextResult {
   tokensUsed: number;
 }
 
+export interface BrandImageContext {
+  name?:           string;
+  primaryColor?:   string;
+  secondaryColor?: string;
+  accentColor?:    string;
+  tone?:           string[];
+  logoB64?:        string;  // raw base64, no data-URI prefix
+  logoMimeType?:   string;  // e.g. 'image/png'
+}
+
 export interface GenerateImageOptions {
   prompt:   string;
   size?:    '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1080x1920' | 'auto';
   quality?: 'low' | 'medium' | 'high' | 'auto';
+  brand?:   BrandImageContext;
 }
 
 export interface GenerateImageResult {
@@ -203,14 +224,51 @@ export async function generateContentImage(
 ): Promise<GenerateImageResult> {
   const client = getOpenAI();
 
-  const response = await client.images.generate({
-    model:           'gpt-image-2-2026-04-21',
-    prompt:          opts.prompt,
-    n:               1,
-    size:            (opts.size === 'auto' || !opts.size) ? '1024x1024' : opts.size,
-    quality:         opts.quality === 'auto' ? 'medium' : (opts.quality ?? 'medium'),
-    output_format:   'jpeg',
-  } as Parameters<typeof client.images.generate>[0]) as unknown as { data: Array<{ b64_json?: string; revised_prompt?: string }> };
+  // Enrich prompt with brand colors and style
+  const brandParts: string[] = [];
+  if (opts.brand?.name)            brandParts.push(`Brand: "${opts.brand.name}".`);
+  if (opts.brand?.primaryColor)    brandParts.push(`Primary color: ${opts.brand.primaryColor}.`);
+  if (opts.brand?.secondaryColor)  brandParts.push(`Secondary color: ${opts.brand.secondaryColor}.`);
+  if (opts.brand?.accentColor)     brandParts.push(`Accent color: ${opts.brand.accentColor}.`);
+  if (opts.brand?.tone?.length)    brandParts.push(`Visual style: ${opts.brand.tone.join(', ')}.`);
+
+  const enrichedPrompt = brandParts.length
+    ? `${opts.prompt}\n\nBrand guidelines: ${brandParts.join(' ')}`
+    : opts.prompt;
+
+  const size    = (opts.size === 'auto' || !opts.size) ? '1024x1024' : opts.size;
+  const quality = opts.quality === 'auto' ? 'medium' : (opts.quality ?? 'medium');
+
+  const hasLogo = !!(opts.brand?.logoB64 && opts.brand?.logoMimeType);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const generateFn = client.images.generate.bind(client.images) as (params: any) => Promise<any>;
+
+  let response: { data: Array<{ b64_json?: string; revised_prompt?: string }> };
+
+  if (hasLogo) {
+    const logoDataUrl = `data:${opts.brand!.logoMimeType!};base64,${opts.brand!.logoB64!}`;
+    response = await generateFn({
+      model:         'gpt-image-2-2026-04-21',
+      input: [
+        { type: 'image_url', image_url: { url: logoDataUrl } },
+        { type: 'text',      text: enrichedPrompt + ' Incorporate the provided brand logo into the composition in a natural and visually balanced way.' },
+      ],
+      n:             1,
+      size,
+      quality,
+      output_format: 'jpeg',
+    });
+  } else {
+    response = await generateFn({
+      model:         'gpt-image-2-2026-04-21',
+      prompt:        enrichedPrompt,
+      n:             1,
+      size,
+      quality,
+      output_format: 'jpeg',
+    });
+  }
 
   const img = response.data?.[0];
   const b64 = (img as { b64_json?: string })?.b64_json;
@@ -264,7 +322,7 @@ export async function generateCarouselSlides(
 
   let slides: CarouselSlide[];
   try {
-    slides = JSON.parse(raw) as CarouselSlide[];
+    slides = JSON.parse(stripJsonFences(raw)) as CarouselSlide[];
     if (!Array.isArray(slides)) throw new Error('Not an array');
   } catch {
     throw new Error(`Claude returned invalid carousel JSON: ${raw.slice(0, 200)}`);
@@ -348,7 +406,7 @@ export async function generateReelScript(
 
   let parsed: { hook: string; hashtags: string[]; scenes: ReelScene[] };
   try {
-    parsed = JSON.parse(raw) as typeof parsed;
+    parsed = JSON.parse(stripJsonFences(raw)) as typeof parsed;
     if (!Array.isArray(parsed.scenes)) throw new Error('scenes not an array');
   } catch {
     throw new Error(`Claude returned invalid reel JSON: ${raw.slice(0, 200)}`);

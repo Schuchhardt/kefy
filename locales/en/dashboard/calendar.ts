@@ -1,0 +1,33 @@
+const en = {
+  title: 'Calendar',
+  subtitle: 'Schedule and manage your social media posts',
+  scheduleBtn: '+ Schedule',
+  newScheduled: 'New scheduled post',
+  contentLabel: 'CONTENT',
+  selectContent: 'Select content...',
+  accountLabel: 'ACCOUNT',
+  selectAccount: 'Select account...',
+  dateLabel: 'DATE & TIME',
+  scheduling: 'Scheduling...',
+  schedule: 'Schedule',
+  cancel: 'Cancel',
+  allStatuses: 'All statuses',
+  noAccounts: 'No accounts connected.',
+  noAccountsGo: 'Go to',
+  noAccountsLink: 'Settings',
+  noAccountsHint: 'to connect your social networks.',
+  loading: 'Loading...',
+  noPosts: 'No scheduled posts',
+  noText: '(no text)',
+  unknownAccount: 'Unknown account',
+  cancelPost: 'Cancel',
+  statusLabels: {
+    pending: 'Pending',
+    scheduled: 'Scheduled',
+    published: 'Published',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+  } as Record<string, string>,
+};
+
+export default en;

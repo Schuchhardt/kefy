@@ -4,23 +4,10 @@ import type { BlogPost } from '@/lib/supabase';
 import { KEFY_COPY } from '@/lib/content';
 import BlogNav from '@/components/blog/BlogNav';
 import Footer from '@/components/landing/Footer';
+import esBlog from '@/locales/es/blog';
+import enBlog from '@/locales/en/blog';
 
-const blogLabels: Record<string, { title: string; sub: string; readMore: string; empty: string; back: string }> = {
-  es: {
-    title: 'Blog',
-    sub: 'Marketing, contenido y crecimiento para negocios que no tienen un equipo dedicado.',
-    readMore: 'Leer artículo →',
-    empty: 'Pronto publicaremos nuestros primeros artículos. ¡Vuelve en unos días!',
-    back: 'Volver al inicio',
-  },
-  en: {
-    title: 'Blog',
-    sub: 'Marketing, content and growth for businesses without a dedicated team.',
-    readMore: 'Read article →',
-    empty: 'Our first articles are coming soon. Check back in a few days!',
-    back: 'Back to home',
-  },
-};
+const blogLabels: Record<string, typeof esBlog> = { es: esBlog, en: enBlog };
 
 function formatDate(dateStr: string, lang: string): string {
   return new Date(dateStr).toLocaleDateString(lang === 'en' ? 'en-US' : 'es-CL', {

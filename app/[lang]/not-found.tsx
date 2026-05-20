@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import esCommon from '@/locales/es/common';
+import enCommon from '@/locales/en/common';
 
-const labels: Record<string, { msg: string; cta: string }> = {
-  es: { msg: 'Página no encontrada', cta: 'Volver al inicio' },
-  en: { msg: 'Page not found', cta: 'Go home' },
+const labels: Record<string, typeof esCommon.notFound> = {
+  es: esCommon.notFound,
+  en: enCommon.notFound,
 };
 
 export default function NotFound() {
