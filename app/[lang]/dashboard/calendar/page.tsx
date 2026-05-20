@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 
 import esT from '@/locales/es/dashboard/calendar';
@@ -88,10 +88,15 @@ export default function CalendarPage() {
     (Object.keys(STATUS_LABELS_BASE) as PostStatus[]).map((k) => [k, STATUS_LABELS_BASE[k][lang === 'en' ? 'en' : 'es']])
   ) as Record<PostStatus, string>;
 
+  const today = useMemo(() => new Date(), []);
   const [posts, setPosts]         = useState<ScheduledPost[]>([]);
   const [accounts, setAccounts]   = useState<SocialAccount[]>([]);
   const [loading, setLoading]     = useState(true);
-  const [filterStatus, setFilterStatus] = useState<PostStatus | ''>('');
+
+  // Calendar navigation
+  const [viewYear, setViewYear]   = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   // Schedule form
   const [showForm, setShowForm]   = useState(false);
@@ -104,23 +109,53 @@ export default function CalendarPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams({ limit: '50' });
-    if (filterStatus) params.set('status', filterStatus);
-
     const [postsRes, accountsRes] = await Promise.all([
-      fetch(`/api/social/schedule?${params}`, { credentials: 'include' }),
+      fetch('/api/social/schedule?limit=100', { credentials: 'include' }),
       fetch('/api/social/accounts', { credentials: 'include' }),
     ]);
-
     const postsData    = await postsRes.json()    as { posts: ScheduledPost[] };
     const accountsData = await accountsRes.json() as { accounts: SocialAccount[] };
-
     setPosts(postsData.posts ?? []);
     setAccounts(accountsData.accounts ?? []);
     setLoading(false);
-  }, [filterStatus]);
+  }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const postsByDay = useMemo(() => {
+    const map: Record<string, ScheduledPost[]> = {};
+    for (const post of posts) {
+      if (!post.scheduled_at) continue;
+      const d = new Date(post.scheduled_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (!map[key]) map[key] = [];
+      map[key].push(post);
+    }
+    return map;
+  }, [posts]);
+
+  const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
+  const startOffset     = (firstDayOfMonth + 6) % 7;
+  const daysInMonth     = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const totalCells      = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+  function goToPrevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
+    else setViewMonth((m) => m - 1);
+    setSelectedDate(null);
+  }
+  function goToNextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear((y) => y + 1); }
+    else setViewMonth((m) => m + 1);
+    setSelectedDate(null);
+  }
+  function goToToday() {
+    setViewYear(today.getFullYear());
+    setViewMonth(today.getMonth());
+    setSelectedDate(null);
+  }
+
+  const selectedDayPosts = selectedDate ? (postsByDay[selectedDate] ?? []) : null;
 
   async function openForm() {
     // Fetch draft/approved content items for the schedule form
@@ -172,18 +207,8 @@ export default function CalendarPage() {
     fetchData();
   }
 
-  // Group posts by date for display
-  const grouped = posts.reduce<Record<string, ScheduledPost[]>>((acc, post) => {
-    const key = post.scheduled_at
-      ? new Date(post.scheduled_at).toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-      : t.noText;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(post);
-    return acc;
-  }, {});
-
   return (
-    <div style={{ padding: '40px 48px', maxWidth: 880 }}>
+    <div style={{ padding: '40px 48px', maxWidth: 960 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
         <div>
@@ -203,7 +228,7 @@ export default function CalendarPage() {
 
       {/* Connected accounts */}
       {accounts.length > 0 && (
-        <div style={{ marginBottom: 28, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ marginBottom: 24, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {accounts.map((acc) => (
             <div key={acc.id} style={{
               display: 'flex', alignItems: 'center', gap: 8,
@@ -289,48 +314,157 @@ export default function CalendarPage() {
         </form>
       )}
 
-      {/* Filter */}
-      <div style={{ marginBottom: 20 }}>
-        <select style={{ ...inputStyle, width: 'auto' }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as PostStatus | '')}>
-          <option value="">{t.allStatuses}</option>
-          {(Object.keys(STATUS_LABELS) as PostStatus[]).map((s) => (
-            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-          ))}
-        </select>
-      </div>
-
       {/* No accounts warning */}
       {!loading && accounts.length === 0 && (
         <div style={{
           background: 'rgba(255,183,77,0.08)', border: '1px solid rgba(255,183,77,0.3)',
-          borderRadius: 10, padding: '14px 18px', marginBottom: 20, fontSize: 14,
+          borderRadius: 10, padding: '14px 18px', marginBottom: 24, fontSize: 14,
         }}>
           <strong>{t.noAccounts}</strong>{' '}
           {t.noAccountsGo} <a href="settings" style={{ color: 'var(--accent)' }}>{t.noAccountsLink}</a> {t.noAccountsHint}
         </div>
       )}
 
-      {/* Calendar posts */}
-      {loading ? (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</p>
-      ) : posts.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px 0' }}>
-          <p style={{ color: 'var(--muted)', fontSize: 15 }}>{t.noPosts}</p>
+      {/* ── Monthly Calendar Grid ─────────────────────────────────────────── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', marginBottom: 28 }}>
+
+        {/* Month navigation */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+          <button
+            onClick={goToPrevMonth}
+            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', color: 'var(--text)', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            &#8249;
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700 }}>
+              {t.monthNames[viewMonth]} {viewYear}
+            </span>
+            {(viewYear !== today.getFullYear() || viewMonth !== today.getMonth()) && (
+              <button
+                onClick={goToToday}
+                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 10px', fontSize: 12, cursor: 'pointer', color: 'var(--muted)' }}
+              >
+                {t.today}
+              </button>
+            )}
+          </div>
+          <button
+            onClick={goToNextMonth}
+            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', color: 'var(--text)', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            &#8250;
+          </button>
         </div>
+
+        {/* Status legend */}
+        <div style={{ display: 'flex', gap: 16, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+          {(['scheduled', 'published', 'failed', 'pending'] as PostStatus[]).map((s) => (
+            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[s] }} />
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{STATUS_LABELS[s]}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Day-of-week headers */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--border)' }}>
+          {t.dayNames.map((day) => (
+            <div key={day} style={{ textAlign: 'center', padding: '8px 4px', fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+              {day}
+            </div>
+          ))}
+        </div>
+
+        {/* Calendar cells */}
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--muted)', fontSize: 14 }}>{t.loading}</div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+            {Array.from({ length: totalCells }, (_, i) => {
+              const dayNum  = i - startOffset + 1;
+              const isValid = dayNum >= 1 && dayNum <= daysInMonth;
+              const dateKey = isValid
+                ? `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+                : '';
+              const dayPosts   = isValid ? (postsByDay[dateKey] ?? []) : [];
+              const isToday    = isValid && viewYear === today.getFullYear() && viewMonth === today.getMonth() && dayNum === today.getDate();
+              const isSelected = dateKey !== '' && dateKey === selectedDate;
+              return (
+                <div
+                  key={i}
+                  onClick={() => { if (isValid) setSelectedDate(isSelected ? null : dateKey); }}
+                  style={{
+                    minHeight: 84,
+                    padding: '8px',
+                    borderTop: '1px solid var(--border)',
+                    borderRight: i % 7 !== 6 ? '1px solid var(--border)' : undefined,
+                    cursor: isValid ? 'pointer' : 'default',
+                    background: isSelected ? 'rgba(198,255,75,0.06)' : 'transparent',
+                    transition: 'background 0.12s',
+                    boxSizing: 'border-box',
+                    opacity: isValid ? 1 : 0,
+                  }}
+                >
+                  {isValid && (
+                    <>
+                      <div style={{
+                        width: 26, height: 26, borderRadius: '50%',
+                        background: isToday ? 'var(--accent)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 13, fontWeight: isToday || isSelected ? 700 : 400,
+                        color: isToday ? '#000' : 'var(--text)',
+                        marginBottom: 5,
+                      }}>
+                        {dayNum}
+                      </div>
+                      {dayPosts.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center' }}>
+                          {dayPosts.slice(0, 4).map((post) => (
+                            <div
+                              key={post.id}
+                              title={`${post.kefy_social_accounts?.platform ?? ''} · ${STATUS_LABELS[post.status]}`}
+                              style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[post.status], flexShrink: 0 }}
+                            />
+                          ))}
+                          {dayPosts.length > 4 && (
+                            <span style={{ fontSize: 10, color: 'var(--muted)', lineHeight: 1, marginLeft: 1 }}>+{dayPosts.length - 4}</span>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Day Detail Panel ───────────────────────────────────────────────── */}
+      {selectedDate === null ? (
+        posts.length > 0 && !loading && (
+          <p style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', paddingBottom: 16 }}>
+            {t.selectDayHint}
+          </p>
+        )
       ) : (
-        Object.entries(grouped).map(([date, group]) => (
-          <div key={date} style={{ marginBottom: 28 }}>
-            <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
-              {date}
-            </p>
+        <div>
+          <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 12 }}>
+            {new Date(selectedDate + 'T12:00:00').toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+          {selectedDayPosts!.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <p style={{ color: 'var(--muted)', fontSize: 15 }}>{t.noPosts}</p>
+            </div>
+          ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {group.map((post) => (
+              {selectedDayPosts!.map((post) => (
                 <div key={post.id} style={{
                   background: 'var(--surface)', border: '1px solid var(--border)',
                   borderRadius: 10, padding: '14px 16px',
                   display: 'flex', alignItems: 'flex-start', gap: 14,
                 }}>
-                  {/* Time */}
                   <div style={{ flexShrink: 0, width: 48, textAlign: 'center' }}>
                     <p style={{ fontSize: 13, fontWeight: 700 }}>
                       {post.scheduled_at
@@ -338,13 +472,9 @@ export default function CalendarPage() {
                         : '--:--'}
                     </p>
                   </div>
-                  {/* Platform */}
                   <div style={{ flexShrink: 0 }}>
-                    <span style={{ fontSize: 20 }}>
-                      {PLATFORM_ICONS[post.kefy_social_accounts?.platform ?? ''] ?? '◉'}
-                    </span>
+                    <span style={{ fontSize: 20 }}>{PLATFORM_ICONS[post.kefy_social_accounts?.platform ?? ''] ?? '◉'}</span>
                   </div>
-                  {/* Content */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
                       {post.kefy_content_items?.body?.slice(0, 80) ?? post.kefy_content_items?.title ?? t.noText}
@@ -356,7 +486,6 @@ export default function CalendarPage() {
                       <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 4 }}>{post.error_message}</p>
                     )}
                   </div>
-                  {/* Status */}
                   <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
                     <span style={{
                       fontSize: 11, fontWeight: 600, borderRadius: 4, padding: '2px 8px',
@@ -377,8 +506,8 @@ export default function CalendarPage() {
                 </div>
               ))}
             </div>
-          </div>
-        ))
+          )}
+        </div>
       )}
     </div>
   );

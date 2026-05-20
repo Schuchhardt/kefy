@@ -1,6 +1,11 @@
 const es = {
   title: 'Calendario',
   subtitle: 'Programa y gestiona tus publicaciones en redes sociales',
+  monthNames: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] as string[],
+  dayNames: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] as string[],
+  today: 'Hoy',
+  selectDayHint: 'Haz clic en un día para ver sus publicaciones',
+
   scheduleBtn: '+ Programar',
   newScheduled: 'Nueva publicación programada',
   contentLabel: 'CONTENIDO',

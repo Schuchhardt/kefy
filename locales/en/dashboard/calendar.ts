@@ -1,6 +1,11 @@
 const en = {
   title: 'Calendar',
   subtitle: 'Schedule and manage your social media posts',
+  monthNames: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as string[],
+  dayNames: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as string[],
+  today: 'Today',
+  selectDayHint: 'Click on a day to view its posts',
+
   scheduleBtn: '+ Schedule',
   newScheduled: 'New scheduled post',
   contentLabel: 'CONTENT',
