@@ -92,6 +92,19 @@ export interface KefyCopy {
     commentLabel?: string;
     dmLabel?: string;
     scoreBarLabel?: string;
+    // UI strings
+    stepDescriptions?: string[];   // [content, inbox, pipeline]
+    creationSteps?: string[];      // 5 short labels (col 1 mini list)
+    creationStepsLong?: string[];  // 5 long labels (col 3 progress)
+    progressLabel?: string;
+    botThoughts?: string[];        // [thought1, thought2]
+    commentBrandReply?: string;
+    instagramNow?: string;
+    statusGenerating?: string;
+    statusAssembling?: string;
+    imageGenerating?: string;
+    imageReady?: string;
+    likesLabel?: string;
   };
   problem: { tag: string; h2: string; intro: string; pains: Pain[]; stats: StatCard[]; };
   how: { tag: string; h2: string; intro: string; steps: Step[]; closer: string[]; };

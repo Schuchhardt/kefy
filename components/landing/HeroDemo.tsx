@@ -57,6 +57,9 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
   const stepRef = useRef<DemoStep>('content');
   useEffect(() => { stepRef.current = step; }, [step]);
 
+  const botThought0 = copy.botThoughts?.[0] ?? 'Analizando intención de compra…';
+  const botThought1 = copy.botThoughts?.[1] ?? 'Score +15 · Clasificando como lead caliente 🔥';
+
   // Step 1
   useEffect(() => {
     if (step !== 'content') { return; }
@@ -79,13 +82,13 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
     const t1 = setTimeout(() => setCommentVisible(true), 500);
     const t2 = setTimeout(() => setBrandReplyVisible(true), 1700);
     const t3 = setTimeout(() => setDmMsgCount(1), 2800);
-    const t4 = setTimeout(() => setBotThinking('Analizando intención de compra…'), 3600);
+        const t4 = setTimeout(() => setBotThinking(botThought0), 3600);
     const t5 = setTimeout(() => setDmMsgCount(2), 4800);
-    const t6 = setTimeout(() => setBotThinking('Score +15 · Clasificando como lead caliente 🔥'), 5600);
+    const t6 = setTimeout(() => setBotThinking(botThought1), 5600);
     const t7 = setTimeout(() => setDmMsgCount(3), 6600);
     const t8 = setTimeout(() => { if (stepRef.current === 'inbox') setStep('pipeline'); }, 10000);
     return () => { [t1, t2, t3, t4, t5, t6, t7, t8].forEach(clearTimeout); };
-  }, [step]);
+  }, [step, botThought0, botThought1]);
 
   // Step 3
   useEffect(() => {
@@ -108,10 +111,20 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
   const handle = copy.brandHandle ?? '@hiclothes';
   const brandInitials = brandName.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
   const labels = copy.stepLabels ?? ['Crear contenido', 'Interacciones', 'Pipeline de leads'];
+  const stepDescs = copy.stepDescriptions ?? [
+    'Kefy analiza tu marca y genera imagen, caption y programación automáticamente.',
+    'Alguien comentó en tu post. Kefy detectó intención de compra y está enviando un DM.',
+    'María fue calificada como lead caliente. Kefy le envió el link de compra por DM.',
+  ];
+  const creationSteps = copy.creationSteps ?? ['Analizando brand kit', 'Generando imagen', 'Generando caption', 'Armando post', 'Programando'];
+  const creationStepsLong = copy.creationStepsLong ?? ['Analizando brand kit', 'Generando imagen del post', 'Generando caption', 'Armando post completo', 'Programando publicación'];
+  const progressLabel = copy.progressLabel ?? 'Progreso';
+  const commentBrandReply = copy.commentBrandReply ?? '¡Hola! Te contactamos por DM 👋';
+  const instagramNow = copy.instagramNow ?? 'Instagram · Ahora';
   const stages = copy.pipelineStages ?? [];
   const dmMsgs = copy.dmThread ?? [];
   const commentThread = copy.commentThread ?? [];
-  const postReady = creationPhase >= 4;
+  const postReady = step !== 'content' || creationPhase >= 4;
 
   const skel = (w: string | number, h: number, radius = 4, extra?: React.CSSProperties): React.CSSProperties => ({
     width: w, height: h, borderRadius: radius,
@@ -130,7 +143,7 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
       </div>
 
       {/* Fixed 3-column layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', minHeight: 460, overflow: 'hidden' }}>
+      <div className="demo-grid" style={{ overflow: 'hidden' }}>
 
         {/* COL 1: Steps */}
         <div style={{ borderRight: '1px solid var(--border)', padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg)' }}>
@@ -152,20 +165,15 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
           <div style={{ borderTop: '1px solid var(--border)', margin: '8px 0' }} />
 
           <div style={{ fontSize: 10, color: 'var(--muted)', lineHeight: 1.6 }}>
-            {step === 'content' && 'Kefy analiza tu marca y genera imagen, caption y programación automáticamente.'}
-            {step === 'inbox' && 'Alguien comentó en tu post. Kefy detectó intención de compra y está enviando un DM.'}
-            {step === 'pipeline' && 'María fue calificada como lead caliente. Kefy le envió el link de compra por DM.'}
+            {step === 'content' && stepDescs[0]}
+            {step === 'inbox' && stepDescs[1]}
+            {step === 'pipeline' && stepDescs[2]}
           </div>
 
           {step === 'content' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8 }}>
-              {[
-                { label: 'Analizando brand kit', doneAt: 1 },
-                { label: 'Generando imagen',      doneAt: 2 },
-                { label: 'Generando caption',     doneAt: 3 },
-                { label: 'Armando post',          doneAt: 4 },
-                { label: 'Programando',           doneAt: 5 },
-              ].map(({ label, doneAt }, i) => {
+              {creationSteps.map((label, i) => {
+                const doneAt = i + 1;
                 const done = creationPhase >= doneAt;
                 const active = creationPhase === doneAt - 1;
                 return (
@@ -210,7 +218,7 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
                 ) : (
                   <>
                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{handle}</div>
-                    <div style={{ fontSize: 9, color: 'var(--muted)' }}>Instagram · Ahora</div>
+                    <div style={{ fontSize: 9, color: 'var(--muted)' }}>{instagramNow}</div>
                   </>
                 )}
               </div>
@@ -222,7 +230,7 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5, animation: 'skeletonPulse 1.4s ease-in-out infinite', background: 'rgba(255,255,255,0.05)' }}>
                   <span style={{ fontSize: 20, opacity: 0.2 }}>🖼</span>
                   <span style={{ fontSize: 9, color: 'var(--muted)', opacity: 0.55, fontFamily: 'var(--font-jetbrains, monospace)' }}>
-                    {creationPhase <= 1 ? 'Generando imagen…' : 'Imagen lista ✓'}
+                    {creationPhase <= 1 ? (copy.imageGenerating ?? 'Generando imagen…') : (copy.imageReady ?? 'Imagen lista ✓')}
                   </span>
                 </div>
               ) : copy.brandProductSrc ? (
@@ -254,7 +262,7 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
                   <div style={{ flex: 1 }} />
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.75 }}><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
                 </div>
-                <div style={{ padding: '2px 10px 2px', fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>247 me gusta</div>
+                <div style={{ padding: '2px 10px 2px', fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{copy.likesLabel ?? '247 likes'}</div>
                 <div style={{ padding: '0 10px 8px', fontSize: 9, lineHeight: 1.5, color: 'var(--muted)' }}>
                   <span style={{ fontWeight: 700, color: 'var(--text)' }}>{handle} </span>
                   {copy.commentPostCaption ?? 'Nueva colección — Invierno Silencioso ❄️'}
@@ -277,7 +285,7 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
                     <IgAvatar src={copy.brandLogoSrc} name={brandName} size={17} />
                     <div>
                       <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{handle} </span>
-                      <span style={{ fontSize: 9, color: '#D6D5CE' }}>¡Hola! Te contactamos por DM 👋</span>
+                      <span style={{ fontSize: 9, color: '#D6D5CE' }}>{commentBrandReply}</span>
                     </div>
                   </div>
                 )}
@@ -288,27 +296,22 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
           {/* Status badge */}
           {step === 'content' && (
             <div style={{ padding: '6px 9px', borderRadius: 7, fontSize: 9, fontFamily: 'var(--font-jetbrains, monospace)', transition: 'all 0.4s', background: creationPhase >= 5 ? 'rgba(198,255,75,0.06)' : 'transparent', border: `1px solid ${creationPhase >= 5 ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`, color: creationPhase >= 5 ? 'var(--accent)' : 'var(--muted)' }}>
-              {creationPhase < 4 ? '⏳ Generando contenido…'
-                : creationPhase === 4 ? '📋 Armando post…'
-                : `✓ Publicado · ${copy.postScheduledFor ?? 'Sáb 23 may · 18:00'}`}
+              {creationPhase < 4 ? (copy.statusGenerating ?? '⏳ Generando contenido…')
+                : creationPhase === 4 ? (copy.statusAssembling ?? '📋 Armando post…')
+                : `${copy.postPublished ?? '✓ Publicado'} · ${copy.postScheduledFor ?? 'Sáb 23 may · 18:00'}`}
             </div>
           )}
         </div>
 
         {/* COL 3: Activity / Inbox / Pipeline */}
-        <div style={{ padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+        <div className="demo-col3" style={{ padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
 
           {/* STEP 1 */}
           {step === 'content' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--muted)', fontFamily: 'var(--font-syne, serif)', fontWeight: 600, marginBottom: 2 }}>Progreso</div>
-              {[
-                { label: 'Analizando brand kit',      doneAt: 1 },
-                { label: 'Generando imagen del post',  doneAt: 2 },
-                { label: 'Generando caption',          doneAt: 3 },
-                { label: 'Armando post completo',      doneAt: 4 },
-                { label: 'Programando publicación',    doneAt: 5 },
-              ].map(({ label, doneAt }, i) => {
+              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--muted)', fontFamily: 'var(--font-syne, serif)', fontWeight: 600, marginBottom: 2 }}>{progressLabel}</div>
+              {creationStepsLong.map((label, i) => {
+                const doneAt = i + 1;
                 const done = creationPhase >= doneAt;
                 const active = creationPhase === doneAt - 1;
                 return (
