@@ -22,6 +22,8 @@ export interface WaitlistCopy {
 }
 export interface HeroStat { big: string; lbl: string; }
 export interface DemoOutput { channel: string; meta: string; body: string; }
+export interface DemoMessage { platform: string; from: string; text: string; type: string; pts: number; }
+export interface DemoDMMessage { sender: 'user' | 'brand'; text: string; }
 export interface Pain { num: string; t: string; d: string; }
 export interface StatCard { v: number; pre?: string; suf?: string; d: string; warm?: boolean; }
 export interface Step { n: string; ic: string; t: string; d: string; }
@@ -42,16 +44,54 @@ export interface CreditPack { credits: string; price: string; popular?: boolean;
 export interface CmpRow { feature: string; values: string[]; }
 export interface FaqItem { q: string; a: string; }
 export interface Testimonial { q: string; name: string; role: string; flag: string; avatar: string; }
+export interface EngageScoreItem { type: string; pts: string; }
+export interface EngageStagePill { key: string; label: string; emoji: string; }
 
 export interface KefyCopy {
   nav: { links: NavLink[]; primary: string; };
   waitlist: WaitlistCopy;
-  hero: { tag: string; h1: string[]; h1em: string; sub: string; cta1: string; cta2: string; ctaNote?: string; stats: HeroStat[]; };
+  hero: { tag: string; h1: string[]; h1em: string; sub: string; cta1: string; cta2: string; ctaNote?: string; emailPlaceholder?: string; stats: HeroStat[]; };
   demo: {
     contextLbl: string; contextProduct: string; contextDesc: string;
     channelsLbl: string; goalLbl: string; goalK: string; goalV: string;
     audienceK: string; audienceV: string; url: string;
     outputs: { linkedin: DemoOutput; meta: DemoOutput; x: DemoOutput, facebook: DemoOutput};
+    stepLabels: string[];
+    strategyLbl: string;
+    strategyGoal: string;
+    strategyNiche: string;
+    postBody: string;
+    postPublished: string;
+    postScheduleLabel?: string;
+    postScheduledFor?: string;
+    inboxTitle: string;
+    scoreLabel: string;
+    inboxMessages: DemoMessage[];
+    autoReplyLabel: string;
+    autoReplyText: string;
+    pipelineLbl: string;
+    pipelineStages: string[];
+    leadName: string;
+    leadScore: string;
+    // New rich demo fields
+    brandLogoSrc?: string;
+    brandProductSrc?: string;
+    brandHandle?: string;
+    brandAudience?: string;
+    brandTone?: string;
+    brandCategory?: string;
+    marketPills?: string[];
+    commentThread?: DemoDMMessage[];
+    dmThread?: DemoDMMessage[];
+    dmTriggerLabel?: string;
+    linkSentLabel?: string;
+    linkSentUrl?: string;
+    linkSentTime?: string;
+    qualifiedLabel?: string;
+    commentPostCaption?: string;
+    commentLabel?: string;
+    dmLabel?: string;
+    scoreBarLabel?: string;
   };
   problem: { tag: string; h2: string; intro: string; pains: Pain[]; stats: StatCard[]; };
   how: { tag: string; h2: string; intro: string; steps: Step[]; closer: string[]; };
@@ -59,6 +99,12 @@ export interface KefyCopy {
   brand: { tag: string; h2: string[]; sub: string; bullets: BrandBullet[]; kit: { palette: string; type: string; logo: string; tone: string; toneV: string; typeV: string }; };
   killer: { tag: string; h2: string[]; sub: string; points: KillerPoint[]; dash: { title: string; range: string; stats: DashStat[]; posts: DashPost[] }; };
   autopilot: { tag: string; h2: string[]; sub: string; bullets: ApBullet[]; closer: string; togglePilot: string; toggleManual: string; schedule: CalDay[]; };
+  engage: {
+    tag: string; h2: string; sub: string;
+    bullets: { ic: string; t: string }[];
+    scoringTitle: string; scoringItems: EngageScoreItem[];
+    pipelineTitle: string; stages: EngageStagePill[];
+  };
   strategy: {
     tag: string; h2: string; sub: string;
     objectives: { slug: string; ic: string; t: string; d: string }[];

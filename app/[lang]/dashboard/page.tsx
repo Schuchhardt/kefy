@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 interface Totals {
@@ -86,11 +87,12 @@ export default function DashboardPage() {
   const { lang } = useParams<{ lang: string }>();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
 
-  const [totals, setTotals]         = useState<Totals | null>(null);
-  const [content, setContent]       = useState<ContentItem[]>([]);
+  const [totals, setTotals]           = useState<Totals | null>(null);
+  const [content, setContent]         = useState<ContentItem[]>([]);
   const [metricsLoading, setMLoading] = useState(true);
   const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
-  const [syncing, setSyncing]       = useState(false);
+  const [brandKitHasData, setBrandKitHasData] = useState<boolean | null>(null);
+  const [syncing, setSyncing]         = useState(false);
 
   useEffect(() => {
     // Check accounts
@@ -101,6 +103,15 @@ export default function DashboardPage() {
         setHasAccounts((json.accounts ?? []).length > 0);
       })
       .catch(() => setHasAccounts(false));
+
+    // Check brand kit
+    fetch('/api/brand-kit', { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) { setBrandKitHasData(false); return; }
+        const { kit } = await res.json() as { kit: { mission?: string; industry?: string; tagline?: string; website_url?: string; primary_color?: string } };
+        setBrandKitHasData(!!(kit?.mission || kit?.industry || kit?.tagline || kit?.website_url || kit?.primary_color));
+      })
+      .catch(() => setBrandKitHasData(false));
 
     // Fetch content
     fetch('/api/content?limit=5&status=published', { credentials: 'include' })
@@ -203,7 +214,13 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {hasAccounts === false ? (
+        {hasAccounts === false && brandKitHasData === false ? (
+          <BrandKitWizard
+            locale={lang ?? 'es'}
+            orgName={org?.name}
+            onComplete={() => setBrandKitHasData(true)}
+          />
+        ) : hasAccounts === false ? (
           <div style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 12, padding: '24px', textAlign: 'center',
@@ -216,13 +233,13 @@ export default function DashboardPage() {
             }}>{t.goSettings}</Link>
           </div>
         ) : metricsLoading ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
             {[...Array(6)].map((_, i) => (
               <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '18px 16px', height: 80, opacity: 0.5 }} />
             ))}
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
             {metricKeys.map(({ key, label, icon }) => (
               <div key={key} style={{
                 background: 'var(--surface)', border: '1px solid var(--border)',

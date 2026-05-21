@@ -134,6 +134,51 @@ function SettingsPageInner() {
   const [profileSaved, setProfileSaved]   = useState(false);
   const [profileError, setProfileError]   = useState<string | null>(null);
 
+  // Lead scoring state
+  type ScoringDefaults  = Record<string, number>;
+  type ScoringThresholds = Record<string, number>;
+  const defaultScores: ScoringDefaults  = { comment: 5, review: 10, dm: 15, mention: 8, follow: 3, share: 12, click: 2, manual: 0 };
+  const defaultThresholds: ScoringThresholds = { tibio: 20, caliente: 50, contactado: 70, convertido: 100 };
+  const [scoringDefaults,    setScoringDefaults]    = useState<ScoringDefaults>(defaultScores);
+  const [scoringThresholds,  setScoringThresholds]  = useState<ScoringThresholds>(defaultThresholds);
+  const [scoringLoading,     setScoringLoading]     = useState(true);
+  const [scoringSaving,      setScoringSaving]      = useState(false);
+  const [scoringSaved,       setScoringSaved]       = useState(false);
+  const [scoringError,       setScoringError]       = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/automations/leads/scoring', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.config) {
+          setScoringDefaults(d.config.defaults   ?? defaultScores);
+          setScoringThresholds(d.config.thresholds ?? defaultThresholds);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setScoringLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSaveScoring(e: React.FormEvent) {
+    e.preventDefault();
+    setScoringSaving(true); setScoringError(null); setScoringSaved(false);
+    try {
+      const res = await fetch('/api/automations/leads/scoring', {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaults: scoringDefaults, thresholds: scoringThresholds }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setScoringSaved(true);
+      setTimeout(() => setScoringSaved(false), 2500);
+    } catch (err) {
+      setScoringError(err instanceof Error ? err.message : 'Error al guardar');
+    } finally {
+      setScoringSaving(false);
+    }
+  }
+
   useEffect(() => {
     if (user?.name) setName(user.name);
   }, [user]);
@@ -172,10 +217,14 @@ function SettingsPageInner() {
     setProfileError(null);
 
     try {
-      // PATCH /api/auth/me is not defined, we use a simple workaround via the Supabase client
-      // The only supported field on /api/auth/me is GET — profile updates go to the user table.
-      // For now we optimistically update only if there's a future endpoint.
-      // Comment: implement PATCH /api/auth/me when available.
+      const res = await fetch('/api/auth/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Error');
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 3000);
     } catch (err) {
@@ -209,7 +258,7 @@ function SettingsPageInner() {
             <button
               type="submit" disabled={savingProfile}
               style={{
-                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+                background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
                 padding: '9px 20px', fontWeight: 600, fontSize: 13,
                 cursor: savingProfile ? 'not-allowed' : 'pointer', opacity: savingProfile ? 0.7 : 1,
               }}
@@ -321,6 +370,74 @@ function SettingsPageInner() {
             );
           })}
         </div>
+      </Section>
+
+      {/* ── Lead Scoring ── */}
+      <Section title={lang === 'en' ? 'Lead Scoring' : 'Scoring de Leads'}>
+        {scoringLoading ? (
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>⏳</p>
+        ) : (
+          <form onSubmit={handleSaveScoring} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {/* Points per interaction */}
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                {lang === 'en' ? 'Points per interaction type' : 'Puntos por tipo de interacción'}
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+                {Object.entries(scoringDefaults).map(([key, val]) => (
+                  <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>{key}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="range" min={0} max={50} value={val}
+                        onChange={e => setScoringDefaults(prev => ({ ...prev, [key]: Number(e.target.value) }))}
+                        style={{ flex: 1, accentColor: 'var(--accent)' }}
+                      />
+                      <span style={{ fontSize: 13, fontWeight: 700, minWidth: 28, textAlign: 'right' }}>{val}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Stage thresholds */}
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                {lang === 'en' ? 'Stage thresholds (min. score)' : 'Umbrales por etapa (score mínimo)'}
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+                {Object.entries(scoringThresholds).map(([key, val]) => (
+                  <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>{key}</span>
+                    <input
+                      type="number" min={0} max={1000} value={val}
+                      onChange={e => setScoringThresholds(prev => ({ ...prev, [key]: Number(e.target.value) }))}
+                      style={{
+                        background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+                        padding: '7px 10px', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box',
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <button
+                type="submit" disabled={scoringSaving}
+                style={{
+                  background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+                  padding: '9px 22px', fontWeight: 700, fontSize: 13,
+                  cursor: scoringSaving ? 'wait' : 'pointer',
+                }}
+              >
+                {scoringSaving ? (lang === 'en' ? 'Saving...' : 'Guardando...') : (lang === 'en' ? 'Save scoring' : 'Guardar scoring')}
+              </button>
+              {scoringSaved  && <span style={{ fontSize: 13, color: 'var(--accent)' }}>✓ {lang === 'en' ? 'Saved' : 'Guardado'}</span>}
+              {scoringError  && <span style={{ fontSize: 13, color: '#ff4b4b' }}>{scoringError}</span>}
+            </div>
+          </form>
+        )}
       </Section>
     </div>
   );

@@ -151,7 +151,7 @@ export default function EngagementPage() {
         {!showForm && (
           <button onClick={openForm}
             style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 600, fontSize: 14,
-              background: 'var(--accent)', color: '#000', border: 'none', cursor: 'pointer', flexShrink: 0 }}>
+              background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', flexShrink: 0 }}>
             {t.newRuleBtn}
           </button>
         )}

@@ -47,6 +47,7 @@ export default function ContentLayout({ children }: { children: ReactNode }) {
                 alignItems: 'center',
                 padding: '14px 20px',
                 fontSize: 14,
+                fontFamily: 'var(--font-syne), sans-serif',
                 fontWeight: active ? 600 : 400,
                 color: active ? 'var(--text)' : 'var(--muted)',
                 textDecoration: 'none',

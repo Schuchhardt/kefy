@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 
 export type Theme = 'dark' | 'light';
 
@@ -16,14 +17,22 @@ const ThemeContext = createContext<ThemeContextValue>({
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>('dark');
+  const pathname = usePathname();
+
+  // Landing pages always stay dark regardless of user preference
+  const isLandingPage = /^\/(es|en)?\/?$/.test(pathname);
 
   useEffect(() => {
+    if (isLandingPage) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      return;
+    }
     const saved = localStorage.getItem('kefy-theme') as Theme | null;
     if (saved === 'light' || saved === 'dark') {
       setTheme(saved);
       document.documentElement.setAttribute('data-theme', saved);
     }
-  }, []);
+  }, [isLandingPage]);
 
   const toggleTheme = () => {
     setTheme((prev) => {

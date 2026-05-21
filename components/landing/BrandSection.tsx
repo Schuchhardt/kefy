@@ -39,7 +39,7 @@ export default function BrandSection({ copy }: Props) {
             style={{ animationDelay: '0.15s' }}
           >
             <div className="brand-kit-head">
-              <div className="brand-kit-title">Brand Kit · Trazo Studio</div>
+              <div className="brand-kit-title">Brand Kit · HiClothes</div>
               <div className="brand-kit-status">
                 <div className="d" />
                 active

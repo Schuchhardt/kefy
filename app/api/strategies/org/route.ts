@@ -57,28 +57,34 @@ export async function PATCH(req: NextRequest) {
 
   const { objective_id, industry_id, strategy_id, custom_notes } = body;
 
-  if (!objective_id || !industry_id) {
+  if (!objective_id && !industry_id && !strategy_id && custom_notes === undefined) {
     return NextResponse.json(
-      { error: 'objective_id and industry_id are required' },
+      { error: 'At least one field is required' },
       { status: 400 },
     );
   }
 
   const supabase = createSupabaseServer();
 
+  // Fetch existing selection to merge (partial update support)
+  const { data: existing } = await supabase
+    .from('kefy_org_strategies')
+    .select('objective_id, industry_id, strategy_id, custom_notes')
+    .eq('org_id', auth.orgId)
+    .single();
+
+  const merged = {
+    org_id:       auth.orgId,
+    objective_id: objective_id  ?? existing?.objective_id  ?? null,
+    industry_id:  industry_id   ?? existing?.industry_id   ?? null,
+    strategy_id:  strategy_id   !== undefined ? (strategy_id ?? null)   : (existing?.strategy_id  ?? null),
+    custom_notes: custom_notes  !== undefined ? (custom_notes ?? null)  : (existing?.custom_notes ?? null),
+    updated_at:   new Date().toISOString(),
+  };
+
   const { data, error } = await supabase
     .from('kefy_org_strategies')
-    .upsert(
-      {
-        org_id: auth.orgId,
-        objective_id,
-        industry_id,
-        strategy_id: strategy_id ?? null,
-        custom_notes: custom_notes ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'org_id' },
-    )
+    .upsert(merged, { onConflict: 'org_id' })
     .select('id, org_id, objective_id, industry_id, strategy_id, custom_notes, updated_at')
     .single();
 

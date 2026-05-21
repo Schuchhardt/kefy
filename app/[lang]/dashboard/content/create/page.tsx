@@ -140,6 +140,8 @@ function ContentPageInner() {
   const [generating, setGenerating]     = useState(false);
   const [genError, setGenError]         = useState<string | null>(null);
   const [genResult, setGenResult]       = useState<string | null>(null);
+  const [keywordRulesCount, setKeywordRulesCount] = useState(0);
+  const [ctaBannerDismissed, setCtaBannerDismissed] = useState(false);
 
   // Selected item
   const [selected, setSelected] = useState<ContentItem | null>(null);
@@ -228,6 +230,16 @@ function ContentPageInner() {
       if (genType === 'post')     setGenResult(data.body ?? '');
       if (genType === 'carousel') setGenResult(`Carrusel generado con ${(data.slides ?? []).length} slides ✓`);
       if (genType === 'reel')     setGenResult(`Reel generado con ${(data.scenes ?? []).length} escenas ✓`);
+
+      // Check for active keyword rules to show CTA banner
+      setCtaBannerDismissed(false);
+      fetch('/api/automations/engagement/rules?limit=200', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : { rules: [] })
+        .then((d: { rules?: Array<{ trigger_type: string; is_active: boolean }> }) => {
+          const count = (d.rules ?? []).filter(r => r.trigger_type === 'comment_contains_keyword' && r.is_active).length;
+          setKeywordRulesCount(count);
+        })
+        .catch(() => {});
 
       fetchItems();
     } catch (err) {
@@ -334,7 +346,7 @@ function ContentPageInner() {
           <button
             onClick={() => { setShowGenerate(!showGenerate); setGenResult(null); setGenError(null); }}
             style={{
-              background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+              background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
               padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
             }}
           >
@@ -459,7 +471,7 @@ function ContentPageInner() {
               <button
                 type="submit" disabled={generating}
                 style={{
-                  background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+                  background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
                   padding: '9px 20px', fontWeight: 600, fontSize: 13,
                   cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.7 : 1,
                 }}
@@ -472,6 +484,31 @@ function ContentPageInner() {
               <div style={{ marginTop: 16, background: 'var(--bg)', borderRadius: 8, padding: '14px 16px', border: '1px solid var(--border)' }}>
                 <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6, fontWeight: 600 }}>{t.resultLabel}</p>
                 <pre style={{ whiteSpace: 'pre-wrap', fontSize: 14, fontFamily: 'inherit', margin: 0 }}>{genResult}</pre>
+              </div>
+            )}
+            {genResult && keywordRulesCount > 0 && !ctaBannerDismissed && (
+              <div style={{
+                marginTop: 12, borderRadius: 10,
+                background: 'rgba(198,255,75,0.08)', border: '1px solid rgba(198,255,75,0.3)',
+                padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
+              }}>
+                <span style={{ fontSize: 18 }}>🎯</span>
+                <div style={{ flex: 1, fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}>
+                  {lang === 'en'
+                    ? `Capture leads from this content — you have ${keywordRulesCount} active keyword rule${keywordRulesCount !== 1 ? 's' : ''}.`
+                    : `¿Quieres capturar leads de este contenido? Tienes ${keywordRulesCount} regla${keywordRulesCount !== 1 ? 's' : ''} de keyword activa${keywordRulesCount !== 1 ? 's' : ''}.`}
+                  {' '}
+                  <a
+                    href={`/${lang}/dashboard/automations/leads`}
+                    style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}
+                  >
+                    {lang === 'en' ? 'View pipeline →' : 'Ver pipeline →'}
+                  </a>
+                </div>
+                <button
+                  onClick={() => setCtaBannerDismissed(true)}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}
+                >×</button>
               </div>
             )}
           </form>

@@ -345,7 +345,7 @@ export default function ConversationsPage() {
                 color: active ? 'var(--accent)' : 'var(--muted)', transition: 'all 0.12s' }}>
               {label}
               {badge && (
-                <span style={{ background: 'var(--accent)', color: '#000', fontSize: 10,
+                <span style={{ background: 'var(--accent)', color: '#fff', fontSize: 10,
                   fontWeight: 700, borderRadius: 10, padding: '0 5px', minWidth: 16, textAlign: 'center' }}>
                   {badge}
                 </span>

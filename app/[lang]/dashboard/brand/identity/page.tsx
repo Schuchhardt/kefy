@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import type { BrandKit, BrandTone, CompanySize } from '@/lib/brand-kit';
 
@@ -147,55 +147,6 @@ function ArrayChips({
   );
 }
 
-// ─── Wizard step definitions ──────────────────────────────────────────────────
-
-type WizardStepId =
-  | 'name' | 'website' | 'mission' | 'industry' | 'language'
-  | 'locations' | 'emojis' | 'comm_style' | 'tone' | 'tagline'
-  | 'colors' | 'fonts' | 'logo' | 'notes'
-  | 'company_size' | 'niche' | 'target_audience' | 'differentiators'
-  | 'challenges' | 'competitors';
-
-interface WizardStep {
-  id: WizardStepId;
-  section: 1 | 2;
-  field: keyof BrandKit | null;
-  aiField?: string;
-  isArray?: boolean;
-  isTone?: boolean;
-  isColor?: boolean;
-  isFont?: boolean;
-  isBoolean?: boolean;
-  isUrl?: boolean;
-  isLogo?: boolean;
-  isCompanySize?: boolean;
-  isSelect?: boolean;
-  selectOptions?: { value: string; label: string }[];
-}
-
-const WIZARD_STEPS: WizardStep[] = [
-  { id: 'name',            section: 1, field: 'name' },
-  { id: 'website',         section: 1, field: 'website_url', isUrl: true },
-  { id: 'mission',         section: 1, field: 'mission', aiField: 'mission' },
-  { id: 'industry',        section: 1, field: 'industry', aiField: 'industry' },
-  { id: 'language',        section: 1, field: 'language', isSelect: true, selectOptions: LANGUAGES },
-  { id: 'locations',       section: 1, field: 'customer_locations', isArray: true, aiField: 'customer_locations' },
-  { id: 'emojis',          section: 1, field: 'uses_emojis', isBoolean: true },
-  { id: 'comm_style',      section: 1, field: 'communication_style', aiField: 'communication_style' },
-  { id: 'tone',            section: 1, field: 'tone', isTone: true },
-  { id: 'tagline',         section: 1, field: 'tagline', aiField: 'tagline' },
-  { id: 'colors',          section: 1, field: null, isColor: true },
-  { id: 'fonts',           section: 1, field: null, isFont: true },
-  { id: 'logo',            section: 1, field: 'logo_url', isLogo: true },
-  { id: 'notes',           section: 1, field: 'notes' },
-  { id: 'company_size',    section: 2, field: 'company_size', isCompanySize: true },
-  { id: 'niche',           section: 2, field: 'niche', aiField: 'niche' },
-  { id: 'target_audience', section: 2, field: 'target_audience', aiField: 'target_audience' },
-  { id: 'differentiators', section: 2, field: 'differentiators', isArray: true, aiField: 'differentiators' },
-  { id: 'challenges',      section: 2, field: 'challenges', isArray: true, aiField: 'challenges' },
-  { id: 'competitors',     section: 2, field: 'competitors', isArray: true, aiField: 'competitors' },
-];
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function BrandKitPage({ params }: { params: Promise<{ lang: string }> }) {
@@ -211,23 +162,12 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
   const t = T[locale];
 
   const [form, setForm] = useState<Partial<BrandKit>>({});
-  const [mode, setMode] = useState<'chat' | 'form'>('chat');
   const [fetching, setFetching] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const formRef = useRef<Partial<BrandKit>>({});
-  const suggCacheRef = useRef<Record<string, string[]>>({});
   const localeRef = useRef<Locale>('es');
-  const suggInflight = useRef<string | null>(null);
-
-  // Wizard state
-  const [wizardStep, setWizardStep] = useState(0);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [loadingSugg, setLoadingSugg] = useState(false);
-  const [suggCache, setSuggCache] = useState<Record<string, string[]>>({});
-  const [wizardInput, setWizardInput] = useState('');
 
   // Enrichment state
   const [enrichUrl, setEnrichUrl] = useState('');
@@ -253,9 +193,6 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
         // Pre-fill name with org name if not yet customized
         if ((!k.name || k.name === 'Mi marca') && org?.name) k.name = org.name;
         setForm(k);
-        // If kit already has data, default to form mode (wizard is only for first time)
-        const hasData = !!(k.mission || k.industry || k.tagline || k.website_url || k.primary_color);
-        if (hasData) setMode('form');
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setFetching(false));
@@ -281,8 +218,6 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
 
   // Sync refs after every render so callbacks always see latest values without re-creating
   useEffect(() => {
-    formRef.current = form;
-    suggCacheRef.current = suggCache;
     localeRef.current = locale;
   }); // intentionally no deps — runs after every render
 
@@ -290,42 +225,6 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     setForm((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
   }
-
-  // Fetch AI suggestions for wizard text fields — stable ref, no reactive deps
-  const fetchSuggestions = useCallback(async (field: string) => {
-    // Skip if already in-flight for this field or cached
-    if (suggInflight.current === field) return;
-    if (suggCacheRef.current[field]) { setSuggestions(suggCacheRef.current[field]); return; }
-    suggInflight.current = field;
-    setLoadingSugg(true);
-    setSuggestions([]);
-    try {
-      const res = await fetch('/api/brand-kit/ai-suggest', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, context: formRef.current, lang: localeRef.current }),
-      });
-      if (!res.ok) throw new Error();
-      const { suggestions: sugg } = await res.json() as { suggestions: string[] };
-      setSuggestions(sugg);
-      setSuggCache((prev) => ({ ...prev, [field]: sugg }));
-    } catch {
-      setSuggestions([]);
-    } finally {
-      suggInflight.current = null;
-      setLoadingSugg(false);
-    }
-  }, []);
-
-  // Load suggestions only when the wizard step changes (not on every re-render)
-  useEffect(() => {
-    const step = WIZARD_STEPS[wizardStep];
-    setSuggestions([]);
-    setWizardInput('');
-    if (step?.aiField && !step.isArray && !step.isTone) {
-      void fetchSuggestions(step.aiField);
-    }
-  }, [wizardStep, fetchSuggestions]);
 
   // Enrich from URL
   async function handleEnrich(urlOverride?: string) {
@@ -358,8 +257,6 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     setEnrichResult(null);
     setEnrichMsg(null);
     setEnrichUrl('');
-    // Jump to mission step after enrichment in wizard mode
-    if (mode === 'chat') setWizardStep(2);
   }
 
   async function loadArraySugg(field: string) {
@@ -423,17 +320,6 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     }
   }
 
-  // Wizard navigation
-  function wizardNext() {
-    if (wizardStep < WIZARD_STEPS.length - 1) {
-      setWizardStep((s) => s + 1);
-    } else {
-      void handleSave();
-      setMode('form');
-    }
-  }
-  function wizardPrev() { if (wizardStep > 0) setWizardStep((s) => s - 1); }
-
   if (authLoading || fetching) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '60vh' }}>
@@ -450,320 +336,18 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     );
   }
 
-  const step = WIZARD_STEPS[wizardStep];
-  const progress = ((wizardStep + 1) / WIZARD_STEPS.length) * 100;
-
-  const wizardQuestions: Record<WizardStepId, string> = {
-    name: t.q_name, website: t.q_websiteUrl, mission: t.q_mission,
-    industry: t.q_industry, language: t.q_language, locations: t.q_customerLocations,
-    emojis: t.q_usesEmojis, comm_style: t.q_communicationStyle, tone: t.q_tone,
-    tagline: t.q_tagline, colors: t.q_colors, fonts: t.q_fonts, logo: t.q_logo, notes: t.q_notes,
-    company_size: t.q_companySize, niche: t.q_niche, target_audience: t.q_targetAudience,
-    differentiators: t.q_differentiators, challenges: t.q_challenges, competitors: t.q_competitors,
-  };
-
-  // ─── Wizard step content ────────────────────────────────────────────────────
-
-  function WizardStepContent() {
-    if (!step) return null;
-
-    // Website + social enrichment step
-    if (step.id === 'website') {
-      return (
-        <div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input style={{ ...inputStyle, flex: 1 }}
-              value={enrichUrl || (form.website_url ?? '')}
-              onChange={(e) => { setEnrichUrl(e.target.value); updateField('website_url', e.target.value || null); }}
-              placeholder="https://tuempresa.com" type="url" />
-            {(enrichUrl || form.website_url) && (
-              <button type="button" onClick={() => void handleEnrich()} disabled={enriching}
-                style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: enriching ? 'not-allowed' : 'pointer', opacity: enriching ? 0.7 : 1, whiteSpace: 'nowrap' }}>
-                {enriching ? t.enriching : t.enrichBtn}
-              </button>
-            )}
-          </div>
-          {enrichMsg && !enrichResult && (
-            <p style={{ fontSize: 13, color: '#ff6b6b', marginTop: 8 }}>{enrichMsg}</p>
-          )}
-          {enrichResult && (
-            <div style={{ marginTop: 14, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, padding: 16 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 10 }}>{t.confirmEnriched}</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                {Object.entries(enrichResult).map(([k, v]) => {
-                  if (!v || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0)) return null;
-                  const display = Array.isArray(v) ? (v as string[]).join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v);
-                  return (
-                    <div key={k} style={{ fontSize: 13, display: 'flex', gap: 8 }}>
-                      <span style={{ color: 'var(--muted)', minWidth: 140, flexShrink: 0 }}>{k}</span>
-                      <span style={{ color: 'var(--text)' }}>{display}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              <button type="button" onClick={applyEnriched}
-                style={{ marginTop: 12, padding: '9px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                {t.applyEnriched}
-              </button>
-            </div>
-          )}
-          <div style={{ marginTop: 16 }}>
-            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.socialUrls}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {SOCIAL_CHANNELS.map((ch) => (
-                <div key={ch} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 68, textTransform: 'capitalize' }}>{ch}</span>
-                  <input style={{ ...inputStyle, fontSize: 12, padding: '7px 10px' }}
-                    value={(form.social_urls as Record<string, string> | undefined)?.[ch] ?? ''}
-                    onChange={(e) => updateField('social_urls', { ...(form.social_urls ?? {}), [ch]: e.target.value || undefined })}
-                    placeholder={`URL`} />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // Boolean
-    if (step.isBoolean) {
-      const current = form.uses_emojis;
-      return (
-        <div style={{ display: 'flex', gap: 12 }}>
-          {([true, false] as const).map((v) => (
-            <button key={String(v)} type="button" onClick={() => updateField('uses_emojis', v)}
-              style={{ padding: '10px 28px', borderRadius: 8, fontSize: 14, fontWeight: current === v ? 600 : 400, border: `1px solid ${current === v ? 'var(--accent)' : 'var(--border)'}`, background: current === v ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: current === v ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-              {v ? t.yes : t.no}
-            </button>
-          ))}
-        </div>
-      );
-    }
-
-    // Tone multi-select
-    if (step.isTone) {
-      const activeTones = (form.tone ?? []) as BrandTone[];
-      return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {TONES.map(({ value, label }) => {
-            const active = activeTones.includes(value);
-            return (
-              <button key={value} type="button"
-                onClick={() => { const next = active ? activeTones.filter((x) => x !== value) : [...activeTones, value]; updateField('tone', next); }}
-                style={{ padding: '8px 16px', borderRadius: 20, fontSize: 13, fontWeight: active ? 600 : 400, border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: active ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-                {label[locale]}
-              </button>
-            );
-          })}
-        </div>
-      );
-    }
-
-    // Colors
-    if (step.isColor) {
-      return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          <ColorField label={t.primaryColor} value={form.primary_color ?? '#000000'} onChange={(v) => updateField('primary_color', v)} />
-          <ColorField label={t.secondaryColor} value={form.secondary_color ?? '#ffffff'} onChange={(v) => updateField('secondary_color', v)} />
-          <ColorField label={t.accentColor} value={form.accent_color ?? '#c6ff4b'} onChange={(v) => updateField('accent_color', v)} />
-        </div>
-      );
-    }
-
-    // Fonts
-    if (step.isFont) {
-      return (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <label style={labelStyle}>{t.fontHeading}</label>
-            <input style={inputStyle} value={form.font_heading ?? ''} onChange={(e) => updateField('font_heading', e.target.value || null)} placeholder="Syne, Playfair..." />
-          </div>
-          <div>
-            <label style={labelStyle}>{t.fontBody}</label>
-            <input style={inputStyle} value={form.font_body ?? ''} onChange={(e) => updateField('font_body', e.target.value || null)} placeholder="DM Sans, Inter..." />
-          </div>
-        </div>
-      );
-    }
-
-    // Company size
-    if (step.isCompanySize) {
-      return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {COMPANY_SIZES.map((size) => (
-            <button key={size} type="button" onClick={() => updateField('company_size', size)}
-              style={{ padding: '10px 20px', borderRadius: 8, fontSize: 14, fontWeight: form.company_size === size ? 600 : 400, border: `1px solid ${form.company_size === size ? 'var(--accent)' : 'var(--border)'}`, background: form.company_size === size ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: form.company_size === size ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-              {size} {locale === 'es' ? 'empleados' : 'employees'}
-            </button>
-          ))}
-        </div>
-      );
-    }
-
-    // Select
-    if (step.isSelect && step.selectOptions && step.field) {
-      const fieldKey = step.field as keyof BrandKit;
-      return (
-        <select style={inputStyle} value={String(form[fieldKey] ?? '')}
-          onChange={(e) => updateField(fieldKey, e.target.value as never)}>
-          {step.selectOptions.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      );
-    }
-
-    // Array chips
-    if (step.isArray && step.field) {
-      const fieldKey = step.field as keyof BrandKit;
-      const arrVal = (form[fieldKey] as string[] | undefined) ?? [];
-      return (
-        <ArrayChips
-          value={arrVal}
-          onChange={(v) => updateField(fieldKey, v as never)}
-          placeholder={t.addPlaceholder}
-          suggestions={step.aiField ? (arraySugg[step.aiField] ?? []) : undefined}
-          loadingSugg={step.aiField ? (arraySuggLoading[step.aiField] ?? false) : false}
-          onLoadSuggestions={step.aiField ? () => void loadArraySugg(step.aiField!) : undefined}
-        />
-      );
-    }
-
-    // Logo upload
-    if (step.isLogo) {
-      return (
-        <div>
-          {form.logo_url && (
-            <div style={{ marginBottom: 16 }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={form.logo_url} alt="Logo" style={{ maxHeight: 80, maxWidth: 200, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--border)', padding: 8, background: '#fff' }} />
-            </div>
-          )}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-            <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLogoUpload(f); }} />
-            <button type="button" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}
-              style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, cursor: logoUploading ? 'not-allowed' : 'pointer', opacity: logoUploading ? 0.7 : 1 }}>
-              {logoUploading ? (locale === 'es' ? 'Subiendo...' : 'Uploading...') : (locale === 'es' ? '↑ Subir archivo' : '↑ Upload file')}
-            </button>
-            {form.logo_url && (
-              <button type="button" onClick={() => updateField('logo_url', null)}
-                style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: '#ff6b6b', fontSize: 13, cursor: 'pointer' }}>
-                {locale === 'es' ? 'Quitar logo' : 'Remove logo'}
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>URL:</span>
-            <input style={inputStyle} value={form.logo_url ?? ''}
-              onChange={(e) => updateField('logo_url', e.target.value || null)}
-              placeholder="https://..." type="url" />
-          </div>
-        </div>
-      );
-    }
-
-    // Notes textarea
-    if (step.id === 'notes') {
-      return (
-        <textarea style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }}
-          value={form.notes ?? ''}
-          onChange={(e) => updateField('notes', e.target.value || null)}
-          placeholder={locale === 'es' ? 'Guías de estilo, instrucciones para la IA...' : 'Style guides, AI instructions...'} />
-      );
-    }
-
-    // Default: text input with AI suggestions chips
-    const fieldKey = step.field as keyof BrandKit | null;
-    const currentVal = fieldKey ? String(form[fieldKey] ?? '') : '';
-
-    return (
-      <div>
-        {loadingSugg ? (
-          <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{t.loadingSuggestions}</p>
-        ) : suggestions.length > 0 ? (
-          <div style={{ marginBottom: 12 }}>
-            <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.suggestions}</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {suggestions.map((s) => (
-                <button key={s} type="button"
-                  onClick={() => { if (fieldKey) updateField(fieldKey, s as never); setWizardInput(s); }}
-                  style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, border: `1px solid ${(wizardInput || currentVal) === s ? 'var(--accent)' : 'var(--border)'}`, background: (wizardInput || currentVal) === s ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: (wizardInput || currentVal) === s ? 'var(--accent)' : 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        <input style={inputStyle}
-          value={wizardInput !== '' ? wizardInput : currentVal}
-          onChange={(e) => { setWizardInput(e.target.value); if (fieldKey) updateField(fieldKey, e.target.value as never); }}
-          placeholder={locale === 'es' ? 'O escribe tu respuesta...' : 'Or type your answer...'}
-          onKeyDown={(e) => { if (e.key === 'Enter') wizardNext(); }} />
-      </div>
-    );
-  }
-
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ padding: '40px 48px', maxWidth: 840 }}>
       {/* Header */}
-      <div style={{ marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700, marginBottom: 6 }}>{t.title}</h1>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700, marginBottom: 6 }}>{t.title}</h1>
           <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.subtitle}</p>
         </div>
-        <div style={{ display: 'flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 4, gap: 4 }}>
-          {(['chat', 'form'] as const).map((m) => (
-            <button key={m} type="button" onClick={() => setMode(m)}
-              style={{ padding: '7px 16px', borderRadius: 7, fontSize: 13, fontWeight: mode === m ? 600 : 400, border: 'none', background: mode === m ? 'var(--accent)' : 'transparent', color: mode === m ? '#000' : 'var(--muted)', cursor: 'pointer', transition: 'all 0.15s' }}>
-              {m === 'chat' ? t.modeChat : t.modeForm}
-            </button>
-          ))}
-        </div>
-      </div>
 
-      {/* ── CHAT MODE ── */}
-      {mode === 'chat' && step && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '28px 32px' }}>
-          <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)' }}>
-              {step.section === 1 ? `1. ${t.sec1}` : `2. ${t.sec2}`}
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.stepOf(wizardStep + 1, WIZARD_STEPS.length)}</span>
-          </div>
-          <div style={{ height: 4, background: 'var(--border)', borderRadius: 4, marginBottom: 28, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${progress}%`, background: 'var(--accent)', borderRadius: 4, transition: 'width 0.3s ease' }} />
-          </div>
-          <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 20, fontWeight: 700, marginBottom: 20, lineHeight: 1.3 }}>
-            {wizardQuestions[step.id]}
-          </h2>
-          {WizardStepContent()}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 28 }}>
-            <button type="button" onClick={wizardPrev} disabled={wizardStep === 0}
-              style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: wizardStep === 0 ? 'var(--muted)' : 'var(--text)', fontSize: 13, cursor: wizardStep === 0 ? 'default' : 'pointer', opacity: wizardStep === 0 ? 0.4 : 1 }}>
-              {t.prev}
-            </button>
-            <div style={{ display: 'flex', gap: 10 }}>
-              {step.field !== 'name' && !step.isColor && !step.isFont && (
-                <button type="button" onClick={wizardNext}
-                  style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 13, cursor: 'pointer' }}>
-                  {t.skip}
-                </button>
-              )}
-              <button type="button" onClick={wizardNext}
-                style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-                {wizardStep === WIZARD_STEPS.length - 1 ? t.finish : t.next}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ── FORM MODE ── */}
-      {mode === 'form' && (
-        <form onSubmit={handleSave}>
+      <form onSubmit={handleSave}>
           <div style={{ marginBottom: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)' }}>1. {t.sec1}</span>
           </div>
@@ -791,7 +375,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
                 <input style={{ ...inputStyle, flex: 1 }} value={form.website_url ?? ''} onChange={(e) => updateField('website_url', e.target.value || null)} placeholder="https://..." type="url" />
                 <button type="button" disabled={!form.website_url || enriching}
                   onClick={() => { setEnrichUrl(form.website_url ?? ''); void handleEnrich(form.website_url ?? undefined); }}
-                  style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: !form.website_url ? 'not-allowed' : 'pointer', opacity: !form.website_url ? 0.5 : 1, whiteSpace: 'nowrap' }}>
+                  style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: !form.website_url ? 'not-allowed' : 'pointer', opacity: !form.website_url ? 0.5 : 1, whiteSpace: 'nowrap' }}>
                   {enriching ? t.enriching : t.enrichBtn}
                 </button>
               </div>
@@ -812,7 +396,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
                   );
                 })}
                 <button type="button" onClick={applyEnriched}
-                  style={{ marginTop: 10, padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ marginTop: 10, padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
                   {t.applyEnriched}
                 </button>
               </div>
@@ -962,26 +546,14 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, paddingTop: 8 }}>
             <button type="submit" disabled={saving}
-              style={{ background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
               {saving ? t.saving : t.save}
             </button>
             {saved && <span style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}>{t.saved}</span>}
             {error && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{error}</span>}
           </div>
         </form>
-      )}
 
-      {/* Save shortcut in chat mode */}
-      {mode === 'chat' && (
-        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button type="button" onClick={() => void handleSave()} disabled={saving}
-            style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 18px', fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? t.saving : t.save}
-          </button>
-          {saved && <span style={{ color: 'var(--accent)', fontSize: 13 }}>{t.saved}</span>}
-          {error && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{error}</span>}
-        </div>
-      )}
     </div>
   );
 }

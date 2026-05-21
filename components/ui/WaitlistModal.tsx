@@ -7,11 +7,12 @@ interface WaitlistModalProps {
   copy: WaitlistCopy;
   isOpen: boolean;
   onClose: () => void;
+  initialEmail?: string;
 }
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
-export default function WaitlistModal({ copy, isOpen, onClose }: WaitlistModalProps) {
+export default function WaitlistModal({ copy, isOpen, onClose, initialEmail }: WaitlistModalProps) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [interest, setInterest] = useState('');
@@ -23,12 +24,13 @@ export default function WaitlistModal({ copy, isOpen, onClose }: WaitlistModalPr
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
+      if (initialEmail) setEmail(initialEmail);
       setTimeout(() => emailRef.current?.focus(), 100);
     } else {
       document.body.style.overflow = '';
     }
     return () => { document.body.style.overflow = ''; };
-  }, [isOpen]);
+  }, [isOpen, initialEmail]);
 
   useEffect(() => {
     if (!isOpen) {

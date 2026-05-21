@@ -5,8 +5,8 @@ import { usePathname, useParams } from 'next/navigation';
 import { ReactNode } from 'react';
 
 const LABELS = {
-  es: { autopilot: 'Autopilot', engagement: 'Engagement' },
-  en: { autopilot: 'Autopilot', engagement: 'Engagement' },
+  es: { autopilot: 'Autopilot', engagement: 'Engagement', leads: 'Leads' },
+  en: { autopilot: 'Autopilot', engagement: 'Engagement', leads: 'Leads' },
 };
 
 export default function AutomationsLayout({ children }: { children: ReactNode }) {
@@ -18,6 +18,7 @@ export default function AutomationsLayout({ children }: { children: ReactNode })
   const tabs = [
     { key: 'autopilot',  label: t.autopilot,  href: `/${lang}/dashboard/automations/autopilot`  },
     { key: 'engagement', label: t.engagement, href: `/${lang}/dashboard/automations/engagement` },
+    { key: 'leads',      label: t.leads,      href: `/${lang}/dashboard/automations/leads`      },
   ];
 
   return (
@@ -47,6 +48,7 @@ export default function AutomationsLayout({ children }: { children: ReactNode })
                 alignItems: 'center',
                 padding: '14px 20px',
                 fontSize: 14,
+                fontFamily: 'var(--font-syne), sans-serif',
                 fontWeight: active ? 600 : 400,
                 color: active ? 'var(--text)' : 'var(--muted)',
                 textDecoration: 'none',

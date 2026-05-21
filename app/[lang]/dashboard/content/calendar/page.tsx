@@ -218,7 +218,7 @@ export default function CalendarPage() {
         <button
           onClick={openForm}
           style={{
-            background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+            background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
             padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer', flexShrink: 0,
           }}
         >
@@ -296,7 +296,7 @@ export default function CalendarPage() {
             <button
               type="submit" disabled={scheduling}
               style={{
-                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+                background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
                 padding: '9px 20px', fontWeight: 600, fontSize: 13,
                 cursor: scheduling ? 'not-allowed' : 'pointer', opacity: scheduling ? 0.7 : 1,
               }}

@@ -72,21 +72,6 @@ const cardStyle = (selected: boolean): React.CSSProperties => ({
   transition:   'all .15s ease',
 });
 
-const pillStyle = (selected: boolean): React.CSSProperties => ({
-  display:       'inline-flex',
-  alignItems:    'center',
-  gap:            6,
-  background:    selected ? 'var(--accent)' : 'var(--surface)',
-  border:        `1.5px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
-  borderRadius:   100,
-  padding:        '8px 16px',
-  cursor:         'pointer',
-  fontSize:       14,
-  color:          selected ? '#000' : 'var(--text)',
-  fontWeight:     selected ? 600 : 400,
-  transition:     'all .15s ease',
-});
-
 const sectionLabel: React.CSSProperties = {
   fontSize:     11,
   fontWeight:   700,
@@ -138,18 +123,33 @@ export default function StrategyPage() {
   const [saving, setSaving] = useState(false);
   const [saveOk, setSaveOk] = useState(false);
 
-  // Brand kit industry hint
-  const [brandIndustry, setBrandIndustry] = useState<string | null>(null);
+  // Automation packs
+  interface AutomationPackRule {
+    id: string;
+    trigger_type: string;
+    action_type: string;
+    name: string;
+  }
+  interface AutomationPack {
+    id: string;
+    name: string;
+    description: string | null;
+    icon: string | null;
+    kefy_automation_pack_rules: AutomationPackRule[];
+  }
+  const [packs, setPacks]             = useState<AutomationPack[]>([]);
+  const [packsLoading, setPacksLoading] = useState(false);
+  const [installedPacks, setInstalledPacks] = useState<Set<string>>(new Set());
+  const [installingPack, setInstallingPack] = useState<string | null>(null);
 
-  // ── Load catalog + saved selection + brand kit on mount ──────────────────
+  // ── Load catalog + saved selection on mount ──────────────────────────────
   useEffect(() => {
     async function init() {
       setCatalogLoading(true);
       try {
-        const [catRes, orgRes, bkRes] = await Promise.all([
+        const [catRes, orgRes] = await Promise.all([
           fetch('/api/strategies',     { credentials: 'include' }),
           fetch('/api/strategies/org', { credentials: 'include' }),
-          fetch('/api/brand-kit',      { credentials: 'include' }),
         ]);
 
         if (catRes.ok) {
@@ -166,11 +166,6 @@ export default function StrategyPage() {
             setSelectedIndustry(selection.industry_id);
           }
         }
-
-        if (bkRes.ok) {
-          const { brand_kit } = await bkRes.json();
-          if (brand_kit?.industry) setBrandIndustry(brand_kit.industry);
-        }
       } finally {
         setCatalogLoading(false);
       }
@@ -178,14 +173,6 @@ export default function StrategyPage() {
     init();
   }, []);
 
-  // ── Auto-suggest industry from brand kit ─────────────────────────────────
-  useEffect(() => {
-    if (!brandIndustry || selectedIndustry || industries.length === 0) return;
-    const match = industries.find(
-      (ind) => ind.slug === brandIndustry || ind.name_es.toLowerCase().includes(brandIndustry.toLowerCase()),
-    );
-    if (match) setSelectedIndustry(match.id);
-  }, [brandIndustry, industries, selectedIndustry]);
 
   // ── Fetch recommendation whenever both selectors are filled ──────────────
   const fetchRecommendation = useCallback(async (objId: string, indId: string) => {
@@ -218,6 +205,34 @@ export default function StrategyPage() {
       fetchRecommendation(selectedObjective, selectedIndustry);
     }
   }, [selectedObjective, selectedIndustry, fetchRecommendation]);
+
+  // ── Fetch automation packs when objective changes ─────────────────────────
+  useEffect(() => {
+    if (!selectedObjective) { setPacks([]); return; }
+    setPacksLoading(true);
+    fetch(`/api/automations/engagement/packs?objective_id=${encodeURIComponent(selectedObjective)}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { packs: [] })
+      .then(d => setPacks(d.packs ?? []))
+      .catch(() => setPacks([]))
+      .finally(() => setPacksLoading(false));
+  }, [selectedObjective]);
+
+  async function installPack(packId: string) {
+    setInstallingPack(packId);
+    try {
+      const res = await fetch('/api/automations/engagement/rules/bulk', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pack_id: packId }),
+      });
+      if (res.ok) {
+        setInstalledPacks(prev => new Set([...prev, packId]));
+      }
+    } finally {
+      setInstallingPack(null);
+    }
+  }
 
   // ── Save selection ────────────────────────────────────────────────────────
   async function handleSave() {
@@ -316,29 +331,54 @@ export default function StrategyPage() {
         </div>
       </div>
 
-      {/* ── Step 2: Industry ── */}
-      <div style={{ marginBottom: 40 }}>
-        <p style={sectionLabel}>{t.step2}</p>
-        {brandIndustry && (
-          <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-            {t.brandHint}
-          </p>
-        )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          {industries.map((ind) => (
-            <div
-              key={ind.id}
-              style={pillStyle(selectedIndustry === ind.id)}
-              onClick={() => setSelectedIndustry(ind.id)}
-              role="button"
-              aria-pressed={selectedIndustry === ind.id}
-            >
-              <span>{ind.icon}</span>
-              <span>{locale === 'en' ? ind.name_en : ind.name_es}</span>
+      {/* ── Industria (read-only, configurada en Mercado) ── */}
+      {(() => {
+        const currentIndustry = industries.find((i) => i.id === selectedIndustry);
+        return currentIndustry ? (
+          <div style={{ marginBottom: 32, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 100, padding: '8px 16px', fontSize: 13, color: 'var(--text)',
+            }}>
+              <span style={{ fontSize: 16 }}>{currentIndustry.icon}</span>
+              <span style={{ fontWeight: 600 }}>
+                {locale === 'en' ? currentIndustry.name_en : currentIndustry.name_es}
+              </span>
             </div>
-          ))}
-        </div>
-      </div>
+            <a
+              href={`/${lang}/dashboard/brand/market`}
+              style={{ fontSize: 12, color: 'var(--muted)', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+            >
+              {locale === 'es' ? 'Cambiar en Mercado →' : 'Change in Market →'}
+            </a>
+          </div>
+        ) : (
+          <div style={{
+            marginBottom: 32,
+            background: 'var(--surface)', border: '1px dashed var(--border)',
+            borderRadius: 10, padding: '16px 20px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+          }}>
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+              {locale === 'es'
+                ? 'Define tu industria para ver la estrategia recomendada.'
+                : 'Set your industry to see the recommended strategy.'}
+            </span>
+            <a
+              href={`/${lang}/dashboard/brand/market`}
+              style={{
+                padding: '8px 16px', borderRadius: 8,
+                background: 'var(--accent)', color: '#fff',
+                fontSize: 13, fontWeight: 700, textDecoration: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {locale === 'es' ? 'Ir a Mercado →' : 'Go to Market →'}
+            </a>
+          </div>
+        );
+      })()}
 
       {/* ── Strategy recommendation ── */}
       {selectedObjective && selectedIndustry && (
@@ -590,6 +630,64 @@ export default function StrategyPage() {
                   <p style={{ margin: 0, fontSize: 14, color: 'var(--text)', lineHeight: 1.7 }}>
                     {locale === 'en' ? (strategy.cta_mechanic_en || strategy.cta_mechanic_es) : strategy.cta_mechanic_es}
                   </p>
+                </div>
+              )}
+
+              {/* ── Automation packs ── */}
+              {(packsLoading || packs.length > 0) && (
+                <div style={{ marginBottom: 40 }}>
+                  <p style={sectionLabel}>
+                    {locale === 'es' ? 'Automatizaciones recomendadas' : 'Recommended automations'}
+                  </p>
+                  {packsLoading ? (
+                    <div style={{ color: 'var(--muted)', fontSize: 13 }}>⏳</div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+                      {packs.map(pack => {
+                        const installed = installedPacks.has(pack.id);
+                        const installing = installingPack === pack.id;
+                        return (
+                          <div key={pack.id} style={{
+                            background: 'var(--surface)', border: `1px solid ${installed ? 'var(--accent)' : 'var(--border)'}`,
+                            borderRadius: 12, padding: '18px 20px',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                              {pack.icon && <span style={{ fontSize: 22 }}>{pack.icon}</span>}
+                              <div style={{ fontWeight: 600, fontSize: 14 }}>{pack.name}</div>
+                            </div>
+                            {pack.description && (
+                              <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, margin: '0 0 12px' }}>
+                                {pack.description}
+                              </p>
+                            )}
+                            {pack.kefy_automation_pack_rules?.length > 0 && (
+                              <ul style={{ margin: '0 0 14px', paddingLeft: 16, listStyle: 'disc', color: 'var(--muted)', fontSize: 12, lineHeight: 1.8 }}>
+                                {pack.kefy_automation_pack_rules.map(r => (
+                                  <li key={r.id}>{r.name}</li>
+                                ))}
+                              </ul>
+                            )}
+                            <button
+                              onClick={() => installPack(pack.id)}
+                              disabled={installed || installing}
+                              style={{
+                                width: '100%', padding: '8px', borderRadius: 8,
+                                border: installed ? '1px solid var(--accent)' : 'none',
+                                background: installed ? 'transparent' : 'var(--accent)',
+                                color: installed ? 'var(--accent)' : '#000',
+                                fontWeight: 600, fontSize: 13,
+                                cursor: (installed || installing) ? 'default' : 'pointer',
+                              }}
+                            >
+                              {installing ? '⏳' : installed
+                                ? (locale === 'es' ? '✓ Pack instalado' : '✓ Pack installed')
+                                : (locale === 'es' ? 'Instalar pack' : 'Install pack')}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 

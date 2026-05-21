@@ -118,10 +118,16 @@ function navItems(lang: string): { main: NavItem[]; settings: NavItem } {
 export default function DashboardSidebar({ lang }: { lang: string }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, org, plan, logout } = useAuth();
+  const { org } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  function switchLang(targetLang: string) {
+    const segments = pathname.split('/');
+    segments[1] = targetLang;
+    router.push(segments.join('/'));
+  }
 
   useEffect(() => {
     async function fetchUnread() {
@@ -151,18 +157,6 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
 
   const { main: items, settings: settingsItem } = navItems(lang);
   const W = collapsed ? 64 : 220;
-
-  const planBadge: Record<string, string> = {
-    starter: 'Starter',
-    pro: 'Pro',
-    business: 'Business',
-  };
-
-  const switchLang = (targetLang: string) => {
-    const segments = pathname.split('/');
-    segments[1] = targetLang;
-    router.push(segments.join('/'));
-  };
 
   function isItemActive(item: NavItem) {
     if (item.href === `/${lang}/dashboard`) return pathname === item.href;
@@ -239,7 +233,10 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
       className="dashboard-sidebar"
       style={{
         width: W,
-        minHeight: '100vh',
+        height: '100vh',
+        position: 'sticky',
+        top: 0,
+        alignSelf: 'flex-start',
         background: 'var(--surface)',
         borderRight: '1px solid var(--border)',
         display: 'flex',
@@ -247,7 +244,6 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         flexShrink: 0,
         transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)',
         overflow: 'hidden',
-        position: 'relative',
         fontFamily: 'var(--font-syne), system-ui, sans-serif',
       }}
     >
@@ -297,92 +293,114 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         {items.map((item) => renderNavItem(item))}
       </nav>
 
-      {/* ── Settings (separado abajo) ── */}
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 4, paddingBottom: 4 }}>
+      {/* ── Lang + Theme (above settings) ── */}
+      {!collapsed ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 16px', borderTop: '1px solid var(--border)',
+        }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['es', 'en'] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => switchLang(l)}
+                style={{
+                  padding: '3px 10px',
+                  fontSize: 10,
+                  fontWeight: lang === l ? 700 : 400,
+                  borderRadius: 5,
+                  border: 'none',
+                  background: lang === l ? 'var(--accent)' : 'var(--border)',
+                  color: lang === l ? '#fff' : 'var(--muted)',
+                  cursor: lang === l ? 'default' : 'pointer',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  fontFamily: 'var(--font-syne), sans-serif',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Cambiar a claro' : 'Cambiar a oscuro'}
+            style={{
+              background: 'var(--border)', border: 'none', borderRadius: 6,
+              color: 'var(--muted)', cursor: 'pointer', width: 26, height: 26,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background 0.15s, color 0.15s',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted)'; }}
+          >
+            {theme === 'dark' ? icons.sun : icons.moon}
+          </button>
+        </div>
+      ) : (
+        <div style={{
+          display: 'flex', justifyContent: 'center',
+          padding: '8px 0', borderTop: '1px solid var(--border)',
+        }}>
+          <button
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Cambiar a claro' : 'Cambiar a oscuro'}
+            style={{
+              background: 'var(--border)', border: 'none', borderRadius: 6,
+              color: 'var(--muted)', cursor: 'pointer', width: 26, height: 26,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background 0.15s',
+            }}
+          >
+            {theme === 'dark' ? icons.sun : icons.moon}
+          </button>
+        </div>
+      )}
+
+      {/* ── Settings ── */}
+      <div style={{ paddingTop: 4, paddingBottom: 4 }}>
         {renderNavItem(settingsItem)}
       </div>
 
       {/* ── Footer ── */}
-      <div style={{
-        borderTop: '1px solid var(--border)',
-        padding: collapsed ? '12px 0' : '14px 16px',
-        display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0,
-      }}>
-        {!collapsed && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', gap: 3 }}>
-              {(['es', 'en'] as const).map((l) => (
-                <button key={l} onClick={() => switchLang(l)} style={{
-                  padding: '2px 7px', fontSize: 10,
-                  fontWeight: lang === l ? 700 : 400, borderRadius: 4,
-                  background: lang === l ? 'var(--accent)' : 'var(--border)',
-                  color: lang === l ? 'var(--bg)' : 'var(--muted)',
-                  cursor: lang === l ? 'default' : 'pointer',
-                  border: 'none', transition: 'all 0.15s',
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                }}>
-                  {l}
-                </button>
-              ))}
-            </div>
-            <button onClick={toggleTheme} title={theme === 'dark' ? 'Cambiar a claro' : 'Cambiar a oscuro'}
+      {!collapsed && (
+        <div style={{
+          padding: '8px 16px 12px',
+          borderTop: '1px solid var(--border)',
+        }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 5 }}>
+            <Link
+              href={`/${lang}/privacidad`}
+              target="_blank"
+              rel="noopener noreferrer"
               style={{
-                background: 'var(--border)', border: 'none', borderRadius: 6, color: 'var(--muted)',
-                cursor: 'pointer', width: 26, height: 26, display: 'flex',
-                alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s',
-              }}>
-              {theme === 'dark' ? icons.sun : icons.moon}
-            </button>
+                fontSize: 10, color: 'var(--muted)', textDecoration: 'none',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
+            >
+              Privacidad
+            </Link>
+            <Link
+              href={`/${lang}/terminos`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: 10, color: 'var(--muted)', textDecoration: 'none',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
+            >
+              Términos
+            </Link>
           </div>
-        )}
-
-        {!collapsed && plan && (
-          <Link href={`/${lang}/dashboard/settings`} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 10, fontWeight: 600,
-            color: plan === 'starter' ? 'var(--muted)' : 'var(--accent)',
-            background: plan === 'starter' ? 'var(--border)' : 'rgba(198,255,75,0.1)',
-            padding: '3px 8px', borderRadius: 5, textDecoration: 'none', width: 'fit-content',
-          }}>
-            {planBadge[plan] ?? plan}
-            {plan === 'starter' && <span style={{ fontWeight: 400, opacity: 0.7 }}>· Actualizar</span>}
-          </Link>
-        )}
-
-        {user && (
-          <div style={{
-            display: 'flex', alignItems: 'center',
-            justifyContent: collapsed ? 'center' : 'space-between',
-            gap: 8, minWidth: 0,
-          }}>
-            <div title={collapsed ? (user.name ?? user.email) : undefined} style={{
-              width: 28, height: 28, borderRadius: 8,
-              background: 'rgba(198,255,75,0.12)', color: 'var(--accent)',
-              fontSize: 11, fontWeight: 700, display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0, letterSpacing: '0.04em',
-            }}>
-              {(user.name ?? user.email ?? '?')[0].toUpperCase()}
-            </div>
-            {!collapsed && (
-              <>
-                <div style={{ overflow: 'hidden', flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
-                    {user.name ?? user.email}
-                  </p>
-                </div>
-                <button onClick={logout} title="Cerrar sesión" style={{
-                  background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  padding: 4, borderRadius: 5, flexShrink: 0, transition: 'color 0.15s',
-                }}>
-                  {icons.logout}
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+          <p style={{ fontSize: 10, color: 'var(--muted)', margin: 0, opacity: 0.6 }}>© 2026 Kefy</p>
+        </div>
+      )}
     </aside>
   );
 }

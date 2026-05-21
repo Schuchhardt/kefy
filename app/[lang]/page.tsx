@@ -4,10 +4,10 @@ import Nav from '@/components/landing/Nav';
 import Hero from '@/components/landing/Hero';
 import ProblemSection from '@/components/landing/ProblemSection';
 import HowSection from '@/components/landing/HowSection';
-import MultSection from '@/components/landing/MultSection';
 import BrandSection from '@/components/landing/BrandSection';
 import KillerSection from '@/components/landing/KillerSection';
 import AutopilotSection from '@/components/landing/AutopilotSection';
+import AutoEngageSection from '@/components/landing/AutoEngageSection';
 import StrategySection from '@/components/landing/StrategySection';
 import FeaturesGrid from '@/components/landing/FeaturesGrid';
 import WhoSection from '@/components/landing/WhoSection';
@@ -18,7 +18,6 @@ import PricingSection from '@/components/landing/PricingSection';
 import Testimonials from '@/components/landing/Testimonials';
 import FinalCTA from '@/components/landing/FinalCTA';
 import Footer from '@/components/landing/Footer';
-import BendsSection from '@/components/ui/BendsSection';
 
 const BASE_URL = 'https://kefy.app';
 
@@ -70,6 +69,8 @@ export default async function LandingPage({
 
   return (
     <WaitlistProvider copy={copy.waitlist}>
+      {/* Force dark theme for the landing page regardless of user preference */}
+      <div data-theme="dark">
       {/* JSON-LD structured data */}
       <script
         type="application/ld+json"
@@ -79,50 +80,23 @@ export default async function LandingPage({
       <Nav lang={lang} copy={copy.nav} />
 
       <main>
-        {/* Hero — verdes accent, rotación diagonal */}
-        <BendsSection
-          colors={['#C6FF4B', '#8AB833', '#0d1f00', '#08080A']}
-          rotation={135}
-          speed={0.13}
-          warpStrength={0.9}
-          intensity={1.3}
-          overlay="rgba(8, 8, 10, 0.72)"
-        >
-          <Hero lang={lang} copy={copy.hero} demoCopy={copy.demo} />
-        </BendsSection>
+        <Hero lang={lang} copy={copy.hero} demoCopy={copy.demo} />
 
         <ProblemSection copy={copy.problem} />
         <HowSection copy={copy.how} />
 
-        {/* MultSection — acento cálido + verde, rotación horizontal */}
-        <BendsSection
-          colors={['#FF8C42', '#C6FF4B', '#1a0a00', '#08080A']}
-          rotation={0}
-          speed={0.1}
-          warpStrength={1.1}
-          frequency={0.8}
-          intensity={1.2}
-          overlay="rgba(8, 8, 10, 0.76)"
-        >
-          <MultSection copy={copy.mult} />
-        </BendsSection>
-
         <BrandSection copy={copy.brand} />
 
-        {/* KillerSection — morado + verde, rotación vertical */}
-        <BendsSection
-          colors={['#8a5cff', '#C6FF4B', '#0a0010', '#08080A']}
-          rotation={270}
-          speed={0.11}
-          warpStrength={1.2}
-          bandWidth={5}
-          intensity={1.4}
-          overlay="rgba(8, 8, 10, 0.80)"
-        >
+        <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(138,92,255,0.13) 0%, transparent 60%), #08080A' }}>
           <KillerSection copy={copy.killer} />
-        </BendsSection>
+        </div>
 
         <AutopilotSection copy={copy.autopilot} />
+
+        <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(168,85,247,0.11) 0%, transparent 60%), #08080A' }}>
+          <AutoEngageSection copy={copy.engage} />
+        </div>
+
         <StrategySection copy={copy.strategy} />
         <FeaturesGrid copy={copy.features} />
         <WhoSection copy={copy.who} />
@@ -130,36 +104,19 @@ export default async function LandingPage({
         <ComparisonSection copy={copy.cmp} />
         <BilingualBand copy={copy.lang} />
 
-        {/* PricingSection — verde+cálido, rotación oblicua */}
-        <BendsSection
-          colors={['#C6FF4B', '#FF8C42', '#001a00', '#08080A']}
-          rotation={60}
-          speed={0.14}
-          warpStrength={0.8}
-          frequency={1.2}
-          intensity={1.35}
-          overlay="rgba(8, 8, 10, 0.75)"
-        >
+        <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(198,255,75,0.08) 0%, transparent 60%), #08080A' }}>
           <PricingSection copy={copy.pricing} />
-        </BendsSection>
+        </div>
 
         <Testimonials copy={copy.testi} />
 
-        {/* FinalCTA — más vibrante, rotación suave */}
-        <BendsSection
-          colors={['#C6FF4B', '#8AB833', '#FF8C42', '#08080A']}
-          rotation={45}
-          speed={0.16}
-          warpStrength={1.3}
-          iterations={2}
-          intensity={1.5}
-          overlay="rgba(8, 8, 10, 0.70)"
-        >
+        <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(198,255,75,0.09) 0%, rgba(255,140,66,0.06) 40%, transparent 70%), #08080A' }}>
           <FinalCTA copy={copy.final} />
-        </BendsSection>
+        </div>
       </main>
 
       <Footer copy={copy.footer} lang={lang} />
+      </div>
     </WaitlistProvider>
   );
 }

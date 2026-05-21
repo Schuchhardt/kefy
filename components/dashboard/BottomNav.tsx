@@ -78,7 +78,6 @@ export default function BottomNav({ lang }: { lang: string }) {
       zIndex: 100,
       background: 'var(--surface)',
       borderTop: '1px solid var(--border)',
-      display: 'flex',
       alignItems: 'stretch',
       paddingBottom: 'env(safe-area-inset-bottom)',
       fontFamily: 'var(--font-syne), system-ui, sans-serif',

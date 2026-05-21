@@ -4,6 +4,14 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import type { BrandKit, CompanySize } from '@/lib/brand-kit';
 
+interface Industry {
+  id:      string;
+  slug:    string;
+  name_es: string;
+  name_en: string;
+  icon:    string;
+}
+
 import esT from '@/locales/es/dashboard/brand';
 import enT from '@/locales/en/dashboard/brand';
 
@@ -130,6 +138,9 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
 
   const [arraySugg, setArraySugg] = useState<Record<string, string[]>>({});
   const [arraySuggLoading, setArraySuggLoading] = useState<Record<string, boolean>>({});
+  const [industries, setIndustries] = useState<Industry[]>([]);
+  const [selectedIndustryId, setSelectedIndustryId] = useState<string | null>(null);
+  const [industryLoading, setIndustryLoading] = useState(false);
 
   // Load locale from params
   useEffect(() => {
@@ -138,14 +149,26 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
     });
   }, [params]);
 
-  // Load brand kit
+  // Load brand kit + industries catalog + saved industry selection
   const loadBrandKit = useCallback(async () => {
     try {
       setLoadingData(true);
-      const res = await fetch('/api/brand-kit');
-      if (res.ok) {
-        const data = (await res.json()) as { brandKit: BrandKit | null };
+      const [bkRes, catRes, orgRes] = await Promise.all([
+        fetch('/api/brand-kit'),
+        fetch('/api/strategies'),
+        fetch('/api/strategies/org'),
+      ]);
+      if (bkRes.ok) {
+        const data = (await bkRes.json()) as { brandKit: BrandKit | null };
         if (data.brandKit) setForm(data.brandKit);
+      }
+      if (catRes.ok) {
+        const { industries: inds } = (await catRes.json()) as { industries: Industry[] };
+        setIndustries(inds ?? []);
+      }
+      if (orgRes.ok) {
+        const { selection } = (await orgRes.json()) as { selection: { industry_id: string | null } | null };
+        if (selection?.industry_id) setSelectedIndustryId(selection.industry_id);
       }
     } finally {
       setLoadingData(false);
@@ -155,6 +178,21 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
   useEffect(() => {
     if (!authLoading && org) void loadBrandKit();
   }, [authLoading, org, loadBrandKit]);
+
+  async function handleSelectIndustry(id: string) {
+    const next = selectedIndustryId === id ? null : id;
+    setSelectedIndustryId(next);
+    setIndustryLoading(true);
+    try {
+      await fetch('/api/strategies/org', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ industry_id: next }),
+      });
+    } finally {
+      setIndustryLoading(false);
+    }
+  }
 
   function updateField<K extends keyof BrandKit>(key: K, value: BrandKit[K] | null) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -245,6 +283,46 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
                 </button>
               ))}
             </div>
+          </Field>
+
+          <Field label={locale === 'es' ? 'Industria' : 'Industry'}>
+            {industries.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                {locale === 'es' ? 'Cargando industrias...' : 'Loading industries...'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {industries.map((ind) => {
+                  const active = selectedIndustryId === ind.id;
+                  return (
+                    <button
+                      key={ind.id}
+                      type="button"
+                      disabled={industryLoading}
+                      onClick={() => void handleSelectIndustry(ind.id)}
+                      style={{
+                        display:    'inline-flex',
+                        alignItems: 'center',
+                        gap:         6,
+                        padding:    '8px 16px',
+                        borderRadius: 100,
+                        fontSize:   13,
+                        fontWeight: active ? 700 : 400,
+                        border:     `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                        background: active ? 'rgba(198,255,75,0.12)' : 'var(--bg)',
+                        color:      active ? 'var(--accent)' : 'var(--text)',
+                        cursor:     industryLoading ? 'not-allowed' : 'pointer',
+                        transition: 'all .15s ease',
+                        opacity:    industryLoading ? 0.6 : 1,
+                      }}
+                    >
+                      <span>{ind.icon}</span>
+                      <span>{locale === 'es' ? ind.name_es : (ind as Industry & { name_en?: string }).name_en ?? ind.name_es}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </Field>
 
           <Field label={t.niche}>
