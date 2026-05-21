@@ -12,9 +12,12 @@ const Player = dynamic(
 );
 
 interface ReelPlayerProps {
-  scenes:       ReelSceneProps[];
-  brandName?:   string;
-  accentColor?: string;
+  scenes:        ReelSceneProps[];
+  brandName?:    string;
+  accentColor?:  string;
+  primaryColor?: string;
+  fontHeading?:  string;
+  logoUrl?:      string;
   /** Rendered height in pixels (width is calculated for 9:16) */
   height?: number;
 }
@@ -31,12 +34,12 @@ const loaderStyle: React.CSSProperties = {
 
 const FPS = 30;
 
-export function ReelPlayer({ scenes, brandName, accentColor = '#c6ff4b', height = 480 }: ReelPlayerProps) {
+export function ReelPlayer({ scenes, brandName, accentColor = '#c6ff4b', primaryColor, fontHeading, logoUrl, height = 480 }: ReelPlayerProps) {
   const totalFrames = useMemo(() => getTotalFrames(scenes, FPS), [scenes]);
 
   const inputProps = useMemo(
-    () => ({ scenes, brandName, accentColor }),
-    [scenes, brandName, accentColor],
+    () => ({ scenes, brandName, accentColor, primaryColor, fontHeading, logoUrl }),
+    [scenes, brandName, accentColor, primaryColor, fontHeading, logoUrl],
   );
 
   const playerWidth  = Math.round(height * (9 / 16));

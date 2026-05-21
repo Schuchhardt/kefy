@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useTheme } from '@/lib/theme-context';
 
@@ -22,16 +22,6 @@ const icons = {
       <path d="M2 12l10 5 10-5"/>
     </svg>
   ),
-  strategy: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <circle cx="12" cy="12" r="4"/>
-      <line x1="12" y1="2" x2="12" y2="8"/>
-      <line x1="12" y1="16" x2="12" y2="22"/>
-      <line x1="2" y1="12" x2="8" y2="12"/>
-      <line x1="16" y1="12" x2="22" y2="12"/>
-    </svg>
-  ),
   content: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -39,41 +29,14 @@ const icons = {
       <path d="M9 21V9"/>
     </svg>
   ),
-  calendar: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="18" rx="2"/>
-      <line x1="16" y1="2" x2="16" y2="6"/>
-      <line x1="8" y1="2" x2="8" y2="6"/>
-      <line x1="3" y1="10" x2="21" y2="10"/>
-    </svg>
-  ),
-  analytics: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="20" x2="18" y2="10"/>
-      <line x1="12" y1="20" x2="12" y2="4"/>
-      <line x1="6" y1="20" x2="6" y2="14"/>
-      <line x1="2" y1="20" x2="22" y2="20"/>
-    </svg>
-  ),
-  autopilot: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-    </svg>
-  ),
-  inbox: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
-      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
-    </svg>
-  ),
-  engage: (
+  conversations: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
     </svg>
   ),
-  ads: (
+  automations: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
     </svg>
   ),
   settings: (
@@ -121,17 +84,12 @@ const icons = {
 
 /* ─── Nav items ──────────────────────────────────────────────────────────── */
 const NAV_LABELS: Record<string, { es: string; en: string }> = {
-  dashboard:  { es: 'Inicio',     en: 'Home'      },
-  brand:      { es: 'Brand Kit',  en: 'Brand Kit'  },
-  strategy:   { es: 'Estrategia', en: 'Strategy'   },
-  content:    { es: 'Contenido',  en: 'Content'    },
-  calendar:   { es: 'Calendario', en: 'Calendar'   },
-  analytics:  { es: 'Analytics',  en: 'Analytics'  },
-  autopilot:  { es: 'Autopilot',  en: 'Autopilot'  },
-  inbox:      { es: 'Inbox',      en: 'Inbox'      },
-  engage:     { es: 'Engage',     en: 'Engage'     },
-  ads:        { es: 'Ads',        en: 'Ads'        },
-  settings:   { es: 'Ajustes',    en: 'Settings'   },
+  dashboard:     { es: 'Dashboard',        en: 'Dashboard'     },
+  brand:         { es: 'Mi marca',         en: 'My Brand'      },
+  content:       { es: 'Contenido',        en: 'Content'       },
+  conversations: { es: 'Conversaciones',   en: 'Conversations' },
+  automations:   { es: 'Automatizaciones', en: 'Automations'   },
+  settings:      { es: 'Ajustes',          en: 'Settings'      },
 };
 
 type IconKey = keyof typeof icons;
@@ -140,24 +98,20 @@ interface NavItem {
   href: string;
   label: string;
   iconKey: IconKey;
-  soon?: boolean;
 }
 
-function navItems(lang: string): NavItem[] {
+function navItems(lang: string): { main: NavItem[]; settings: NavItem } {
   const l = (key: string) => NAV_LABELS[key]?.[lang as 'es' | 'en'] ?? NAV_LABELS[key]?.es ?? key;
-  return [
-    { href: `/${lang}/dashboard`,           label: l('dashboard'),  iconKey: 'home'      },
-    { href: `/${lang}/dashboard/brand`,     label: l('brand'),      iconKey: 'brand'     },
-    { href: `/${lang}/dashboard/strategy`,  label: l('strategy'),   iconKey: 'strategy'  },
-    { href: `/${lang}/dashboard/content`,   label: l('content'),    iconKey: 'content'   },
-    { href: `/${lang}/dashboard/calendar`,  label: l('calendar'),   iconKey: 'calendar'  },
-    { href: `/${lang}/dashboard/analytics`, label: l('analytics'),  iconKey: 'analytics' },
-    { href: `/${lang}/dashboard/autopilot`, label: l('autopilot'),  iconKey: 'autopilot' },
-    { href: `/${lang}/dashboard/inbox`,     label: l('inbox'),      iconKey: 'inbox'     },
-    { href: `/${lang}/dashboard/engage`,    label: l('engage'),     iconKey: 'engage'    },
-    { href: `/${lang}/dashboard/ads`,       label: l('ads'),        iconKey: 'ads'       },
-    { href: `/${lang}/dashboard/settings`,  label: l('settings'),   iconKey: 'settings'  },
-  ];
+  return {
+    main: [
+      { href: `/${lang}/dashboard`,               label: l('dashboard'),     iconKey: 'home'          },
+      { href: `/${lang}/dashboard/brand`,         label: l('brand'),         iconKey: 'brand'         },
+      { href: `/${lang}/dashboard/content`,       label: l('content'),       iconKey: 'content'       },
+      { href: `/${lang}/dashboard/conversations`, label: l('conversations'), iconKey: 'conversations' },
+      { href: `/${lang}/dashboard/automations`,   label: l('automations'),   iconKey: 'automations'   },
+    ],
+    settings: { href: `/${lang}/dashboard/settings`, label: l('settings'), iconKey: 'settings' },
+  };
 }
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
@@ -167,8 +121,35 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
   const { user, org, plan, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const items = navItems(lang);
+  useEffect(() => {
+    async function fetchUnread() {
+      try {
+        const [dmsRes, commentsRes] = await Promise.all([
+          fetch('/api/messaging?unread=true&limit=1', { credentials: 'include' }),
+          fetch('/api/comments?replied=false&limit=1', { credentials: 'include' }),
+        ]);
+        let count = 0;
+        if (dmsRes.ok) {
+          const d = await dmsRes.json() as { threads?: unknown[] };
+          count += d.threads?.length ?? 0;
+        }
+        if (commentsRes.ok) {
+          const d = await commentsRes.json() as { comments?: unknown[] };
+          count += d.comments?.length ?? 0;
+        }
+        setUnreadCount(count);
+      } catch {
+        // non-critical
+      }
+    }
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const { main: items, settings: settingsItem } = navItems(lang);
   const W = collapsed ? 64 : 220;
 
   const planBadge: Record<string, string> = {
@@ -183,8 +164,79 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
     router.push(segments.join('/'));
   };
 
+  function isItemActive(item: NavItem) {
+    if (item.href === `/${lang}/dashboard`) return pathname === item.href;
+    return pathname.startsWith(item.href);
+  }
+
+  function renderNavItem(item: NavItem) {
+    const active = isItemActive(item);
+    const isConv = item.iconKey === 'conversations';
+    const showBadge = isConv && unreadCount > 0;
+
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        title={collapsed ? item.label : undefined}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: collapsed ? 'center' : 'flex-start',
+          gap: collapsed ? 0 : 10,
+          padding: collapsed ? '10px 0' : '9px 16px',
+          fontSize: 13,
+          fontWeight: active ? 600 : 400,
+          color: active ? 'var(--accent)' : 'var(--text)',
+          background: active ? 'rgba(198,255,75,0.06)' : 'transparent',
+          borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
+          cursor: 'pointer',
+          transition: 'color 0.15s, background 0.15s',
+          textDecoration: 'none',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
+        <span style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, opacity: active ? 1 : 0.6,
+          color: active ? 'var(--accent)' : 'inherit',
+          transition: 'opacity 0.15s', position: 'relative',
+        }}>
+          {icons[item.iconKey]}
+          {showBadge && collapsed && (
+            <span style={{
+              position: 'absolute', top: -3, right: -3,
+              width: 7, height: 7, borderRadius: '50%',
+              background: '#ff6b6b', border: '1.5px solid var(--surface)',
+            }} />
+          )}
+        </span>
+        {!collapsed && (
+          <>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+              {item.label}
+            </span>
+            {showBadge && (
+              <span style={{
+                marginLeft: 'auto', fontSize: 10, fontWeight: 700,
+                color: '#fff', background: '#ff6b6b',
+                padding: '1px 5px', borderRadius: 8, flexShrink: 0,
+                minWidth: 16, textAlign: 'center',
+              }}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </>
+        )}
+      </Link>
+    );
+  }
+
   return (
     <aside
+      className="dashboard-sidebar"
       style={{
         width: W,
         minHeight: '100vh',
@@ -199,18 +251,14 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         fontFamily: 'var(--font-syne), system-ui, sans-serif',
       }}
     >
-      {/* ── Header: logo + toggle ── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'space-between',
-          padding: collapsed ? '18px 0' : '18px 16px',
-          borderBottom: '1px solid var(--border)',
-          minHeight: 60,
-          flexShrink: 0,
-        }}
-      >
+      {/* ── Header ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center',
+        justifyContent: collapsed ? 'center' : 'space-between',
+        padding: collapsed ? '18px 0' : '18px 16px',
+        borderBottom: '1px solid var(--border)',
+        minHeight: 60, flexShrink: 0,
+      }}>
         {!collapsed && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', flex: 1, minWidth: 0 }}>
             <Image src="/apple-touch-icon.png" alt="Kefy" width={26} height={26} style={{ borderRadius: 6, flexShrink: 0, display: 'block' }} />
@@ -233,17 +281,9 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
           onClick={() => setCollapsed((v) => !v)}
           title={collapsed ? 'Expandir' : 'Colapsar'}
           style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--muted)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 6,
-            borderRadius: 6,
-            transition: 'color 0.15s, background 0.15s',
-            flexShrink: 0,
+            background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 6, borderRadius: 6, transition: 'color 0.15s, background 0.15s', flexShrink: 0,
           }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)'; (e.currentTarget as HTMLButtonElement).style.background = 'var(--border)'; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
@@ -252,176 +292,76 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         </button>
       </div>
 
-      {/* ── Nav ── */}
+      {/* ── Main nav ── */}
       <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
-        {items.map((item) => {
-          const isActive = item.href === `/${lang}/dashboard`
-            ? pathname === item.href
-            : pathname.startsWith(item.href);
-
-          return (
-            <Link
-              key={item.href}
-              href={item.soon ? '#' : item.href}
-              title={collapsed ? item.label : undefined}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: collapsed ? 'center' : 'flex-start',
-                gap: collapsed ? 0 : 10,
-                padding: collapsed ? '10px 0' : '9px 16px',
-                fontSize: 13,
-                fontWeight: isActive ? 600 : 400,
-                color: isActive ? 'var(--accent)' : item.soon ? 'var(--muted)' : 'var(--text)',
-                background: isActive ? 'rgba(198,255,75,0.06)' : 'transparent',
-                borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                cursor: item.soon ? 'default' : 'pointer',
-                transition: 'color 0.15s, background 0.15s',
-                textDecoration: 'none',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-              }}
-            >
-              <span
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  opacity: isActive ? 1 : 0.6,
-                  color: isActive ? 'var(--accent)' : 'inherit',
-                  transition: 'opacity 0.15s',
-                }}
-              >
-                {icons[item.iconKey]}
-              </span>
-              {!collapsed && (
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-                  {item.label}
-                </span>
-              )}
-              {!collapsed && item.soon && (
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--muted)', background: 'var(--border)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
-                  soon
-                </span>
-              )}
-            </Link>
-          );
-        })}
+        {items.map((item) => renderNavItem(item))}
       </nav>
 
+      {/* ── Settings (separado abajo) ── */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 4, paddingBottom: 4 }}>
+        {renderNavItem(settingsItem)}
+      </div>
+
       {/* ── Footer ── */}
-      <div
-        style={{
-          borderTop: '1px solid var(--border)',
-          padding: collapsed ? '12px 0' : '14px 16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          flexShrink: 0,
-        }}
-      >
-        {/* Theme + Lang (only expanded) */}
+      <div style={{
+        borderTop: '1px solid var(--border)',
+        padding: collapsed ? '12px 0' : '14px 16px',
+        display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0,
+      }}>
         {!collapsed && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', gap: 3 }}>
               {(['es', 'en'] as const).map((l) => (
-                <button
-                  key={l}
-                  onClick={() => switchLang(l)}
-                  style={{
-                    padding: '2px 7px',
-                    fontSize: 10,
-                    fontWeight: lang === l ? 700 : 400,
-                    borderRadius: 4,
-                    background: lang === l ? 'var(--accent)' : 'var(--border)',
-                    color: lang === l ? 'var(--bg)' : 'var(--muted)',
-                    cursor: lang === l ? 'default' : 'pointer',
-                    border: 'none',
-                    transition: 'all 0.15s',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                  }}
-                >
+                <button key={l} onClick={() => switchLang(l)} style={{
+                  padding: '2px 7px', fontSize: 10,
+                  fontWeight: lang === l ? 700 : 400, borderRadius: 4,
+                  background: lang === l ? 'var(--accent)' : 'var(--border)',
+                  color: lang === l ? 'var(--bg)' : 'var(--muted)',
+                  cursor: lang === l ? 'default' : 'pointer',
+                  border: 'none', transition: 'all 0.15s',
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                }}>
                   {l}
                 </button>
               ))}
             </div>
-            <button
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Cambiar a claro' : 'Cambiar a oscuro'}
+            <button onClick={toggleTheme} title={theme === 'dark' ? 'Cambiar a claro' : 'Cambiar a oscuro'}
               style={{
-                background: 'var(--border)',
-                border: 'none',
-                borderRadius: 6,
-                color: 'var(--muted)',
-                cursor: 'pointer',
-                width: 26,
-                height: 26,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                transition: 'background 0.15s',
-              }}
-            >
+                background: 'var(--border)', border: 'none', borderRadius: 6, color: 'var(--muted)',
+                cursor: 'pointer', width: 26, height: 26, display: 'flex',
+                alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s',
+              }}>
               {theme === 'dark' ? icons.sun : icons.moon}
             </button>
           </div>
         )}
 
-        {/* Plan badge (only expanded) */}
         {!collapsed && plan && (
-          <Link
-            href={`/${lang}/dashboard/settings/billing`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: 10,
-              fontWeight: 600,
-              color: plan === 'starter' ? 'var(--muted)' : 'var(--accent)',
-              background: plan === 'starter' ? 'var(--border)' : 'rgba(198,255,75,0.1)',
-              padding: '3px 8px',
-              borderRadius: 5,
-              textDecoration: 'none',
-              width: 'fit-content',
-            }}
-          >
+          <Link href={`/${lang}/dashboard/settings`} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 10, fontWeight: 600,
+            color: plan === 'starter' ? 'var(--muted)' : 'var(--accent)',
+            background: plan === 'starter' ? 'var(--border)' : 'rgba(198,255,75,0.1)',
+            padding: '3px 8px', borderRadius: 5, textDecoration: 'none', width: 'fit-content',
+          }}>
             {planBadge[plan] ?? plan}
             {plan === 'starter' && <span style={{ fontWeight: 400, opacity: 0.7 }}>· Actualizar</span>}
           </Link>
         )}
 
-        {/* User row */}
         {user && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: collapsed ? 'center' : 'space-between',
-              gap: 8,
-              minWidth: 0,
-            }}
-          >
-            {/* Avatar initials */}
-            <div
-              title={collapsed ? (user.name ?? user.email) : undefined}
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: 'rgba(198,255,75,0.12)',
-                color: 'var(--accent)',
-                fontSize: 11,
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                letterSpacing: '0.04em',
-              }}
-            >
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            justifyContent: collapsed ? 'center' : 'space-between',
+            gap: 8, minWidth: 0,
+          }}>
+            <div title={collapsed ? (user.name ?? user.email) : undefined} style={{
+              width: 28, height: 28, borderRadius: 8,
+              background: 'rgba(198,255,75,0.12)', color: 'var(--accent)',
+              fontSize: 11, fontWeight: 700, display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, letterSpacing: '0.04em',
+            }}>
               {(user.name ?? user.email ?? '?')[0].toUpperCase()}
             </div>
             {!collapsed && (
@@ -431,23 +371,11 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
                     {user.name ?? user.email}
                   </p>
                 </div>
-                <button
-                  onClick={logout}
-                  title="Cerrar sesión"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--muted)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 4,
-                    borderRadius: 5,
-                    flexShrink: 0,
-                    transition: 'color 0.15s',
-                  }}
-                >
+                <button onClick={logout} title="Cerrar sesión" style={{
+                  background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: 4, borderRadius: 5, flexShrink: 0, transition: 'color 0.15s',
+                }}>
                   {icons.logout}
                 </button>
               </>

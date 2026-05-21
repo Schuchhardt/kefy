@@ -19,9 +19,12 @@ export interface ReelSceneProps {
 }
 
 export interface ReelCompositionProps {
-  scenes:    ReelSceneProps[];
-  brandName?: string;
-  accentColor?: string;   // default: #c6ff4b
+  scenes:        ReelSceneProps[];
+  brandName?:    string;
+  accentColor?:  string;   // default: #c6ff4b
+  primaryColor?: string;   // brand kit primary color
+  fontHeading?:  string;   // brand kit heading font
+  logoUrl?:      string;   // brand kit logo URL
 }
 
 // ─── Scene frame ranges ───────────────────────────────────────────────────────
@@ -44,18 +47,20 @@ export function getTotalFrames(scenes: ReelSceneProps[], fps = 30): number {
 
 function ReelScene({
   scene,
-  startFrame,
   durationFrames,
   accentColor,
+  primaryColor,
+  fontHeading,
 }: {
   scene:          ReelSceneProps;
-  startFrame:     number;
   durationFrames: number;
   accentColor:    string;
+  primaryColor?:  string;
+  fontHeading?:   string;
 }) {
-  const frame      = useCurrentFrame();
-  const { fps }    = useVideoConfig();
-  const localFrame = frame - startFrame;
+  const localFrame     = useCurrentFrame();
+  const { fps }        = useVideoConfig();
+  const highlightColor = primaryColor ?? accentColor;
 
   // Fade-in for background (first 15 frames)
   const bgOpacity = interpolate(localFrame, [0, 15], [0, 1], { extrapolateRight: 'clamp' });
@@ -93,31 +98,35 @@ function ReelScene({
       {/* Dark gradient overlay */}
       <div style={{
         position: 'absolute', inset: 0,
-        background: 'linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.35) 40%, rgba(0,0,0,0.75) 100%)',
+        background: 'linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.72) 100%)',
       }} />
 
-      {/* Text content — bottom area */}
-      <div style={{
-        position: 'absolute', bottom: 80, left: 0, right: 0,
-        padding: '0 48px',
+      {/* Text content — centered */}
+      <AbsoluteFill style={{
+        display:        'flex',
+        flexDirection:  'column',
+        justifyContent: 'center',
+        alignItems:     'flex-start',
+        padding:        '160px 64px',
       }}>
         {/* Title */}
         <div style={{
-          transform: `translateY(${titleY}px)`,
-          opacity:   titleOpacity,
-          marginBottom: 16,
+          transform:    `translateY(${titleY}px)`,
+          opacity:      titleOpacity,
+          marginBottom: 32,
         }}>
           <span style={{
-            display:      'inline-block',
-            background:   accentColor,
-            color:        '#000',
-            fontFamily:   'system-ui, -apple-system, sans-serif',
-            fontWeight:   800,
-            fontSize:     42,
-            lineHeight:   1.15,
-            padding:      '4px 12px',
-            borderRadius: 6,
-            letterSpacing: '-0.5px',
+            display:       'inline',
+            background:    highlightColor,
+            color:         '#000',
+            fontFamily:    fontHeading ? `'${fontHeading}', system-ui, -apple-system, sans-serif` : 'system-ui, -apple-system, sans-serif',
+            fontWeight:    800,
+            fontSize:      80,
+            lineHeight:    1.15,
+            padding:       '6px 20px',
+            borderRadius:  10,
+            letterSpacing: '-1px',
+            boxDecorationBreak: 'clone' as const,
           }}>
             {scene.title}
           </span>
@@ -132,15 +141,15 @@ function ReelScene({
             color:      '#fff',
             fontFamily: 'system-ui, -apple-system, sans-serif',
             fontWeight: 500,
-            fontSize:   28,
+            fontSize:   48,
             lineHeight: 1.4,
             margin:     0,
-            textShadow: '0 1px 8px rgba(0,0,0,0.7)',
+            textShadow: '0 2px 12px rgba(0,0,0,0.85)',
           }}>
             {scene.body}
           </p>
         </div>
-      </div>
+      </AbsoluteFill>
 
       {/* Scene counter */}
       <div style={{
@@ -157,7 +166,7 @@ function ReelScene({
 
       {/* Progress bar */}
       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 5, background: 'rgba(255,255,255,0.15)' }}>
-        <div style={{ height: '100%', width: `${progress * 100}%`, background: accentColor, transition: 'width 0.05s linear' }} />
+        <div style={{ height: '100%', width: `${progress * 100}%`, background: highlightColor, transition: 'width 0.05s linear' }} />
       </div>
     </AbsoluteFill>
   );
@@ -165,7 +174,7 @@ function ReelScene({
 
 // ─── Root composition ─────────────────────────────────────────────────────────
 
-export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b' }: ReelCompositionProps) {
+export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', primaryColor, fontHeading, logoUrl }: ReelCompositionProps) {
   const { fps }  = useVideoConfig();
   const ranges   = getSceneRanges(scenes, fps);
 
@@ -177,30 +186,45 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b' }: 
           <Sequence key={scene.scene_order} from={range.start} durationInFrames={range.durationFrames}>
             <ReelScene
               scene={scene}
-              startFrame={range.start}
               durationFrames={range.durationFrames}
               accentColor={accentColor}
+              primaryColor={primaryColor}
+              fontHeading={fontHeading}
             />
           </Sequence>
         );
       })}
 
-      {/* Brand watermark */}
-      {brandName && (
+      {/* Brand watermark — logo or text */}
+      {logoUrl ? (
+        <Img
+          src={logoUrl}
+          style={{
+            position:  'absolute',
+            top:       48,
+            left:      48,
+            height:    80,
+            maxWidth:  280,
+            objectFit: 'contain',
+            filter:    'drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
+          }}
+        />
+      ) : brandName ? (
         <div style={{
-          position:   'absolute',
-          top:        40,
-          left:       40,
-          fontFamily: 'system-ui, sans-serif',
-          fontWeight: 800,
-          fontSize:   22,
-          color:      '#fff',
-          opacity:    0.9,
+          position:      'absolute',
+          top:           48,
+          left:          48,
+          fontFamily:    'system-ui, sans-serif',
+          fontWeight:    800,
+          fontSize:      26,
+          color:         '#fff',
+          opacity:       0.95,
           letterSpacing: '-0.3px',
+          textShadow:    '0 2px 8px rgba(0,0,0,0.6)',
         }}>
           {brandName}
         </div>
-      )}
+      ) : null}
     </AbsoluteFill>
   );
 }

@@ -60,9 +60,25 @@ export async function POST(req: NextRequest) {
   // Fetch brand kit context
   const { data: brandKit } = await db
     .from('kefy_brand_kits')
-    .select('name, tagline, tone, industry')
+    .select('name, tagline, tone, industry, primary_color, secondary_color, accent_color, font_heading, logo_url')
     .eq('org_id', auth.orgId)
     .maybeSingle();
+
+  // Fetch logo as base64 for brand-aware image generation
+  let logoB64: string | undefined;
+  let logoMimeType: string | undefined;
+  if (brandKit?.logo_url) {
+    try {
+      const logoRes = await fetch(brandKit.logo_url);
+      if (logoRes.ok) {
+        const contentType = logoRes.headers.get('content-type') ?? 'image/png';
+        logoB64      = Buffer.from(await logoRes.arrayBuffer()).toString('base64');
+        logoMimeType = contentType.split(';')[0]?.trim();
+      }
+    } catch {
+      // logo fetch is non-critical
+    }
+  }
 
   // 1. Generate reel script with Claude
   let generated;
@@ -93,6 +109,15 @@ export async function POST(req: NextRequest) {
           prompt:  scene.image_prompt,
           size:    '1080x1920',
           quality: imageQuality,
+          brand: {
+            name:           brandKit?.name           ?? undefined,
+            primaryColor:   brandKit?.primary_color  ?? undefined,
+            secondaryColor: brandKit?.secondary_color ?? undefined,
+            accentColor:    brandKit?.accent_color   ?? undefined,
+            tone:           brandKit?.tone           ?? undefined,
+            logoB64,
+            logoMimeType,
+          },
         });
         const imageUrl = await uploadBase64Image(
           imgResult.b64,
