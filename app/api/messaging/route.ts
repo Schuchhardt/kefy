@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 
 // ─── GET /api/messaging ────────────────────────────────────────────────────────
 // Returns the latest inbound message per thread for the org (unified inbox).
@@ -14,6 +15,9 @@ import { getAuthFromRequest } from '@/lib/auth';
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const { searchParams } = req.nextUrl;
   const platform = searchParams.get('platform');
@@ -34,7 +38,7 @@ export async function GET(req: NextRequest) {
       body, direction, read_at, created_at,
       kefy_social_accounts!inner ( id, platform, username, avatar_url )
     `)
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit * 3 - 1); // overfetch to dedupe threads
 
@@ -61,5 +65,7 @@ export async function GET(req: NextRequest) {
 
   const threads = Array.from(byThread.values()).slice(0, limit);
 
-  return NextResponse.json({ threads });
+  const res = NextResponse.json({ threads });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }

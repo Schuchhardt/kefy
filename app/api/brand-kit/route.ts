@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { validateBrandKitUpdate, type BrandKitUpdateInput } from '@/lib/brand-kit';
+import { getBrandFromRequest } from '@/lib/brands';
 
 // ─── GET /api/brand-kit ───────────────────────────────────────────────────────
-// Returns the brand kit for the authenticated user's org.
+// Returns the brand kit for the active brand.
 // Creates a default kit if one doesn't exist yet.
 
 export async function GET(req: NextRequest) {
@@ -13,12 +14,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) {
+    return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+  }
+
   const db = createSupabaseServer();
 
   const { data: kit, error } = await db
     .from('kefy_brand_kits')
     .select('*')
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .maybeSingle();
 
   if (error) {
@@ -28,16 +34,9 @@ export async function GET(req: NextRequest) {
 
   // Auto-create a default kit on first access
   if (!kit) {
-    // Use the org's real name as the default brand name
-    const { data: orgRow } = await db
-      .from('kefy_organizations')
-      .select('name')
-      .eq('id', auth.orgId)
-      .maybeSingle();
-
     const { data: newKit, error: createError } = await db
       .from('kefy_brand_kits')
-      .insert({ org_id: auth.orgId, name: orgRow?.name ?? null })
+      .insert({ org_id: auth.orgId, brand_id: brand.id, name: brand.name })
       .select('*')
       .single();
 
@@ -46,10 +45,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to initialize brand kit' }, { status: 500 });
     }
 
-    return NextResponse.json({ kit: newKit }, { status: 201 });
+    const res = NextResponse.json({ kit: newKit }, { status: 201 });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
   }
 
-  return NextResponse.json({ kit });
+  const res = NextResponse.json({ kit });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
 
 // ─── PATCH /api/brand-kit ─────────────────────────────────────────────────────
@@ -101,13 +104,18 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 422 });
   }
 
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) {
+    return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+  }
+
   const db = createSupabaseServer();
 
   // Upsert: update if exists, insert if not
   const { data: existing } = await db
     .from('kefy_brand_kits')
     .select('id')
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .maybeSingle();
 
   let kit;
@@ -127,7 +135,7 @@ export async function PATCH(req: NextRequest) {
   } else {
     const { data, error } = await db
       .from('kefy_brand_kits')
-      .insert({ org_id: auth.orgId, name: 'Mi marca', ...update })
+      .insert({ org_id: auth.orgId, brand_id: brand.id, name: brand.name, ...update })
       .select('*')
       .single();
 
@@ -138,5 +146,7 @@ export async function PATCH(req: NextRequest) {
     kit = data;
   }
 
-  return NextResponse.json({ kit });
+  const res = NextResponse.json({ kit });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }

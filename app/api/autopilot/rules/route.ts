@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -87,12 +88,15 @@ export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+
   const db = createSupabaseServer();
 
   const { data, error } = await db
     .from('kefy_autopilot_rules')
     .select('*')
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -100,7 +104,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch rules' }, { status: 500 });
   }
 
-  return NextResponse.json({ data });
+  const res = NextResponse.json({ data });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
 
 // ─── POST /api/autopilot/rules ────────────────────────────────────────────────

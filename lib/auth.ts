@@ -55,8 +55,9 @@ export function hashToken(token: string): string {
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
-export const ACCESS_COOKIE  = 'kefy_access';
-export const REFRESH_COOKIE = 'kefy_refresh';
+export const ACCESS_COOKIE        = 'kefy_access';
+export const REFRESH_COOKIE       = 'kefy_refresh';
+export const ACTIVE_BRAND_COOKIE  = 'kefy_active_brand';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -87,6 +88,16 @@ export function clearCookieOptions(path = '/') {
     sameSite: 'lax' as const,
     path,
     maxAge: 0,
+  };
+}
+
+export function activeBrandCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: IS_PROD,
+    sameSite: 'lax' as const,
+    path: '/',
+    maxAge: 365 * 24 * 60 * 60, // 1 year
   };
 }
 

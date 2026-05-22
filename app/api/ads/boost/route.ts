@@ -3,6 +3,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { boostPost } from '@/lib/zernio';
 import type { ZernioBoostObjective } from '@/lib/zernio';
+import { getBrandFromRequest } from '@/lib/brands';
 
 const VALID_OBJECTIVES = new Set<ZernioBoostObjective>(['reach', 'engagement', 'traffic', 'leads']);
 
@@ -17,6 +18,9 @@ const VALID_OBJECTIVES = new Set<ZernioBoostObjective>(['reach', 'engagement', '
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const { searchParams } = req.nextUrl;
   const status = searchParams.get('status');
@@ -39,7 +43,7 @@ export async function GET(req: NextRequest) {
         kefy_social_accounts ( id, platform, username )
       )
     `)
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -54,7 +58,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch boosts' }, { status: 500 });
   }
 
-  return NextResponse.json({ boosts: boosts ?? [] });
+  const res = NextResponse.json({ boosts: boosts ?? [] });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
 
 // ─── POST /api/ads/boost ───────────────────────────────────────────────────────
@@ -75,6 +81,9 @@ export async function POST(req: NextRequest) {
   if (!['owner', 'admin'].includes(auth.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+
+  const { brand: postBrand, setCookieHeader: postCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!postBrand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   let body: unknown;
   try { body = await req.json(); } catch {
@@ -99,12 +108,12 @@ export async function POST(req: NextRequest) {
 
   const db = createSupabaseServer();
 
-  // Fetch the scheduled post — must be published and belong to this org
+  // Fetch the scheduled post — must be published and belong to this brand
   const { data: post } = await db
     .from('kefy_scheduled_posts')
     .select('id, zernio_post_id, social_account_id, status, kefy_social_accounts ( id, zernio_account_id )')
     .eq('id', input.scheduled_post_id as string)
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', postBrand.id)
     .maybeSingle();
 
   if (!post) return NextResponse.json({ error: 'Post not found' }, { status: 404 });
@@ -151,6 +160,7 @@ export async function POST(req: NextRequest) {
     .from('kefy_ad_boosts')
     .insert({
       org_id:             auth.orgId,
+      brand_id:           postBrand.id,
       scheduled_post_id:  post.id,
       social_account_id:  post.social_account_id,
       budget_cents:       Math.round(input.budget_cents as number),
@@ -173,5 +183,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save boost record' }, { status: 500 });
   }
 
-  return NextResponse.json({ boost: record }, { status: 201 });
+  const res = NextResponse.json({ boost: record }, { status: 201 });
+  if (postCookieHeader) res.headers.set('Set-Cookie', postCookieHeader);
+  return res;
 }

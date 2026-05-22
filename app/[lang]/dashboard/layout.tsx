@@ -1,4 +1,5 @@
 import { AuthProvider } from '@/lib/auth-context';
+import { BrandProvider } from '@/lib/brand-context';
 import DashboardSidebar from '@/components/dashboard/Sidebar';
 import BottomNav from '@/components/dashboard/BottomNav';
 import UserAvatar from '@/components/dashboard/UserAvatar';
@@ -15,14 +16,16 @@ export default async function DashboardLayout({
 
   return (
     <AuthProvider lang={lang}>
-      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
-        <DashboardSidebar lang={lang} />
-        <main className="dashboard-main" style={{ flex: 1, overflowY: 'auto', height: '100vh' }}>
-          {children}
-        </main>
-      </div>
-      <UserAvatar lang={lang} />
-      <BottomNav lang={lang} />
+      <BrandProvider>
+        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
+          <DashboardSidebar lang={lang} />
+          <main className="dashboard-main" style={{ flex: 1, overflowY: 'auto', height: '100vh' }}>
+            {children}
+          </main>
+        </div>
+        <UserAvatar lang={lang} />
+        <BottomNav lang={lang} />
+      </BrandProvider>
     </AuthProvider>
   );
 }

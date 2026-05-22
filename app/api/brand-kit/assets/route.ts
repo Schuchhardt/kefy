@@ -35,7 +35,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 
-  return NextResponse.json({ assets: assets ?? [] });
+  const res = NextResponse.json({ assets: assets ?? [] });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
 
 // ─── POST /api/brand-kit/assets ───────────────────────────────────────────────
@@ -80,6 +82,11 @@ export async function POST(req: NextRequest) {
   const rawLabel = formData.get('label');
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim().slice(0, 100) : null;
 
+  const { brand: postBrand, setCookieHeader: postCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!postBrand) {
+    return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+  }
+
   const db = createSupabaseServer();
 
   // Ensure the brand kit exists (auto-create if not)
@@ -87,7 +94,7 @@ export async function POST(req: NextRequest) {
   const { data: existingKit } = await db
     .from('kefy_brand_kits')
     .select('id')
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', postBrand.id)
     .maybeSingle();
 
   if (existingKit) {
@@ -95,7 +102,7 @@ export async function POST(req: NextRequest) {
   } else {
     const { data: newKit, error: kitError } = await db
       .from('kefy_brand_kits')
-      .insert({ org_id: auth.orgId, name: 'Mi marca' })
+      .insert({ org_id: auth.orgId, brand_id: postBrand.id, name: postBrand.name })
       .select('id')
       .single();
 
@@ -106,9 +113,9 @@ export async function POST(req: NextRequest) {
     kitId = newKit.id;
   }
 
-  // Build storage path: orgId/kitId/timestamp-filename
+  // Build storage path: brandId/kitId/timestamp-filename
   const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
-  const storagePath = `${auth.orgId}/${kitId}/${Date.now()}-${safeFilename}`;
+  const storagePath = `${postBrand.id}/${kitId}/${Date.now()}-${safeFilename}`;
 
   const fileBuffer = Buffer.from(await file.arrayBuffer());
 
@@ -150,5 +157,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save asset' }, { status: 500 });
   }
 
-  return NextResponse.json({ asset }, { status: 201 });
+  const res = NextResponse.json({ asset }, { status: 201 });
+  if (postCookieHeader) res.headers.set('Set-Cookie', postCookieHeader);
+  return res;
 }

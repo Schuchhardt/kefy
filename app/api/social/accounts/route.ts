@@ -1,20 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 
 // ─── GET /api/social/accounts ────────────────────────────────────────────────
-// List connected social accounts for the org.
+// List connected social accounts for the active brand.
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const db = createSupabaseServer();
 
   const { data: accounts, error } = await db
     .from('kefy_social_accounts')
     .select('id, platform, external_id, username, avatar_url, zernio_account_id, status, token_expires_at, created_at')
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -22,7 +26,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 });
   }
 
-  return NextResponse.json({ accounts: accounts ?? [] });
+  const res = NextResponse.json({ accounts: accounts ?? [] });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
 
 // ─── POST /api/social/accounts ───────────────────────────────────────────────
@@ -83,14 +89,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
+  const { brand: postBrand, setCookieHeader: postCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!postBrand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+
   const db = createSupabaseServer();
 
-  // Upsert by (org_id, platform, external_id)
+  // Upsert by (brand_id, platform, external_id)
   const { data: account, error } = await db
     .from('kefy_social_accounts')
     .upsert(
       {
         org_id:            auth.orgId,
+        brand_id:          postBrand.id,
         platform:          input.platform,
         external_id:       connected.account.external_id,
         username:          connected.account.username,
@@ -101,7 +111,7 @@ export async function POST(req: NextRequest) {
         zernio_account_id: connected.account.id,
         status:            'active',
       },
-      { onConflict: 'org_id,platform,external_id' },
+      { onConflict: 'brand_id,platform,external_id' },
     )
     .select('id, platform, username, avatar_url, status, created_at')
     .single();
@@ -111,5 +121,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save account' }, { status: 500 });
   }
 
-  return NextResponse.json({ account }, { status: 201 });
+  const res = NextResponse.json({ account }, { status: 201 });
+  if (postCookieHeader) res.headers.set('Set-Cookie', postCookieHeader);
+  return res;
 }

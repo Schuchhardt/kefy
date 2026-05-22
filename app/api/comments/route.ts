@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 
 // ─── GET /api/comments ─────────────────────────────────────────────────────────
 // List comments received on published posts.
@@ -14,6 +15,9 @@ import { getAuthFromRequest } from '@/lib/auth';
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const { searchParams } = req.nextUrl;
   const platform   = searchParams.get('platform');
@@ -34,7 +38,7 @@ export async function GET(req: NextRequest) {
       kefy_social_accounts!inner ( id, platform, username, avatar_url ),
       kefy_scheduled_posts ( id, platform_post_id )
     `)
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -52,5 +56,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch comments' }, { status: 500 });
   }
 
-  return NextResponse.json({ comments: comments ?? [] });
+  const res = NextResponse.json({ comments: comments ?? [] });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }

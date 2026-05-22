@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { STORAGE_BUCKET } from '@/lib/brand-kit';
+import { validateBrandAccess } from '@/lib/brands';
 
 // ─── DELETE /api/brand-kit/assets/[assetId] ───────────────────────────────────
 // Delete an asset by ID. Only owner/admin can delete.
@@ -26,12 +27,11 @@ export async function DELETE(
 
   const db = createSupabaseServer();
 
-  // Fetch asset — ensure it belongs to this org
+  // Fetch asset — verify it belongs to a brand owned by this org
   const { data: asset, error: fetchError } = await db
     .from('kefy_brand_assets')
-    .select('id, storage_path, org_id')
+    .select('id, storage_path, brand_kit_id, kefy_brand_kits!inner ( brand_id )')
     .eq('id', assetId)
-    .eq('org_id', auth.orgId)   // ownership check
     .maybeSingle();
 
   if (fetchError) {
@@ -42,6 +42,11 @@ export async function DELETE(
   if (!asset) {
     return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
   }
+
+  // Verify the asset's brand belongs to this org
+  const kitRow = asset.kefy_brand_kits as unknown as { brand_id: string };
+  const brand = await validateBrandAccess(kitRow.brand_id, auth);
+  if (!brand) return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
 
   // Delete from Storage
   const { error: storageError } = await db.storage

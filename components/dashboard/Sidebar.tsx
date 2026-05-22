@@ -4,8 +4,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth-context';
 import { useTheme } from '@/lib/theme-context';
+import BrandSwitcher from '@/components/dashboard/BrandSwitcher';
 
 /* ─── SVG Icons ─────────────────────────────────────────────────────────── */
 const icons = {
@@ -118,7 +118,6 @@ function navItems(lang: string): { main: NavItem[]; settings: NavItem } {
 export default function DashboardSidebar({ lang }: { lang: string }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { org } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -247,31 +246,23 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         fontFamily: 'var(--font-syne), system-ui, sans-serif',
       }}
     >
-      {/* ── Header ── */}
+      {/* ── Kefy logo ── */}
       <div style={{
         display: 'flex', alignItems: 'center',
         justifyContent: collapsed ? 'center' : 'space-between',
-        padding: collapsed ? '18px 0' : '18px 16px',
-        borderBottom: '1px solid var(--border)',
-        minHeight: 60, flexShrink: 0,
+        padding: collapsed ? '14px 0' : '14px 16px',
+        flexShrink: 0,
       }}>
         {!collapsed && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Image src="/apple-touch-icon.png" alt="Kefy" width={26} height={26} style={{ borderRadius: 6, flexShrink: 0, display: 'block' }} />
-            <div style={{ overflow: 'hidden', lineHeight: 1 }}>
-              <span style={{ fontWeight: 800, fontSize: 17, color: 'var(--text)', letterSpacing: '-0.02em', display: 'block', lineHeight: 1 }}>
-                Kef<span style={{ color: 'var(--accent)' }}>y</span>
-              </span>
-              {org && (
-                <span style={{ color: 'var(--muted)', fontSize: 11, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110, display: 'block' }}>
-                  {org.name}
-                </span>
-              )}
-            </div>
+            <span style={{ fontWeight: 800, fontSize: 17, color: 'var(--text)', letterSpacing: '-0.02em', lineHeight: 1 }}>
+              Kef<span style={{ color: 'var(--accent)' }}>y</span>
+            </span>
           </div>
         )}
         {collapsed && (
-          <Image src="/apple-touch-icon.png" alt="Kefy" width={26} height={26} style={{ borderRadius: 6, flexShrink: 0, display: 'block' }} />
+          <Image src="/apple-touch-icon.png" alt="Kefy" width={26} height={26} style={{ borderRadius: 6, display: 'block' }} />
         )}
         <button
           onClick={() => setCollapsed((v) => !v)}
@@ -286,6 +277,11 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         >
           {collapsed ? icons.chevronRight : icons.chevronLeft}
         </button>
+      </div>
+
+      {/* ── Brand switcher ── */}
+      <div style={{ borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <BrandSwitcher collapsed={collapsed} />
       </div>
 
       {/* ── Main nav ── */}

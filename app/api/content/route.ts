@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 
 const VALID_CHANNELS = new Set([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
@@ -8,11 +9,14 @@ const VALID_CHANNELS = new Set([
 const VALID_STATUSES = new Set(['draft', 'approved', 'scheduled', 'published', 'archived']);
 
 // ─── GET /api/content ─────────────────────────────────────────────────────────
-// List content items for the org. Supports ?channel= ?status= ?limit= ?offset=
+// List content items for the active brand. Supports ?channel= ?status= ?limit= ?offset=
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const { searchParams } = new URL(req.url);
   const channel = searchParams.get('channel');
@@ -25,7 +29,7 @@ export async function GET(req: NextRequest) {
   let query = db
     .from('kefy_content_items')
     .select('id, channel, content_type, status, title, body, image_url, hashtags, slides, video_url, created_by, created_at, updated_at')
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -39,7 +43,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch content' }, { status: 500 });
   }
 
-  return NextResponse.json({ items: data ?? [], total: count ?? 0 });
+  const res = NextResponse.json({ items: data ?? [], total: count ?? 0 });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
 
 // ─── POST /api/content ────────────────────────────────────────────────────────
@@ -48,6 +54,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand: postBrand, setCookieHeader: postCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!postBrand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   let body: unknown;
   try { body = await req.json(); } catch {
@@ -70,6 +79,7 @@ export async function POST(req: NextRequest) {
     .from('kefy_content_items')
     .insert({
       org_id:       auth.orgId,
+      brand_id:     postBrand.id,
       created_by:   auth.userId,
       channel:      input.channel,
       title:        typeof input.title === 'string'  ? input.title.trim().slice(0, 200)  : null,
@@ -86,5 +96,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to create content item' }, { status: 500 });
   }
 
-  return NextResponse.json({ item }, { status: 201 });
+  const res = NextResponse.json({ item }, { status: 201 });
+  if (postCookieHeader) res.headers.set('Set-Cookie', postCookieHeader);
+  return res;
 }
