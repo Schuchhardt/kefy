@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { generateContentText, type ContentChannel, type AIModel } from '@/lib/ai';
 
 const VALID_CHANNELS = new Set<ContentChannel>([
@@ -49,12 +50,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `model must be 'claude' or 'gpt'` }, { status: 422 });
   }
 
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+
   const db = createSupabaseServer();
 
   // Fetch brand kit context if available
   const { data: brandKit } = await db
     .from('kefy_brand_kits')
-    .select('name, tagline, tone, industry')
+    .select('id, name, tagline, tone, industry')
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
@@ -102,12 +105,14 @@ export async function POST(req: NextRequest) {
     const { data: newItem, error: itemError } = await db
       .from('kefy_content_items')
       .insert({
-        org_id:     auth.orgId,
-        created_by: auth.userId,
-        channel:    input.channel,
-        body:       result.body,
-        hashtags:   result.hashtags,
-        status:     'draft',
+        org_id:       auth.orgId,
+        brand_id:     brand?.id ?? null,
+        brand_kit_id: brandKit?.id ?? null,
+        created_by:   auth.userId,
+        channel:      input.channel,
+        body:         result.body,
+        hashtags:     result.hashtags,
+        status:       'draft',
       })
       .select('id')
       .single();
@@ -150,5 +155,7 @@ export async function POST(req: NextRequest) {
     .update({ body: result.body, hashtags: result.hashtags })
     .eq('id', itemId);
 
-  return NextResponse.json({ itemId, result, draft }, { status: 201 });
+  const res = NextResponse.json({ itemId, result, draft }, { status: 201 });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }

@@ -75,11 +75,18 @@ export async function POST(req: NextRequest) {
 
   const db = createSupabaseServer();
 
+  const { data: brandKit } = await db
+    .from('kefy_brand_kits')
+    .select('id')
+    .eq('org_id', auth.orgId)
+    .maybeSingle();
+
   const { data: item, error } = await db
     .from('kefy_content_items')
     .insert({
       org_id:       auth.orgId,
       brand_id:     postBrand.id,
+      brand_kit_id: brandKit?.id ?? null,
       created_by:   auth.userId,
       channel:      input.channel,
       title:        typeof input.title === 'string'  ? input.title.trim().slice(0, 200)  : null,

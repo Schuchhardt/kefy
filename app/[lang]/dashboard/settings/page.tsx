@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import ChannelIcon from '@/components/ui/ChannelIcon';
+import { CHANNELS, CHANNEL_LABELS, type Channel } from '@/lib/channels';
 
 import esT from '@/locales/es/dashboard/settings';
 import enT from '@/locales/en/dashboard/settings';
@@ -23,27 +25,6 @@ interface SocialAccount {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const PLATFORMS = ['linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads'] as const;
-type Platform = typeof PLATFORMS[number];
-
-const PLATFORM_ICONS: Record<Platform, string> = {
-  linkedin:  'in',
-  instagram: '◉',
-  facebook:  'f',
-  twitter:   '𝕏',
-  tiktok:    '♪',
-  threads:   '@',
-};
-
-const PLATFORM_LABELS: Record<Platform, string> = {
-  linkedin:  'LinkedIn',
-  instagram: 'Instagram',
-  facebook:  'Facebook',
-  twitter:   'X / Twitter',
-  tiktok:    'TikTok',
-  threads:   'Threads',
-};
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -90,8 +71,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function SettingsPageInner() {
-  const { user, org } = useAuth();
+  const { user, org, plan, refresh } = useAuth();
   const { lang } = useParams<{ lang: string }>();
+  const router = useRouter();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
   const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
   const searchParams = useSearchParams();
@@ -100,9 +82,13 @@ function SettingsPageInner() {
   const [loadingAccts, setLoadingAccts] = useState(true);
 
   // Connecting OAuth
-  const [connecting, setConnecting] = useState<Platform | null>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectSuccess, setConnectSuccess] = useState<string | null>(null);
+
+  // Billing
+  const [billingLoading, setBillingLoading] = useState<string | null>(null);
+  const [billingNotice, setBillingNotice]   = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
 
   const fetchAccounts = useCallback(async () => {
     const res = await fetch('/api/social/accounts', { credentials: 'include' });
@@ -113,16 +99,26 @@ function SettingsPageInner() {
 
   useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
 
-  // Handle redirect back from OAuth callback
+  // Handle redirect back from OAuth callback + Stripe billing callback
   useEffect(() => {
     const connected = searchParams.get('connected');
     const error     = searchParams.get('error');
+    const billing   = searchParams.get('billing');
+
     if (connected) {
       setConnectSuccess(connected);
       fetchAccounts();
       window.history.replaceState({}, '', window.location.pathname);
     } else if (error) {
       setConnectError(error === 'oauth_failed' ? t.oauthError : t.unknownError);
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (billing === 'success') {
+      setBillingNotice({ type: 'success', msg: t.billingSuccess });
+      window.history.replaceState({}, '', window.location.pathname);
+      // Refresh auth context so plan badge updates immediately
+      refresh().catch(() => {});
+    } else if (billing === 'canceled') {
+      setBillingNotice({ type: 'info', msg: t.billingCanceled });
       window.history.replaceState({}, '', window.location.pathname);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,7 +179,40 @@ function SettingsPageInner() {
     if (user?.name) setName(user.name);
   }, [user]);
 
-  async function handleConnectPlatform(platform: Platform) {
+  async function handleUpgrade(targetPlan: string) {
+    setBillingLoading(targetPlan);
+    setBillingNotice(null);
+    try {
+      const res  = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: targetPlan }),
+      });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? t.billingError);
+      window.location.href = data.url!;
+    } catch (err) {
+      setBillingNotice({ type: 'error', msg: err instanceof Error ? err.message : t.billingError });
+      setBillingLoading(null);
+    }
+  }
+
+  async function handleManageSubscription() {
+    setBillingLoading('portal');
+    setBillingNotice(null);
+    try {
+      const res  = await fetch('/api/billing/portal', { method: 'POST', credentials: 'include' });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? t.billingError);
+      window.location.href = data.url!;
+    } catch (err) {
+      setBillingNotice({ type: 'error', msg: err instanceof Error ? err.message : t.billingError });
+      setBillingLoading(null);
+    }
+  }
+
+  async function handleConnectPlatform(platform: string) {
     setConnecting(platform);
     setConnectError(null);
 
@@ -273,20 +302,129 @@ function SettingsPageInner() {
 
       {/* Organization */}
       <Section title={t.sectionOrg}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <label style={labelStyle}>{t.nameLabel}</label>
-            <input style={{ ...inputStyle, opacity: 0.6 }} value={org?.name ?? ''} disabled />
-          </div>
-          <div>
-            <label style={labelStyle}>{t.planLabel}</label>
-            <input style={{ ...inputStyle, opacity: 0.6 }} value={org?.plan ?? ''} disabled />
-          </div>
+        <div>
+          <label style={labelStyle}>{t.nameLabel}</label>
+          <input style={{ ...inputStyle, opacity: 0.6 }} value={org?.name ?? ''} disabled />
         </div>
-        <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
-          {t.planChangeNote}{' '}
-          <a href="mailto:hola@kefy.app" style={{ color: 'var(--accent)' }}>hola@kefy.app</a>
-        </p>
+      </Section>
+
+      {/* Plan & billing */}
+      <Section title={t.sectionBilling}>
+        {billingNotice && (
+          <div style={{
+            marginBottom: 16, padding: '10px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+            background: billingNotice.type === 'success' ? 'rgba(76,175,80,0.12)'
+                      : billingNotice.type === 'error'   ? 'rgba(255,107,107,0.12)'
+                      : 'rgba(198,255,75,0.08)',
+            color: billingNotice.type === 'success' ? '#4caf50'
+                 : billingNotice.type === 'error'   ? '#ff6b6b'
+                 : 'var(--accent)',
+            border: `1px solid ${billingNotice.type === 'success' ? 'rgba(76,175,80,0.3)'
+                               : billingNotice.type === 'error'   ? 'rgba(255,107,107,0.3)'
+                               : 'rgba(198,255,75,0.2)'}`,
+          }}>
+            {billingNotice.msg}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {([
+            { key: 'starter',  name: t.planStarterName,  price: t.planStarterPrice,  features: t.planStarterFeatures, popular: false },
+            { key: 'pro',      name: t.planProName,       price: t.planProPrice,      features: t.planProFeatures,     popular: true  },
+            { key: 'business', name: t.planBusinessName,  price: t.planBusinessPrice, features: t.planBusinessFeatures, popular: false },
+          ] as const).map((p) => {
+            const isCurrent = (plan ?? org?.plan ?? 'starter') === p.key;
+            const isLoading = billingLoading === p.key;
+            const anyLoading = billingLoading !== null;
+            return (
+              <div key={p.key} style={{
+                background: isCurrent ? 'rgba(198,255,75,0.06)' : 'var(--bg)',
+                border: `1px solid ${isCurrent ? 'rgba(198,255,75,0.35)' : 'var(--border)'}`,
+                borderRadius: 10,
+                padding: '16px',
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}>
+                {p.popular && !isCurrent && (
+                  <span style={{
+                    position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)',
+                    background: 'var(--accent)', color: '#000',
+                    fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 20,
+                    letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap',
+                  }}>
+                    {lang === 'en' ? 'Most popular' : 'Más popular'}
+                  </span>
+                )}
+                {isCurrent && (
+                  <span style={{
+                    position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)',
+                    background: 'var(--accent)', color: '#000',
+                    fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 20,
+                    letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap',
+                  }}>
+                    {t.currentPlanBadge}
+                  </span>
+                )}
+
+                <div>
+                  <p style={{ fontFamily: 'var(--font-syne)', fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
+                    {p.name}
+                  </p>
+                  <p style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                    {p.price}
+                    <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)', marginLeft: 3 }}>
+                      {t.planPer}
+                    </span>
+                  </p>
+                </div>
+
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
+                  {p.features.map((f, i) => (
+                    <li key={i} style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                      <span style={{ color: 'var(--accent)', flexShrink: 0 }}>✓</span>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+
+                {isCurrent ? (
+                  <button
+                    onClick={handleManageSubscription}
+                    disabled={anyLoading}
+                    style={{
+                      width: '100%', background: 'none',
+                      border: '1px solid var(--border)', borderRadius: 7,
+                      padding: '8px', fontSize: 12, fontWeight: 600,
+                      cursor: anyLoading ? 'not-allowed' : 'pointer',
+                      color: 'var(--text)', opacity: anyLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {billingLoading === 'portal' ? t.billingRedirecting : t.manage}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleUpgrade(p.key)}
+                    disabled={anyLoading}
+                    style={{
+                      width: '100%',
+                      background: p.popular ? 'var(--accent)' : 'var(--surface)',
+                      border: `1px solid ${p.popular ? 'var(--accent)' : 'var(--border)'}`,
+                      borderRadius: 7,
+                      padding: '8px', fontSize: 12, fontWeight: 700,
+                      cursor: anyLoading ? 'not-allowed' : 'pointer',
+                      color: p.popular ? '#000' : 'var(--text)',
+                      opacity: anyLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {isLoading ? t.billingRedirecting : `${t.upgrade} ${p.name}`}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </Section>
 
       {/* Social accounts */}
@@ -313,8 +451,8 @@ function SettingsPageInner() {
                   background: 'var(--bg)', border: '1px solid var(--border)',
                   borderRadius: 8, padding: '10px 14px',
                 }}>
-                  <span style={{ fontSize: 18, width: 28, textAlign: 'center' }}>
-                    {PLATFORM_ICONS[acc.platform as Platform] ?? '◉'}
+                  <span style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <ChannelIcon name={acc.platform} size={18} />
                   </span>
                   <div style={{ flex: 1 }}>
                     <p style={{ fontWeight: 600, fontSize: 14 }}>{acc.username}</p>
@@ -345,7 +483,7 @@ function SettingsPageInner() {
           {t.connectNew}
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-          {PLATFORMS.map((platform) => {
+          {CHANNELS.filter((ch) => ch.group === 'organic').map(({ value: platform, label: platformLabel }) => {
             const already = accounts.some((a) => a.platform === platform);
             return (
               <button
@@ -361,9 +499,11 @@ function SettingsPageInner() {
                   transition: 'border-color 0.15s',
                 }}
               >
-                <span style={{ fontWeight: 700, fontSize: 14 }}>{PLATFORM_ICONS[platform]}</span>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20 }}>
+                  <ChannelIcon name={platform} size={16} />
+                </span>
                 <span style={{ fontSize: 13, fontWeight: 500 }}>
-                  {connecting === platform ? t.redirecting : PLATFORM_LABELS[platform]}
+                  {connecting === platform ? t.redirecting : (CHANNEL_LABELS[platform as Channel] ?? platformLabel)}
                 </span>
                 {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--accent)' }}>✓</span>}
               </button>

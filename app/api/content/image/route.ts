@@ -4,7 +4,7 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { generateContentImage, BrandImageContext } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
-const VALID_SIZES    = new Set(['1024x1024', '1536x1024', '1024x1536', '1080x1080', '1080x1920', 'auto']);
+const VALID_SIZES    = new Set(['1024x1024', '1536x1024', '1024x1536', '1080x1080', '1024x1792', 'auto']);
 const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
 
 // ─── POST /api/content/image ──────────────────────────────────────────────────
@@ -14,7 +14,7 @@ const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
 //
 // Body:
 //   prompt     — required (image description)
-//   size?      — '1024x1024' (default) | '1536x1024' | '1024x1536' | '1080x1080' | '1080x1920' | 'auto'
+//   size?      — '1024x1024' (default) | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto'
 //   quality?   — 'medium' (default) | 'low' | 'high' | 'auto'
 //   itemId?    — if provided, updates the content item's image_url
 
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
   try {
     result = await generateContentImage({
       prompt:  sanitizedPrompt,
-      size:    (input.size    as '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1080x1920' | 'auto' | undefined) ?? '1024x1024',
+      size:    (input.size    as '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto' | undefined) ?? '1024x1024',
       quality: (input.quality as 'low' | 'medium' | 'high' | 'auto' | undefined) ?? 'medium',
       brand,
     });

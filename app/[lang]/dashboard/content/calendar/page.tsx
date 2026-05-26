@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
+import ChannelIcon from '@/components/ui/ChannelIcon';
 
 import esT from '@/locales/es/dashboard/calendar';
 import enT from '@/locales/en/dashboard/calendar';
@@ -55,15 +56,6 @@ const STATUS_LABELS_BASE: Record<PostStatus, { es: string; en: string }> = {
   published: { es: 'Publicado',  en: 'Published'  },
   failed:    { es: 'Fallido',    en: 'Failed'     },
   cancelled: { es: 'Cancelado',  en: 'Cancelled'  },
-};
-
-const PLATFORM_ICONS: Record<string, string> = {
-  linkedin:  'in',
-  instagram: '◉',
-  facebook:  'f',
-  twitter:   '𝕏',
-  tiktok:    '♪',
-  threads:   '@',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -235,7 +227,9 @@ export default function CalendarPage() {
               background: 'var(--surface)', border: '1px solid var(--border)',
               borderRadius: 8, padding: '8px 12px', fontSize: 13,
             }}>
-              <span style={{ fontWeight: 700, opacity: 0.7 }}>{PLATFORM_ICONS[acc.platform] ?? '◉'}</span>
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, opacity: 0.7 }}>
+                <ChannelIcon name={acc.platform} size={16} />
+              </span>
               <span>{acc.username}</span>
               <span style={{
                 fontSize: 11, padding: '1px 6px', borderRadius: 4,
@@ -276,7 +270,7 @@ export default function CalendarPage() {
                 <option value="">{t.selectAccount}</option>
                 {accounts.map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    {PLATFORM_ICONS[acc.platform] ?? '◉'} {acc.username}
+                    {acc.username}
                   </option>
                 ))}
               </select>
@@ -472,8 +466,8 @@ export default function CalendarPage() {
                         : '--:--'}
                     </p>
                   </div>
-                  <div style={{ flexShrink: 0 }}>
-                    <span style={{ fontSize: 20 }}>{PLATFORM_ICONS[post.kefy_social_accounts?.platform ?? ''] ?? '◉'}</span>
+                  <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24 }}>
+                    <ChannelIcon name={post.kefy_social_accounts?.platform ?? ''} size={20} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>

@@ -1,0 +1,120 @@
+description: "Kefy AI prompt evaluation"
+prompts:
+  - prompts/reel-script.prompt.md
+  - prompts/carousel.prompt.md
+  - prompts/post.prompt.md
+
+providers:
+  - id: anthropic:claude-opus-4-5
+    config:
+      temperature: 0.7
+      max_tokens: 2048
+  - id: openai:gpt-4o
+    config:
+      temperature: 0.7
+      max_tokens: 2048
+
+defaultTest:
+  assert:
+    - type: is-json
+      description: "Response must be valid JSON"
+
+tests:
+  # ── Reel script tests ───────────────────────────────────────────────────────
+  - description: "Reel script — Instagram español, 5 escenas"
+    prompts:
+      - prompts/reel-script.prompt.md
+    vars:
+      channel: instagram
+      sceneCount: "5"
+      language: Spanish
+      tone: "dynamic, inspiring"
+      brandCtx: "Brand: \"Kefy\" — \"Gestiona tu marca en minutos\"."
+      extraCtx: "Industry: SaaS / Marketing tools."
+    providers:
+      - anthropic:claude-opus-4-5
+    assert:
+      - type: is-json
+      - type: javascript
+        value: |
+          const d = JSON.parse(output);
+          return Array.isArray(d.scenes) && d.scenes.length === 5;
+        description: "Must have exactly 5 scenes"
+      - type: javascript
+        value: |
+          const d = JSON.parse(output);
+          return d.scenes.every(s => s.title && s.body && s.image_prompt && s.duration_seconds);
+        description: "Each scene must have required fields"
+      - type: javascript
+        value: |
+          const d = JSON.parse(output);
+          return Array.isArray(d.hashtags) && d.hashtags.length >= 5;
+        description: "Must have at least 5 hashtags"
+
+  - description: "Reel script — TikTok English, 3 scenes"
+    prompts:
+      - prompts/reel-script.prompt.md
+    vars:
+      channel: tiktok
+      sceneCount: "3"
+      language: English
+      tone: "casual, humorous"
+      brandCtx: ""
+      extraCtx: ""
+    providers:
+      - anthropic:claude-opus-4-5
+    assert:
+      - type: is-json
+      - type: javascript
+        value: |
+          const d = JSON.parse(output);
+          return Array.isArray(d.scenes) && d.scenes.length === 3;
+        description: "Must have exactly 3 scenes"
+
+  # ── Carousel tests ──────────────────────────────────────────────────────────
+  - description: "Carousel — LinkedIn español, 7 slides"
+    prompts:
+      - prompts/carousel.prompt.md
+    vars:
+      slideCount: "7"
+      channel: linkedin
+      language: Spanish
+      tone: "professional, authoritative"
+      brandCtx: ""
+      extraCtx: ""
+    providers:
+      - anthropic:claude-opus-4-5
+    assert:
+      - type: is-json
+      - type: javascript
+        value: |
+          const arr = JSON.parse(output);
+          return Array.isArray(arr) && arr.length === 7;
+        description: "Must return exactly 7 slides"
+      - type: javascript
+        value: |
+          const arr = JSON.parse(output);
+          return arr.every(s => s.slide_order && s.title && s.body && s.image_prompt);
+        description: "Each slide must have all required fields"
+
+  # ── Post tests ───────────────────────────────────────────────────────────────
+  - description: "Post — Instagram español"
+    prompts:
+      - prompts/post.prompt.md
+    vars:
+      channel: instagram
+      language: Spanish
+      tone: "casual, inspirational"
+      maxChars: "2200"
+      hashtagCount: "10"
+      brandCtx: ""
+      extraCtx: ""
+    providers:
+      - anthropic:claude-opus-4-5
+    assert:
+      - type: not-contains
+        value: "Here's"
+        description: "Should not include English meta-commentary"
+      - type: contains-any
+        values: ["#", "hashtag"]
+        description: "Must include hashtags"

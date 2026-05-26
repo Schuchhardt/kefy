@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import fs from 'fs';
+import path from 'path';
 
 // ─── Client singletons ────────────────────────────────────────────────────────
 
@@ -13,6 +15,26 @@ function getOpenAI(): OpenAI {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('Missing OPENAI_API_KEY env var');
   return new OpenAI({ apiKey: key });
+}
+
+// ─── Prompt loader ────────────────────────────────────────────────────────────
+
+/**
+ * Load a prompt template from `prompts/{name}.prompt.md`.
+ * Falls back to the provided inline string if the file is missing.
+ * Supports simple `{{variable}}` template substitution.
+ */
+function loadPrompt(name: string, vars: Record<string, string> = {}, fallback = ''): string {
+  try {
+    const filePath = path.join(process.cwd(), 'prompts', `${name}.prompt.md`);
+    let template   = fs.readFileSync(filePath, 'utf-8');
+    // Strip optional YAML frontmatter (--- ... ---)
+    template = template.replace(/^---[\s\S]*?---\s*/m, '');
+    // Substitute {{variable}} placeholders
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? `{{${key}}}`).trim();
+  } catch {
+    return fallback;
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -67,10 +89,11 @@ export interface BrandImageContext {
 }
 
 export interface GenerateImageOptions {
-  prompt:   string;
-  size?:    '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1080x1920' | 'auto';
-  quality?: 'low' | 'medium' | 'high' | 'auto';
-  brand?:   BrandImageContext;
+  prompt:           string;
+  size?:            '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto';
+  quality?:         'low' | 'medium' | 'high' | 'auto';
+  brand?:           BrandImageContext;
+  referenceImages?: string[];  // Public URLs of user-uploaded reference images
 }
 
 export interface GenerateImageResult {
@@ -125,7 +148,7 @@ function buildSystemPrompt(opts: GenerateTextOptions): string {
     ? `Brand: "${opts.brandName}"${opts.tagline ? ` — "${opts.tagline}"` : ''}.`
     : '';
 
-  return [
+  const inlinePrompt = [
     `You are an expert social media copywriter. Write content for ${opts.channel} in ${lang}.`,
     `Tone: ${tone}.`,
     `Max characters: ${limit.maxChars}.`,
@@ -136,6 +159,16 @@ function buildSystemPrompt(opts: GenerateTextOptions): string {
   ]
     .filter(Boolean)
     .join(' ');
+
+  return loadPrompt('post', {
+    channel:         opts.channel,
+    language:        lang,
+    tone,
+    maxChars:        String(limit.maxChars),
+    hashtagCount:    String(limit.hashtagCount),
+    brandCtx:        brandCtx,
+    extraCtx:        opts.extraCtx ?? '',
+  }, inlinePrompt);
 }
 
 // ─── Extract hashtags from generated text ────────────────────────────────────
@@ -232,28 +265,60 @@ export async function generateContentImage(
   if (opts.brand?.accentColor)     brandParts.push(`Accent color: ${opts.brand.accentColor}.`);
   if (opts.brand?.tone?.length)    brandParts.push(`Visual style: ${opts.brand.tone.join(', ')}.`);
 
-  const enrichedPrompt = brandParts.length
+  // Load enriched prompt from file if available
+  const imagePromptTemplate = loadPrompt('reel-image', {
+    prompt:    opts.prompt,
+    brandCtx:  brandParts.join(' '),
+  });
+
+  const enrichedPrompt = imagePromptTemplate || (brandParts.length
     ? `${opts.prompt}\n\nBrand guidelines: ${brandParts.join(' ')}`
-    : opts.prompt;
+    : opts.prompt);
 
   const size    = (opts.size === 'auto' || !opts.size) ? '1024x1024' : opts.size;
   const quality = opts.quality === 'auto' ? 'medium' : (opts.quality ?? 'medium');
 
-  const hasLogo = !!(opts.brand?.logoB64 && opts.brand?.logoMimeType);
+  const hasLogo       = !!(opts.brand?.logoB64 && opts.brand?.logoMimeType);
+  const hasReferences = !!(opts.referenceImages?.length);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const generateFn = client.images.generate.bind(client.images) as (params: any) => Promise<any>;
 
   let response: { data: Array<{ b64_json?: string; revised_prompt?: string }> };
 
-  if (hasLogo) {
-    const logoDataUrl = `data:${opts.brand!.logoMimeType!};base64,${opts.brand!.logoB64!}`;
+  if (hasLogo || hasReferences) {
+    // Multi-image input mode: logo + reference images guide the generation
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const inputParts: any[] = [];
+
+    // Reference images from user uploads (up to 3)
+    const refs = (opts.referenceImages ?? []).slice(0, 3);
+    for (const refUrl of refs) {
+      inputParts.push({ type: 'image_url', image_url: { url: refUrl } });
+    }
+
+    // Brand logo
+    if (hasLogo) {
+      const logoDataUrl = `data:${opts.brand!.logoMimeType!};base64,${opts.brand!.logoB64!}`;
+      inputParts.push({ type: 'image_url', image_url: { url: logoDataUrl } });
+    }
+
+    // Prompt text — include guidance to use the reference images
+    const referenceGuidance = refs.length > 0
+      ? ' Use the provided reference images to guide the visual style, composition, and mood.'
+      : '';
+    const logoGuidance = hasLogo
+      ? ' Incorporate the provided brand logo into the composition in a natural and visually balanced way.'
+      : '';
+
+    inputParts.push({
+      type: 'text',
+      text: enrichedPrompt + referenceGuidance + logoGuidance,
+    });
+
     response = await generateFn({
       model:         'gpt-image-2-2026-04-21',
-      input: [
-        { type: 'image_url', image_url: { url: logoDataUrl } },
-        { type: 'text',      text: enrichedPrompt + ' Incorporate the provided brand logo into the composition in a natural and visually balanced way.' },
-      ],
+      input:         inputParts,
       n:             1,
       size,
       quality,
@@ -293,7 +358,7 @@ export async function generateCarouselSlides(
     ? `Brand: "${opts.brandName}"${opts.tagline ? ` — "${opts.tagline}"` : ''}.`
     : '';
 
-  const system = [
+  const inlineCarouselSystem = [
     `You are an expert social media content strategist creating a ${slideCount}-slide carousel for ${opts.channel} in ${lang}.`,
     `Tone: ${tone}.`,
     brandCtx,
@@ -302,6 +367,15 @@ export async function generateCarouselSlides(
     `[{"slide_order":1,"title":"...","body":"...","image_prompt":"..."}]`,
     'title: short hook (max 60 chars). body: slide copy (max 150 chars). image_prompt: visual description for image generation (max 100 chars, English).',
   ].filter(Boolean).join(' ');
+
+  const system = loadPrompt('carousel', {
+    slideCount: String(slideCount),
+    channel:    opts.channel,
+    language:   lang,
+    tone,
+    brandCtx:   brandCtx,
+    extraCtx:   opts.extraCtx ?? '',
+  }, inlineCarouselSystem);
 
   const userMessage = `Create a ${slideCount}-slide carousel about: ${opts.topic}`;
 
@@ -376,7 +450,7 @@ export async function generateReelScript(
     ? `Brand: "${opts.brandName}"${opts.tagline ? ` — "${opts.tagline}"` : ''}.`
     : '';
 
-  const system = [
+  const inlineReelSystem = [
     `You are a short-form video director creating a ${sceneCount}-scene vertical reel for ${opts.channel} in ${lang}.`,
     `Tone: ${tone}.`,
     brandCtx,
@@ -386,6 +460,15 @@ export async function generateReelScript(
     'title: text overlay headline (max 60 chars). body: supporting copy shown on screen (max 120 chars). image_prompt: vivid English visual description for image generation (max 120 chars). duration_seconds: 2-5.',
     `hook: compelling ${lang} caption for the post description (max 150 chars). hashtags: 8 relevant tags.`,
   ].filter(Boolean).join(' ');
+
+  const system = loadPrompt('reel-script', {
+    sceneCount: String(sceneCount),
+    channel:    opts.channel,
+    language:   lang,
+    tone,
+    brandCtx:   brandCtx,
+    extraCtx:   opts.extraCtx ?? '',
+  }, inlineReelSystem);
 
   const userMessage = `Create a ${sceneCount}-scene vertical reel about: ${opts.topic}`;
 

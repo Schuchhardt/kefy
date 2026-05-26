@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { validateAssetUpload, STORAGE_BUCKET, type AssetType } from '@/lib/brand-kit';
 
 // ─── GET /api/brand-kit/assets ────────────────────────────────────────────────
@@ -35,9 +36,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 
-  const res = NextResponse.json({ assets: assets ?? [] });
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
+  return NextResponse.json({ assets: assets ?? [] });
 }
 
 // ─── POST /api/brand-kit/assets ───────────────────────────────────────────────

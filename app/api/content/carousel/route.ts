@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { generateCarouselSlides, generateContentImage, type ContentChannel } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
@@ -24,7 +25,7 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
   let body: unknown;
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
   // Fetch brand kit context
   const { data: brandKit } = await db
     .from('kefy_brand_kits')
-    .select('name, tagline, tone, industry')
+    .select('id, name, tagline, tone, industry')
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
@@ -117,6 +118,8 @@ export async function POST(req: NextRequest) {
     .from('kefy_content_items')
     .insert({
       org_id:       auth.orgId,
+      brand_id:     brand?.id ?? null,
+      brand_kit_id: brandKit?.id ?? null,
       created_by:   auth.userId,
       channel:      input.channel,
       content_type: 'carousel',
@@ -136,8 +139,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save carousel' }, { status: 500 });
   }
 
-  return NextResponse.json(
+  const res = NextResponse.json(
     { itemId: item.id, slides, model: generated.model, tokensUsed: generated.tokensUsed },
     { status: 201 },
   );
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }

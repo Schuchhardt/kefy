@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import { CHANNELS as ALL_CHANNELS, type Channel } from '@/lib/channels';
 
 import esT from '@/locales/es/dashboard/autopilot';
 import enT from '@/locales/en/dashboard/autopilot';
@@ -11,7 +12,6 @@ type Locale = keyof typeof T;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Channel   = 'linkedin' | 'instagram' | 'facebook' | 'twitter' | 'tiktok' | 'threads' | 'generic';
 type Frequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
 type AIModel   = 'claude' | 'gpt';
 
@@ -40,15 +40,7 @@ interface SocialAccount {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CHANNELS_BASE: { value: Channel; label: string }[] = [
-  { value: 'linkedin',  label: 'LinkedIn'  },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'facebook',  label: 'Facebook'  },
-  { value: 'twitter',   label: 'X/Twitter' },
-  { value: 'tiktok',    label: 'TikTok'    },
-  { value: 'threads',   label: 'Threads'   },
-  { value: 'generic',   label: ''          },
-];
+// CHANNELS_BASE replaced by ALL_CHANNELS from lib/channels
 
 const FREQUENCIES_BASE: { value: Frequency; label: string }[] = [
   { value: 'daily',    label: '' },
@@ -87,7 +79,7 @@ export default function AutopilotPage() {
   const { lang } = useParams<{ lang: string }>();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
   const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
-  const CHANNELS   = CHANNELS_BASE.map((c) => c.value === 'generic' ? { ...c, label: t.channelGeneric } : c);
+  const CHANNELS   = ALL_CHANNELS.map((c) => c.value === 'generic' ? { ...c, label: t.channelGeneric } : c);
   const FREQUENCIES = FREQUENCIES_BASE.map((f) => ({ ...f, label: t.frequencies[f.value] ?? f.value }));
   const DAYS = t.days;
   const [rules, setRules]       = useState<AutopilotRule[]>([]);

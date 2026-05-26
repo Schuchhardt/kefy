@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import ChannelIcon from '@/components/ui/ChannelIcon';
 
 import esInbox from '@/locales/es/dashboard/inbox';
 import enInbox from '@/locales/en/dashboard/inbox';
@@ -49,19 +50,6 @@ interface ReviewItem {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PLATFORM_ICONS: Record<Platform | 'unknown', string> = {
-  linkedin: 'in', instagram: '◉', facebook: 'f',
-  twitter: '𝕏', tiktok: '♪', threads: '@', unknown: '?',
-};
-
-const PLATFORMS_BASE: { value: Platform | 'all'; label: string }[] = [
-  { value: 'linkedin',  label: 'LinkedIn'  },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'facebook',  label: 'Facebook'  },
-  { value: 'twitter',   label: 'X/Twitter' },
-  { value: 'tiktok',    label: 'TikTok'    },
-  { value: 'threads',   label: 'Threads'   },
-];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -119,8 +107,13 @@ export default function ConversationsPage() {
   const te = TE[locale];
 
   const PLATFORMS: { value: Platform | 'all'; label: string }[] = [
-    { value: 'all', label: locale === 'es' ? 'Todos' : 'All' },
-    ...PLATFORMS_BASE,
+    { value: 'all',       label: locale === 'es' ? 'Todos'     : 'All'       },
+    { value: 'linkedin',  label: 'LinkedIn'  },
+    { value: 'instagram', label: 'Instagram' },
+    { value: 'facebook',  label: 'Facebook'  },
+    { value: 'twitter',   label: 'X/Twitter' },
+    { value: 'tiktok',    label: 'TikTok'    },
+    { value: 'threads',   label: 'Threads'   },
   ];
 
   const FILTER_LABELS: Record<FilterType, string> = {
@@ -453,7 +446,9 @@ export default function ConversationsPage() {
                         </span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{PLATFORM_ICONS[thread.platform] ?? '◉'}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', fontSize: 11, color: 'var(--muted)' }}>
+                          <ChannelIcon name={thread.platform} size={11} />
+                        </span>
                         <span style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden',
                           textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                           {thread.body.slice(0, 50)}{thread.body.length > 50 ? '…' : ''}
@@ -490,8 +485,8 @@ export default function ConversationsPage() {
                   </div>
                   <div>
                     <p style={{ fontSize: 14, fontWeight: 600 }}>{activeThread.sender_name ?? activeThread.sender_id}</p>
-                    <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
-                      {PLATFORM_ICONS[activeThread.platform] ?? '◉'} {activeThread.platform}
+                    <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <ChannelIcon name={activeThread.platform} size={12} /> {activeThread.platform}
                       {activeAccount && ` · @${activeAccount.username}`}
                     </p>
                   </div>
@@ -586,8 +581,8 @@ export default function ConversationsPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>{c.author_name ?? c.author_id}</span>
                       <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                        background: 'var(--border)', color: 'var(--muted)' }}>
-                        {PLATFORM_ICONS[c.platform] ?? '◉'} {c.platform}
+                        background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <ChannelIcon name={c.platform} size={10} /> {c.platform}
                       </span>
                       <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{timeAgo(c.created_at)}</span>
                     </div>
@@ -654,8 +649,8 @@ export default function ConversationsPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span style={{ fontWeight: 600, fontSize: 13 }}>{r.reviewer_name ?? r.reviewer_id}</span>
                     <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                      background: 'var(--border)', color: 'var(--muted)' }}>
-                      {PLATFORM_ICONS[r.platform] ?? '◉'} {r.platform}
+                      background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <ChannelIcon name={r.platform} size={10} /> {r.platform}
                     </span>
                     <span style={{ fontSize: 13, letterSpacing: 1 }}>
                       {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}

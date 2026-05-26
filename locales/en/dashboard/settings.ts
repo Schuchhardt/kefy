@@ -4,6 +4,7 @@ const en = {
   sectionProfile: 'Profile',
   sectionOrg: 'Organization',
   sectionSocial: 'Social accounts',
+  sectionBilling: 'Plan & billing',
   nameLabel: 'Name',
   emailLabel: 'Email',
   planLabel: 'Plan',
@@ -19,6 +20,24 @@ const en = {
   oauthError: 'Error generating OAuth URL',
   unknownError: 'Unknown error',
   expires: 'expires',
+  // Billing
+  currentPlanBadge: 'Current plan',
+  upgrade: 'Upgrade to',
+  manage: 'Manage subscription',
+  billingSuccess: '✓ Plan updated. Thank you for subscribing!',
+  billingCanceled: 'Payment process was canceled.',
+  billingError: 'Could not start the payment process.',
+  billingRedirecting: 'Redirecting to Stripe...',
+  planStarterName: 'Starter',
+  planProName: 'Pro',
+  planBusinessName: 'Business',
+  planStarterPrice: '$19',
+  planProPrice: '$69',
+  planBusinessPrice: '$199',
+  planPer: '/ mo',
+  planStarterFeatures: ['1 brand', '3 social connections', '150 AI credits / mo', 'Calendar + scheduling', 'Basic analytics'],
+  planProFeatures: ['5 brands', '20 social connections', '500 AI credits / mo', 'All channels', 'Advanced automations', 'Autopilot mode'],
+  planBusinessFeatures: ['Unlimited brands', 'Unlimited connections', '2000 AI credits / mo', 'Everything in Pro', 'Priority support', 'API access'],
 };
 
 export default en;

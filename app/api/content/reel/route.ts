@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { generateReelScript, generateContentImage, type ContentChannel } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
@@ -20,11 +21,14 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 //   language?        — 'es' (default) | 'en'
 //   generate_images? — boolean (default true)
 //   image_quality?   — 'low' | 'medium' (default) | 'high'
-//   save?            — persist to DB (default true)
+//   save?                  — persist to DB (default true)
+//   reference_image_urls?  — public URLs of reference images to guide AI image generation
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
 
   let body: unknown;
   try { body = await req.json(); } catch {
@@ -60,25 +64,9 @@ export async function POST(req: NextRequest) {
   // Fetch brand kit context
   const { data: brandKit } = await db
     .from('kefy_brand_kits')
-    .select('name, tagline, tone, industry, primary_color, secondary_color, accent_color, font_heading, logo_url')
+    .select('id, name, tagline, tone, industry, primary_color, secondary_color, accent_color, font_heading, logo_url')
     .eq('org_id', auth.orgId)
     .maybeSingle();
-
-  // Fetch logo as base64 for brand-aware image generation
-  let logoB64: string | undefined;
-  let logoMimeType: string | undefined;
-  if (brandKit?.logo_url) {
-    try {
-      const logoRes = await fetch(brandKit.logo_url);
-      if (logoRes.ok) {
-        const contentType = logoRes.headers.get('content-type') ?? 'image/png';
-        logoB64      = Buffer.from(await logoRes.arrayBuffer()).toString('base64');
-        logoMimeType = contentType.split(';')[0]?.trim();
-      }
-    } catch {
-      // logo fetch is non-critical
-    }
-  }
 
   // 1. Generate reel script with Claude
   let generated;
@@ -105,9 +93,12 @@ export async function POST(req: NextRequest) {
       if (!genImages) return { ...scene, image_url: undefined };
 
       try {
+        // For reel backgrounds: do NOT pass logo (it's overlaid by Remotion, not baked in).
+        // Do NOT pass referenceImages either — those are brand references, not backgrounds.
+        const bgPrompt = `Background scene for a reel: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks, NO signs with writing, NO UI overlays. Pure cinematic background scene only.`;
         const imgResult = await generateContentImage({
-          prompt:  scene.image_prompt,
-          size:    '1080x1920',
+          prompt:  bgPrompt,
+          size:    '1024x1792',
           quality: imageQuality,
           brand: {
             name:           brandKit?.name           ?? undefined,
@@ -115,8 +106,7 @@ export async function POST(req: NextRequest) {
             secondaryColor: brandKit?.secondary_color ?? undefined,
             accentColor:    brandKit?.accent_color   ?? undefined,
             tone:           brandKit?.tone           ?? undefined,
-            logoB64,
-            logoMimeType,
+            // NO logoB64/logoMimeType — logo is overlaid by Remotion, must not be baked into background
           },
         });
         const imageUrl = await uploadBase64Image(
@@ -150,6 +140,8 @@ export async function POST(req: NextRequest) {
     .from('kefy_content_items')
     .insert({
       org_id:       auth.orgId,
+      brand_id:     brand?.id ?? null,
+      brand_kit_id: brandKit?.id ?? null,
       created_by:   auth.userId,
       channel:      input.channel,
       content_type: 'reel',
@@ -169,7 +161,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save reel' }, { status: 500 });
   }
 
-  return NextResponse.json(
+  const res = NextResponse.json(
     {
       itemId:     item.id,
       scenes,
@@ -180,4 +172,6 @@ export async function POST(req: NextRequest) {
     },
     { status: 201 },
   );
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }

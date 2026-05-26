@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
+import ChannelIcon    from '@/components/ui/ChannelIcon';
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 interface Totals {
@@ -31,11 +32,6 @@ function fmt(n: number) {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
-
-const PLATFORM_ICONS: Record<string, string> = {
-  linkedin: 'in', instagram: '◉', facebook: 'f',
-  twitter: '𝕏', tiktok: '♪', threads: '@',
-};
 
 const T = {
   es: {
@@ -277,9 +273,9 @@ export default function DashboardPage() {
                 <span style={{
                   width: 28, height: 28, borderRadius: 6, flexShrink: 0,
                   background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 11, fontWeight: 600, color: 'var(--muted)',
+                  color: 'var(--muted)',
                 }}>
-                  {PLATFORM_ICONS[item.platform] ?? item.platform?.slice(0, 2) ?? '?'}
+                  <ChannelIcon name={item.platform} size={14} />
                 </span>
                 <p style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)', margin: 0 }}>
                   {item.body?.slice(0, 80) ?? '—'}
