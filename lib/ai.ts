@@ -134,7 +134,9 @@ const CHANNEL_LIMITS: Record<ContentChannel, { maxChars: number; hashtagCount: n
   twitter:   { maxChars: 280,  hashtagCount: 3 },
   tiktok:    { maxChars: 2200, hashtagCount: 10 },
   threads:   { maxChars: 500,  hashtagCount: 5 },
-  generic:   { maxChars: 3000, hashtagCount: 5 },
+  // 'generic' is the multi-channel sweet spot: works on LinkedIn/IG/FB/TikTok
+  // out of the box; Zernio truncates/adapts per platform at publish time.
+  generic:   { maxChars: 2000, hashtagCount: 8 },
 };
 
 // ─── System prompt builder ────────────────────────────────────────────────────
@@ -499,6 +501,107 @@ export async function generateReelScript(
     scenes:     parsed.scenes,
     hook:       parsed.hook ?? '',
     hashtags:   parsed.hashtags ?? [],
+    model,
+    tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+  };
+}
+
+// ─── Content recommendations (AI fallback when no strategy) ──────────────────
+
+export type RecommendedContentType = 'post' | 'carousel' | 'reel';
+
+export interface ContentRecommendation {
+  topic:           string;
+  content_type:    RecommendedContentType;
+  rationale_short: string;
+}
+
+export interface RecommendBrandContext {
+  name?:            string;
+  tagline?:         string;
+  industry?:        string;
+  niche?:           string;
+  target_audience?: string;
+  mission?:         string;
+  differentiators?: string[];
+  tone?:            string[];
+  language?:        'es' | 'en';
+}
+
+export interface GenerateRecommendationsResult {
+  recommendations: ContentRecommendation[];
+  model:           string;
+  tokensUsed:      number;
+}
+
+/**
+ * Generate 3 channel-agnostic content recommendations from Brand Kit context.
+ * Used when the org has no active strategy and no industry match in the
+ * strategy catalog. Output drives the "✦ Recomiéndame contenido" chips.
+ */
+export async function generateContentRecommendations(
+  ctx: RecommendBrandContext,
+  count = 3,
+): Promise<GenerateRecommendationsResult> {
+  const lang = ctx.language === 'en' ? 'English' : 'Spanish';
+  const brandLines = [
+    ctx.name            ? `Brand: "${ctx.name}".` : '',
+    ctx.tagline         ? `Tagline: "${ctx.tagline}".` : '',
+    ctx.industry        ? `Industry: ${ctx.industry}.` : '',
+    ctx.niche           ? `Niche: ${ctx.niche}.` : '',
+    ctx.target_audience ? `Target audience: ${ctx.target_audience}.` : '',
+    ctx.mission         ? `Mission: ${ctx.mission}.` : '',
+    ctx.differentiators?.length ? `Differentiators: ${ctx.differentiators.join('; ')}.` : '',
+    ctx.tone?.length    ? `Voice tone: ${ctx.tone.join(', ')}.` : '',
+  ].filter(Boolean).join(' ');
+
+  const inlineSystem = [
+    `You are a senior social media strategist. Suggest ${count} fresh, high-performing channel-agnostic content ideas in ${lang} for the brand below.`,
+    brandLines,
+    'Return ONLY a valid JSON array (no markdown fences) with this exact shape:',
+    `[{"topic":"<concrete content idea, 1-2 sentences, max 240 chars>","content_type":"post"|"carousel"|"reel","rationale_short":"<why this idea fits the brand, max 100 chars>"}]`,
+    'Mix the 3 content_type values across the 3 items when possible. Avoid generic motivational fluff — be specific to the brand.',
+  ].filter(Boolean).join(' ');
+
+  const system = loadPrompt('recommend', {
+    count:    String(count),
+    language: lang,
+    brand:    brandLines,
+  }, inlineSystem);
+
+  const client = getAnthropic();
+  const model  = 'claude-opus-4-5';
+
+  const response = await client.messages.create({
+    model,
+    max_tokens: 1024,
+    system,
+    messages: [{ role: 'user', content: `Give me ${count} content ideas.` }],
+  });
+
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
+
+  let parsed: ContentRecommendation[];
+  try {
+    parsed = JSON.parse(stripJsonFences(raw)) as ContentRecommendation[];
+    if (!Array.isArray(parsed)) throw new Error('Not an array');
+  } catch {
+    throw new Error(`Claude returned invalid recommendations JSON: ${raw.slice(0, 200)}`);
+  }
+
+  // Sanitize + clamp
+  const valid: RecommendedContentType[] = ['post', 'carousel', 'reel'];
+  const recommendations = parsed.slice(0, count).map((r) => ({
+    topic:           String(r.topic ?? '').slice(0, 280),
+    content_type:    valid.includes(r.content_type) ? r.content_type : ('post' as RecommendedContentType),
+    rationale_short: String(r.rationale_short ?? '').slice(0, 140),
+  })).filter((r) => r.topic.length > 0);
+
+  return {
+    recommendations,
     model,
     tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
   };

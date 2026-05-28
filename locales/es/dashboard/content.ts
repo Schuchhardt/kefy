@@ -62,6 +62,22 @@ const es = {
   errorGenerate: 'Error al generar',
   errorUnknown: 'Error desconocido',
   errorGenerateImage: 'Error al generar imagen',
+  // ── Recommendations ──
+  recommendBlockTitle: '✨ Recomendación inteligente',
+  recommendBlockSubtitle: 'Ideas listas para publicar, alineadas a tu estrategia y marca.',
+  recommendBtn: '✨ Recomiéndame contenido',
+  recommendLoading: 'Buscando ideas…',
+  recommendMoreBtn: '↻ Recomendar otro contenido',
+  recommendError: 'No pudimos generar recomendaciones. Intenta de nuevo.',
+  recommendNoneTitle: 'No hay recomendaciones disponibles',
+  recommendUseBtn: 'Usar esta idea',
+  recommendSourceStrategy: (framework: string, kpi: string, week: number, total: number) =>
+    `Basado en tu estrategia «${framework}» — Semana ${week} de ${total} · KPI: ${kpi}`,
+  recommendSourceIndustry: (industry: string) =>
+    `Basado en tu industria (${industry}) — todavía no has elegido una estrategia.`,
+  recommendSourceAI: 'Generado por IA a partir de tu Brand Kit.',
+  weekBadge: (week: number, post: number) => `Semana ${week} · Post ${post}`,
+  recCardCtaHint: 'Click para autocompletar el formulario',
 };
 
 export default es;

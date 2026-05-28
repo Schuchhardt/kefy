@@ -18,18 +18,20 @@ const MuxPlayer = dynamic(() => import('@mux/mux-player-react'), {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface MuxReelPlayerProps {
-  itemId:         string;
-  scenes:         ReelSceneProps[];
-  muxPlaybackId?: string | null;
-  renderStatus?:  'not_rendered' | 'rendering' | 'ready' | 'error' | null;
-  brandName?:     string;
-  accentColor?:   string;
-  primaryColor?:  string;
-  fontHeading?:   string;
-  logoUrl?:       string;
-  height?:        number;
-  onRenderStart?: (itemId: string) => void;
-  onRenderDone?:  (itemId: string, playbackId: string) => void;
+  itemId:             string;
+  scenes:             ReelSceneProps[];
+  muxPlaybackId?:     string | null;
+  renderStatus?:      'not_rendered' | 'rendering' | 'ready' | 'error' | null;
+  brandName?:         string;
+  accentColor?:       string;
+  primaryColor?:      string;
+  fontHeading?:       string;
+  logoUrl?:           string;
+  height?:            number;
+  hideRenderButton?:  boolean;
+  autoPlay?:          boolean;
+  onRenderStart?:     (itemId: string) => void;
+  onRenderDone?:      (itemId: string, playbackId: string) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,6 +60,8 @@ export function MuxReelPlayer({
   fontHeading,
   logoUrl,
   height = 480,
+  hideRenderButton = false,
+  autoPlay = false,
   onRenderStart,
   onRenderDone,
 }: MuxReelPlayerProps) {
@@ -149,6 +153,8 @@ export function MuxReelPlayer({
             style={{ width: '100%', height: '100%' }}
             accentColor={accentColor}
             thumbnailTime={1}
+            muted={autoPlay}
+            autoPlay={autoPlay}
           />
         </div>
         <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -216,28 +222,32 @@ export function MuxReelPlayer({
         <p style={{ color: '#ff6b6b', fontSize: 12, marginTop: 8 }}>{renderError}</p>
       )}
 
-      <button
-        onClick={handleRender}
-        disabled={isRendering}
-        style={{
-          width: '100%', marginTop: 14,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          background: `linear-gradient(135deg, ${accentColor}18, ${accentColor}10)`,
-          border: `1px solid ${accentColor}60`,
-          color: accentColor,
-          borderRadius: 10, padding: '12px 0',
-          fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          transition: 'opacity 0.15s',
-          opacity: isRendering ? 0.6 : 1,
-        }}
-      >
-        <span style={{ fontSize: 16 }}>▶</span>
-        Renderizar y subir a Mux
-      </button>
+      {!hideRenderButton && (
+        <>
+          <button
+            onClick={handleRender}
+            disabled={isRendering}
+            style={{
+              width: '100%', marginTop: 14,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              background: `linear-gradient(135deg, ${accentColor}18, ${accentColor}10)`,
+              border: `1px solid ${accentColor}60`,
+              color: accentColor,
+              borderRadius: 10, padding: '12px 0',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              transition: 'opacity 0.15s',
+              opacity: isRendering ? 0.6 : 1,
+            }}
+          >
+            <span style={{ fontSize: 16 }}>▶</span>
+            Renderizar y subir a Mux
+          </button>
 
-      <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', marginTop: 6 }}>
-        Genera el MP4 final en alta calidad y lo aloja en Mux
-      </p>
+          <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', marginTop: 6 }}>
+            Genera el MP4 final en alta calidad y lo aloja en Mux
+          </p>
+        </>
+      )}
     </div>
   );
 }

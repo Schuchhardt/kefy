@@ -9,6 +9,16 @@ Zernio es el servicio de publicación en redes sociales que Kefy usa como capa d
 
 ---
 
+## Drafts channel-agnostic (`channel = 'generic'`)
+
+En el flujo de creación de contenido (`/[lang]/dashboard/content/create`) el usuario **ya no elige canal**. Todos los drafts se guardan con `kefy_content_items.channel = 'generic'` y Zernio adapta el copy/aspect-ratio a cada plataforma en el momento de publicar (truncado para X, hashtags y captions para Instagram, etc.).
+
+- Límites usados al generar: `maxChars: 2000`, `hashtagCount: 8` (ver `CHANNEL_LIMITS.generic` en `lib/ai.ts`).
+- El prompt `prompts/post.prompt.md` instruye al modelo a front-loadear el hook en los primeros 240 caracteres para que sobreviva al límite de X.
+- El campo `channel` en los endpoints `POST /api/content/generate|carousel|reel` es **opcional**; si se omite, el backend usa `'generic'` automáticamente.
+
+---
+
 ## Plataformas soportadas
 
 | Identificador    | Plataforma       | Conexión        |

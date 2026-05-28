@@ -37,11 +37,16 @@ export async function POST(req: NextRequest) {
 
   const input = body as Record<string, unknown>;
 
-  if (!input.channel || !VALID_CHANNELS.has(input.channel as ContentChannel)) {
-    return NextResponse.json(
-      { error: `channel must be one of: ${[...VALID_CHANNELS].join(', ')}` },
-      { status: 422 },
-    );
+  // channel is optional — defaults to 'generic' (Zernio adapts per platform)
+  let channel: ContentChannel = 'generic';
+  if (input.channel !== undefined && input.channel !== null && input.channel !== '') {
+    if (!VALID_CHANNELS.has(input.channel as ContentChannel)) {
+      return NextResponse.json(
+        { error: `channel must be one of: ${[...VALID_CHANNELS].join(', ')}` },
+        { status: 422 },
+      );
+    }
+    channel = input.channel as ContentChannel;
   }
   if (typeof input.topic !== 'string' || !input.topic.trim()) {
     return NextResponse.json({ error: 'topic is required' }, { status: 422 });
@@ -49,7 +54,8 @@ export async function POST(req: NextRequest) {
 
   const rawCount    = typeof input.slide_count === 'number' ? input.slide_count : 5;
   const slideCount  = Math.min(10, Math.max(3, Math.floor(rawCount)));
-  const genImages   = input.generate_images === true;
+  // Images now default to TRUE (always-on policy for AI-recommended content)
+  const genImages   = input.generate_images !== false;
   const imageQuality = (['low', 'medium', 'high'] as const)
     .includes(input.image_quality as 'low' | 'medium' | 'high')
     ? (input.image_quality as 'low' | 'medium' | 'high')
@@ -68,7 +74,7 @@ export async function POST(req: NextRequest) {
   let generated;
   try {
     generated = await generateCarouselSlides({
-      channel:     input.channel as ContentChannel,
+      channel,
       topic:       (input.topic as string).trim().slice(0, 500),
       slide_count: slideCount,
       language:    input.language === 'en' ? 'en' : 'es',
@@ -121,7 +127,7 @@ export async function POST(req: NextRequest) {
       brand_id:     brand?.id ?? null,
       brand_kit_id: brandKit?.id ?? null,
       created_by:   auth.userId,
-      channel:      input.channel,
+      channel,
       content_type: 'carousel',
       title:        firstSlide?.title ?? null,
       body:         firstSlide?.body  ?? null,

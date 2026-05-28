@@ -36,12 +36,17 @@ export async function POST(req: NextRequest) {
 
   const input = body as Record<string, unknown>;
 
-  // Validate
-  if (!input.channel || !VALID_CHANNELS.has(input.channel as ContentChannel)) {
-    return NextResponse.json(
-      { error: `channel must be one of: ${[...VALID_CHANNELS].join(', ')}` },
-      { status: 422 },
-    );
+  // Validate — channel is optional; defaults to 'generic' (multi-channel).
+  // Zernio adapts per platform at publish time.
+  let channel: ContentChannel = 'generic';
+  if (input.channel !== undefined && input.channel !== null && input.channel !== '') {
+    if (!VALID_CHANNELS.has(input.channel as ContentChannel)) {
+      return NextResponse.json(
+        { error: `channel must be one of: ${[...VALID_CHANNELS].join(', ')}` },
+        { status: 422 },
+      );
+    }
+    channel = input.channel as ContentChannel;
   }
   if (typeof input.topic !== 'string' || !input.topic.trim()) {
     return NextResponse.json({ error: 'topic is required' }, { status: 422 });
@@ -65,7 +70,7 @@ export async function POST(req: NextRequest) {
   let result;
   try {
     result = await generateContentText({
-      channel:   input.channel as ContentChannel,
+      channel,
       topic:     (input.topic as string).trim().slice(0, 500),
       model:     (input.model as AIModel | undefined) ?? 'claude',
       language:  input.language === 'en' ? 'en' : 'es',
@@ -109,7 +114,7 @@ export async function POST(req: NextRequest) {
         brand_id:     brand?.id ?? null,
         brand_kit_id: brandKit?.id ?? null,
         created_by:   auth.userId,
-        channel:      input.channel,
+        channel,
         body:         result.body,
         hashtags:     result.hashtags,
         status:       'draft',
