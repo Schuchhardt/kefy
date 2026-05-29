@@ -1,15 +1,22 @@
 import Stripe from 'stripe';
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY is not set');
+let stripe: Stripe | null = null;
+
+export function getStripeClient(): Stripe {
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) {
+    throw new Error('STRIPE_SECRET_KEY is not set');
+  }
+
+  if (!stripe) {
+    stripe = new Stripe(secret, {
+      apiVersion: '2026-04-22.dahlia',
+      typescript: true,
+    });
+  }
+
+  return stripe;
 }
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2026-04-22.dahlia',
-  typescript: true,
-});
-
-export default stripe;
 
 // ─── Plan → Price ID map ──────────────────────────────────────────────────────
 

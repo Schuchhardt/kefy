@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
 import { createSupabaseServer } from '@/lib/supabase';
-import stripe, { getPriceId, type BillingPlan } from '@/lib/stripe';
+import { getPriceId, getStripeClient, type BillingPlan } from '@/lib/stripe';
 import { z } from 'zod';
+import type Stripe from 'stripe';
 
 const BodySchema = z.object({
   plan: z.enum(['starter', 'pro', 'business']),
@@ -13,6 +14,15 @@ const BodySchema = z.object({
 // Returns { url } — the frontend redirects the user there.
 
 export async function POST(req: NextRequest) {
+  let stripe: Stripe;
+  try {
+    stripe = getStripeClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Stripe client not configured';
+    console.error('[billing/checkout] stripe config error:', msg);
+    return NextResponse.json({ error: 'Billing service not configured' }, { status: 503 });
+  }
+
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
