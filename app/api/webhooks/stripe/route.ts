@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import stripe from '@/lib/stripe';
+import { getStripeClient } from '@/lib/stripe';
 import { createSupabaseServer } from '@/lib/supabase';
 import type Stripe from 'stripe';
 
 // ─── POST /api/webhooks/stripe ────────────────────────────────────────────────
 // Receives and processes Stripe webhook events.
 // Syncs subscription state into kefy_subscriptions + kefy_organizations.plan
-
-// Next.js App Router: disable body parsing so we can read the raw bytes for
-// Stripe signature verification.
-export const config = { api: { bodyParser: false } };
 
 type Plan = 'starter' | 'pro' | 'business';
 
@@ -113,6 +109,15 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
 }
 
 export async function POST(req: NextRequest) {
+  let stripe: Stripe;
+  try {
+    stripe = getStripeClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Stripe client not configured';
+    console.error('[stripe webhook] stripe config error:', msg);
+    return NextResponse.json({ error: 'Stripe service not configured' }, { status: 503 });
+  }
+
   const sig = req.headers.get('stripe-signature');
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 

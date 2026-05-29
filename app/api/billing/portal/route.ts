@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
 import { createSupabaseServer } from '@/lib/supabase';
-import stripe from '@/lib/stripe';
+import { getStripeClient } from '@/lib/stripe';
+import type Stripe from 'stripe';
 
 // ─── POST /api/billing/portal ─────────────────────────────────────────────────
 // Creates a Stripe Customer Portal session for managing an existing subscription.
 // Returns { url } — the frontend redirects the user there.
 
 export async function POST(req: NextRequest) {
+  let stripe: Stripe;
+  try {
+    stripe = getStripeClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Stripe client not configured';
+    console.error('[billing/portal] stripe config error:', msg);
+    return NextResponse.json({ error: 'Billing service not configured' }, { status: 503 });
+  }
+
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
