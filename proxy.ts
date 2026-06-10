@@ -7,6 +7,8 @@ const ACCESS_COOKIE = 'kefy_access';
 const PUBLIC_API_PATHS = [
   '/api/auth/register',
   '/api/auth/login',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
   '/api/auth/refresh',
   '/api/waitlist',
 ];
