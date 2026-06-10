@@ -1,124 +1,22 @@
 'use client';
 
-import { useState, FormEvent, Suspense, useEffect, useRef } from 'react';
+import { useState, FormEvent, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useRouter, useSearchParams } from 'next/navigation';
 import { useParams } from 'next/navigation';
 
 const VIDEO_SRC =
   'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260328_065045_c44942da-53c6-4804-b734-f9e07fc22e08.mp4';
 const FADE = 0.5;
 
-function LoginForm() {
-  const router = useRouter();
-  const { lang } = useParams<{ lang: string }>();
-  const searchParams = useSearchParams();
-  const expired = searchParams.get('expired');
-  const reset   = searchParams.get('reset');
-
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? 'Error al iniciar sesión');
-        return;
-      }
-
-      router.push(`/${lang}/dashboard`);
-    } catch {
-      setError('Error de red, intenta de nuevo');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <>
-      {reset && (
-        <div style={{ background: 'rgba(198,255,75,0.08)', border: '1px solid rgba(198,255,75,0.25)', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: 'var(--accent)' }}>
-          ✓ Contraseña actualizada. Ya puedes iniciar sesión.
-        </div>
-      )}
-
-      {expired && (
-        <div style={{ background: 'rgba(255,140,66,0.1)', border: '1px solid rgba(255,140,66,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: 'var(--warm)' }}>
-          Tu sesión expiró. Vuelve a iniciar sesión.
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
-            Email
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            placeholder="tu@email.com"
-            style={inputStyle}
-          />
-        </div>
-
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>
-              Contraseña
-            </label>
-            <Link href={`/${lang}/forgot-password`} style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500, textDecoration: 'none' }}>
-              ¿Olvidaste tu contraseña?
-            </Link>
-          </div>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            placeholder="••••••••"
-            style={inputStyle}
-          />
-        </div>
-
-        {error && (
-          <p style={{ color: '#ff6b6b', fontSize: 13, background: 'rgba(255,107,107,0.08)', padding: '8px 12px', borderRadius: 6 }}>
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading}
-          style={buttonStyle(loading)}
-        >
-          {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
-        </button>
-      </form>
-    </>
-  );
-}
-
-export default function LoginPage() {
+export default function ForgotPasswordPage() {
   const { lang } = useParams<{ lang: string }>();
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const [email, setEmail]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent]       = useState(false);
+  const [error, setError]     = useState('');
 
   useEffect(() => {
     const video = videoRef.current;
@@ -145,6 +43,29 @@ export default function LoginPage() {
     return () => { cancelAnimationFrame(rafId); video.removeEventListener('ended', handleEnded); };
   }, []);
 
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, lang }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? 'Error al enviar el correo');
+        return;
+      }
+      setSent(true);
+    } catch {
+      setError('Error de red, intenta de nuevo');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
       {/* Background video */}
@@ -163,7 +84,6 @@ export default function LoginPage() {
       {/* Blur glow behind card */}
       <div aria-hidden="true" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 700, height: 500, background: 'rgba(3,7,18,0.85)', filter: 'blur(72px)', pointerEvents: 'none', zIndex: 1 }} />
 
-      {/* Content */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, position: 'relative', zIndex: 2 }}>
         <div style={{ width: '100%', maxWidth: 400 }}>
           {/* Logo */}
@@ -172,23 +92,67 @@ export default function LoginPage() {
               <Image src="/apple-touch-icon.png" alt="Kefy" width={28} height={28} />
               <span>Kef<span className="y">y</span></span>
             </Link>
-            <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 12 }}>Inicia sesión en tu cuenta</p>
+            <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 12 }}>Recuperar contraseña</p>
           </div>
 
-          <Suspense>
-            <LoginForm />
-          </Suspense>
+          {sent ? (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(198,255,75,0.1)', border: '1px solid rgba(198,255,75,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 24 }}>
+                ✉️
+              </div>
+              <p style={{ color: 'var(--text)', fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+                Revisa tu correo
+              </p>
+              <p style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+                Si existe una cuenta con ese correo, recibirás un enlace para crear una nueva contraseña. El enlace expira en 1 hora.
+              </p>
+              <Link href={`/${lang}/login`} style={{ color: 'var(--accent)', fontSize: 14, fontWeight: 500 }}>
+                Volver al inicio de sesión
+              </Link>
+            </div>
+          ) : (
+            <>
+              <p style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.6, marginBottom: 24, textAlign: 'center' }}>
+                Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.
+              </p>
 
-          <p style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 13, marginTop: 24 }}>
-            ¿No tienes cuenta?{' '}
-            <Link href={`/${lang}/register`} style={{ color: 'var(--accent)', fontWeight: 500 }}>
-              Regístrate gratis
-            </Link>
-          </p>
+              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                    placeholder="tu@email.com"
+                    style={inputStyle}
+                  />
+                </div>
+
+                {error && (
+                  <p style={{ color: '#ff6b6b', fontSize: 13, background: 'rgba(255,107,107,0.08)', padding: '8px 12px', borderRadius: 6 }}>
+                    {error}
+                  </p>
+                )}
+
+                <button type="submit" disabled={loading} style={buttonStyle(loading)}>
+                  {loading ? 'Enviando...' : 'Enviar instrucciones'}
+                </button>
+              </form>
+
+              <p style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 13, marginTop: 24 }}>
+                <Link href={`/${lang}/login`} style={{ color: 'var(--accent)', fontWeight: 500 }}>
+                  Volver al inicio de sesión
+                </Link>
+              </p>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Footer legal */}
       <footer style={{ position: 'relative', zIndex: 2, borderTop: '1px solid rgba(255,255,255,0.07)', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, flexWrap: 'wrap' }}>
         <Link href={`/${lang}/terminos`} style={{ color: 'var(--muted)', fontSize: 12, textDecoration: 'none' }}>
           Términos de servicio
@@ -222,11 +186,10 @@ const buttonStyle = (disabled: boolean): React.CSSProperties => ({
   color: disabled ? 'var(--muted)' : '#0A0A0C',
   border: 'none',
   borderRadius: 8,
-  padding: '12px',
-  fontWeight: 700,
+  padding: '11px 20px',
   fontSize: 15,
+  fontWeight: 600,
   cursor: disabled ? 'not-allowed' : 'pointer',
-  transition: 'background 0.15s',
   width: '100%',
-  fontFamily: 'var(--font-syne)',
+  transition: 'opacity 0.15s',
 });

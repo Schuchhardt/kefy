@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent, Suspense, useEffect, useRef } from 'react';
+import { useState, FormEvent, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -10,37 +10,59 @@ const VIDEO_SRC =
   'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260328_065045_c44942da-53c6-4804-b734-f9e07fc22e08.mp4';
 const FADE = 0.5;
 
-function LoginForm() {
+function ResetPasswordForm() {
   const router = useRouter();
   const { lang } = useParams<{ lang: string }>();
   const searchParams = useSearchParams();
-  const expired = searchParams.get('expired');
-  const reset   = searchParams.get('reset');
+  const token = searchParams.get('token') ?? '';
 
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [password, setPassword]   = useState('');
+  const [confirm, setConfirm]     = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+
+  // Invalid / missing token
+  if (!token) {
+    return (
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ color: '#ff6b6b', fontSize: 14, marginBottom: 20 }}>
+          El enlace de recuperación es inválido o ha expirado.
+        </p>
+        <Link href={`/${lang}/forgot-password`} style={{ color: 'var(--accent)', fontSize: 14, fontWeight: 500 }}>
+          Solicitar nuevo enlace
+        </Link>
+      </div>
+    );
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    setLoading(true);
 
+    if (password.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+    if (password !== confirm) {
+      setError('Las contraseñas no coinciden');
+      return;
+    }
+
+    setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ token, password }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? 'Error al iniciar sesión');
+        setError(data.error ?? 'Error al restablecer la contraseña');
         return;
       }
 
-      router.push(`/${lang}/dashboard`);
+      router.push(`/${lang}/login?reset=true`);
     } catch {
       setError('Error de red, intenta de nuevo');
     } finally {
@@ -49,74 +71,51 @@ function LoginForm() {
   }
 
   return (
-    <>
-      {reset && (
-        <div style={{ background: 'rgba(198,255,75,0.08)', border: '1px solid rgba(198,255,75,0.25)', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: 'var(--accent)' }}>
-          ✓ Contraseña actualizada. Ya puedes iniciar sesión.
-        </div>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div>
+        <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
+          Nueva contraseña
+        </label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          autoComplete="new-password"
+          placeholder="Mínimo 8 caracteres"
+          style={inputStyle}
+        />
+      </div>
+
+      <div>
+        <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
+          Confirmar contraseña
+        </label>
+        <input
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          required
+          autoComplete="new-password"
+          placeholder="Repite la contraseña"
+          style={inputStyle}
+        />
+      </div>
+
+      {error && (
+        <p style={{ color: '#ff6b6b', fontSize: 13, background: 'rgba(255,107,107,0.08)', padding: '8px 12px', borderRadius: 6 }}>
+          {error}
+        </p>
       )}
 
-      {expired && (
-        <div style={{ background: 'rgba(255,140,66,0.1)', border: '1px solid rgba(255,140,66,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: 'var(--warm)' }}>
-          Tu sesión expiró. Vuelve a iniciar sesión.
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
-            Email
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            placeholder="tu@email.com"
-            style={inputStyle}
-          />
-        </div>
-
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>
-              Contraseña
-            </label>
-            <Link href={`/${lang}/forgot-password`} style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500, textDecoration: 'none' }}>
-              ¿Olvidaste tu contraseña?
-            </Link>
-          </div>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            placeholder="••••••••"
-            style={inputStyle}
-          />
-        </div>
-
-        {error && (
-          <p style={{ color: '#ff6b6b', fontSize: 13, background: 'rgba(255,107,107,0.08)', padding: '8px 12px', borderRadius: 6 }}>
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading}
-          style={buttonStyle(loading)}
-        >
-          {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
-        </button>
-      </form>
-    </>
+      <button type="submit" disabled={loading} style={buttonStyle(loading)}>
+        {loading ? 'Guardando...' : 'Establecer nueva contraseña'}
+      </button>
+    </form>
   );
 }
 
-export default function LoginPage() {
+export default function ResetPasswordPage() {
   const { lang } = useParams<{ lang: string }>();
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -163,7 +162,6 @@ export default function LoginPage() {
       {/* Blur glow behind card */}
       <div aria-hidden="true" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 700, height: 500, background: 'rgba(3,7,18,0.85)', filter: 'blur(72px)', pointerEvents: 'none', zIndex: 1 }} />
 
-      {/* Content */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, position: 'relative', zIndex: 2 }}>
         <div style={{ width: '100%', maxWidth: 400 }}>
           {/* Logo */}
@@ -172,23 +170,21 @@ export default function LoginPage() {
               <Image src="/apple-touch-icon.png" alt="Kefy" width={28} height={28} />
               <span>Kef<span className="y">y</span></span>
             </Link>
-            <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 12 }}>Inicia sesión en tu cuenta</p>
+            <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 12 }}>Establece una nueva contraseña</p>
           </div>
 
           <Suspense>
-            <LoginForm />
+            <ResetPasswordForm />
           </Suspense>
 
           <p style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 13, marginTop: 24 }}>
-            ¿No tienes cuenta?{' '}
-            <Link href={`/${lang}/register`} style={{ color: 'var(--accent)', fontWeight: 500 }}>
-              Regístrate gratis
+            <Link href={`/${lang}/login`} style={{ color: 'var(--accent)', fontWeight: 500 }}>
+              Volver al inicio de sesión
             </Link>
           </p>
         </div>
       </div>
 
-      {/* Footer legal */}
       <footer style={{ position: 'relative', zIndex: 2, borderTop: '1px solid rgba(255,255,255,0.07)', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, flexWrap: 'wrap' }}>
         <Link href={`/${lang}/terminos`} style={{ color: 'var(--muted)', fontSize: 12, textDecoration: 'none' }}>
           Términos de servicio
@@ -222,11 +218,10 @@ const buttonStyle = (disabled: boolean): React.CSSProperties => ({
   color: disabled ? 'var(--muted)' : '#0A0A0C',
   border: 'none',
   borderRadius: 8,
-  padding: '12px',
-  fontWeight: 700,
+  padding: '11px 20px',
   fontSize: 15,
+  fontWeight: 600,
   cursor: disabled ? 'not-allowed' : 'pointer',
-  transition: 'background 0.15s',
   width: '100%',
-  fontFamily: 'var(--font-syne)',
+  transition: 'opacity 0.15s',
 });
