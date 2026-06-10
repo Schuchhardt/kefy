@@ -128,12 +128,18 @@ export default function StrategyPage() {
     id: string;
     trigger_type: string;
     action_type: string;
-    name: string;
+    name?: string | null;
+    name_es?: string | null;
+    name_en?: string | null;
   }
   interface AutomationPack {
     id: string;
-    name: string;
-    description: string | null;
+    name?: string | null;
+    name_es?: string | null;
+    name_en?: string | null;
+    description?: string | null;
+    desc_es?: string | null;
+    desc_en?: string | null;
     icon: string | null;
     kefy_automation_pack_rules: AutomationPackRule[];
   }
@@ -280,6 +286,11 @@ export default function StrategyPage() {
     return acc;
   }, {});
 
+  const localizedText = (es?: string | null, en?: string | null, fallback?: string | null) => {
+    if (locale === 'en') return en || es || fallback || '';
+    return es || en || fallback || '';
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   if (catalogLoading) {
     return (
@@ -369,7 +380,7 @@ export default function StrategyPage() {
               href={`/${lang}/dashboard/brand/market`}
               style={{
                 padding: '8px 16px', borderRadius: 8,
-                background: 'var(--accent)', color: '#fff',
+                background: 'var(--accent)', color: '#000',
                 fontSize: 13, fontWeight: 700, textDecoration: 'none',
                 whiteSpace: 'nowrap',
               }}
@@ -646,6 +657,8 @@ export default function StrategyPage() {
                       {packs.map(pack => {
                         const installed = installedPacks.has(pack.id);
                         const installing = installingPack === pack.id;
+                        const packName = localizedText(pack.name_es, pack.name_en, pack.name);
+                        const packDescription = localizedText(pack.desc_es, pack.desc_en, pack.description);
                         return (
                           <div key={pack.id} style={{
                             background: 'var(--surface)', border: `1px solid ${installed ? 'var(--accent)' : 'var(--border)'}`,
@@ -653,17 +666,17 @@ export default function StrategyPage() {
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                               {pack.icon && <span style={{ fontSize: 22 }}>{pack.icon}</span>}
-                              <div style={{ fontWeight: 600, fontSize: 14 }}>{pack.name}</div>
+                              <div style={{ fontWeight: 600, fontSize: 14 }}>{packName}</div>
                             </div>
-                            {pack.description && (
+                            {packDescription && (
                               <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, margin: '0 0 12px' }}>
-                                {pack.description}
+                                {packDescription}
                               </p>
                             )}
                             {pack.kefy_automation_pack_rules?.length > 0 && (
                               <ul style={{ margin: '0 0 14px', paddingLeft: 16, listStyle: 'disc', color: 'var(--muted)', fontSize: 12, lineHeight: 1.8 }}>
                                 {pack.kefy_automation_pack_rules.map(r => (
-                                  <li key={r.id}>{r.name}</li>
+                                  <li key={r.id}>{localizedText(r.name_es, r.name_en, r.name)}</li>
                                 ))}
                               </ul>
                             )}

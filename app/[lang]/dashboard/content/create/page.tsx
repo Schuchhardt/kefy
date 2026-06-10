@@ -562,7 +562,7 @@ function ContentPageInner() {
           <button
             onClick={() => { setShowGenerate(!showGenerate); setGenResult(null); setGenError(null); if (showGenerate) setReferenceImages([]); }}
             style={{
-              background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
+              background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
               padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
             }}
           >
@@ -706,7 +706,7 @@ function ContentPageInner() {
               <button
                 type="submit" disabled={generating}
                 style={{
-                  background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
+                  background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
                   padding: '9px 20px', fontWeight: 600, fontSize: 13,
                   cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.7 : 1,
                 }}

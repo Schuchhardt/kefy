@@ -287,7 +287,7 @@ function SettingsPageInner() {
             <button
               type="submit" disabled={savingProfile}
               style={{
-                background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
+                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
                 padding: '9px 20px', fontWeight: 600, fontSize: 13,
                 cursor: savingProfile ? 'not-allowed' : 'pointer', opacity: savingProfile ? 0.7 : 1,
               }}

@@ -482,7 +482,7 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
               placeholder="https://tuempresa.com" type="url" />
             {(enrichUrl || form.website_url) && (
               <button type="button" onClick={() => void handleEnrich()} disabled={enriching}
-                style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: enriching ? 'not-allowed' : 'pointer', opacity: enriching ? 0.7 : 1, whiteSpace: 'nowrap' }}>
+                style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: enriching ? 'not-allowed' : 'pointer', opacity: enriching ? 0.7 : 1, whiteSpace: 'nowrap' }}>
                 {enriching ? t.enriching : t.enrichBtn}
               </button>
             )}
@@ -506,7 +506,7 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
                 })}
               </div>
               <button type="button" onClick={applyEnriched}
-                style={{ marginTop: 12, padding: '9px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                style={{ marginTop: 12, padding: '9px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
                 {t.applyEnriched}
               </button>
             </div>
@@ -736,7 +736,7 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
             </button>
           )}
           <button type="button" onClick={wizardNext} disabled={saving}
-            style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
+            style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
             {saving ? t.saving : wizardStep === WIZARD_STEPS.length - 1 ? t.finish : t.next}
           </button>
         </div>

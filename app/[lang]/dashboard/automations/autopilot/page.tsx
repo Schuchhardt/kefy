@@ -206,7 +206,7 @@ export default function AutopilotPage() {
         <button
           onClick={() => { setShowForm(!showForm); setFormError(null); }}
           style={{
-            background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
+            background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
             padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer', flexShrink: 0,
           }}
         >
@@ -328,7 +328,7 @@ export default function AutopilotPage() {
             <button
               type="submit" disabled={saving}
               style={{
-                background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
+                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
                 padding: '9px 20px', fontWeight: 600, fontSize: 13,
                 cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
               }}

@@ -375,7 +375,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
                 <input style={{ ...inputStyle, flex: 1 }} value={form.website_url ?? ''} onChange={(e) => updateField('website_url', e.target.value || null)} placeholder="https://..." type="url" />
                 <button type="button" disabled={!form.website_url || enriching}
                   onClick={() => { setEnrichUrl(form.website_url ?? ''); void handleEnrich(form.website_url ?? undefined); }}
-                  style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: !form.website_url ? 'not-allowed' : 'pointer', opacity: !form.website_url ? 0.5 : 1, whiteSpace: 'nowrap' }}>
+                  style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: !form.website_url ? 'not-allowed' : 'pointer', opacity: !form.website_url ? 0.5 : 1, whiteSpace: 'nowrap' }}>
                   {enriching ? t.enriching : t.enrichBtn}
                 </button>
               </div>
@@ -396,7 +396,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
                   );
                 })}
                 <button type="button" onClick={applyEnriched}
-                  style={{ marginTop: 10, padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ marginTop: 10, padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
                   {t.applyEnriched}
                 </button>
               </div>
@@ -546,7 +546,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, paddingTop: 8 }}>
             <button type="submit" disabled={saving}
-              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
+              style={{ background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
               {saving ? t.saving : t.save}
             </button>
             {saved && <span style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}>{t.saved}</span>}
