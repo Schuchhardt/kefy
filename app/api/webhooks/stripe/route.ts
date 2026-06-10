@@ -7,10 +7,6 @@ import type Stripe from 'stripe';
 // Receives and processes Stripe webhook events.
 // Syncs subscription state into kefy_subscriptions + kefy_organizations.plan
 
-// Next.js App Router: disable body parsing so we can read the raw bytes for
-// Stripe signature verification.
-export const config = { api: { bodyParser: false } };
-
 type Plan = 'starter' | 'pro' | 'business';
 
 function planFromMetadata(metadata: Stripe.Metadata | null): Plan {
