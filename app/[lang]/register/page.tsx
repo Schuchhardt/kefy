@@ -44,7 +44,7 @@ export default function RegisterPage() {
         return;
       }
 
-      router.push(`/${lang}/onboarding`);
+      router.push(`/${lang}/dashboard?onboarding=1`);
     } catch {
       setError('Error de red, intenta de nuevo');
     } finally {

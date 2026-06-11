@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
 import ChannelIcon    from '@/components/ui/ChannelIcon';
 
@@ -24,6 +24,13 @@ interface ContentItem {
   status: 'published' | 'scheduled' | 'draft';
   published_at: string | null;
   created_at: string;
+}
+
+interface OnboardingStep {
+  key: string;
+  icon: string;
+  title: string;
+  desc: string;
 }
 
 /* ─── Helpers ──────────────────────────────────────────────────────────────── */
@@ -79,6 +86,8 @@ type Locale = keyof typeof T;
 
 /* ─── Page ─────────────────────────────────────────────────────────────────── */
 export default function DashboardPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, org, plan, loading: authLoading } = useAuth();
   const { lang } = useParams<{ lang: string }>();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
@@ -89,6 +98,7 @@ export default function DashboardPage() {
   const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
   const [brandKitHasData, setBrandKitHasData] = useState<boolean | null>(null);
   const [syncing, setSyncing]         = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   useEffect(() => {
     // Check accounts
@@ -118,6 +128,12 @@ export default function DashboardPage() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get('onboarding') === '1') {
+      setOnboardingOpen(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (hasAccounts === null) return;
@@ -180,8 +196,141 @@ export default function DashboardPage() {
     published: t.statusPublished, scheduled: t.statusScheduled, draft: t.statusDraft,
   };
 
+  const isNewAccount = hasAccounts === false && brandKitHasData === false && content.length === 0;
+
+  useEffect(() => {
+    if (isNewAccount) setOnboardingOpen(true);
+  }, [isNewAccount]);
+
+  function closeOnboarding() {
+    setOnboardingOpen(false);
+    if (searchParams.get('onboarding') === '1') {
+      router.replace(`/${lang}/dashboard`);
+    }
+  }
+
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      key: 'brand',
+      icon: '◈',
+      title: lang === 'en' ? 'Set up your Brand Kit' : 'Configura tu Brand Kit',
+      desc: lang === 'en'
+        ? 'Upload logo, colors, and define your brand voice.'
+        : 'Sube tu logo, colores y define cómo se comunica tu marca.',
+    },
+    {
+      key: 'content',
+      icon: '✦',
+      title: lang === 'en' ? 'Create your first content' : 'Crea tu primer contenido',
+      desc: lang === 'en'
+        ? 'Generate a post, image, or carousel with AI in seconds.'
+        : 'Genera un post, imagen o carrusel con IA en segundos.',
+    },
+    {
+      key: 'social',
+      icon: '◫',
+      title: lang === 'en' ? 'Connect your social networks' : 'Conecta tus redes',
+      desc: lang === 'en'
+        ? 'Link Instagram, LinkedIn, TikTok and publish directly.'
+        : 'Enlaza Instagram, LinkedIn, TikTok y más para publicar directamente.',
+    },
+  ];
+
   return (
     <div style={{ padding: '40px 48px', maxWidth: 960, fontFamily: 'var(--font-syne), system-ui, sans-serif' }}>
+
+      {onboardingOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.55)',
+            zIndex: 60,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 640,
+              background: 'var(--bg)',
+              border: '1px solid var(--border)',
+              borderRadius: 14,
+              padding: '24px 24px 20px',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
+                {lang === 'en' ? 'Welcome to Kefy' : 'Bienvenido a Kefy'}
+              </h2>
+            </div>
+
+            <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>
+              {lang === 'en'
+                ? 'Complete these steps to get your account ready.'
+                : 'Sigue estos pasos para dejar tu cuenta lista.'}
+            </p>
+
+            <div style={{ display: 'grid', gap: 10, marginBottom: 18 }}>
+              {onboardingSteps.map((step, i) => (
+                <div
+                  key={step.key}
+                  style={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 10,
+                    padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 8,
+                    background: i === 0 ? 'rgba(198,255,75,0.12)' : 'var(--border)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>
+                    {step.icon}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: '0 0 2px', fontSize: 14, fontWeight: 600 }}>{step.title}</p>
+                    <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>{step.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={closeOnboarding}
+                style={{
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '11px 16px',
+                  background: 'var(--accent)',
+                  color: 'var(--bg)',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {lang === 'en' ? 'Start' : 'Empezar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div style={{ marginBottom: 36 }}>
@@ -194,7 +343,22 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {/* ── New account setup ── */}
+      {isNewAccount && (
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
+            {lang === 'en' ? 'Set up your account' : 'Configura tu cuenta'}
+          </h2>
+          <BrandKitWizard
+            locale={lang ?? 'es'}
+            orgName={org?.name}
+            onComplete={() => setBrandKitHasData(true)}
+          />
+        </section>
+      )}
+
       {/* ── Metrics ── */}
+      {!isNewAccount && (
       <section style={{ marginBottom: 40 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>{t.metricsTitle}</h2>
@@ -210,13 +374,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {hasAccounts === false && brandKitHasData === false ? (
-          <BrandKitWizard
-            locale={lang ?? 'es'}
-            orgName={org?.name}
-            onComplete={() => setBrandKitHasData(true)}
-          />
-        ) : hasAccounts === false ? (
+        {hasAccounts === false ? (
           <div style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 12, padding: '24px', textAlign: 'center',
@@ -251,8 +409,10 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* ── Recent content ── */}
+      {!isNewAccount && (
       <section style={{ marginBottom: 40 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12 }}>
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>{t.recentContent}</h2>
@@ -293,6 +453,7 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* ── Quick actions ── */}
       <section style={{ marginBottom: 40 }}>
