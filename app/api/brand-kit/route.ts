@@ -80,6 +80,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const input = body as Record<string, unknown>;
+  const syncOrgName = req.nextUrl.searchParams.get('syncOrg') === '1';
   const validationError = validateBrandKitUpdate(input);
   if (validationError) {
     return NextResponse.json({ error: validationError }, { status: 422 });
@@ -110,6 +111,27 @@ export async function PATCH(req: NextRequest) {
   }
 
   const db = createSupabaseServer();
+
+  if (syncOrgName && typeof input.name === 'string' && input.name.trim()) {
+    const syncedName = input.name.trim().slice(0, 100);
+
+    const [{ error: orgUpdateError }, { error: brandUpdateError }] = await Promise.all([
+      db
+        .from('kefy_organizations')
+        .update({ name: syncedName })
+        .eq('id', auth.orgId),
+      db
+        .from('kefy_brands')
+        .update({ name: syncedName })
+        .eq('id', brand.id)
+        .eq('org_id', auth.orgId),
+    ]);
+
+    if (orgUpdateError || brandUpdateError) {
+      console.error('brand-kit sync name error:', orgUpdateError?.message ?? brandUpdateError?.message);
+      return NextResponse.json({ error: 'Failed to sync organization name' }, { status: 500 });
+    }
+  }
 
   // Upsert: update if exists, insert if not
   const { data: existing } = await db

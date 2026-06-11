@@ -1,28 +1,15 @@
 'use client';
 
-import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { useParams, useSearchParams, useRouter } from 'next/navigation';
-import ChannelIcon from '@/components/ui/ChannelIcon';
-import { CHANNELS, CHANNEL_LABELS, type Channel } from '@/lib/channels';
+import { useParams, useSearchParams } from 'next/navigation';
+import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
 
 import esT from '@/locales/es/dashboard/settings';
 import enT from '@/locales/en/dashboard/settings';
 
 const T = { es: esT, en: enT } as const;
 type Locale = keyof typeof T;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface SocialAccount {
-  id:              string;
-  platform:        string;
-  username:        string;
-  avatar_url:      string | null;
-  status:          string;
-  token_expires_at: string | null;
-  created_at:      string;
-}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,46 +60,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function SettingsPageInner() {
   const { user, org, plan, refresh } = useAuth();
   const { lang } = useParams<{ lang: string }>();
-  const router = useRouter();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
-  const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
   const searchParams = useSearchParams();
-
-  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
-  const [loadingAccts, setLoadingAccts] = useState(true);
-
-  // Connecting OAuth
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [connectError, setConnectError] = useState<string | null>(null);
-  const [connectSuccess, setConnectSuccess] = useState<string | null>(null);
 
   // Billing
   const [billingLoading, setBillingLoading] = useState<string | null>(null);
   const [billingNotice, setBillingNotice]   = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
 
-  const fetchAccounts = useCallback(async () => {
-    const res = await fetch('/api/social/accounts', { credentials: 'include' });
-    const { accounts: data } = await res.json() as { accounts: SocialAccount[] };
-    setAccounts(data ?? []);
-    setLoadingAccts(false);
-  }, []);
-
-  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
-
   // Handle redirect back from OAuth callback + Stripe billing callback
   useEffect(() => {
-    const connected = searchParams.get('connected');
-    const error     = searchParams.get('error');
     const billing   = searchParams.get('billing');
 
-    if (connected) {
-      setConnectSuccess(connected);
-      fetchAccounts();
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (error) {
-      setConnectError(error === 'oauth_failed' ? t.oauthError : t.unknownError);
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (billing === 'success') {
+    if (billing === 'success') {
       setBillingNotice({ type: 'success', msg: t.billingSuccess });
       window.history.replaceState({}, '', window.location.pathname);
       // Refresh auth context so plan badge updates immediately
@@ -129,6 +88,11 @@ function SettingsPageInner() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved]   = useState(false);
   const [profileError, setProfileError]   = useState<string | null>(null);
+
+  const [orgName, setOrgName] = useState('');
+  const [savingOrg, setSavingOrg] = useState(false);
+  const [orgSaved, setOrgSaved] = useState(false);
+  const [orgError, setOrgError] = useState<string | null>(null);
 
   // Lead scoring state
   type ScoringDefaults  = Record<string, number>;
@@ -179,6 +143,10 @@ function SettingsPageInner() {
     if (user?.name) setName(user.name);
   }, [user]);
 
+  useEffect(() => {
+    if (org?.name) setOrgName(org.name);
+  }, [org?.name]);
+
   async function handleUpgrade(targetPlan: string) {
     setBillingLoading(targetPlan);
     setBillingNotice(null);
@@ -212,33 +180,6 @@ function SettingsPageInner() {
     }
   }
 
-  async function handleConnectPlatform(platform: string) {
-    setConnecting(platform);
-    setConnectError(null);
-
-    try {
-      const state = crypto.randomUUID();
-      sessionStorage.setItem('oauth_state', state);
-
-      const res = await fetch(
-        `/api/social/oauth/url?platform=${platform}&state=${state}`,
-        { credentials: 'include' },
-      );
-      const data = await res.json() as { url?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? t.oauthError);
-      window.location.href = data.url!;
-    } catch (err) {
-      setConnectError(err instanceof Error ? err.message : t.unknownError);
-      setConnecting(null);
-    }
-  }
-
-  async function handleDisconnect(accountId: string) {
-    if (!confirm(t.confirmDisconnect)) return;
-    await fetch(`/api/social/accounts/${accountId}`, { method: 'DELETE', credentials: 'include' });
-    setAccounts((prev) => prev.filter((a) => a.id !== accountId));
-  }
-
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
@@ -260,6 +201,33 @@ function SettingsPageInner() {
       setProfileError(err instanceof Error ? err.message : 'Error');
     } finally {
       setSavingProfile(false);
+    }
+  }
+
+  async function handleSaveOrg(e: React.FormEvent) {
+    e.preventDefault();
+    if (!orgName.trim()) return;
+    setSavingOrg(true);
+    setOrgError(null);
+
+    try {
+      const res = await fetch('/api/auth/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ org_name: orgName.trim() }),
+      });
+
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Error');
+
+      await refresh();
+      setOrgSaved(true);
+      setTimeout(() => setOrgSaved(false), 3000);
+    } catch (err) {
+      setOrgError(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setSavingOrg(false);
     }
   }
 
@@ -302,10 +270,33 @@ function SettingsPageInner() {
 
       {/* Organization */}
       <Section title={t.sectionOrg}>
-        <div>
-          <label style={labelStyle}>{t.nameLabel}</label>
-          <input style={{ ...inputStyle, opacity: 0.6 }} value={org?.name ?? ''} disabled />
-        </div>
+        <form onSubmit={handleSaveOrg}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>{t.nameLabel}</label>
+            <input
+              style={inputStyle}
+              value={orgName}
+              onChange={(e) => setOrgName(e.target.value)}
+              placeholder={lang === 'en' ? 'Organization name' : 'Nombre de la organización'}
+            />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              type="submit"
+              disabled={savingOrg}
+              style={{
+                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+                padding: '9px 20px', fontWeight: 600, fontSize: 13,
+                cursor: savingOrg ? 'not-allowed' : 'pointer', opacity: savingOrg ? 0.7 : 1,
+              }}
+            >
+              {savingOrg ? t.saving : t.save}
+            </button>
+            {orgSaved && <span style={{ color: 'var(--accent)', fontSize: 13 }}>{t.saved}</span>}
+            {orgError && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{orgError}</span>}
+          </div>
+        </form>
       </Section>
 
       {/* Plan & billing */}
@@ -429,87 +420,10 @@ function SettingsPageInner() {
 
       {/* Social accounts */}
       <Section title={t.sectionSocial}>
-        {connectError && (
-          <p style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 12 }}>{connectError}</p>
-        )}
-        {connectSuccess && (
-          <p style={{ color: '#4caf50', fontSize: 13, marginBottom: 12 }}>
-            ✓ {connectSuccess.charAt(0).toUpperCase() + connectSuccess.slice(1)} conectado correctamente
-          </p>
-        )}
-
-        {/* Connected accounts */}
-        {!loadingAccts && accounts.length > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              {t.connected}
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {accounts.map((acc) => (
-                <div key={acc.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  background: 'var(--bg)', border: '1px solid var(--border)',
-                  borderRadius: 8, padding: '10px 14px',
-                }}>
-                  <span style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <ChannelIcon name={acc.platform} size={18} />
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontWeight: 600, fontSize: 14 }}>{acc.username}</p>
-                    <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
-                      {acc.platform} · {acc.status}
-                      {acc.token_expires_at && (
-                        <> · {t.expires} {new Date(acc.token_expires_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}</>
-                      )}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleDisconnect(acc.id)}
-                    style={{
-                      background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-                      padding: '5px 12px', fontSize: 12, cursor: 'pointer', color: '#ff6b6b',
-                    }}
-                  >
-                    {t.disconnect}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Connect new */}
-        <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          {t.connectNew}
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-          {CHANNELS.filter((ch) => ch.group === 'organic').map(({ value: platform, label: platformLabel }) => {
-            const already = accounts.some((a) => a.platform === platform);
-            return (
-              <button
-                key={platform}
-                onClick={() => handleConnectPlatform(platform)}
-                disabled={connecting !== null}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  background: already ? 'rgba(198,255,75,0.04)' : 'var(--bg)',
-                  border: `1px solid ${already ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
-                  borderRadius: 8, padding: '10px 14px', cursor: 'pointer',
-                  opacity: connecting !== null ? 0.6 : 1,
-                  transition: 'border-color 0.15s',
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20 }}>
-                  <ChannelIcon name={platform} size={16} />
-                </span>
-                <span style={{ fontSize: 13, fontWeight: 500 }}>
-                  {connecting === platform ? t.redirecting : (CHANNEL_LABELS[platform as Channel] ?? platformLabel)}
-                </span>
-                {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--accent)' }}>✓</span>}
-              </button>
-            );
-          })}
-        </div>
+        <SocialConnectionPanel
+          locale={(lang === 'en' ? 'en' : 'es')}
+          mode="settings"
+        />
       </Section>
 
       {/* ── Lead Scoring ── */}

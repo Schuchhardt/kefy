@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { BrandKit, BrandTone, CompanySize } from '@/lib/brand-kit';
+import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 
@@ -275,7 +276,6 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loadingSugg, setLoadingSugg] = useState(false);
   const [suggCache, setSuggCache] = useState<Record<string, string[]>>({});
-  const [wizardInput, setWizardInput] = useState('');
 
   const [enrichUrl, setEnrichUrl] = useState('');
   const [enriching, setEnriching] = useState(false);
@@ -334,7 +334,15 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
   useEffect(() => {
     const step = WIZARD_STEPS[wizardStep];
     setSuggestions([]);
-    setWizardInput('');
+    setLoadingSugg(false);
+
+    const requiresWebsite = step?.aiField === 'mission';
+    const hasWebsite = !!String(formRef.current.website_url ?? '').trim();
+
+    if (requiresWebsite && !hasWebsite) {
+      return;
+    }
+
     if (step?.aiField && !step.isArray && !step.isTone) {
       void fetchSuggestions(step.aiField);
     }
@@ -401,8 +409,8 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
     finally { setArraySuggLoading((p) => ({ ...p, [field]: false })); }
   }
 
-  async function handleSave(isFinish = false) {
-    if (saving) return;
+  async function handleSave(isFinish = false): Promise<boolean> {
+    if (saving) return false;
     setSaving(true);
     setError(null);
     const payload = {
@@ -420,7 +428,7 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
       competitors: form.competitors ?? [], target_audience: form.target_audience ?? null,
     };
     try {
-      const res = await fetch('/api/brand-kit', {
+      const res = await fetch('/api/brand-kit?syncOrg=1', {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -435,16 +443,21 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
       if (saveTimeout.current) clearTimeout(saveTimeout.current);
       saveTimeout.current = setTimeout(() => setSaved(false), 3000);
       if (isFinish) onComplete();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido');
+      return false;
     } finally { setSaving(false); }
   }
 
-  function wizardNext() {
+  async function wizardNext() {
     if (wizardStep < WIZARD_STEPS.length - 1) {
+      const ok = await handleSave(false);
+      if (!ok) return;
       setWizardStep((s) => s + 1);
     } else {
-      void handleSave(true);
+      const finished = await handleSave(true);
+      if (!finished) return;
     }
   }
   function wizardPrev() { if (wizardStep > 0) setWizardStep((s) => s - 1); }
@@ -469,7 +482,7 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
     differentiators: t.q_differentiators, challenges: t.q_challenges, competitors: t.q_competitors,
   };
 
-  function StepContent() {
+  function renderStepContent() {
     if (!step) return null;
 
     if (step.id === 'website') {
@@ -576,11 +589,21 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
             <label style={labelStyle}>{locale === 'es' ? 'Fuente de títulos' : 'Heading font'}</label>
-            <input style={inputStyle} value={form.font_heading ?? ''} onChange={(e) => updateField('font_heading', e.target.value || null)} placeholder="Syne, Playfair..." />
+            <GoogleFontSelect
+              value={form.font_heading}
+              onChange={(value) => updateField('font_heading', value)}
+              placeholder={locale === 'es' ? 'Selecciona fuente para títulos' : 'Select heading font'}
+              previewText={locale === 'es' ? 'Titulares con estilo' : 'Headlines with style'}
+            />
           </div>
           <div>
             <label style={labelStyle}>{locale === 'es' ? 'Fuente de texto' : 'Body font'}</label>
-            <input style={inputStyle} value={form.font_body ?? ''} onChange={(e) => updateField('font_body', e.target.value || null)} placeholder="DM Sans, Inter..." />
+            <GoogleFontSelect
+              value={form.font_body}
+              onChange={(value) => updateField('font_body', value)}
+              placeholder={locale === 'es' ? 'Selecciona fuente de texto' : 'Select body font'}
+              previewText={locale === 'es' ? 'Texto claro y legible' : 'Readable body copy'}
+            />
           </div>
         </div>
       );
@@ -670,19 +693,20 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
 
     const fieldKey = step.field as keyof BrandKit | null;
     const currentVal = fieldKey ? String(form[fieldKey] ?? '') : '';
+    const shouldHideAiSuggestions = step.aiField === 'mission' && !String(form.website_url ?? '').trim();
 
     return (
       <div>
-        {loadingSugg ? (
+        {!shouldHideAiSuggestions && loadingSugg ? (
           <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{t.loadingSuggestions}</p>
-        ) : suggestions.length > 0 ? (
+        ) : !shouldHideAiSuggestions && suggestions.length > 0 ? (
           <div style={{ marginBottom: 12 }}>
             <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.suggestions}</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {suggestions.map((s) => (
                 <button key={s} type="button"
-                  onClick={() => { if (fieldKey) updateField(fieldKey, s as never); setWizardInput(s); }}
-                  style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, border: `1px solid ${(wizardInput || currentVal) === s ? 'var(--accent)' : 'var(--border)'}`, background: (wizardInput || currentVal) === s ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: (wizardInput || currentVal) === s ? 'var(--accent)' : 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
+                  onClick={() => { if (fieldKey) updateField(fieldKey, s as never); }}
+                  style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, border: `1px solid ${currentVal === s ? 'var(--accent)' : 'var(--border)'}`, background: currentVal === s ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: currentVal === s ? 'var(--accent)' : 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
                   {s}
                 </button>
               ))}
@@ -690,10 +714,10 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
           </div>
         ) : null}
         <input style={inputStyle}
-          value={wizardInput !== '' ? wizardInput : currentVal}
-          onChange={(e) => { setWizardInput(e.target.value); if (fieldKey) updateField(fieldKey, e.target.value as never); }}
+          value={currentVal}
+          onChange={(e) => { if (fieldKey) updateField(fieldKey, e.target.value as never); }}
           placeholder={locale === 'es' ? 'O escribe tu respuesta...' : 'Or type your answer...'}
-          onKeyDown={(e) => { if (e.key === 'Enter') wizardNext(); }} />
+          onKeyDown={(e) => { if (e.key === 'Enter') void wizardNext(); }} />
       </div>
     );
   }
@@ -719,7 +743,7 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
         {wizardQuestions[step.id]}
       </h3>
 
-      <StepContent />
+      {renderStepContent()}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 28 }}>
         <button type="button" onClick={wizardPrev} disabled={wizardStep === 0}
@@ -730,12 +754,12 @@ export default function BrandKitWizard({ locale: localeProp, orgName, onComplete
           {error && <span style={{ color: '#ff6b6b', fontSize: 12 }}>{error}</span>}
           {saved && <span style={{ color: 'var(--accent)', fontSize: 12 }}>{t.saved}</span>}
           {step.field !== 'name' && !step.isColor && !step.isFont && (
-            <button type="button" onClick={wizardNext}
+            <button type="button" onClick={() => void wizardNext()}
               style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 13, cursor: 'pointer' }}>
               {t.skip}
             </button>
           )}
-          <button type="button" onClick={wizardNext} disabled={saving}
+          <button type="button" onClick={() => void wizardNext()} disabled={saving}
             style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
             {saving ? t.saving : wizardStep === WIZARD_STEPS.length - 1 ? t.finish : t.next}
           </button>

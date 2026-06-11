@@ -52,7 +52,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { name, current_password, new_password } = body as Record<string, unknown>;
+  const { name, org_name, current_password, new_password } = body as Record<string, unknown>;
 
   const db = createSupabaseServer();
 
@@ -94,6 +94,29 @@ export async function PATCH(req: NextRequest) {
   }
 
   // ── Name update ──────────────────────────────────────────────────────────
+  if (typeof org_name === 'string') {
+    if (!['owner', 'admin'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    if (!org_name.trim()) {
+      return NextResponse.json({ error: 'El nombre de la organización no puede estar vacío' }, { status: 400 });
+    }
+
+    const { data: updatedOrg, error: orgError } = await db
+      .from('kefy_organizations')
+      .update({ name: org_name.trim().slice(0, 100) })
+      .eq('id', auth.orgId)
+      .select('id, name, slug, plan')
+      .maybeSingle();
+
+    if (orgError || !updatedOrg) {
+      return NextResponse.json({ error: 'Error al actualizar organización' }, { status: 500 });
+    }
+
+    return NextResponse.json({ org: updatedOrg });
+  }
+
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'El nombre no puede estar vacío' }, { status: 400 });
   }

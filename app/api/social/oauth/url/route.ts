@@ -9,6 +9,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 // Query params:
 //   platform — required
 //   state    — optional CSRF state token (recommended)
+//   returnTo — optional app path to return after callback (e.g. /es/dashboard)
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -17,6 +18,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const platform = searchParams.get('platform');
   const state    = searchParams.get('state') ?? crypto.randomUUID();
+  const returnTo = searchParams.get('returnTo');
 
   const VALID_PLATFORMS = new Set<string>([
     'facebook', 'instagram', 'linkedin', 'twitter', 'tiktok', 'youtube',
@@ -75,7 +77,12 @@ export async function GET(req: NextRequest) {
   // Get the OAuth URL from Zernio (standard mode — Zernio redirects back with accountId)
   let authUrl: string;
   try {
-    const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin}/api/social/oauth/callback`;
+    const callbackUrl = new URL('/api/social/oauth/callback', process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin);
+    if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+      callbackUrl.searchParams.set('returnTo', returnTo);
+    }
+
+    const redirectUrl = callbackUrl.toString();
     const result = await getConnectUrl(
       platform as import('@/lib/zernio').ZernioPlatform,
       profileId,

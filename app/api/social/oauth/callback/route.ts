@@ -18,7 +18,11 @@ export async function GET(req: NextRequest) {
   const profileId  = searchParams.get('profileId');
   const username   = searchParams.get('username');
 
-  const settingsUrl = `${origin}/dashboard/settings`;
+  const returnTo = searchParams.get('returnTo');
+  const safeReturnTo = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')
+    ? returnTo
+    : '/dashboard/settings';
+  const settingsUrl = `${origin}${safeReturnTo}`;
 
   if (!connected) {
     return NextResponse.redirect(`${settingsUrl}?error=oauth_failed`);
@@ -45,12 +49,12 @@ export async function GET(req: NextRequest) {
   // Identify the user from the access cookie
   const accessToken = req.cookies.get(ACCESS_COOKIE)?.value;
   if (!accessToken) {
-    return NextResponse.redirect(`${origin}/login?redirect=/dashboard/settings`);
+    return NextResponse.redirect(`${origin}/login?redirect=${encodeURIComponent(safeReturnTo)}`);
   }
 
   const auth = await verifyAccessToken(accessToken);
   if (!auth) {
-    return NextResponse.redirect(`${origin}/login?redirect=/dashboard/settings`);
+    return NextResponse.redirect(`${origin}/login?redirect=${encodeURIComponent(safeReturnTo)}`);
   }
 
   const db = createSupabaseServer();

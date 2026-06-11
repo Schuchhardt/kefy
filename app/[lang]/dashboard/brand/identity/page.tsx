@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import type { BrandKit, BrandTone, CompanySize } from '@/lib/brand-kit';
+import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 
@@ -467,10 +468,20 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
               <Field label={t.fontHeading}>
-                <input style={inputStyle} value={form.font_heading ?? ''} onChange={(e) => updateField('font_heading', e.target.value || null)} placeholder="Syne, Playfair..." />
+                <GoogleFontSelect
+                  value={form.font_heading}
+                  onChange={(value) => updateField('font_heading', value)}
+                  placeholder={locale === 'es' ? 'Selecciona fuente para títulos' : 'Select heading font'}
+                  previewText={locale === 'es' ? 'Titulares con estilo' : 'Headlines with style'}
+                />
               </Field>
               <Field label={t.fontBody}>
-                <input style={inputStyle} value={form.font_body ?? ''} onChange={(e) => updateField('font_body', e.target.value || null)} placeholder="DM Sans, Inter..." />
+                <GoogleFontSelect
+                  value={form.font_body}
+                  onChange={(value) => updateField('font_body', value)}
+                  placeholder={locale === 'es' ? 'Selecciona fuente de texto' : 'Select body font'}
+                  previewText={locale === 'es' ? 'Texto claro y legible' : 'Readable body copy'}
+                />
               </Field>
             </div>
             <Field label={t.logo}>

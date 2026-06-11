@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
 import ChannelIcon    from '@/components/ui/ChannelIcon';
+import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 interface Totals {
@@ -100,15 +101,22 @@ export default function DashboardPage() {
   const [syncing, setSyncing]         = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
 
+  async function fetchAccounts() {
+    const res = await fetch('/api/social/accounts', { credentials: 'include' });
+    if (!res.ok) {
+      setHasAccounts(false);
+      return;
+    }
+    const json = await res.json() as { accounts: { id: string }[] };
+    const items = json.accounts ?? [];
+    setHasAccounts(items.length > 0);
+  }
+
   useEffect(() => {
     // Check accounts
-    fetch('/api/social/accounts', { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) { setHasAccounts(false); return; }
-        const json = await res.json() as { accounts: { id: string }[] };
-        setHasAccounts((json.accounts ?? []).length > 0);
-      })
-      .catch(() => setHasAccounts(false));
+    fetchAccounts().catch(() => {
+      setHasAccounts(false);
+    });
 
     // Check brand kit
     fetch('/api/brand-kit', { credentials: 'include' })
@@ -149,6 +157,12 @@ export default function DashboardPage() {
       .catch(() => {})
       .finally(() => setMLoading(false));
   }, [hasAccounts]);
+
+  const isNewAccount = hasAccounts === false && brandKitHasData === false && content.length === 0;
+
+  useEffect(() => {
+    if (isNewAccount) setOnboardingOpen(true);
+  }, [isNewAccount]);
 
   async function handleSync() {
     setSyncing(true);
@@ -195,12 +209,6 @@ export default function DashboardPage() {
   const statusLabel: Record<string, string> = {
     published: t.statusPublished, scheduled: t.statusScheduled, draft: t.statusDraft,
   };
-
-  const isNewAccount = hasAccounts === false && brandKitHasData === false && content.length === 0;
-
-  useEffect(() => {
-    if (isNewAccount) setOnboardingOpen(true);
-  }, [isNewAccount]);
 
   function closeOnboarding() {
     setOnboardingOpen(false);
@@ -354,6 +362,25 @@ export default function DashboardPage() {
             orgName={org?.name}
             onComplete={() => setBrandKitHasData(true)}
           />
+        </section>
+      )}
+
+      {/* ── Onboarding: Connect social / Create first content ── */}
+      {content.length === 0 && (
+        <section style={{ marginBottom: 40 }}>
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            padding: '20px 24px',
+          }}>
+            <SocialConnectionPanel
+              locale={(lang === 'en' ? 'en' : 'es')}
+              mode="onboarding"
+              contentHref={`/${lang}/dashboard/content`}
+              onAccountsChange={(count) => setHasAccounts(count > 0)}
+            />
+          </div>
         </section>
       )}
 
