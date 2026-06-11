@@ -220,6 +220,12 @@ describe('POST /api/auth/register', () => {
       select: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: { id: 'new-org-id' }, error: null }),
     };
+    // insert initial brand
+    const insertBrandChain = {
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'new-brand-id' }, error: null }),
+    };
     // insert membership
     const insertMembershipChain = {
       insert: vi.fn().mockResolvedValue({ error: null }),
@@ -237,6 +243,7 @@ describe('POST /api/auth/register', () => {
       .mockReturnValueOnce(noExistChain)
       .mockReturnValueOnce(insertUserChain)
       .mockReturnValueOnce(insertOrgChain)
+      .mockReturnValueOnce(insertBrandChain)
       .mockReturnValueOnce(insertMembershipChain)
       .mockReturnValueOnce(insertSubChain)
       .mockReturnValueOnce(insertRefreshChain);

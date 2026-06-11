@@ -6,8 +6,10 @@ import {
   generateRefreshToken,
   accessCookieOptions,
   refreshCookieOptions,
+  activeBrandCookieOptions,
   ACCESS_COOKIE,
   REFRESH_COOKIE,
+  ACTIVE_BRAND_COOKIE,
 } from '@/lib/auth';
 
 function isValidEmail(email: string): boolean {
@@ -95,6 +97,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to create organization' }, { status: 500 });
   }
 
+  // Create initial brand for the new org so brand-scoped flows work immediately
+  const { data: brand, error: brandError } = await db
+    .from('kefy_brands')
+    .insert({ org_id: org.id, name: sanitizedOrgName, slug })
+    .select('id')
+    .single();
+
+  if (brandError || !brand) {
+    console.error('Brand creation error:', brandError?.message);
+    return NextResponse.json({ error: 'Failed to initialize brand' }, { status: 500 });
+  }
+
   // Create membership (owner)
   await db.from('kefy_org_memberships').insert({
     org_id: org.id,
@@ -131,5 +145,6 @@ export async function POST(req: NextRequest) {
   );
   res.cookies.set(ACCESS_COOKIE, accessToken, accessCookieOptions());
   res.cookies.set(REFRESH_COOKIE, refreshRaw, refreshCookieOptions());
+  res.cookies.set(ACTIVE_BRAND_COOKIE, brand.id, activeBrandCookieOptions());
   return res;
 }

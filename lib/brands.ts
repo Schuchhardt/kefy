@@ -73,15 +73,53 @@ export async function getBrandFromRequest(
     .limit(1)
     .maybeSingle();
 
-  if (!first) return { brand: null };
+  let resolved = first as Brand | null;
+
+  // Self-heal legacy orgs that were created before multi-brand bootstrap.
+  if (!resolved) {
+    const { data: org } = await db
+      .from('kefy_organizations')
+      .select('id, name, slug')
+      .eq('id', auth.orgId)
+      .maybeSingle();
+
+    if (org) {
+      const baseSlug = typeof org.slug === 'string' && org.slug.trim()
+        ? org.slug
+        : slugifyBrand(typeof org.name === 'string' ? org.name : 'brand');
+
+      const { data: created } = await db
+        .from('kefy_brands')
+        .insert({ org_id: auth.orgId, name: org.name, slug: baseSlug })
+        .select('*')
+        .maybeSingle();
+
+      if (created) {
+        resolved = created as Brand;
+      } else {
+        // Handle potential race condition if another request created it first.
+        const { data: retry } = await db
+          .from('kefy_brands')
+          .select('*')
+          .eq('org_id', auth.orgId)
+          .eq('archived', false)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (retry) resolved = retry as Brand;
+      }
+    }
+  }
+
+  if (!resolved) return { brand: null };
 
   // Build Set-Cookie header so the caller can persist the fallback
   const opts = activeBrandCookieOptions();
   const secure = opts.secure ? '; Secure' : '';
   const setCookieHeader =
-    `${ACTIVE_BRAND_COOKIE}=${first.id}; Path=${opts.path}; Max-Age=${opts.maxAge}; HttpOnly; SameSite=Lax${secure}`;
+    `${ACTIVE_BRAND_COOKIE}=${resolved.id}; Path=${opts.path}; Max-Age=${opts.maxAge}; HttpOnly; SameSite=Lax${secure}`;
 
-  return { brand: first as Brand, setCookieHeader };
+  return { brand: resolved, setCookieHeader };
 }
 
 // ─── validateBrandAccess ──────────────────────────────────────────────────────
