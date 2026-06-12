@@ -10,6 +10,72 @@ const VIDEO_SRC =
   'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260328_065045_c44942da-53c6-4804-b734-f9e07fc22e08.mp4';
 const FADE = 0.5;
 
+const LOGIN_ERROR_MESSAGES = {
+  es: {
+    invalidCredentials: 'Email o contraseña incorrectos',
+    invalidEmail: 'Ingresa un email válido',
+    passwordRequired: 'La contraseña es obligatoria',
+    invalidBody: 'Solicitud inválida',
+    noOrganization: 'No se encontró una organización para esta cuenta',
+    generic: 'Error al iniciar sesión',
+    network: 'Error de red, intenta de nuevo',
+  },
+  en: {
+    invalidCredentials: 'Invalid email or password',
+    invalidEmail: 'Please enter a valid email',
+    passwordRequired: 'Password is required',
+    invalidBody: 'Invalid request',
+    noOrganization: 'No organization found for this account',
+    generic: 'Error signing in',
+    network: 'Network error, please try again',
+  },
+} as const;
+
+function resolveLoginError(error: unknown, lang: string): string {
+  const locale = lang === 'en' ? 'en' : 'es';
+  const messages = LOGIN_ERROR_MESSAGES[locale];
+
+  if (typeof error !== 'string' || !error.trim()) {
+    return messages.generic;
+  }
+
+  const normalized = error.trim().toLowerCase();
+
+  if (
+    normalized === 'invalid email or password' ||
+    normalized === 'email o contraseña incorrectos'
+  ) {
+    return messages.invalidCredentials;
+  }
+  if (
+    normalized === 'valid email is required' ||
+    normalized === 'ingresa un email válido'
+  ) {
+    return messages.invalidEmail;
+  }
+  if (
+    normalized === 'password is required' ||
+    normalized === 'la contraseña es obligatoria'
+  ) {
+    return messages.passwordRequired;
+  }
+  if (
+    normalized === 'invalid request body' ||
+    normalized === 'invalid request' ||
+    normalized === 'solicitud inválida'
+  ) {
+    return messages.invalidBody;
+  }
+  if (
+    normalized === 'no organization found' ||
+    normalized === 'no se encontró una organización para esta cuenta'
+  ) {
+    return messages.noOrganization;
+  }
+
+  return messages.generic;
+}
+
 function LoginForm() {
   const router = useRouter();
   const { lang } = useParams<{ lang: string }>();
@@ -36,13 +102,14 @@ function LoginForm() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? 'Error al iniciar sesión');
+        setError(resolveLoginError(data?.error, lang));
         return;
       }
 
       router.push(`/${lang}/dashboard`);
     } catch {
-      setError('Error de red, intenta de nuevo');
+      const locale = lang === 'en' ? 'en' : 'es';
+      setError(LOGIN_ERROR_MESSAGES[locale].network);
     } finally {
       setLoading(false);
     }

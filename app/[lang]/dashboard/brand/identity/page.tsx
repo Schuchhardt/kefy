@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import type { BrandKit, BrandTone, CompanySize } from '@/lib/brand-kit';
+import type { BrandKit, BrandTone } from '@/lib/brand-kit';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
@@ -25,8 +25,6 @@ const TONES: { value: BrandTone; label: Record<Locale, string> }[] = [
   { value: 'casual',        label: { es: 'Casual',        en: 'Casual'        } },
   { value: 'formal',        label: { es: 'Formal',        en: 'Formal'        } },
 ];
-
-const COMPANY_SIZES: CompanySize[] = ['1-10', '11-50', '51-200', '201-500', '500+'];
 
 const SOCIAL_CHANNELS = ['instagram', 'linkedin', 'twitter', 'facebook', 'tiktok', 'youtube'];
 
@@ -227,10 +225,36 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     setSaved(false);
   }
 
+  function normalizeWebsiteUrl(input: string): string | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+    try {
+      const parsed = new URL(withProtocol);
+      if (!parsed.hostname) return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  }
+
   // Enrich from URL
   async function handleEnrich(urlOverride?: string) {
-    const url = urlOverride ?? enrichUrl;
-    if (!url.trim()) return;
+    const rawUrl = urlOverride ?? enrichUrl;
+    const normalizedUrl = normalizeWebsiteUrl(rawUrl);
+    if (!normalizedUrl) {
+      setEnrichResult(null);
+      setEnrichMsg(t.enrichError);
+      return;
+    }
+
+    setEnrichUrl(normalizedUrl);
+    if ((form.website_url ?? '').trim() === rawUrl.trim()) {
+      updateField('website_url', normalizedUrl);
+    }
+
     setEnriching(true);
     setEnrichResult(null);
     setEnrichMsg(null);
@@ -238,7 +262,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
       const res = await fetch('/api/brand-kit/enrich-url', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), lang: localeRef.current }),
+        body: JSON.stringify({ url: normalizedUrl, lang: localeRef.current }),
       });
       if (!res.ok) throw new Error();
       const { extracted } = await res.json() as { extracted: Partial<BrandKit> };
@@ -295,9 +319,6 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
       primary_color: form.primary_color ?? null, secondary_color: form.secondary_color ?? null,
       accent_color: form.accent_color ?? null, font_heading: form.font_heading ?? null,
       font_body: form.font_body ?? null, logo_url: form.logo_url ?? null, notes: form.notes ?? null,
-      company_size: form.company_size ?? null, differentiators: form.differentiators ?? [],
-      challenges: form.challenges ?? [], niche: form.niche ?? null,
-      competitors: form.competitors ?? [], target_audience: form.target_audience ?? null,
     };
     try {
       const res = await fetch('/api/brand-kit', {
@@ -375,7 +396,7 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
               <div style={{ display: 'flex', gap: 8 }}>
                 <input style={{ ...inputStyle, flex: 1 }} value={form.website_url ?? ''} onChange={(e) => updateField('website_url', e.target.value || null)} placeholder="https://..." type="url" />
                 <button type="button" disabled={!form.website_url || enriching}
-                  onClick={() => { setEnrichUrl(form.website_url ?? ''); void handleEnrich(form.website_url ?? undefined); }}
+                  onClick={() => { void handleEnrich(form.website_url ?? undefined); }}
                   style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: !form.website_url ? 'not-allowed' : 'pointer', opacity: !form.website_url ? 0.5 : 1, whiteSpace: 'nowrap' }}>
                   {enriching ? t.enriching : t.enrichBtn}
                 </button>
@@ -511,48 +532,6 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
 
           <SectionCard title={t.notes}>
             <textarea style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }} value={form.notes ?? ''} onChange={(e) => updateField('notes', e.target.value || null)} placeholder={locale === 'es' ? 'Guías de estilo, instrucciones para la IA...' : 'Style guides, AI instructions...'} />
-          </SectionCard>
-
-          <div style={{ marginTop: 16, marginBottom: 12 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)' }}>2. {t.sec2}</span>
-          </div>
-
-          <SectionCard title={`${t.companySize} & ${t.niche}`}>
-            <Field label={t.companySize}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {COMPANY_SIZES.map((size) => (
-                  <button key={size} type="button" onClick={() => updateField('company_size', size)}
-                    style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: form.company_size === size ? 600 : 400, border: `1px solid ${form.company_size === size ? 'var(--accent)' : 'var(--border)'}`, background: form.company_size === size ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: form.company_size === size ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-                    {size} {locale === 'es' ? 'empleados' : 'employees'}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            <Field label={t.niche}>
-              <input style={inputStyle} value={form.niche ?? ''} onChange={(e) => updateField('niche', e.target.value || null)} placeholder={locale === 'es' ? 'Ej: Coaches para mujeres emprendedoras...' : 'E.g. Life coaches for female entrepreneurs...'} />
-            </Field>
-            <Field label={t.targetAudience}>
-              <input style={inputStyle} value={form.target_audience ?? ''} onChange={(e) => updateField('target_audience', e.target.value || null)} placeholder={locale === 'es' ? 'Ej: Emprendedores digitales 25-40 años...' : 'E.g. Digital entrepreneurs 25-40 years...'} />
-            </Field>
-          </SectionCard>
-
-          <SectionCard title={`${t.differentiators} & ${t.challenges}`}>
-            <Field label={t.differentiators}>
-              <ArrayChips value={form.differentiators ?? []} onChange={(v) => updateField('differentiators', v)} placeholder={t.addPlaceholder}
-                suggestions={arraySugg['differentiators']} loadingSugg={arraySuggLoading['differentiators']}
-                onLoadSuggestions={() => void loadArraySugg('differentiators')} />
-            </Field>
-            <Field label={t.challenges}>
-              <ArrayChips value={form.challenges ?? []} onChange={(v) => updateField('challenges', v)} placeholder={t.addPlaceholder}
-                suggestions={arraySugg['challenges']} loadingSugg={arraySuggLoading['challenges']}
-                onLoadSuggestions={() => void loadArraySugg('challenges')} />
-            </Field>
-          </SectionCard>
-
-          <SectionCard title={t.competitors}>
-            <ArrayChips value={form.competitors ?? []} onChange={(v) => updateField('competitors', v)} placeholder={t.addPlaceholder}
-              suggestions={arraySugg['competitors']} loadingSugg={arraySuggLoading['competitors']}
-              onLoadSuggestions={() => void loadArraySugg('competitors')} />
           </SectionCard>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, paddingTop: 8 }}>
