@@ -75,29 +75,48 @@ async function setupApiMocks(page: Page) {
   });
 }
 
+async function createAccessToken() {
+  const { SignJWT } = await import('jose');
+  const secret = process.env.JWT_SECRET ?? 'test-secret';
+  const key = new TextEncoder().encode(secret);
+
+  return new SignJWT({
+    userId: 'u1',
+    orgId: 'org-1',
+    role: 'owner',
+    plan: 'pro',
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('24h')
+    .sign(key);
+}
+
 /**
  * Simula que el usuario ya está autenticado configurando cookies.
  * Luego configura los mocks de API.
  */
 async function setupAuthenticatedState(page: Page, baseURL: string) {
+  const accessToken = await createAccessToken();
+
   // Navegar primero para que las cookies se puedan setear en el dominio correcto
   await page.goto(baseURL);
   await page.context().addCookies([
     {
       name: 'kefy_access',
-      value: 'fake-jwt-token-for-testing',
-      domain: 'localhost',
-      path: '/',
+      value: accessToken,
+      url: `${baseURL}/`,
       httpOnly: true,
       secure: false,
+      sameSite: 'Lax',
     },
     {
       name: 'kefy_active_brand',
       value: 'brand-test-1',
-      domain: 'localhost',
-      path: '/',
+      url: `${baseURL}/`,
       httpOnly: false,
       secure: false,
+      sameSite: 'Lax',
     },
   ]);
   await setupApiMocks(page);

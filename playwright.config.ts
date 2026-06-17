@@ -23,6 +23,10 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     url: 'http://localhost:3097',
+    env: {
+      ...process.env,
+      JWT_SECRET: process.env.JWT_SECRET ?? 'test-secret',
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
