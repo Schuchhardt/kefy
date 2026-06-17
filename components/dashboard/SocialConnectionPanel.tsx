@@ -108,12 +108,13 @@ export default function SocialConnectionPanel({
       setConnectError(null);
       void fetchAccounts();
     } else if (error) {
-      setConnectError(error === 'oauth_failed' ? t.connectError : t.unknownError);
+      console.error('[social oauth] callback returned error:', error);
+      setConnectError(t.connectError);
       setConnectSuccess(null);
     }
 
     router.replace(pathname);
-  }, [searchParams, router, pathname, fetchAccounts, t.connectError, t.unknownError]);
+  }, [searchParams, router, pathname, fetchAccounts, t.connectError]);
 
   async function handleConnectPlatform(platform: string) {
     setConnecting(platform);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { verifyAccessToken, ACCESS_COOKIE } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { listAccounts } from '@/lib/zernio';
 
 // ─── GET /api/social/oauth/callback ──────────────────────────────────────────
@@ -57,6 +58,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/login?redirect=${encodeURIComponent(safeReturnTo)}`);
   }
 
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) {
+    return NextResponse.redirect(`${settingsUrl}?error=no_brand`);
+  }
+
   const db = createSupabaseServer();
 
   // Upsert the connected account — Zernio owns the tokens, we just store the reference
@@ -65,6 +71,7 @@ export async function GET(req: NextRequest) {
     .upsert(
       {
         org_id:            auth.orgId,
+        brand_id:          brand.id,
         platform:          connected,
         external_id:       accountId,
         username:          username ?? accountId,
@@ -75,7 +82,7 @@ export async function GET(req: NextRequest) {
         zernio_account_id: accountId,
         status:            'active',
       },
-      { onConflict: 'org_id,platform,external_id' },
+      { onConflict: 'brand_id,platform,external_id' },
     );
 
   if (error) {
@@ -83,5 +90,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${settingsUrl}?error=save_failed`);
   }
 
-  return NextResponse.redirect(`${settingsUrl}?connected=${encodeURIComponent(connected)}`);
+  const successUrl = `${settingsUrl}?connected=${encodeURIComponent(connected)}`;
+  const res = NextResponse.redirect(successUrl);
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
