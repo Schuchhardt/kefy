@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -86,7 +86,7 @@ const T = {
 type Locale = keyof typeof T;
 
 /* ─── Page ─────────────────────────────────────────────────────────────────── */
-export default function DashboardPage() {
+function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, org, plan, loading: authLoading } = useAuth();
@@ -523,5 +523,13 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense>
+      <DashboardPageInner />
+    </Suspense>
   );
 }
