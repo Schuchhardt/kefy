@@ -5,6 +5,9 @@ import { getBrandFromRequest } from '@/lib/brands';
 import { generateReelScript, generateContentImage, type ContentChannel } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
+export const runtime = 'nodejs';
+export const maxDuration = 180;
+
 const VALID_CHANNELS = new Set<ContentChannel>([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
 ]);

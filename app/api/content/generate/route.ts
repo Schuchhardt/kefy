@@ -4,6 +4,9 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
 import { generateContentText, type ContentChannel, type AIModel } from '@/lib/ai';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 const VALID_CHANNELS = new Set<ContentChannel>([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
 ]);

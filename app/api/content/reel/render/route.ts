@@ -6,6 +6,9 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { createMuxDirectUpload, getMuxUploadStatus } from '@/lib/mux';
 
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
 // ─── GET /api/content/reel/render?itemId=X ────────────────────────────────────
 // Poll the render/Mux status of a content item.
 
@@ -69,10 +72,9 @@ export async function GET(req: NextRequest) {
 //
 // Body: { itemId: string }
 //
-// NOTE for Netlify deployment:
-//   This route can take 2-5 minutes to complete.
-//   Configure as a Netlify Background Function by setting timeout >= 300s in netlify.toml,
-//   or migrate to Remotion Lambda for production scale.
+// Deployment (Vercel): maxDuration=300 (5 min) configured via the top-level
+// `maxDuration` export and `vercel.json`. Pro plan or higher required.
+// For production scale, consider migrating to Remotion Lambda.
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);

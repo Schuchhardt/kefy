@@ -4,6 +4,9 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { generateContentImage, BrandImageContext } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
+export const runtime = 'nodejs';
+export const maxDuration = 120;
+
 const VALID_SIZES    = new Set(['1024x1024', '1536x1024', '1024x1536', '1080x1080', '1024x1792', 'auto']);
 const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
 

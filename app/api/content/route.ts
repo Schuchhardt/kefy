@@ -7,6 +7,37 @@ const VALID_CHANNELS = new Set([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
 ]);
 const VALID_STATUSES = new Set(['draft', 'approved', 'scheduled', 'published', 'archived']);
+const VALID_CONTENT_TYPES = new Set(['post', 'carousel', 'reel']);
+
+interface SlideInput {
+  slide_order: number;
+  title?: string | null;
+  body?: string | null;
+  image_url?: string | null;
+  duration_seconds?: number | null;
+}
+
+function sanitizeSlides(raw: unknown): SlideInput[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: SlideInput[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const r = raw[i];
+    if (typeof r !== 'object' || r === null) return null;
+    const s = r as Record<string, unknown>;
+    const order = typeof s.slide_order === 'number' ? s.slide_order : i + 1;
+    out.push({
+      slide_order:      order,
+      title:            typeof s.title === 'string' ? s.title.slice(0, 200) : null,
+      body:             typeof s.body  === 'string' ? s.body.slice(0, 2000) : null,
+      image_url:        typeof s.image_url === 'string' && s.image_url ? s.image_url : null,
+      duration_seconds: typeof s.duration_seconds === 'number' ? s.duration_seconds : null,
+    });
+  }
+  // Normalize order to 1..N to avoid duplicates
+  out.sort((a, b) => a.slide_order - b.slide_order);
+  out.forEach((s, i) => { s.slide_order = i + 1; });
+  return out;
+}
 
 // ─── GET /api/content ─────────────────────────────────────────────────────────
 // List content items for the active brand. Supports ?channel= ?status= ?limit= ?offset=
@@ -73,6 +104,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `channel must be one of: ${[...VALID_CHANNELS].join(', ')}` }, { status: 422 });
   }
 
+  const contentType = typeof input.content_type === 'string' && VALID_CONTENT_TYPES.has(input.content_type)
+    ? input.content_type
+    : 'post';
+
+  // Carousel/reel require at least one slide
+  let slides: SlideInput[] | null = null;
+  if (contentType === 'carousel' || contentType === 'reel') {
+    slides = sanitizeSlides(input.slides);
+    if (!slides || slides.length === 0) {
+      return NextResponse.json(
+        { error: `${contentType} requires a non-empty 'slides' array` },
+        { status: 422 },
+      );
+    }
+  }
+
+  const videoUrl = contentType === 'reel' && typeof input.video_url === 'string' && input.video_url
+    ? input.video_url
+    : null;
+
+  // For carousel/reel, derive cover image from first slide if not explicitly provided
+  const explicitImage = typeof input.image_url === 'string' && input.image_url ? input.image_url : null;
+  const coverImage = explicitImage
+    ?? (slides ? slides.find((s) => !!s.image_url)?.image_url ?? null : null);
+
   const db = createSupabaseServer();
 
   const { data: brandKit } = await db
@@ -89,9 +145,12 @@ export async function POST(req: NextRequest) {
       brand_kit_id: brandKit?.id ?? null,
       created_by:   auth.userId,
       channel:      input.channel,
+      content_type: contentType,
       title:        typeof input.title === 'string'  ? input.title.trim().slice(0, 200)  : null,
       body:         typeof input.body  === 'string'  ? input.body.trim()                  : null,
-      image_url:    typeof input.image_url === 'string' ? input.image_url.trim()          : null,
+      image_url:    coverImage,
+      slides:       slides,
+      video_url:    videoUrl,
       hashtags:     Array.isArray(input.hashtags) ? input.hashtags.filter((h) => typeof h === 'string') : [],
       status:       'draft',
     })

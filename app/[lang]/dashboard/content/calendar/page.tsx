@@ -3,12 +3,12 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
+import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 
 import esT from '@/locales/es/dashboard/calendar';
 import enT from '@/locales/en/dashboard/calendar';
 
 const T = { es: esT, en: enT } as const;
-type Locale = keyof typeof T;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,26 +58,16 @@ const STATUS_LABELS_BASE: Record<PostStatus, { es: string; en: string }> = {
   cancelled: { es: 'Cancelado',  en: 'Cancelled'  },
 };
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  fontSize: 14,
-  color: 'var(--text)',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+
 export default function CalendarPage() {
-  const { lang } = useParams<{ lang: string }>();
-  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
+  const { lang: rawLang } = useParams<{ lang: string }>();
+  const lang: 'es' | 'en' = rawLang === 'en' ? 'en' : 'es';
+  const t = T[lang] ?? T.es;
   const locale = lang === 'en' ? 'en-US' : 'es-ES';
   const STATUS_LABELS = Object.fromEntries(
-    (Object.keys(STATUS_LABELS_BASE) as PostStatus[]).map((k) => [k, STATUS_LABELS_BASE[k][lang === 'en' ? 'en' : 'es']])
+    (Object.keys(STATUS_LABELS_BASE) as PostStatus[]).map((k) => [k, STATUS_LABELS_BASE[k][lang]])
   ) as Record<PostStatus, string>;
 
   const today = useMemo(() => new Date(), []);
@@ -90,14 +80,9 @@ export default function CalendarPage() {
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  // Schedule form
-  const [showForm, setShowForm]   = useState(false);
-  const [contentItems, setContentItems] = useState<ContentItem[]>([]);
-  const [formContentId, setFormContentId]   = useState('');
-  const [formAccountId, setFormAccountId]   = useState('');
-  const [formScheduledAt, setFormScheduledAt] = useState('');
-  const [scheduling, setScheduling] = useState(false);
-  const [schedError, setSchedError] = useState<string | null>(null);
+  // ScheduleModal
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [scheduleInitialDate, setScheduleInitialDate] = useState<Date | undefined>(undefined);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -149,43 +134,18 @@ export default function CalendarPage() {
 
   const selectedDayPosts = selectedDate ? (postsByDay[selectedDate] ?? []) : null;
 
-  async function openForm() {
-    // Fetch draft/approved content items for the schedule form
-    const res = await fetch('/api/content?limit=50&status=approved', { credentials: 'include' });
-    const { items } = await res.json() as { items: ContentItem[] };
-    // Also include drafts
-    const res2 = await fetch('/api/content?limit=50&status=draft', { credentials: 'include' });
-    const { items: drafts } = await res2.json() as { items: ContentItem[] };
-    setContentItems([...(items ?? []), ...(drafts ?? [])]);
-    setShowForm(true);
+  function openScheduleForDay(year: number, month: number, day: number) {
+    const d = new Date(year, month, day, 9, 0, 0, 0);
+    if (d.getTime() < Date.now()) d.setTime(Date.now() + 60 * 60 * 1000);
+    setScheduleInitialDate(d);
+    setScheduleModalOpen(true);
   }
 
-  async function handleSchedule(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formContentId || !formAccountId || !formScheduledAt) return;
-    setScheduling(true);
-    setSchedError(null);
-
-    try {
-      const res = await fetch('/api/social/schedule', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content_item_id:   formContentId,
-          social_account_id: formAccountId,
-          scheduled_at:      new Date(formScheduledAt).toISOString(),
-        }),
-      });
-      const data = await res.json() as { post?: ScheduledPost; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Error al programar');
-      setShowForm(false);
-      fetchData();
-    } catch (err) {
-      setSchedError(err instanceof Error ? err.message : 'Error desconocido');
-    } finally {
-      setScheduling(false);
-    }
+  function openScheduleGeneric() {
+    const d = new Date();
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+    setScheduleInitialDate(d);
+    setScheduleModalOpen(true);
   }
 
   async function handleCancel(postId: string) {
@@ -208,7 +168,7 @@ export default function CalendarPage() {
           <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>{t.subtitle}</p>
         </div>
         <button
-          onClick={openForm}
+          onClick={openScheduleGeneric}
           style={{
             background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
             padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer', flexShrink: 0,
@@ -241,71 +201,6 @@ export default function CalendarPage() {
             </div>
           ))}
         </div>
-      )}
-
-      {/* Schedule form */}
-      {showForm && (
-        <form onSubmit={handleSchedule} style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 12, padding: '20px 24px', marginBottom: 28,
-        }}>
-          <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 15, fontWeight: 700, marginBottom: 16 }}>
-            {t.newScheduled}
-          </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{t.contentLabel}</label>
-              <select style={inputStyle} value={formContentId} onChange={(e) => setFormContentId(e.target.value)} required>
-                <option value="">{t.selectContent}</option>
-                {contentItems.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title ?? (item.body?.slice(0, 60) ?? item.id)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{t.accountLabel}</label>
-              <select style={inputStyle} value={formAccountId} onChange={(e) => setFormAccountId(e.target.value)} required>
-                <option value="">{t.selectAccount}</option>
-                {accounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.username}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{t.dateLabel}</label>
-            <input
-              type="datetime-local"
-              style={inputStyle}
-              value={formScheduledAt}
-              onChange={(e) => setFormScheduledAt(e.target.value)}
-              required
-            />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              type="submit" disabled={scheduling}
-              style={{
-                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
-                padding: '9px 20px', fontWeight: 600, fontSize: 13,
-                cursor: scheduling ? 'not-allowed' : 'pointer', opacity: scheduling ? 0.7 : 1,
-              }}
-            >
-              {scheduling ? t.scheduling : t.schedule}
-            </button>
-            <button
-              type="button" onClick={() => setShowForm(false)}
-              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 16px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}
-            >
-              {t.cancel}
-            </button>
-            {schedError && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{schedError}</span>}
-          </div>
-        </form>
       )}
 
       {/* No accounts warning */}
@@ -387,7 +282,11 @@ export default function CalendarPage() {
               return (
                 <div
                   key={i}
-                  onClick={() => { if (isValid) setSelectedDate(isSelected ? null : dateKey); }}
+                  onClick={() => {
+                    if (!isValid) return;
+                    setSelectedDate(isSelected ? null : dateKey);
+                    openScheduleForDay(viewYear, viewMonth, dayNum);
+                  }}
                   style={{
                     minHeight: 84,
                     padding: '8px',
@@ -503,6 +402,17 @@ export default function CalendarPage() {
           )}
         </div>
       )}
+
+      <ScheduleModal
+        open={scheduleModalOpen}
+        onClose={() => setScheduleModalOpen(false)}
+        initialDate={scheduleInitialDate}
+        lang={lang}
+        onSuccess={() => {
+          fetchData();
+          setScheduleModalOpen(false);
+        }}
+      />
     </div>
   );
 }

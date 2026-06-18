@@ -1,0 +1,30 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "installCommand": "npm install --legacy-peer-deps",
+  "crons": [
+    {
+      "path": "/api/autopilot/run",
+      "schedule": "*/5 * * * *"
+    }
+  ],
+  "functions": {
+    "app/api/content/reel/render/route.ts": {
+      "maxDuration": 300,
+      "memory": 3008
+    },
+    "app/api/autopilot/run/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/content/reel/route.ts": {
+      "maxDuration": 180
+    },
+    "app/api/content/image/route.ts": {
+      "maxDuration": 120
+    },
+    "app/api/content/generate/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

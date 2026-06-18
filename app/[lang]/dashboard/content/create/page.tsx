@@ -2,10 +2,12 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams, useParams } from 'next/navigation';
-import dynamic from 'next/dynamic';
-import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
-import { PostPreview }     from '@/components/dashboard/PostPreview';
 import ChannelIcon         from '@/components/ui/ChannelIcon';
+import ContentActions      from '@/components/dashboard/content/ContentActions';
+import ScheduleModal       from '@/components/dashboard/content/ScheduleModal';
+import EditContentModal    from '@/components/dashboard/content/EditContentModal';
+import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
+import type { ContentItem as ContentItemShared } from '@/components/dashboard/content/types';
 import { CHANNELS as ALL_CHANNELS, type Channel } from '@/lib/channels';
 
 import esT from '@/locales/es/dashboard/content';
@@ -52,20 +54,7 @@ interface ContentItem {
   created_at:       string;
 }
 
-interface SocialAccount {
-  id:                 string;
-  platform:           string;
-  username:           string;
-  avatar_url:         string | null;
-  zernio_account_id:  string;
-  status:             string;
-}
-
-// Lazy-load MuxReelPlayer to avoid SSR issues
-const MuxReelPlayer = dynamic(
-  () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
-  { ssr: false, loading: () => <p style={{ color: 'var(--muted)', fontSize: 13 }}>Cargando reproductor…</p> },
-);
+// Modals own their own preview/publish/regen logic now — no need for SocialAccount or MuxReelPlayer here.
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -152,7 +141,8 @@ interface StrategyMeta {
 
 function ContentPageInner() {
   const searchParams = useSearchParams();
-  const { lang } = useParams<{ lang: string }>();
+  const { lang: rawLang } = useParams<{ lang: string }>();
+  const lang: 'es' | 'en' = rawLang === 'en' ? 'en' : 'es';
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
   const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
 
@@ -203,45 +193,13 @@ function ContentPageInner() {
   const [referenceImages, setReferenceImages]   = useState<string[]>([]);
   const [referenceUploading, setReferenceUploading] = useState(false);
 
-  // Selected item
-  const [selected, setSelected] = useState<ContentItem | null>(null);
+  // Modals
+  const [viewItem,    setViewItem]    = useState<ContentItem | null>(null);
+  const [editItem,    setEditItem]    = useState<ContentItem | null>(null);
+  const [manualOpen,  setManualOpen]  = useState(false);
 
-  // Publish / schedule state
-  const [publishOpen, setPublishOpen]               = useState(false);
-  const [publishScheduled, setPublishScheduled]     = useState(false);
-  const [publishDate, setPublishDate]               = useState('');
-  const [socialAccounts, setSocialAccounts]         = useState<SocialAccount[]>([]);
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
-  const [loadingAccounts, setLoadingAccounts]       = useState(false);
-  const [publishing, setPublishing]                 = useState(false);
-  const [publishError, setPublishError]             = useState<string | null>(null);
-  const [publishSuccess, setPublishSuccess]         = useState(false);
-
-  // AI re-generation for selected item
-  const [regenTextFeedback, setRegenTextFeedback]   = useState('');
-  const [regenImageFeedback, setRegenImageFeedback] = useState('');
-  const [regenTextLoading, setRegenTextLoading]     = useState(false);
-  const [regenImageLoading, setRegenImageLoading]   = useState(false);
-  const [regenTextError, setRegenTextError]         = useState<string | null>(null);
-  const [regenImageError, setRegenImageError]       = useState<string | null>(null);
-  const [regenTextOk, setRegenTextOk]               = useState(false);
-  const [regenImageOk, setRegenImageOk]             = useState(false);
-
-  // Reset regen state when selection changes
-  useEffect(() => {
-    setRegenTextFeedback('');
-    setRegenImageFeedback('');
-    setRegenTextError(null);
-    setRegenImageError(null);
-    setRegenTextOk(false);
-    setRegenImageOk(false);
-    setPublishOpen(false);
-    setPublishScheduled(false);
-    setPublishDate('');
-    setSelectedAccountIds([]);
-    setPublishError(null);
-    setPublishSuccess(false);
-  }, [selected?.id]);
+  // Track items whose cover image is being generated in background
+  const [imagePending, setImagePending] = useState<Set<string>>(new Set());
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -280,7 +238,7 @@ function ContentPageInner() {
 
     try {
       let url = '/api/content/generate';
-      const language: 'es' | 'en' = lang === 'en' ? 'en' : 'es';
+      const language: 'es' | 'en' = lang;
       // Note: channel is omitted on purpose — backend defaults to 'generic'
       // (Zernio adapts per platform at publish time). Images are always-on.
       let payload: Record<string, unknown> = {
@@ -303,7 +261,7 @@ function ContentPageInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { body?: string; hook?: string; slides?: unknown[]; scenes?: unknown[]; error?: string };
+      const data = await res.json() as { itemId?: string; body?: string; hook?: string; hashtags?: string[]; slides?: unknown[]; scenes?: unknown[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Error al generar');
 
       if (genType === 'post')     setGenResult(data.body ?? '');
@@ -320,7 +278,34 @@ function ContentPageInner() {
         })
         .catch(() => {});
 
-      fetchItems();
+      await fetchItems();
+
+      // For posts: kick off background image generation so the user sees the image
+      // appear in the list without needing to open the modal manually.
+      if (genType === 'post' && data.itemId) {
+        const newItemId = data.itemId;
+        setImagePending((prev) => { const n = new Set(prev); n.add(newItemId); return n; });
+        const imagePrompt = (data.body ?? genTopic).slice(0, 900);
+        fetch('/api/content/image', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: imagePrompt, size: '1024x1024', quality: 'medium', itemId: newItemId }),
+        })
+          .then((r) => r.ok ? r.json() : null)
+          .then((d: { url?: string } | null) => {
+            if (d?.url) {
+              setItems((prev) => prev.map((i) => i.id === newItemId ? { ...i, image_url: d.url ?? i.image_url } : i));
+              setViewItem((prev) => prev?.id === newItemId ? { ...prev, image_url: d.url ?? prev.image_url } : prev);
+              setEditItem((prev) => prev?.id === newItemId ? { ...prev, image_url: d.url ?? prev.image_url } : prev);
+            }
+          })
+          .catch(() => {/* non-fatal: user can regenerate from Edit modal */})
+          .finally(() => {
+            setImagePending((prev) => { const n = new Set(prev); n.delete(newItemId); return n; });
+          });
+      }
+
       // Clear form so user can start a new generation immediately
       setGenTopic('');
     } catch (err) {
@@ -415,135 +400,15 @@ function ContentPageInner() {
     if (!confirm('¿Eliminar este contenido?')) return;
     await fetch(`/api/content/${id}`, { method: 'DELETE', credentials: 'include' });
     setItems((prev) => prev.filter((i) => i.id !== id));
-    if (selected?.id === id) setSelected(null);
+    if (viewItem?.id === id) setViewItem(null);
+    if (editItem?.id === id) setEditItem(null);
   }
 
-  async function fetchSocialAccounts() {
-    if (socialAccounts.length > 0) return;
-    setLoadingAccounts(true);
-    try {
-      const res = await fetch('/api/social/accounts', { credentials: 'include' });
-      const data = await res.json() as { accounts?: SocialAccount[] };
-      setSocialAccounts(data.accounts ?? []);
-    } catch {
-      // non-critical
-    } finally {
-      setLoadingAccounts(false);
-    }
-  }
-
-  async function handlePublish() {
-    if (!selected || selectedAccountIds.length === 0) return;
-    setPublishing(true);
-    setPublishError(null);
-    try {
-      // Reels: render first if not done yet
-      if (selected.content_type === 'reel' && !selected.mux_playback_id) {
-        const renderRes = await fetch('/api/content/reel/render', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itemId: selected.id }),
-        });
-        const renderData = await renderRes.json() as { mux_playback_id?: string; error?: string };
-        if (!renderRes.ok) throw new Error(renderData.error ?? 'Error al renderizar el reel');
-        if (!renderData.mux_playback_id) {
-          throw new Error('El video está siendo procesado. Intenta publicar en unos minutos cuando esté listo.');
-        }
-        setSelected((prev) => prev ? { ...prev, mux_playback_id: renderData.mux_playback_id, render_status: 'ready' } : prev);
-        setItems((prev) => prev.map((i) => i.id === selected.id ? { ...i, mux_playback_id: renderData.mux_playback_id, render_status: 'ready' } : i));
-      }
-
-      if (publishScheduled && publishDate) {
-        const res = await fetch('/api/social/schedule', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content_item_id: selected.id, social_account_ids: selectedAccountIds, scheduled_at: publishDate }),
-        });
-        const data = await res.json() as { error?: string };
-        if (!res.ok) throw new Error(data.error ?? 'Error al programar');
-      } else {
-        const res = await fetch('/api/social/publish', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content_item_id: selected.id, social_account_ids: selectedAccountIds }),
-        });
-        const data = await res.json() as { error?: string };
-        if (!res.ok) throw new Error(data.error ?? 'Error al publicar');
-      }
-
-      const newStatus: Status = publishScheduled ? 'scheduled' : 'published';
-      setItems((prev) => prev.map((i) => i.id === selected.id ? { ...i, status: newStatus } : i));
-      setSelected((prev) => prev ? { ...prev, status: newStatus } : prev);
-      setPublishSuccess(true);
-      setPublishOpen(false);
-    } catch (err) {
-      setPublishError(err instanceof Error ? err.message : 'Error desconocido');
-    } finally {
-      setPublishing(false);
-    }
-  }
-
-  async function handleRegenText() {
-    if (!selected) return;
-    setRegenTextLoading(true);
-    setRegenTextError(null);
-    setRegenTextOk(false);
-    try {
-      const existingBody = selected.body?.slice(0, 250) ?? selected.title ?? '';
-      const topic = regenTextFeedback.trim()
-        ? existingBody
-          ? `Reescribe este post aplicando el siguiente feedback: "${regenTextFeedback.trim()}". Post actual: ${existingBody}`
-          : regenTextFeedback.trim()
-        : existingBody || 'contenido de calidad';
-      const res = await fetch('/api/content/generate', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel: selected.channel, topic: topic.slice(0, 480), itemId: selected.id, save: true }),
-      });
-      const data = await res.json() as { body?: string; hashtags?: string[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? t.errorGenerate);
-      const patch = { body: data.body ?? selected.body, hashtags: data.hashtags ?? selected.hashtags };
-      setSelected((prev) => prev ? { ...prev, ...patch } : prev);
-      setItems((prev) => prev.map((i) => i.id === selected.id ? { ...i, ...patch } : i));
-      setRegenTextOk(true);
-      setRegenTextFeedback('');
-      setTimeout(() => setRegenTextOk(false), 3000);
-    } catch (err) {
-      setRegenTextError(err instanceof Error ? err.message : t.errorUnknown);
-    } finally {
-      setRegenTextLoading(false);
-    }
-  }
-
-  async function handleRegenImage() {
-    if (!selected) return;
-    setRegenImageLoading(true);
-    setRegenImageError(null);
-    setRegenImageOk(false);
-    try {
-      const base = selected.body?.slice(0, 350) ?? selected.title ?? 'imagen para post de redes sociales';
-      const prompt = regenImageFeedback.trim()
-        ? `${base}. Estilo visual: ${regenImageFeedback.trim()}`
-        : base;
-      const res = await fetch('/api/content/image', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium', itemId: selected.id }),
-      });
-      const data = await res.json() as { url?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? t.errorGenerateImage);
-      setSelected((prev) => prev ? { ...prev, image_url: data.url ?? prev.image_url } : prev);
-      setItems((prev) => prev.map((i) => i.id === selected.id ? { ...i, image_url: data.url ?? i.image_url } : i));
-      setRegenImageOk(true);
-      setRegenImageFeedback('');
-      setTimeout(() => setRegenImageOk(false), 3000);
-    } catch (err) {
-      setRegenImageError(err instanceof Error ? err.message : t.errorUnknown);
-    } finally {
-      setRegenImageLoading(false);
-    }
+  // Apply patches from EditContentModal back into local state
+  function handleItemUpdate(id: string, patch: Partial<ContentItem>) {
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...patch } : i));
+    setEditItem((prev) => prev?.id === id ? { ...prev, ...patch } : prev);
+    setViewItem((prev) => prev?.id === id ? { ...prev, ...patch } : prev);
   }
 
   // Content type display label (no "Genérico")
@@ -560,15 +425,26 @@ function ContentPageInner() {
             <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>{t.title}</h1>
             <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>{t.subtitle}</p>
           </div>
-          <button
-            onClick={() => { setShowGenerate(!showGenerate); setGenResult(null); setGenError(null); if (showGenerate) setReferenceImages([]); }}
-            style={{
-              background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
-              padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-            }}
-          >
-            {showGenerate ? t.cancelBtn : t.generateBtn}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => setManualOpen(true)}
+              style={{
+                background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8,
+                padding: '9px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+              }}
+            >
+              {lang === 'en' ? 'Create manually' : 'Crear sin IA'}
+            </button>
+            <button
+              onClick={() => { setShowGenerate(!showGenerate); setGenResult(null); setGenError(null); if (showGenerate) setReferenceImages([]); }}
+              style={{
+                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
+                padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+              }}
+            >
+              {showGenerate ? t.cancelBtn : t.generateBtn}
+            </button>
+          </div>
         </div>
 
         {/* Generate form */}
@@ -858,14 +734,24 @@ function ContentPageInner() {
               if (viewMode === 'grid') return (
                 <div
                   key={item.id}
-                  onClick={() => setSelected(selected?.id === item.id ? null : item)}
+                  onClick={() => setViewItem(item)}
                   style={{
                     background: 'var(--surface)',
-                    border: `1px solid ${selected?.id === item.id ? 'var(--accent)' : 'var(--border)'}`,
+                    border: `1px solid ${viewItem?.id === item.id ? 'var(--accent)' : 'var(--border)'}`,
                     borderRadius: 10, cursor: 'pointer', overflow: 'hidden',
-                    transition: 'border-color 0.15s',
+                    transition: 'border-color 0.15s', position: 'relative',
                   }}
                 >
+                  {/* Action buttons */}
+                  <div style={{ position: 'absolute', top: 6, right: 6, zIndex: 2, background: 'rgba(0,0,0,0.55)', borderRadius: 8, padding: 2, backdropFilter: 'blur(4px)' }}>
+                    <ContentActions
+                      lang={lang}
+                      size="sm"
+                      onView={() => setViewItem(item)}
+                      onEdit={() => setEditItem(item)}
+                      onDelete={() => handleDelete(item.id)}
+                    />
+                  </div>
                   {/* Grid thumbnail */}
                   <div style={{
                     width: '100%',
@@ -887,6 +773,11 @@ function ContentPageInner() {
                           overflow: 'hidden', display: '-webkit-box',
                           WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
                         }}>{carouselFallback.title}</span>
+                      </div>
+                    ) : imagePending.has(item.id) ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: 'var(--muted)' }}>
+                        <span style={{ fontSize: 28, animation: 'pulse 1.6s ease-in-out infinite' }}>✨</span>
+                        <span style={{ fontSize: 11 }}>{lang === 'en' ? 'Generating image…' : 'Generando imagen…'}</span>
                       </div>
                     ) : (
                       <span style={{ fontSize: 36, opacity: 0.4 }}>{CONTENT_TYPE_ICONS[item.content_type as ContentType]}</span>
@@ -934,9 +825,9 @@ function ContentPageInner() {
               return (
               <div
                 key={item.id}
-                onClick={() => setSelected(selected?.id === item.id ? null : item)}
+                onClick={() => setViewItem(item)}
                 style={{
-                  background: 'var(--surface)', border: `1px solid ${selected?.id === item.id ? 'var(--accent)' : 'var(--border)'}`,
+                  background: 'var(--surface)', border: `1px solid ${viewItem?.id === item.id ? 'var(--accent)' : 'var(--border)'}`,
                   borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
                   transition: 'border-color 0.15s', display: 'flex', gap: 12, alignItems: 'center',
                 }}
@@ -961,6 +852,8 @@ function ContentPageInner() {
                         WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                       }}>{carouselFallback.title}</span>
                     </div>
+                  ) : imagePending.has(item.id) ? (
+                    <span style={{ fontSize: 18, opacity: 0.6, animation: 'pulse 1.6s ease-in-out infinite' }}>✨</span>
                   ) : (
                     <span style={{ fontSize: 20, opacity: 0.5 }}>{CONTENT_TYPE_ICONS[item.content_type]}</span>
                   )}
@@ -1028,6 +921,17 @@ function ContentPageInner() {
                     {item.body ?? item.title ?? t.noText}
                   </p>
                 </div>
+
+                {/* Action buttons */}
+                <div style={{ flexShrink: 0 }}>
+                  <ContentActions
+                    lang={lang}
+                    size="md"
+                    onView={() => setViewItem(item)}
+                    onEdit={() => setEditItem(item)}
+                    onDelete={() => handleDelete(item.id)}
+                  />
+                </div>
               </div>
               );
             })}
@@ -1035,388 +939,52 @@ function ContentPageInner() {
         )}
       </div>
 
-      {/* ── Detail modal ────────────────────────────────────────────── */}
-      {selected && (
-        <div
-          onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(0,0,0,0.72)',
-            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-            padding: '32px 16px', overflowY: 'auto',
-          }}
-        >
-          <div style={{
-            background: 'var(--bg)', borderRadius: 16, width: '100%', maxWidth: 560,
-            border: '1px solid var(--border)', flexShrink: 0,
-          }}>
-            {/* Sticky header */}
-            <div style={{
-              position: 'sticky', top: 0, zIndex: 2,
-              background: 'var(--bg)', borderBottom: '1px solid var(--border)',
-              padding: '16px 20px', borderRadius: '16px 16px 0 0',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-            }}>
-              <div style={{ minWidth: 0 }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
-                  color: 'var(--accent)', background: 'rgba(198,255,75,0.1)',
-                  borderRadius: 4, padding: '2px 7px',
-                }}>
-                  {contentTypeLabel(selected.content_type)}
-                </span>
-                <h2 style={{
-                  fontFamily: 'var(--font-syne)', fontSize: 16, fontWeight: 700, margin: '6px 0 0',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {selected.title ?? selected.body?.slice(0, 60) ?? t.detailTitle}
-                </h2>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                <span style={{
-                  fontSize: 11, fontWeight: 600, borderRadius: 20, padding: '3px 10px',
-                  background: `${STATUS_COLORS[selected.status]}22`,
-                  color: STATUS_COLORS[selected.status],
-                }}>
-                  {STATUS_LABELS[selected.status]}
-                </span>
-                <button
-                  onClick={() => setSelected(null)}
-                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: '2px 4px' }}
-                >✕</button>
-              </div>
-            </div>
+      {/* ── Modals ──────────────────────────────────────────────────── */}
+      <ScheduleModal
+        open={!!viewItem}
+        onClose={() => setViewItem(null)}
+        initialItem={viewItem as ContentItemShared | null}
+        brandKit={brandKit ? {
+          name: brandKit.name ?? null,
+          logo_url: brandKit.logo_url ?? null,
+          accent_color: brandKit.accent_color ?? null,
+          primary_color: brandKit.primary_color ?? null,
+          font_heading: brandKit.font_heading ?? null,
+        } : undefined}
+        lang={lang}
+        onSuccess={() => {
+          fetchItems();
+          setViewItem(null);
+        }}
+      />
 
-            {/* Modal body */}
-            <div style={{ padding: '20px 24px 24px' }}>
-              {/* Post preview */}
-              {selected.content_type === 'post' && (
-                <PostPreview
-                  channel={selected.channel}
-                  body={selected.body}
-                  imageUrl={selected.image_url}
-                  hashtags={selected.hashtags}
-                  username={brandKit?.name ?? 'tu_marca'}
-                  logoUrl={brandKit?.logo_url ?? undefined}
-                />
-              )}
+      <EditContentModal
+        open={!!editItem}
+        onClose={() => setEditItem(null)}
+        item={editItem as ContentItemShared | null}
+        brandKit={brandKit ? {
+          name: brandKit.name ?? null,
+          logo_url: brandKit.logo_url ?? null,
+          accent_color: brandKit.accent_color ?? null,
+          primary_color: brandKit.primary_color ?? null,
+          font_heading: brandKit.font_heading ?? null,
+        } : undefined}
+        lang={lang}
+        onUpdate={(patch) => {
+          if (editItem) handleItemUpdate(editItem.id, patch as Partial<ContentItem>);
+        }}
+      />
 
-              {/* Carousel/Reel shared: title + body + hashtags */}
-              {selected.content_type !== 'post' && (
-                <>
-                  {selected.title && (
-                    <div style={{ marginBottom: 16 }}>
-                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>{t.titleLabel}</p>
-                      <p style={{ fontSize: 14 }}>{selected.title}</p>
-                    </div>
-                  )}
-                  <div style={{ marginBottom: 16 }}>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>{t.contentLabel}</p>
-                    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', fontSize: 14, whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>
-                      {selected.body ?? t.noText}
-                    </div>
-                  </div>
-                  {selected.hashtags.length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>{t.hashtagsLabel}</p>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {selected.hashtags.map((h) => (
-                          <span key={h} style={{ fontSize: 13, color: 'var(--accent)', background: 'rgba(198,255,75,0.08)', borderRadius: 4, padding: '2px 8px' }}>
-                            {h.startsWith('#') ? h : `#${h}`}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {selected.image_url && selected.content_type !== 'reel' && (
-                    <div style={{ marginBottom: 16 }}>
-                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>{t.imageLabel}</p>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={selected.image_url} alt="Content" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border)' }} />
-                    </div>
-                  )}
-                </>
-              )}
+      <ManualCreateModal
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        lang={lang}
+        onCreated={(item) => {
+          setItems((prev) => [item as ContentItem, ...prev]);
+          setManualOpen(false);
+        }}
+      />
 
-              {/* Carousel slides — Instagram-style preview */}
-              {selected.content_type === 'carousel' && Array.isArray(selected.slides) && selected.slides.length > 0 && (
-                <CarouselPreview
-                  key={selected.id}
-                  slides={selected.slides as CarouselSlide[]}
-                  username={brandKit?.name ?? undefined}
-                  logoUrl={brandKit?.logo_url ?? undefined}
-                />
-              )}
-
-              {/* Reel preview — Mux or Remotion preview, render button hidden */}
-              {selected.content_type === 'reel' && Array.isArray(selected.slides) && selected.slides.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 10 }}>{t.previewReel}</p>
-                  <MuxReelPlayer
-                    itemId={selected.id}
-                    scenes={selected.slides as ReelScene[]}
-                    muxPlaybackId={selected.mux_playback_id}
-                    renderStatus={selected.render_status}
-                    height={400}
-                    hideRenderButton
-                    autoPlay
-                    brandName={brandKit?.name ?? undefined}
-                    accentColor={brandKit?.accent_color ?? brandKit?.primary_color ?? undefined}
-                    primaryColor={brandKit?.primary_color ?? undefined}
-                    fontHeading={brandKit?.font_heading ?? undefined}
-                    logoUrl={brandKit?.logo_url ?? undefined}
-                    onRenderDone={(itemId, playbackId) => {
-                      setItems((prev) => prev.map((i) =>
-                        i.id === itemId ? { ...i, mux_playback_id: playbackId, render_status: 'ready' } : i
-                      ));
-                      setSelected((prev) => prev?.id === itemId
-                        ? { ...prev, mux_playback_id: playbackId, render_status: 'ready' }
-                        : prev
-                      );
-                    }}
-                    onRenderStart={(itemId) => {
-                      setItems((prev) => prev.map((i) =>
-                        i.id === itemId ? { ...i, render_status: 'rendering' } : i
-                      ));
-                    }}
-                  />
-                  <div style={{ marginTop: 12 }}>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>{t.scenesCount((selected.slides as ReelScene[]).length)}</p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {(selected.slides as ReelScene[]).map((scene) => (
-                        <div key={scene.scene_order} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginTop: 1 }}>{scene.scene_order}</span>
-                          <div>
-                            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 2px' }}>{scene.title}</p>
-                            <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>{scene.body}</p>
-                            <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0 0', opacity: 0.6 }}>{scene.duration_seconds}s</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── IA: Regenerar texto ───────────────────── */}
-              {(selected.content_type === 'post' || selected.content_type === 'carousel') && (
-                <div style={{ marginBottom: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.06em', marginBottom: 8 }}>
-                    {t.regenTextTitle}
-                  </p>
-                  <textarea
-                    placeholder={t.regenTextPlaceholder}
-                    value={regenTextFeedback}
-                    onChange={(e) => setRegenTextFeedback(e.target.value)}
-                    rows={3}
-                    style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
-                  />
-                  {regenTextError && <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 6 }}>{regenTextError}</p>}
-                  {regenTextOk && <p style={{ fontSize: 12, color: 'var(--accent)', marginTop: 6 }}>{t.regenTextOk}</p>}
-                  <button
-                    onClick={handleRegenText}
-                    disabled={regenTextLoading}
-                    style={{
-                      width: '100%', marginTop: 8, background: 'rgba(198,255,75,0.08)',
-                      border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8,
-                      padding: '9px 0', fontSize: 13, fontWeight: 600,
-                      cursor: regenTextLoading ? 'not-allowed' : 'pointer', opacity: regenTextLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {regenTextLoading ? t.regenTextLoading : t.regenTextBtn}
-                  </button>
-                </div>
-              )}
-
-              {/* ── IA: Generar / Regenerar imagen ─────────── */}
-              {selected.content_type !== 'reel' && (
-                <div style={{ marginBottom: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.06em', marginBottom: 8 }}>
-                    {selected.image_url ? t.regenImageTitle : t.genImageTitle}
-                  </p>
-                  <textarea
-                    placeholder={t.regenImagePlaceholder}
-                    value={regenImageFeedback}
-                    onChange={(e) => setRegenImageFeedback(e.target.value)}
-                    rows={2}
-                    style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
-                  />
-                  {regenImageError && <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 6 }}>{regenImageError}</p>}
-                  {regenImageOk && <p style={{ fontSize: 12, color: 'var(--accent)', marginTop: 6 }}>{t.regenImageOk}</p>}
-                  <button
-                    onClick={handleRegenImage}
-                    disabled={regenImageLoading}
-                    style={{
-                      width: '100%', marginTop: 8, background: 'rgba(198,255,75,0.05)',
-                      border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8,
-                      padding: '9px 0', fontSize: 13, fontWeight: 600,
-                      cursor: regenImageLoading ? 'not-allowed' : 'pointer', opacity: regenImageLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {regenImageLoading ? t.regenImageLoading : (selected.image_url ? t.regenImageBtn : t.genImageBtn)}
-                  </button>
-                </div>
-              )}
-
-              {/* ── Publicar ──────────────────────────────────── */}
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 4 }}>
-                {publishSuccess ? (
-                  <p style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: 'var(--accent)', padding: '10px 0' }}>
-                    ✓ {publishScheduled ? 'Programado correctamente' : 'Publicado correctamente'}
-                  </p>
-                ) : !publishOpen ? (
-                  <button
-                    onClick={() => { setPublishOpen(true); fetchSocialAccounts(); }}
-                    style={{
-                      width: '100%', background: 'var(--accent)', color: '#000', border: 'none',
-                      borderRadius: 10, padding: '12px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                    }}
-                  >
-                    Publicar
-                  </button>
-                ) : (
-                  <div>
-                    {/* Toggle publicar ahora / programar */}
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                      <button
-                        type="button"
-                        onClick={() => setPublishScheduled(false)}
-                        style={{
-                          flex: 1, padding: '9px 0', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                          border: `1px solid ${!publishScheduled ? 'var(--accent)' : 'var(--border)'}`,
-                          background: !publishScheduled ? 'rgba(198,255,75,0.12)' : 'var(--bg)',
-                          color: !publishScheduled ? 'var(--accent)' : 'var(--muted)',
-                        }}
-                      >
-                        Publicar ahora
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPublishScheduled(true)}
-                        style={{
-                          flex: 1, padding: '9px 0', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                          border: `1px solid ${publishScheduled ? 'var(--accent)' : 'var(--border)'}`,
-                          background: publishScheduled ? 'rgba(198,255,75,0.12)' : 'var(--bg)',
-                          color: publishScheduled ? 'var(--accent)' : 'var(--muted)',
-                        }}
-                      >
-                        Programar
-                      </button>
-                    </div>
-
-                    {/* Date picker when scheduling */}
-                    {publishScheduled && (
-                      <div style={{ marginBottom: 16 }}>
-                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-                          Fecha y hora de publicación
-                        </label>
-                        <input
-                          type="datetime-local"
-                          value={publishDate}
-                          onChange={(e) => setPublishDate(e.target.value)}
-                          min={new Date().toISOString().slice(0, 16)}
-                          style={{ ...inputStyle }}
-                        />
-                      </div>
-                    )}
-
-                    {/* Social accounts */}
-                    <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 10, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                      ¿En qué cuentas publicar?
-                    </p>
-                    {loadingAccounts ? (
-                      <p style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', padding: '12px 0' }}>Cargando cuentas…</p>
-                    ) : socialAccounts.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '16px 0', fontSize: 13, color: 'var(--muted)' }}>
-                        No hay cuentas conectadas.{' '}
-                        <a href={`/${lang}/dashboard/social`} style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
-                          Conectar cuentas →
-                        </a>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                        {socialAccounts.filter(acc => acc.status === 'active').map((acc) => {
-                          const isSelected = selectedAccountIds.includes(acc.id);
-                          return (
-                            <button
-                              key={acc.id}
-                              type="button"
-                              onClick={() => setSelectedAccountIds((prev) =>
-                                isSelected ? prev.filter((id) => id !== acc.id) : [...prev, acc.id]
-                              )}
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: 10,
-                                padding: '10px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-                                border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
-                                background: isSelected ? 'rgba(198,255,75,0.08)' : 'var(--surface)',
-                                transition: 'border-color 0.15s',
-                              }}
-                            >
-                              <ChannelIcon name={acc.platform} size={20} />
-                              <div style={{ flex: 1 }}>
-                                <p style={{ fontSize: 13, fontWeight: 700, margin: 0, color: isSelected ? 'var(--accent)' : 'var(--text)' }}>
-                                  @{acc.username}
-                                </p>
-                                <p style={{ fontSize: 11, color: 'var(--muted)', margin: '1px 0 0', textTransform: 'capitalize' }}>
-                                  {acc.platform}
-                                </p>
-                              </div>
-                              {isSelected && (
-                                <span style={{ fontSize: 16, color: 'var(--accent)' }}>✓</span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {publishError && (
-                      <p style={{ fontSize: 12, color: '#ff6b6b', marginBottom: 10 }}>{publishError}</p>
-                    )}
-
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        onClick={handlePublish}
-                        disabled={publishing || selectedAccountIds.length === 0 || (publishScheduled && !publishDate)}
-                        style={{
-                          flex: 1, background: 'var(--accent)', color: '#000', border: 'none',
-                          borderRadius: 10, padding: '11px 0', fontSize: 14, fontWeight: 700,
-                          cursor: (publishing || selectedAccountIds.length === 0 || (publishScheduled && !publishDate)) ? 'not-allowed' : 'pointer',
-                          opacity: (publishing || selectedAccountIds.length === 0 || (publishScheduled && !publishDate)) ? 0.55 : 1,
-                        }}
-                      >
-                        {publishing ? 'Procesando…' : publishScheduled ? 'Confirmar programación' : 'Publicar ahora'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPublishOpen(false)}
-                        style={{
-                          padding: '11px 18px', borderRadius: 10, border: '1px solid var(--border)',
-                          background: 'var(--bg)', color: 'var(--muted)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                        }}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Delete */}
-              <button
-                onClick={() => handleDelete(selected.id)}
-                style={{
-                  width: '100%', background: 'none', border: '1px solid #ff6b6b',
-                  color: '#ff6b6b', borderRadius: 8, padding: '9px 0',
-                  fontSize: 13, fontWeight: 600, cursor: 'pointer', marginTop: 12,
-                }}
-              >
-                {t.deleteBtn}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

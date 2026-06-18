@@ -5,13 +5,36 @@ import { generateContentText } from '@/lib/ai';
 import { publishPost } from '@/lib/zernio';
 import { computeNextRun } from '../rules/route';
 
-// ─── POST /api/autopilot/run ──────────────────────────────────────────────────
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
+// ─── /api/autopilot/run ───────────────────────────────────────────────────────
 // Evaluate active autopilot rules whose next_run_at <= now and execute them.
-// Can be called manually (authenticated user) or by a cron/webhook.
 //
-// Body (optional):
-//   { rule_ids?: string[] }  — run only specific rules (org-scoped)
-//   { cron_secret?: string } — allow unauthenticated cron invocation
+// Invocation modes:
+//   - GET  (Vercel Cron): header `Authorization: Bearer ${CRON_SECRET}`.
+//     Vercel sets this automatically for cron schedules defined in vercel.json.
+//     Falls back to AUTOPILOT_CRON_SECRET if CRON_SECRET is not set.
+//   - POST (manual/webhook): authenticated user (owner/admin) OR
+//     body `{ cron_secret: string }` matching AUTOPILOT_CRON_SECRET.
+//
+// POST body (optional):
+//   { rule_ids?: string[] }   — run only specific rules (org-scoped)
+//   { cron_secret?: string }  — allow unauthenticated cron invocation
+
+function isVercelCronAuthorized(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET ?? process.env.AUTOPILOT_CRON_SECRET;
+  if (!secret) return false;
+  const header = req.headers.get('authorization');
+  return header === `Bearer ${secret}`;
+}
+
+export async function GET(req: NextRequest) {
+  if (!isVercelCronAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return runAutopilot({ orgId: null, ruleIds: null });
+}
 
 export async function POST(req: NextRequest) {
   // Support both authenticated users and cron calls via shared secret
@@ -21,7 +44,8 @@ export async function POST(req: NextRequest) {
   let body: Record<string, unknown> = {};
   try { body = (await req.json()) as Record<string, unknown>; } catch { /* no body */ }
 
-  const isCron = cronSecret && typeof body.cron_secret === 'string' && body.cron_secret === cronSecret;
+  const isCronBody = cronSecret && typeof body.cron_secret === 'string' && body.cron_secret === cronSecret;
+  const isCron = isCronBody || isVercelCronAuthorized(req);
 
   if (!isCron) {
     const auth = await getAuthFromRequest(req);
@@ -36,6 +60,11 @@ export async function POST(req: NextRequest) {
     ? (body.rule_ids as unknown[]).filter((id): id is string => typeof id === 'string')
     : null;
 
+  return runAutopilot({ orgId, ruleIds });
+}
+
+async function runAutopilot(opts: { orgId: string | null; ruleIds: string[] | null }) {
+  const { orgId, ruleIds } = opts;
   const db = createSupabaseServer();
   const now = new Date();
 

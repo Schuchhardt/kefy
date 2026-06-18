@@ -28,10 +28,12 @@
     "@types/sharp": "^0.31.1",
     "@types/three": "^0.184.1",
     "bcryptjs": "^3.0.3",
+    "date-fns": "^4.4.0",
     "jose": "^6.2.3",
     "next": "16.2.6",
     "openai": "^6.37.0",
     "react": "19.2.4",
+    "react-day-picker": "^10.0.1",
     "react-dom": "19.2.4",
     "remotion": "^4.0.462",
     "resend": "^6.12.3",
@@ -44,7 +46,6 @@
     "@next/swc-darwin-arm64": "^16.2.6"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5.15.11",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",

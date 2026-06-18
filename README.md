@@ -48,7 +48,7 @@
 | Procesamiento de imágenes | Sharp |
 | Pagos | Stripe |
 | Emails | Resend + React Email |
-| Despliegue | Netlify (`@netlify/plugin-nextjs`) |
+| Despliegue | Vercel (cron jobs nativos) |
 
 ## Estructura del proyecto
 
@@ -148,6 +148,7 @@ FIRECRAWL_API_KEY=your-firecrawl-api-key
 
 # Autopilot cron
 AUTOPILOT_CRON_SECRET=your-cron-secret  # openssl rand -hex 32
+CRON_SECRET=your-vercel-cron-secret    # openssl rand -hex 32 (Vercel Cron)
 
 # URL pública (para callbacks OAuth; omitir en dev)
 NEXT_PUBLIC_APP_URL=https://app.kefy.app
@@ -183,4 +184,11 @@ npm run build      # Verifica tipos y genera build de producción
 npm start          # Arranca el servidor de producción
 ```
 
-El despliegue se realiza automáticamente en **Netlify** al hacer push a `main` usando el plugin `@netlify/plugin-nextjs`.
+El despliegue se realiza automáticamente en **Vercel** al hacer push a `main`. Configuración en [`vercel.json`](vercel.json):
+
+- `crons` — invoca `/api/autopilot/run` cada 5 minutos (requiere plan Pro).
+- `functions` — `maxDuration` por ruta: render de reels = 300 s, autopilot = 300 s, generación de imágenes = 120 s, reel storyboard = 180 s.
+
+Variables de entorno extra requeridas en Vercel:
+
+- `CRON_SECRET` — secreto que Vercel envía automáticamente como `Authorization: Bearer ...` al invocar los cron jobs. Si no se define, se usa `AUTOPILOT_CRON_SECRET` como fallback.
