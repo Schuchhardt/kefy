@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import fs from 'fs';
 import path from 'path';
 
@@ -285,47 +285,68 @@ export async function generateContentImage(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const generateFn = client.images.generate.bind(client.images) as (params: any) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editFn     = client.images.edit.bind(client.images)     as (params: any) => Promise<any>;
 
-  let response: { data: Array<{ b64_json?: string; revised_prompt?: string }> };
+  let response: { data?: Array<{ b64_json?: string; revised_prompt?: string }> };
 
   if (hasLogo || hasReferences) {
-    // Multi-image input mode: logo + reference images guide the generation
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inputParts: any[] = [];
+    // Reference-image-guided generation: use images.edit with the logo and any
+    // user-provided references as input images. `images.generate` only accepts
+    // text prompts — example/reference images must go through `images.edit`.
+    const imageFiles: Awaited<ReturnType<typeof toFile>>[] = [];
 
-    // Reference images from user uploads (up to 3)
+    // User reference images (up to 3) — downloaded and converted to File
     const refs = (opts.referenceImages ?? []).slice(0, 3);
-    for (const refUrl of refs) {
-      inputParts.push({ type: 'image_url', image_url: { url: refUrl } });
+    for (let i = 0; i < refs.length; i++) {
+      try {
+        const res = await fetch(refs[i]);
+        if (!res.ok) continue;
+        const buf  = Buffer.from(await res.arrayBuffer());
+        const mime = res.headers.get('content-type') ?? 'image/png';
+        const ext  = mime.includes('jpeg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png';
+        imageFiles.push(await toFile(buf, `ref-${i}.${ext}`, { type: mime }));
+      } catch {
+        // Skip unreachable references rather than failing the whole request
+      }
     }
 
-    // Brand logo
+    // Brand logo (already base64 in memory)
     if (hasLogo) {
-      const logoDataUrl = `data:${opts.brand!.logoMimeType!};base64,${opts.brand!.logoB64!}`;
-      inputParts.push({ type: 'image_url', image_url: { url: logoDataUrl } });
+      const logoBuf  = Buffer.from(opts.brand!.logoB64!, 'base64');
+      const logoMime = opts.brand!.logoMimeType!;
+      const ext      = logoMime.includes('jpeg') ? 'jpg' : logoMime.includes('webp') ? 'webp' : 'png';
+      imageFiles.push(await toFile(logoBuf, `logo.${ext}`, { type: logoMime }));
     }
 
-    // Prompt text — include guidance to use the reference images
-    const referenceGuidance = refs.length > 0
-      ? ' Use the provided reference images to guide the visual style, composition, and mood.'
-      : '';
-    const logoGuidance = hasLogo
-      ? ' Incorporate the provided brand logo into the composition in a natural and visually balanced way.'
-      : '';
+    if (imageFiles.length === 0) {
+      // All references failed to load — fall back to text-only generation
+      response = await generateFn({
+        model:         'gpt-image-2-2026-04-21',
+        prompt:        enrichedPrompt,
+        n:             1,
+        size,
+        quality,
+        output_format: 'jpeg',
+      });
+    } else {
+      const referenceGuidance = refs.length > 0
+        ? ' Use the provided reference images to guide the visual style, composition, and mood.'
+        : '';
+      const logoGuidance = hasLogo
+        ? ' Incorporate the provided brand logo into the composition in a natural and visually balanced way.'
+        : '';
 
-    inputParts.push({
-      type: 'text',
-      text: enrichedPrompt + referenceGuidance + logoGuidance,
-    });
-
-    response = await generateFn({
-      model:         'gpt-image-2-2026-04-21',
-      input:         inputParts,
-      n:             1,
-      size,
-      quality,
-      output_format: 'jpeg',
-    });
+      response = await editFn({
+        model:         'gpt-image-2-2026-04-21',
+        image:         imageFiles.length === 1 ? imageFiles[0] : imageFiles,
+        prompt:        enrichedPrompt + referenceGuidance + logoGuidance,
+        n:             1,
+        size,
+        quality,
+        output_format: 'jpeg',
+      });
+    }
   } else {
     response = await generateFn({
       model:         'gpt-image-2-2026-04-21',
