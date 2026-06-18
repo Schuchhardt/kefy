@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useTheme } from '@/lib/theme-context';
 
 const iconProfile = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -19,11 +21,47 @@ const iconLogout = (
   </svg>
 );
 
+const iconSettings = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg>
+);
+
+const iconSun = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="5"/>
+    <line x1="12" y1="1" x2="12" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="23"/>
+    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+    <line x1="1" y1="12" x2="3" y2="12"/>
+    <line x1="21" y1="12" x2="23" y2="12"/>
+    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+  </svg>
+);
+
+const iconMoon = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+  </svg>
+);
+
 
 export default function UserAvatar({ lang }: { lang: string }) {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
+  const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  function switchLang(targetLang: string) {
+    const segments = pathname.split('/');
+    segments[1] = targetLang;
+    router.push(segments.join('/'));
+  }
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -130,6 +168,83 @@ export default function UserAvatar({ lang }: { lang: string }) {
               <span style={{ color: 'var(--muted)', display: 'flex' }}>{iconProfile}</span>
               Ver perfil
             </Link>
+
+            {/* Settings — only on mobile (sidebar is hidden) */}
+            <Link
+              href={`/${lang}/dashboard/settings`}
+              onClick={() => setOpen(false)}
+              className="user-avatar-settings-mobile"
+              style={{
+                alignItems: 'center',
+                gap: 9,
+                padding: '8px 14px',
+                fontSize: 13,
+                color: 'var(--text)',
+                textDecoration: 'none',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = 'var(--surface-2)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = 'transparent'; }}
+            >
+              <span style={{ color: 'var(--muted)', display: 'flex' }}>{iconSettings}</span>
+              {lang === 'en' ? 'Settings' : 'Ajustes'}
+            </Link>
+          </div>
+
+          {/* Lang + Theme — only on mobile (sidebar is hidden) */}
+          <div
+            className="user-avatar-settings-mobile"
+            style={{
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 14px',
+              borderTop: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ display: 'flex', gap: 4 }}>
+              {(['es', 'en'] as const).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => { setOpen(false); switchLang(l); }}
+                  style={{
+                    padding: '3px 10px',
+                    fontSize: 10,
+                    fontWeight: lang === l ? 700 : 400,
+                    borderRadius: 5,
+                    border: 'none',
+                    background: lang === l ? 'var(--accent)' : 'var(--border)',
+                    color: lang === l ? '#fff' : 'var(--muted)',
+                    cursor: lang === l ? 'default' : 'pointer',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    fontFamily: 'var(--font-syne), sans-serif',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={toggleTheme}
+              title={theme === 'dark' ? (lang === 'en' ? 'Switch to light' : 'Cambiar a claro') : (lang === 'en' ? 'Switch to dark' : 'Cambiar a oscuro')}
+              style={{
+                background: 'var(--border)',
+                border: 'none',
+                borderRadius: 6,
+                color: 'var(--muted)',
+                cursor: 'pointer',
+                width: 26,
+                height: 26,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background 0.15s, color 0.15s',
+                flexShrink: 0,
+              }}
+            >
+              {theme === 'dark' ? iconSun : iconMoon}
+            </button>
           </div>
 
           {/* Logout */}

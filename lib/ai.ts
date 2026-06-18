@@ -547,6 +547,18 @@ export interface RecommendBrandContext {
   differentiators?: string[];
   tone?:            string[];
   language?:        'es' | 'en';
+  /** Free-form comment from the user to steer the recommendations. */
+  hint?:            string;
+  /** Optional active-strategy context to anchor the AI output. */
+  strategy?: {
+    framework_name?: string;
+    kpi_primary?:    string;
+    current_week?:   number;
+    total_weeks?:    number;
+    sample_topics?:  string[];
+  };
+  /** Recent topics already published — AI should avoid repeating them. */
+  recent_topics?:   string[];
 }
 
 export interface GenerateRecommendationsResult {
@@ -576,9 +588,34 @@ export async function generateContentRecommendations(
     ctx.tone?.length    ? `Voice tone: ${ctx.tone.join(', ')}.` : '',
   ].filter(Boolean).join(' ');
 
+  const strategyLines = ctx.strategy
+    ? [
+        ctx.strategy.framework_name ? `Active strategy framework: ${ctx.strategy.framework_name}.` : '',
+        ctx.strategy.kpi_primary    ? `Primary KPI: ${ctx.strategy.kpi_primary}.` : '',
+        ctx.strategy.current_week && ctx.strategy.total_weeks
+          ? `Calendar position: week ${ctx.strategy.current_week} of ${ctx.strategy.total_weeks}.`
+          : '',
+        ctx.strategy.sample_topics?.length
+          ? `Topics already scheduled this week (do not repeat verbatim): ${ctx.strategy.sample_topics.slice(0, 6).join(' | ')}.`
+          : '',
+      ].filter(Boolean).join(' ')
+    : '';
+
+  const recentLines = ctx.recent_topics?.length
+    ? `Recently published topics (avoid repeating): ${ctx.recent_topics.slice(0, 10).join(' | ')}.`
+    : '';
+
+  const hintClean = (ctx.hint ?? '').trim().slice(0, 500);
+  const hintLines = hintClean
+    ? `USER GUIDANCE (highest priority — every idea MUST address this): "${hintClean}".`
+    : '';
+
   const inlineSystem = [
     `You are a senior social media strategist. Suggest ${count} fresh, high-performing channel-agnostic content ideas in ${lang} for the brand below.`,
     brandLines,
+    strategyLines,
+    recentLines,
+    hintLines,
     'Return ONLY a valid JSON array (no markdown fences) with this exact shape:',
     `[{"topic":"<concrete content idea, 1-2 sentences, max 240 chars>","content_type":"post"|"carousel"|"reel","rationale_short":"<why this idea fits the brand, max 100 chars>"}]`,
     'Mix the 3 content_type values across the 3 items when possible. Avoid generic motivational fluff — be specific to the brand.',
@@ -588,6 +625,9 @@ export async function generateContentRecommendations(
     count:    String(count),
     language: lang,
     brand:    brandLines,
+    strategy: strategyLines,
+    recent:   recentLines,
+    hint:     hintLines,
   }, inlineSystem);
 
   const client = getAnthropic();

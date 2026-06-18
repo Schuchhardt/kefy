@@ -21,13 +21,15 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev',
+    command: process.env.CI
+      ? 'npx next start -p 3097'
+      : 'npx next dev -p 3097',
     url: 'http://localhost:3097',
     env: {
-      ...process.env,
+      ...(process.env as Record<string, string>),
       JWT_SECRET: process.env.JWT_SECRET ?? 'test-secret',
     },
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
   },
 });

@@ -197,6 +197,7 @@ function ContentPageInner() {
   const [recsOffset, setRecsOffset]   = useState(0);
   const [recsSource, setRecsSource]   = useState<RecSource | null>(null);
   const [recsMeta, setRecsMeta]       = useState<StrategyMeta | null>(null);
+  const [recsHint, setRecsHint]       = useState('');
 
   // Reference images for AI-guided image generation
   const [referenceImages, setReferenceImages]   = useState<string[]>([]);
@@ -581,6 +582,8 @@ function ContentPageInner() {
               meta={recsMeta}
               loading={recsLoading}
               error={recsError}
+              hint={recsHint}
+              onHintChange={setRecsHint}
               onRecommend={handleRecommendClick}
               onRotate={handleRotateRecommendations}
               onApply={handleApplyRecommendation}
@@ -1441,13 +1444,15 @@ interface RecommendationBlockProps {
   meta:         StrategyMeta | null;
   loading:      boolean;
   error:        string | null;
+  hint:         string;
+  onHintChange: (next: string) => void;
   onRecommend:  () => void;
   onRotate:     () => void;
   onApply:      (r: Recommendation) => void;
 }
 
 function RecommendationBlock(props: RecommendationBlockProps) {
-  const { t, recs, source, meta, loading, error, onRecommend, onRotate, onApply } = props;
+  const { t, recs, source, meta, loading, error, hint, onHintChange, onRecommend, onRotate, onApply } = props;
   const hasRecs = recs.length > 0;
   const sourceText = (() => {
     if (!source) return '';
@@ -1496,6 +1501,53 @@ function RecommendationBlock(props: RecommendationBlockProps) {
       {error && (
         <p style={{ color: '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{error}</p>
       )}
+
+      {/* User guidance comment — drives the AI prompt */}
+      <div style={{ marginTop: hasRecs ? 0 : 12, marginBottom: hasRecs ? 12 : 0 }}>
+        <label
+          htmlFor="rec-hint-input"
+          style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}
+        >
+          {t.recommendHintLabel}
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            id="rec-hint-input"
+            type="text"
+            value={hint}
+            onChange={(e) => onHintChange(e.target.value.slice(0, 500))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !loading) {
+                e.preventDefault();
+                onRecommend();
+              }
+            }}
+            placeholder={t.recommendHintPlaceholder}
+            maxLength={500}
+            disabled={loading}
+            style={{
+              flex: 1, padding: '9px 12px', borderRadius: 8, fontSize: 13,
+              background: 'var(--bg)', color: 'var(--text)',
+              border: '1px solid var(--border)', outline: 'none',
+            }}
+          />
+          {hasRecs && (
+            <button
+              type="button"
+              onClick={onRecommend}
+              disabled={loading}
+              style={{
+                background: 'var(--accent)', color: '#000', border: 'none',
+                borderRadius: 8, padding: '0 16px', fontWeight: 700, fontSize: 13,
+                cursor: loading ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                opacity: loading ? 0.7 : 1,
+              }}
+            >
+              {loading ? t.recommendLoading : t.recommendBtn}
+            </button>
+          )}
+        </div>
+      </div>
 
       {hasRecs && sourceText && (
         <div style={{

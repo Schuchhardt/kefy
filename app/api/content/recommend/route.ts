@@ -56,11 +56,14 @@ function defaultSlideCount(type: RecommendedContentType): number | undefined {
   return type === 'carousel' ? 5 : undefined;
 }
 
-// GET /api/content/recommend?offset=N&lang=es|en
+// GET /api/content/recommend?offset=N&lang=es|en&hint=...
 // Auth required — returns 3 channel-agnostic content recommendations driven by:
-//   1. Org's active strategy (kefy_org_strategies → kefy_strategy_templates), or
-//   2. Industry match in kefy_content_strategies (fallback), or
-//   3. Claude-generated ideas from the Brand Kit (last resort)
+//   1. If `hint` is provided → Claude-generated ideas guided by the comment
+//      (brand kit + active strategy context are passed in for grounding).
+//   2. Otherwise:
+//      a. Org's active strategy (kefy_org_strategies → kefy_strategy_templates), or
+//      b. Industry match in kefy_content_strategies (fallback), or
+//      c. Claude-generated ideas from the Brand Kit (last resort).
 //
 // `offset` lets the UI rotate through the calendar / catalog for "Recomendar otro".
 export async function GET(req: NextRequest) {
@@ -73,6 +76,7 @@ export async function GET(req: NextRequest) {
   const offset   = Math.max(0, Number(searchParams.get('offset') ?? '0') || 0);
   const langRaw  = searchParams.get('lang');
   const lang: 'es' | 'en' = langRaw === 'en' ? 'en' : 'es';
+  const hint     = (searchParams.get('hint') ?? '').trim().slice(0, 500);
 
   const db = createSupabaseServer();
 
@@ -105,12 +109,37 @@ export async function GET(req: NextRequest) {
     .map((i) => `${i.title ?? ''}\n${i.body ?? ''}`.toLowerCase())
     .join('\n');
 
+  const recentTopics = (recentItems ?? [])
+    .map((i) => (i.title ?? '').trim())
+    .filter((s) => s.length > 0)
+    .slice(0, 10);
+
   const isAlreadyUsed = (topic: string): boolean => {
     const t = topic.toLowerCase().trim();
     if (t.length < 30) return false;
     // Use the first 30 chars as a fingerprint
     return recentBlob.includes(t.slice(0, 30));
   };
+
+  // ─── Shortcut: when the user provides a hint, always go through Claude so ──
+  // it can steer the ideas around the comment. Strategy context (if any) is
+  // attached for grounding but does not override the user's guidance.
+  if (hint.length > 0) {
+    const strategyCtx = await loadStrategyContext({
+      db,
+      orgStrategy,
+      brandKitIndustry: brandKit?.industry ?? null,
+      lang,
+    });
+
+    return runAiRecommendations({
+      brandKit,
+      lang,
+      hint,
+      strategyCtx,
+      recentTopics,
+    });
+  }
 
   // ─── Case A: org has a strategy_id ──────────────────────────────────────────
   if (orgStrategy?.strategy_id) {
@@ -162,6 +191,46 @@ export async function GET(req: NextRequest) {
   }
 
   // ─── Case C: AI-only fallback ───────────────────────────────────────────────
+  return runAiRecommendations({
+    brandKit,
+    lang,
+    hint:        '',
+    strategyCtx: null,
+    recentTopics,
+  });
+}
+
+// ─── Helper: run the Claude-backed recommendation path ───────────────────────
+
+type BrandKitRow = {
+  name?:            string | null;
+  tagline?:         string | null;
+  industry?:        string | null;
+  niche?:           string | null;
+  target_audience?: string | null;
+  mission?:         string | null;
+  differentiators?: string[] | null;
+  tone?:            string[] | null;
+} | null;
+
+interface StrategyCtx {
+  framework_name?: string;
+  kpi_primary?:    string;
+  current_week?:   number;
+  total_weeks?:    number;
+  sample_topics?:  string[];
+}
+
+interface AiRunOpts {
+  brandKit:     BrandKitRow;
+  lang:         'es' | 'en';
+  hint:         string;
+  strategyCtx:  StrategyCtx | null;
+  recentTopics: string[];
+}
+
+async function runAiRecommendations(opts: AiRunOpts): Promise<NextResponse> {
+  const { brandKit, lang, hint, strategyCtx, recentTopics } = opts;
   try {
     const ai = await generateContentRecommendations({
       name:            brandKit?.name ?? undefined,
@@ -173,6 +242,9 @@ export async function GET(req: NextRequest) {
       differentiators: brandKit?.differentiators ?? undefined,
       tone:            brandKit?.tone ?? undefined,
       language:        lang,
+      hint:            hint || undefined,
+      strategy:        strategyCtx ?? undefined,
+      recent_topics:   recentTopics.length > 0 ? recentTopics : undefined,
     }, 3);
 
     const recommendations: Recommendation[] = ai.recommendations.map((r) => ({
@@ -189,13 +261,100 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       recommendations,
       source: 'ai_only' as RecommendSource,
-      strategy_meta: null,
+      strategy_meta: strategyCtx && strategyCtx.framework_name
+        ? {
+            framework_name: strategyCtx.framework_name,
+            kpi_primary:    strategyCtx.kpi_primary    ?? '',
+            current_week:   strategyCtx.current_week   ?? 1,
+            total_weeks:    strategyCtx.total_weeks    ?? 1,
+          }
+        : null,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'AI recommendation failed';
-    console.error('[api/content/recommend] AI fallback error:', msg);
+    console.error('[api/content/recommend] AI error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
+}
+
+// ─── Helper: resolve strategy context for the AI prompt (best-effort) ────────
+
+interface LoadStrategyCtxOpts {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db:                any;
+  orgStrategy:       { strategy_id: string | null; created_at: string | null } | null;
+  brandKitIndustry:  string | null;
+  lang:              'es' | 'en';
+}
+
+async function loadStrategyContext(opts: LoadStrategyCtxOpts): Promise<StrategyCtx | null> {
+  const { db, orgStrategy, brandKitIndustry, lang } = opts;
+
+  let strategyId: string | null = orgStrategy?.strategy_id ?? null;
+  const createdAt: string | null = orgStrategy?.created_at ?? null;
+
+  // If no explicit org strategy, try industry match.
+  if (!strategyId && brandKitIndustry) {
+    const { data: industryRow } = await db
+      .from('kefy_content_industries')
+      .select('id')
+      .or(`slug.eq.${brandKitIndustry},name_es.ilike.${brandKitIndustry},name_en.ilike.${brandKitIndustry}`)
+      .limit(1)
+      .maybeSingle();
+    if (industryRow?.id) {
+      const { data: fallbackStrat } = await db
+        .from('kefy_content_strategies')
+        .select('id')
+        .eq('industry_id', industryRow.id)
+        .limit(1)
+        .maybeSingle();
+      strategyId = fallbackStrat?.id ?? null;
+    }
+  }
+
+  if (!strategyId) return null;
+
+  const { data: strategy } = await db
+    .from('kefy_content_strategies')
+    .select(
+      `id, framework_name_es, framework_name_en,
+       kpi_primary_es, kpi_primary_en`,
+    )
+    .eq('id', strategyId)
+    .maybeSingle();
+
+  if (!strategy) return null;
+
+  const { data: templates } = await db
+    .from('kefy_strategy_templates')
+    .select('week_num, sort_order, topic_es, topic_en')
+    .eq('strategy_id', strategyId)
+    .order('week_num', { ascending: true })
+    .order('sort_order', { ascending: true });
+
+  const tpls = (templates ?? []) as Array<{ week_num: number; topic_es: string | null; topic_en: string | null }>;
+  const totalWeeks = tpls.length > 0 ? Math.max(1, ...tpls.map((t) => t.week_num)) : 1;
+
+  let currentWeek = 1;
+  if (createdAt) {
+    const weeksElapsed = Math.floor(
+      (Date.now() - new Date(createdAt).getTime()) / (7 * 24 * 60 * 60 * 1000),
+    );
+    currentWeek = ((weeksElapsed % totalWeeks) + totalWeeks) % totalWeeks + 1;
+  }
+
+  const sampleTopics = tpls
+    .filter((t) => t.week_num === currentWeek)
+    .map((t) => (lang === 'en' ? t.topic_en : t.topic_es) ?? '')
+    .filter((s) => s.length > 0);
+
+  return {
+    framework_name: (lang === 'en' ? strategy.framework_name_en : strategy.framework_name_es) ?? undefined,
+    kpi_primary:    (lang === 'en' ? strategy.kpi_primary_en    : strategy.kpi_primary_es)    ?? undefined,
+    current_week:   currentWeek,
+    total_weeks:    totalWeeks,
+    sample_topics:  sampleTopics,
+  };
 }
 
 // ─── Helper: build recommendations from a strategy + its templates ────────────

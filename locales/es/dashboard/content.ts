@@ -76,6 +76,8 @@ const es = {
   recommendSourceIndustry: (industry: string) =>
     `Basado en tu industria (${industry}) — todavía no has elegido una estrategia.`,
   recommendSourceAI: 'Generado por IA a partir de tu Brand Kit.',
+  recommendHintLabel: '¿Quieres guiar la recomendación? (opcional)',
+  recommendHintPlaceholder: 'Ej: enfocado en el lanzamiento de la nueva colección, con tono divertido',
   weekBadge: (week: number, post: number) => `Semana ${week} · Post ${post}`,
   recCardCtaHint: 'Click para autocompletar el formulario',
 };

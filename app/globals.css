@@ -95,11 +95,13 @@ img { display: block; max-width: 100%; }
 
 /* ─── Dashboard responsive ─────────────────────────────────────── */
 .bottom-nav { display: none; }
+.user-avatar-settings-mobile { display: none; }
 
 @media (max-width: 767px) {
   .dashboard-sidebar { display: none !important; }
   .bottom-nav { display: flex; }
   .dashboard-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .user-avatar-settings-mobile { display: flex; }
 }
 
 .dashboard-main button { font-family: var(--font-syne), sans-serif !important; }
