@@ -10,7 +10,7 @@ import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModa
 import type { ContentItem, ContentType, ContentStatus, ReelScene, CarouselSlide } from '@/types/content';
 import type { Channel } from '@/types/channels';
 import type { Locale } from '@/types/i18n';
-import type { RecSource, RecRationale, Recommendation, StrategyMeta } from '@/types/strategy';
+import type { RecSource, Recommendation, StrategyMeta } from '@/types/strategy';
 import { CHANNELS as ALL_CHANNELS } from '@/lib/channels';
 
 import esT from '@/locales/es/dashboard/content';

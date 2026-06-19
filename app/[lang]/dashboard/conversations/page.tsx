@@ -90,6 +90,7 @@ export default function ConversationsPage() {
   };
 
   function timeAgo(iso: string): string {
+    // eslint-disable-next-line react-hooks/purity
     const diff = Date.now() - new Date(iso).getTime();
     const m = Math.floor(diff / 60_000);
     if (m < 1) return ti.timeNow;

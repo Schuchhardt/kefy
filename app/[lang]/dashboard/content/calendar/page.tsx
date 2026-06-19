@@ -111,6 +111,7 @@ export default function CalendarPage() {
 
   function openScheduleForDay(year: number, month: number, day: number) {
     const d = new Date(year, month, day, 9, 0, 0, 0);
+    // eslint-disable-next-line react-hooks/purity
     if (d.getTime() < Date.now()) d.setTime(Date.now() + 60 * 60 * 1000);
     setScheduleInitialDate(d);
     setScheduleModalOpen(true);

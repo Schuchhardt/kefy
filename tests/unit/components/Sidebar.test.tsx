@@ -12,10 +12,12 @@ vi.mock('next/link', () => ({
     <a href={href} {...props}>{children}</a>,
 }));
 
+/* eslint-disable @next/next/no-img-element */
 vi.mock('next/image', () => ({
   default: ({ src, alt, ...props }: { src: string; alt: string }) =>
     <img src={src} alt={alt} {...props} />,
 }));
+/* eslint-enable @next/next/no-img-element */
 
 vi.mock('@/lib/theme-context', () => ({
   useTheme: vi.fn().mockReturnValue({ theme: 'dark', toggleTheme: vi.fn() }),

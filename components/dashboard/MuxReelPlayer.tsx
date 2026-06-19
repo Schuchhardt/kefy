@@ -146,7 +146,6 @@ export function MuxReelPlayer({
     return (
       <div>
         <div style={containerStyle}>
-          {/* @ts-ignore - MuxPlayer types vary across versions */}
           <MuxPlayer
             playbackId={localPlaybackId}
             streamType="on-demand"

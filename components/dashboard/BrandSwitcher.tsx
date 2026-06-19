@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { useBrand, type Brand } from '@/lib/brand-context';
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -22,8 +23,8 @@ function BrandAvatar({ brand, size = 28 }: { brand: Brand | null; size?: number 
   }
 
   if (brand.avatar_url) {
-    /* eslint-disable-next-line @next/next/no-img-element */
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={brand.avatar_url}
         alt={brand.name}
@@ -212,9 +213,9 @@ export default function BrandSwitcher({ collapsed }: { collapsed: boolean }) {
               {!canCreate && (
                 <p style={{ fontSize: 11, color: '#ff6b6b', margin: '0 0 8px', lineHeight: 1.4 }}>
                   Alcanzaste el límite de tu plan.{' '}
-                  <a href="/es/dashboard/settings" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+                  <Link href="/es/dashboard/settings" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
                     Mejorar plan
-                  </a>
+                  </Link>
                 </p>
               )}
               <input

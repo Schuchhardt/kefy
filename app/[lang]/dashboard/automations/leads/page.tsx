@@ -41,7 +41,7 @@ const channelEmoji: Record<string, string> = {
 // ─── Modal: Add Manual Lead ───────────────────────────────────────────────────
 
 function AddLeadModal({
-  t, lang, onAdd, onClose,
+  t, lang: _lang, onAdd, onClose,
 }: {
   t: typeof esT;
   lang: string;
@@ -176,6 +176,7 @@ function LeadCard({
           fontSize: 14, overflow: 'hidden', flexShrink: 0,
         }}>
           {lead.avatar_url
+            // eslint-disable-next-line @next/next/no-img-element
             ? <img src={lead.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : lead.username[0]?.toUpperCase() ?? '?'}
         </div>
@@ -294,6 +295,7 @@ function LeadDrawer({
           fontSize: 20, overflow: 'hidden',
         }}>
           {lead.avatar_url
+            // eslint-disable-next-line @next/next/no-img-element
             ? <img src={lead.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : lead.username[0]?.toUpperCase() ?? '?'}
         </div>

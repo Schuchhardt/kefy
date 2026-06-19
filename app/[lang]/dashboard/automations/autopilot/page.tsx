@@ -26,7 +26,7 @@ const FREQUENCIES_BASE: { value: Frequency; label: string }[] = [
   { value: 'monthly',  label: '' },
 ];
 
-const DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const _DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const inputStyle: React.CSSProperties = {
   width: '100%',

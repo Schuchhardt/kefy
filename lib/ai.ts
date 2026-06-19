@@ -4,10 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import type {
   ContentChannel,
-  AIModel,
   GenerateTextOptions,
   GenerateTextResult,
-  BrandImageContext,
   GenerateImageOptions,
   GenerateImageResult,
   CarouselSlide,

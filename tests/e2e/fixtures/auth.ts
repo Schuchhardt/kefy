@@ -128,6 +128,7 @@ export const test = base.extend<{
 }>({
   authenticatedPage: async ({ page, baseURL }, use) => {
     await setupAuthenticatedState(page, baseURL ?? 'http://localhost:3097');
+    // eslint-disable-next-line react-hooks/rules-of-hooks
     await use(page);
   },
 });

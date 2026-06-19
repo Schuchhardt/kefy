@@ -111,9 +111,11 @@ export default function ScheduleModal({
     [accounts],
   );
 
+  /* eslint-disable react-hooks/purity */
   const canSubmit = !!selectedItem
     && selectedAccountIds.length > 0
     && (mode === 'now' || (mode === 'scheduled' && scheduledAt && scheduledAt.getTime() > Date.now()));
+  /* eslint-enable react-hooks/purity */
 
   const handleSubmit = useCallback(async () => {
     if (!selectedItem || !canSubmit) return;

@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { type ComponentType, useMemo } from 'react';
+import { useMemo } from 'react';
 import type { ReelSceneProps } from '@/remotion/ReelComposition';
 import { getTotalFrames, ReelComposition } from '@/remotion/ReelComposition';
 
