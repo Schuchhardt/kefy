@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { createSupabaseServer } from '@/lib/supabase';
-import type { BlogPost } from '@/lib/supabase';
+import type { BlogPost } from '@/types/blog';
 import { KEFY_COPY } from '@/lib/content';
 import BlogNav from '@/components/blog/BlogNav';
 import Footer from '@/components/landing/Footer';

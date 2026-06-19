@@ -7,7 +7,8 @@ import DateTimePicker from './DateTimePicker';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from '@/components/dashboard/PostPreview';
 import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
-import type { ContentItem, SocialAccount, BrandKitInfo, CarouselSlide, ReelScene } from './types';
+import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
+import type { SocialAccount } from '@/types/social';
 
 const MuxReelPlayer = dynamic(
   () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),

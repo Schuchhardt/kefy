@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
 import { createSupabaseServer } from '@/lib/supabase';
-import stripe, { getPriceId, type BillingPlan } from '@/lib/stripe';
+import stripe, { getPriceId } from '@/lib/stripe';
+import type { BillingPlan } from '@/types/billing';
 import { z } from 'zod';
 
 const BodySchema = z.object({

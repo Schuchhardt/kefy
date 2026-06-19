@@ -1,4 +1,4 @@
-import type { BlogCopy } from '../types';
+import type { BlogCopy } from '@/types/locales';
 
 const es: BlogCopy = {
   title: 'Blog',

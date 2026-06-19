@@ -4,30 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import esT from '@/locales/es/dashboard/leads';
 import enT from '@/locales/en/dashboard/leads';
+import type { LeadStage, Lead } from '@/types/leads';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type Stage = 'frio' | 'tibio' | 'caliente' | 'contactado' | 'convertido';
-
-interface Lead {
-  id: string;
-  username: string;
-  display_name: string | null;
-  avatar_url: string | null;
-  channel: string;
-  stage: Stage;
-  score: number;
-  notes: string | null;
-  tags: string[];
-  contacted: boolean;
-  converted: boolean;
-  first_interaction_at: string | null;
-  last_interaction_at: string | null;
-  created_at: string;
-}
-
-const STAGES: Stage[] = ['frio', 'tibio', 'caliente', 'contactado', 'convertido'];
-const NEXT_STAGE: Record<Stage, Stage | null> = {
+const STAGES: LeadStage[] = ['frio', 'tibio', 'caliente', 'contactado', 'convertido'];
+const NEXT_STAGE: Record<LeadStage, LeadStage | null> = {
   frio: 'tibio', tibio: 'caliente', caliente: 'contactado',
   contactado: 'convertido', convertido: null,
 };
@@ -70,7 +50,7 @@ function AddLeadModal({
 }) {
   const [username, setUsername] = useState('');
   const [channel, setChannel]   = useState('instagram');
-  const [stage, setStage]       = useState<Stage>('frio');
+  const [stage, setStage]       = useState<LeadStage>('frio');
   const [loading, setLoading]   = useState(false);
   const [err, setErr]           = useState('');
 
@@ -127,7 +107,7 @@ function AddLeadModal({
             ))}
           </select>
           <select
-            value={stage} onChange={e => setStage(e.target.value as Stage)}
+            value={stage} onChange={e => setStage(e.target.value as LeadStage)}
             style={{
               background: 'var(--bg)', border: '1px solid var(--border)',
               borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 14,
@@ -511,7 +491,7 @@ export default function LeadsPage() {
     if (selectedLead?.id === id) setSelectedLead(prev => prev ? { ...prev, ...updates } : null);
   }
 
-  async function moveLead(lead: Lead, newStage: Stage) {
+  async function moveLead(lead: Lead, newStage: LeadStage) {
     const res = await fetch(`/api/automations/leads/${lead.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

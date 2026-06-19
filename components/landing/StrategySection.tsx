@@ -1,7 +1,7 @@
 'use client';
 
 import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 interface Props {
   copy: KefyCopy['strategy'];

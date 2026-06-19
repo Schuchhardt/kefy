@@ -60,12 +60,14 @@ function defaultSlideCount(type: RecommendedContentType): number | undefined {
 // Auth required — returns 3 channel-agnostic content recommendations driven by:
 //   1. If `hint` is provided → Claude-generated ideas guided by the comment
 //      (brand kit + active strategy context are passed in for grounding).
-//   2. Otherwise:
-//      a. Org's active strategy (kefy_org_strategies → kefy_strategy_templates), or
-//      b. Industry match in kefy_content_strategies (fallback), or
-//      c. Claude-generated ideas from the Brand Kit (last resort).
+//   2. Otherwise, `offset === 0` → first batch from the org's active strategy
+//      template (or industry-matched strategy as fallback).
+//   3. Otherwise (`offset > 0`) → Claude-generated ideas, grounded with the
+//      active strategy context so users keep getting fresh content instead of
+//      cycling through the same calendar.
 //
-// `offset` lets the UI rotate through the calendar / catalog for "Recomendar otro".
+// `offset` lets the UI rotate through fresh AI ideas after the initial
+// strategy-driven batch ("Recomendar otro").
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) {
@@ -141,61 +143,73 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ─── Case A: org has a strategy_id ──────────────────────────────────────────
-  if (orgStrategy?.strategy_id) {
-    const strategyResult = await loadStrategyRecommendations({
-      db,
-      strategyId: orgStrategy.strategy_id,
-      createdAt:  orgStrategy.created_at,
-      offset,
-      lang,
-      isAlreadyUsed,
-      source: 'strategy',
-    });
+  // ─── First batch (offset === 0): serve the active strategy templates ──────
+  // Subsequent rotations (offset > 0) always go through Claude so users keep
+  // getting fresh ideas instead of cycling through the same calendar.
+  if (offset === 0) {
+    // Case A: org has a strategy_id
+    if (orgStrategy?.strategy_id) {
+      const strategyResult = await loadStrategyRecommendations({
+        db,
+        strategyId: orgStrategy.strategy_id,
+        createdAt:  orgStrategy.created_at,
+        offset,
+        lang,
+        isAlreadyUsed,
+        source: 'strategy',
+      });
 
-    if (strategyResult) return NextResponse.json(strategyResult);
-  }
+      if (strategyResult) return NextResponse.json(strategyResult);
+    }
 
-  // ─── Case B: no strategy but brand kit has an industry ──────────────────────
-  if (brandKit?.industry) {
-    // Match industry by slug or name (case-insensitive)
-    const { data: industryRow } = await db
-      .from('kefy_content_industries')
-      .select('id')
-      .or(`slug.eq.${brandKit.industry},name_es.ilike.${brandKit.industry},name_en.ilike.${brandKit.industry}`)
-      .limit(1)
-      .maybeSingle();
-
-    if (industryRow?.id) {
-      const { data: fallbackStrat } = await db
-        .from('kefy_content_strategies')
+    // Case B: no strategy but brand kit has an industry
+    if (brandKit?.industry) {
+      // Match industry by slug or name (case-insensitive)
+      const { data: industryRow } = await db
+        .from('kefy_content_industries')
         .select('id')
-        .eq('industry_id', industryRow.id)
+        .or(`slug.eq.${brandKit.industry},name_es.ilike.${brandKit.industry},name_en.ilike.${brandKit.industry}`)
         .limit(1)
         .maybeSingle();
 
-      if (fallbackStrat?.id) {
-        const fallbackResult = await loadStrategyRecommendations({
-          db,
-          strategyId: fallbackStrat.id,
-          createdAt:  null,
-          offset,
-          lang,
-          isAlreadyUsed,
-          source: 'industry_fallback',
-        });
+      if (industryRow?.id) {
+        const { data: fallbackStrat } = await db
+          .from('kefy_content_strategies')
+          .select('id')
+          .eq('industry_id', industryRow.id)
+          .limit(1)
+          .maybeSingle();
 
-        if (fallbackResult) return NextResponse.json(fallbackResult);
+        if (fallbackStrat?.id) {
+          const fallbackResult = await loadStrategyRecommendations({
+            db,
+            strategyId: fallbackStrat.id,
+            createdAt:  null,
+            offset,
+            lang,
+            isAlreadyUsed,
+            source: 'industry_fallback',
+          });
+
+          if (fallbackResult) return NextResponse.json(fallbackResult);
+        }
       }
     }
   }
 
-  // ─── Case C: AI-only fallback ───────────────────────────────────────────────
+  // ─── Default path: Claude, grounded with the active strategy context ──────
+  const strategyCtx = await loadStrategyContext({
+    db,
+    orgStrategy,
+    brandKitIndustry: brandKit?.industry ?? null,
+    lang,
+  });
+
   return runAiRecommendations({
     brandKit,
     lang,
     hint:        '',
-    strategyCtx: null,
+    strategyCtx,
     recentTopics,
   });
 }

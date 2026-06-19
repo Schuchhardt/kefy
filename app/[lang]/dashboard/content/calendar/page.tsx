@@ -12,33 +12,8 @@ const T = { es: esT, en: enT } as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type PostStatus = 'pending' | 'scheduled' | 'published' | 'failed' | 'cancelled';
-
-interface SocialAccount {
-  id:         string;
-  platform:   string;
-  username:   string;
-  avatar_url: string | null;
-  status:     string;
-}
-
-interface ContentItem {
-  id:      string;
-  channel: string;
-  title:   string | null;
-  body:    string | null;
-}
-
-interface ScheduledPost {
-  id:             string;
-  status:         PostStatus;
-  scheduled_at:   string | null;
-  published_at:   string | null;
-  error_message:  string | null;
-  created_at:     string;
-  kefy_content_items:  ContentItem | null;
-  kefy_social_accounts: SocialAccount | null;
-}
+import type { PostStatus, ScheduledPost } from '@/types/content';
+import type { SocialAccount } from '@/types/social';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

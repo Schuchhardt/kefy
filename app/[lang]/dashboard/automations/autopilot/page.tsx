@@ -2,43 +2,20 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { CHANNELS as ALL_CHANNELS, type Channel } from '@/lib/channels';
+import { CHANNELS as ALL_CHANNELS } from '@/lib/channels';
+import type { Channel } from '@/types/channels';
 
 import esT from '@/locales/es/dashboard/autopilot';
 import enT from '@/locales/en/dashboard/autopilot';
 
-const T = { es: esT, en: enT } as const;
-type Locale = keyof typeof T;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type Frequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
-type AIModel   = 'claude' | 'gpt';
-
-interface AutopilotRule {
-  id:                 string;
-  name:               string;
-  channel:            Channel;
-  social_account_ids: string[];
-  frequency:          Frequency;
-  day_of_week:        number | null;
-  time_of_day:        string;
-  timezone:           string;
-  ai_model:           AIModel;
-  prompt_hint:        string | null;
-  is_active:          boolean;
-  next_run_at:        string | null;
-  last_run_at:        string | null;
-  created_at:         string;
-}
-
-interface SocialAccount {
-  id:       string;
-  platform: string;
-  username: string;
-}
+import type { AIModel } from '@/types/ai';
+import type { Frequency, AutopilotRule } from '@/types/automations';
+import type { SocialAccount } from '@/types/social';
+import type { Locale } from '@/types/i18n';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+const T = { es: esT, en: enT } as const;
 
 // CHANNELS_BASE replaced by ALL_CHANNELS from lib/channels
 

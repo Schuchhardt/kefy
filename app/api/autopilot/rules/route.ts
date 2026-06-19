@@ -2,14 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
+import type { Frequency } from '@/types/automations';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 const VALID_CHANNELS  = ['linkedin','instagram','facebook','twitter','tiktok','threads','generic'] as const;
 const VALID_MODELS    = ['claude', 'gpt'] as const;
 const VALID_FREQ      = ['daily', 'weekly', 'biweekly', 'monthly'] as const;
-
-type Frequency = typeof VALID_FREQ[number];
 
 /** Compute the next run timestamp based on a rule's schedule. */
 export function computeNextRun(

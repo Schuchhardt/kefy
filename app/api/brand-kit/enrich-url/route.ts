@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import FirecrawlApp from '@mendable/firecrawl-js';
 import { z } from 'zod';
 import { getAuthFromRequest } from '@/lib/auth';
-import type { BrandKit } from '@/lib/brand-kit';
+import type { BrandKit } from '@/types/brand-kit';
 
 const brandSchema = z.object({
   name:                z.string().nullable().optional(),

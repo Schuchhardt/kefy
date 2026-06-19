@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useScrolled } from '@/hooks/useScrolled';
 import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 interface NavProps {
   lang: string;

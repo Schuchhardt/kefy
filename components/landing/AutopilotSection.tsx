@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useReveal } from '@/hooks/useReveal';
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 interface Props {
   copy: KefyCopy['autopilot'];

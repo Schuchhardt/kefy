@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ZernioError as ZernioErrorType } from '@/lib/zernio';
 
 // ─── Mock global fetch antes de importar el módulo ───────────────────────────
 
@@ -176,7 +177,7 @@ describe('ZernioError', () => {
       expect.fail('debería haber lanzado');
     } catch (err) {
       expect(err).toBeInstanceOf(ZernioError);
-      expect((err as ZernioError).statusCode).toBe(429);
+      expect((err as ZernioErrorType).statusCode).toBe(429);
     }
   });
 
@@ -186,7 +187,7 @@ describe('ZernioError', () => {
     try {
       await getPostStatus('post-inexistente');
     } catch (err) {
-      expect((err as ZernioError).message).toBe('Post not found');
+      expect((err as ZernioErrorType).message).toBe('Post not found');
     }
   });
 });

@@ -16,18 +16,7 @@ export function getMuxClient(): Mux {
   return _client;
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface MuxUploadResult {
-  uploadId:  string;
-  uploadUrl: string;  // GCS URL to PUT the video file to
-}
-
-export interface MuxAssetStatus {
-  assetId:    string;
-  playbackId: string | null;
-  status:     'preparing' | 'ready' | 'errored';
-}
+import type { MuxUploadResult, MuxAssetStatus } from '@/types/mux';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

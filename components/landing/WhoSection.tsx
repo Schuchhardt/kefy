@@ -1,4 +1,4 @@
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 interface Props {
   copy: KefyCopy['who'];

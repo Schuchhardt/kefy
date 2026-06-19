@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { validateBrandKitUpdate, type BrandKitUpdateInput } from '@/lib/brand-kit';
+import { validateBrandKitUpdate } from '@/lib/brand-kit';
+import type { BrandKitUpdateInput } from '@/types/brand-kit';
 import { getBrandFromRequest } from '@/lib/brands';
 
 // ─── GET /api/brand-kit ───────────────────────────────────────────────────────

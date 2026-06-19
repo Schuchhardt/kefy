@@ -7,52 +7,16 @@ import ContentActions      from '@/components/dashboard/content/ContentActions';
 import ScheduleModal       from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
 import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
-import type { ContentItem as ContentItemShared } from '@/components/dashboard/content/types';
-import { CHANNELS as ALL_CHANNELS, type Channel } from '@/lib/channels';
+import type { ContentItem, ContentType, ContentStatus, ReelScene, CarouselSlide } from '@/types/content';
+import type { Channel } from '@/types/channels';
+import type { Locale } from '@/types/i18n';
+import type { RecSource, RecRationale, Recommendation, StrategyMeta } from '@/types/strategy';
+import { CHANNELS as ALL_CHANNELS } from '@/lib/channels';
 
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
 
 const T = { es: esT, en: enT } as const;
-type Locale = keyof typeof T;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-// Channel type is imported from lib/channels
-type Status      = 'draft' | 'approved' | 'scheduled' | 'published' | 'archived';
-type ContentType = 'post' | 'carousel' | 'reel';
-
-interface ReelScene {
-  scene_order:      number;
-  title:            string;
-  body:             string;
-  image_url?:       string;
-  duration_seconds: number;
-}
-
-interface CarouselSlide {
-  slide_order:   number;
-  title:         string;
-  body:          string;
-  image_url?:    string;
-}
-
-interface ContentItem {
-  id:               string;
-  channel:          Channel;
-  content_type:     ContentType;
-  status:           Status;
-  title:            string | null;
-  body:             string | null;
-  image_url:        string | null;
-  hashtags:         string[];
-  slides:           ReelScene[] | CarouselSlide[] | null;
-  video_url:        string | null;
-  mux_playback_id?: string | null;
-  mux_asset_id?:    string | null;
-  render_status?:   'not_rendered' | 'rendering' | 'ready' | 'error' | null;
-  created_at:       string;
-}
 
 // Modals own their own preview/publish/regen logic now — no need for SocialAccount or MuxReelPlayer here.
 
@@ -72,7 +36,7 @@ const CONTENT_TYPE_ICONS: Record<ContentType, string> = {
   reel:     '▶',
 };
 
-const STATUS_COLORS: Record<Status, string> = {
+const STATUS_COLORS: Record<ContentStatus, string> = {
   draft:     '#888',
   approved:  '#4fc3f7',
   scheduled: '#ffb74d',
@@ -104,39 +68,6 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-// ─── Recommendation types (shared by page + RecommendationBlock) ─────────────
-
-type RecSource = 'strategy' | 'industry_fallback' | 'ai_only';
-
-interface RecRationale {
-  source:           RecSource;
-  framework_name?:  string;
-  kpi_primary?:     string;
-  goal?:            string;
-  week_num?:        number;
-  post_num?:        number;
-  rationale_short?: string;
-}
-
-interface Recommendation {
-  template_id?:    string;
-  week_num?:       number;
-  post_num?:       number;
-  format?:         string;
-  topic:           string;
-  content_type:    ContentType;
-  slide_count?:    number;
-  generate_images: true;
-  rationale:       RecRationale;
-}
-
-interface StrategyMeta {
-  framework_name: string;
-  kpi_primary:    string;
-  current_week:   number;
-  total_weeks:    number;
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function ContentPageInner() {
@@ -153,13 +84,13 @@ function ContentPageInner() {
     ...ct,
     desc: t.contentDescs[ct.value] ?? '',
   }));
-  const STATUS_LABELS = t.statusLabels as Record<Status, string>;
+  const STATUS_LABELS = t.statusLabels as Record<ContentStatus, string>;
 
 
   const [items, setItems]           = useState<ContentItem[]>([]);
   const [loading, setLoading]       = useState(true);
   const [filterChannel, setFilterChannel] = useState<Channel | ''>('');
-  const [filterStatus, setFilterStatus]   = useState<Status | ''>('');
+  const [filterStatus, setFilterStatus]   = useState<ContentStatus | ''>('');
   const [brandKit, setBrandKit]     = useState<{ name: string | null; logo_url: string | null; primary_color: string | null; accent_color: string | null; font_heading: string | null } | null>(null);
 
   // Generate form — pre-populate from ?topic=Y&type=Z (strategy page deep-link).
@@ -316,7 +247,7 @@ function ContentPageInner() {
   }
 
   // ─── Smart recommendations ────────────────────────────────────────────────
-  const fetchRecommendations = useCallback(async (offset: number) => {
+  const fetchRecommendations = useCallback(async (offset: number, hint: string) => {
     setRecsLoading(true);
     setRecsError(null);
     try {
@@ -324,6 +255,8 @@ function ContentPageInner() {
         offset: String(offset),
         lang:   lang === 'en' ? 'en' : 'es',
       });
+      const trimmedHint = hint.trim();
+      if (trimmedHint.length > 0) params.set('hint', trimmedHint.slice(0, 500));
       const res  = await fetch(`/api/content/recommend?${params}`, { credentials: 'include' });
       const data = await res.json() as {
         recommendations?: Recommendation[];
@@ -345,13 +278,13 @@ function ContentPageInner() {
 
   function handleRecommendClick() {
     setRecsOffset(0);
-    fetchRecommendations(0);
+    fetchRecommendations(0, recsHint);
   }
 
   function handleRotateRecommendations() {
     const next = recsOffset + 3;
     setRecsOffset(next);
-    fetchRecommendations(next);
+    fetchRecommendations(next, recsHint);
   }
 
   function handleApplyRecommendation(r: Recommendation) {
@@ -635,9 +568,9 @@ function ContentPageInner() {
             <option value="">{t.allChannels}</option>
             {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
-          <select style={{ ...inputStyle, width: 'auto' }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as Status | '')}>
+          <select style={{ ...inputStyle, width: 'auto' }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as ContentStatus | '')}>
             <option value="">{t.allStatuses}</option>
-            {(Object.keys(STATUS_LABELS) as Status[]).map((s) => (
+            {(Object.keys(STATUS_LABELS) as ContentStatus[]).map((s) => (
               <option key={s} value={s}>{STATUS_LABELS[s]}</option>
             ))}
           </select>
@@ -943,7 +876,7 @@ function ContentPageInner() {
       <ScheduleModal
         open={!!viewItem}
         onClose={() => setViewItem(null)}
-        initialItem={viewItem as ContentItemShared | null}
+        initialItem={viewItem as ContentItem | null}
         brandKit={brandKit ? {
           name: brandKit.name ?? null,
           logo_url: brandKit.logo_url ?? null,
@@ -961,7 +894,7 @@ function ContentPageInner() {
       <EditContentModal
         open={!!editItem}
         onClose={() => setEditItem(null)}
-        item={editItem as ContentItemShared | null}
+        item={editItem as ContentItem | null}
         brandKit={brandKit ? {
           name: brandKit.name ?? null,
           logo_url: brandKit.logo_url ?? null,

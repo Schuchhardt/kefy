@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateReelScript, generateContentImage, type ContentChannel } from '@/lib/ai';
+import { generateReelScript, generateContentImage } from '@/lib/ai';
+import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
 export const runtime = 'nodejs';

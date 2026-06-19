@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import type { WaitlistCopy } from '@/lib/content';
+import type { WaitlistCopy } from '@/types/locales';
 
 interface WaitlistModalProps {
   copy: WaitlistCopy;

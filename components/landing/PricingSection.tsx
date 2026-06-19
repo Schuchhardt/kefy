@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
-import type { KefyCopy, PlanFeature } from '@/lib/content';
+import type { KefyCopy, PlanFeature } from '@/types/locales';
 
 interface Props {
   copy: KefyCopy['pricing'];

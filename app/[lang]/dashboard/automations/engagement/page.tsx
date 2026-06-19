@@ -2,32 +2,14 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import type { Locale } from '@/types/i18n';
+import type { TriggerType, ActionType, EngagementPlatform, EngagementRule } from '@/types/automations';
 import esT from '@/locales/es/dashboard/engagement';
 import enT from '@/locales/en/dashboard/engagement';
 
-type Locale = 'es' | 'en';
 const DICT = { es: esT, en: enT } as const;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type TriggerType = 'new_comment' | 'new_review' | 'new_follower' | 'mention';
-type ActionType  = 'reply_comment' | 'reply_review' | 'send_dm' | 'like_comment';
-type Platform    = 'linkedin' | 'instagram' | 'facebook' | 'twitter' | 'tiktok' | 'threads' | 'all';
-
-interface EngagementRule {
-  id: string;
-  name: string;
-  trigger_type: TriggerType;
-  condition_platform: string | null;
-  condition_keyword: string | null;
-  condition_rating: number | null;
-  action_type: ActionType;
-  action_template: string;
-  is_active: boolean;
-  created_at: string;
-}
-
-const PLATFORMS: { value: Platform; label: string }[] = [
+const PLATFORMS: { value: EngagementPlatform; label: string }[] = [
   { value: 'linkedin',  label: 'LinkedIn'  },
   { value: 'instagram', label: 'Instagram' },
   { value: 'facebook',  label: 'Facebook'  },
@@ -58,7 +40,7 @@ export default function EngagementPage() {
   // Form state
   const [name, setName]                   = useState('');
   const [triggerType, setTriggerType]     = useState<TriggerType>('new_comment');
-  const [platform, setPlatform]           = useState<Platform | 'all'>('all');
+  const [platform, setPlatform]           = useState<EngagementPlatform | 'all'>('all');
   const [keyword, setKeyword]             = useState('');
   const [minRating, setMinRating]         = useState<number | ''>('');
   const [actionType, setActionType]       = useState<ActionType>('reply_comment');
@@ -202,7 +184,7 @@ export default function EngagementPage() {
                 color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 {t.platformLabel}
               </label>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value as Platform | 'all')}
+              <select value={platform} onChange={(e) => setPlatform(e.target.value as EngagementPlatform | 'all')}
                 style={{ width: '100%', padding: '10px 14px', borderRadius: 8, fontSize: 14,
                   border: '1px solid var(--border)', background: 'var(--bg)',
                   color: 'var(--text)', outline: 'none', fontFamily: 'inherit', cursor: 'pointer' }}>

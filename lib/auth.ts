@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { createHash, randomBytes } from 'crypto';
 import { NextRequest } from 'next/server';
+import type { JWTPayload } from '@/types/auth';
 
 function getJWTSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
@@ -13,13 +14,6 @@ const ACCESS_TTL_HOURS  = parseInt(process.env.ACCESS_TOKEN_TTL_HOURS ?? '24', 1
 const ACCESS_TOKEN_TTL  = `${ACCESS_TTL_HOURS}h`;
 const ACCESS_TOKEN_MAX_AGE = ACCESS_TTL_HOURS * 60 * 60; // en segundos
 const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
-
-export interface JWTPayload {
-  userId: string;
-  orgId:  string;
-  role:   'owner' | 'admin' | 'member';
-  plan:   'starter' | 'pro' | 'business';
-}
 
 // ─── Access token ─────────────────────────────────────────────────────────────
 

@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import type { BrandKit, BrandTone } from '@/lib/brand-kit';
+import type { BrandKit, BrandTone } from '@/types/brand-kit';
+import type { Locale } from '@/types/i18n';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
@@ -11,7 +12,6 @@ import esT from '@/locales/es/dashboard/brand';
 import enT from '@/locales/en/dashboard/brand';
 
 const T = { es: esT, en: enT } as const;
-type Locale = keyof typeof T;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

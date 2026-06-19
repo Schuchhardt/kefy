@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getAuthFromRequest } from '@/lib/auth';
-import type { BrandKit } from '@/lib/brand-kit';
+import type { BrandKit } from '@/types/brand-kit';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { validateAssetUpload, STORAGE_BUCKET, type AssetType } from '@/lib/brand-kit';
+import { validateAssetUpload, STORAGE_BUCKET } from '@/lib/brand-kit';
+import type { AssetType } from '@/types/brand-kit';
 
 // ─── GET /api/brand-kit/assets ────────────────────────────────────────────────
 // List all assets for the org's brand kit.

@@ -3,7 +3,7 @@
 import Nav from '@/components/landing/Nav';
 import WaitlistModal from '@/components/ui/WaitlistModal';
 import { useWaitlist } from '@/hooks/useWaitlist';
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 interface BlogNavProps {
   lang: string;

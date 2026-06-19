@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import type { BrandKit, BrandTone, CompanySize } from '@/lib/brand-kit';
+import type { BrandKit, BrandTone, CompanySize } from '@/types/brand-kit';
+import type { Locale } from '@/types/i18n';
+import type { WizardStepId, WizardStep, BrandKitWizardProps } from '@/types/components/brand-kit-wizard';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
@@ -84,7 +86,6 @@ const T = {
     q_competitors: 'Who are your main competitors?',
   },
 } as const;
-type Locale = keyof typeof T;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -124,30 +125,6 @@ const labelStyle: React.CSSProperties = {
 };
 
 // ─── Wizard step definitions ──────────────────────────────────────────────────
-
-type WizardStepId =
-  | 'name' | 'website' | 'mission' | 'industry' | 'language'
-  | 'locations' | 'emojis' | 'comm_style' | 'tone' | 'tagline'
-  | 'colors' | 'fonts' | 'logo' | 'notes'
-  | 'company_size' | 'niche' | 'target_audience' | 'differentiators'
-  | 'challenges' | 'competitors';
-
-interface WizardStep {
-  id: WizardStepId;
-  section: 1 | 2;
-  field: keyof BrandKit | null;
-  aiField?: string;
-  isArray?: boolean;
-  isTone?: boolean;
-  isColor?: boolean;
-  isFont?: boolean;
-  isBoolean?: boolean;
-  isUrl?: boolean;
-  isLogo?: boolean;
-  isCompanySize?: boolean;
-  isSelect?: boolean;
-  selectOptions?: { value: string; label: string }[];
-}
 
 const WIZARD_STEPS: WizardStep[] = [
   { id: 'name',            section: 1, field: 'name' },
@@ -251,13 +228,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-interface Props {
-  locale: string;
-  orgName?: string;
-  onComplete: () => void;
-}
-
-export default function BrandKitWizard({ locale: localeProp, orgName, onComplete }: Props) {
+export default function BrandKitWizard({ locale: localeProp, orgName, onComplete }: BrandKitWizardProps) {
   const locale: Locale = (localeProp === 'en' ? 'en' : 'es') as Locale;
   const t = T[locale];
 

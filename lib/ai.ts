@@ -2,6 +2,25 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI, { toFile } from 'openai';
 import fs from 'fs';
 import path from 'path';
+import type {
+  ContentChannel,
+  AIModel,
+  GenerateTextOptions,
+  GenerateTextResult,
+  BrandImageContext,
+  GenerateImageOptions,
+  GenerateImageResult,
+  CarouselSlide,
+  GenerateCarouselOptions,
+  GenerateCarouselResult,
+  ReelScene,
+  GenerateReelOptions,
+  GenerateReelResult,
+  RecommendedContentType,
+  ContentRecommendation,
+  RecommendBrandContext,
+  GenerateRecommendationsResult,
+} from '@/types/ai';
 
 // ─── Client singletons ────────────────────────────────────────────────────────
 
@@ -45,84 +64,6 @@ function stripJsonFences(text: string): string {
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/, '')
     .trim();
-}
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export type ContentChannel =
-  | 'linkedin'
-  | 'instagram'
-  | 'facebook'
-  | 'twitter'
-  | 'tiktok'
-  | 'threads'
-  | 'generic';
-
-export type AIModel = 'claude' | 'gpt';
-
-export interface GenerateTextOptions {
-  channel:    ContentChannel;
-  topic:      string;
-  tone?:      string[];
-  language?:  'es' | 'en';
-  model?:     AIModel;
-  brandName?: string;
-  tagline?:   string;
-  extraCtx?:  string;
-}
-
-export interface GenerateTextResult {
-  body:       string;
-  hashtags:   string[];
-  model:      string;
-  tokensUsed: number;
-}
-
-export interface BrandImageContext {
-  name?:           string;
-  primaryColor?:   string;
-  secondaryColor?: string;
-  accentColor?:    string;
-  tone?:           string[];
-  logoB64?:        string;  // raw base64, no data-URI prefix
-  logoMimeType?:   string;  // e.g. 'image/png'
-}
-
-export interface GenerateImageOptions {
-  prompt:           string;
-  size?:            '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto';
-  quality?:         'low' | 'medium' | 'high' | 'auto';
-  brand?:           BrandImageContext;
-  referenceImages?: string[];  // Public URLs of user-uploaded reference images
-}
-
-export interface GenerateImageResult {
-  b64:           string;   // raw base64, no data-URI prefix
-  revisedPrompt: string;
-}
-
-export interface CarouselSlide {
-  slide_order:   number;
-  title:         string;
-  body:          string;
-  image_prompt?: string;
-}
-
-export interface GenerateCarouselOptions {
-  channel:     ContentChannel;
-  topic:       string;
-  slide_count: number;  // 3–10
-  tone?:       string[];
-  language?:   'es' | 'en';
-  brandName?:  string;
-  tagline?:    string;
-  extraCtx?:   string;
-}
-
-export interface GenerateCarouselResult {
-  slides:     CarouselSlide[];
-  model:      string;
-  tokensUsed: number;
 }
 
 // ─── Channel limits ───────────────────────────────────────────────────────────
@@ -434,34 +375,6 @@ export async function generateCarouselSlides(
 
 // ─── Reel script generation ───────────────────────────────────────────────────
 
-export interface ReelScene {
-  scene_order:      number;
-  title:            string;   // on-screen hook/headline (max 60 chars)
-  body:             string;   // supporting copy (max 120 chars)
-  image_prompt:     string;   // English visual description for gpt-image-2
-  duration_seconds: number;   // 2–5
-  image_url?:       string;   // populated after image generation
-}
-
-export interface GenerateReelOptions {
-  channel:      ContentChannel;
-  topic:        string;
-  scene_count?: number;   // 3–8, default 5
-  tone?:        string[];
-  language?:    'es' | 'en';
-  brandName?:   string;
-  tagline?:     string;
-  extraCtx?:    string;
-}
-
-export interface GenerateReelResult {
-  scenes:     ReelScene[];
-  hook:       string;         // opening caption / CTA for the post
-  hashtags:   string[];
-  model:      string;
-  tokensUsed: number;
-}
-
 export async function generateReelScript(
   opts: GenerateReelOptions,
 ): Promise<GenerateReelResult> {
@@ -528,44 +441,6 @@ export async function generateReelScript(
 }
 
 // ─── Content recommendations (AI fallback when no strategy) ──────────────────
-
-export type RecommendedContentType = 'post' | 'carousel' | 'reel';
-
-export interface ContentRecommendation {
-  topic:           string;
-  content_type:    RecommendedContentType;
-  rationale_short: string;
-}
-
-export interface RecommendBrandContext {
-  name?:            string;
-  tagline?:         string;
-  industry?:        string;
-  niche?:           string;
-  target_audience?: string;
-  mission?:         string;
-  differentiators?: string[];
-  tone?:            string[];
-  language?:        'es' | 'en';
-  /** Free-form comment from the user to steer the recommendations. */
-  hint?:            string;
-  /** Optional active-strategy context to anchor the AI output. */
-  strategy?: {
-    framework_name?: string;
-    kpi_primary?:    string;
-    current_week?:   number;
-    total_weeks?:    number;
-    sample_topics?:  string[];
-  };
-  /** Recent topics already published — AI should avoid repeating them. */
-  recent_topics?:   string[];
-}
-
-export interface GenerateRecommendationsResult {
-  recommendations: ContentRecommendation[];
-  model:           string;
-  tokensUsed:      number;
-}
 
 /**
  * Generate 3 channel-agnostic content recommendations from Brand Kit context.

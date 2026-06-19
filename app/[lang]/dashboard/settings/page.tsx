@@ -3,13 +3,13 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useParams, useSearchParams } from 'next/navigation';
+import type { Locale } from '@/types/i18n';
 import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
 
 import esT from '@/locales/es/dashboard/settings';
 import enT from '@/locales/en/dashboard/settings';
 
 const T = { es: esT, en: enT } as const;
-type Locale = keyof typeof T;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

@@ -4,8 +4,8 @@ import {
   verifyAccessToken,
   generateRefreshToken,
   hashToken,
-  type JWTPayload,
 } from '@/lib/auth';
+import type { JWTPayload } from '@/types/auth';
 
 const samplePayload: JWTPayload = {
   userId: 'user-123',

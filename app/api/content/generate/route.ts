@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText, type ContentChannel, type AIModel } from '@/lib/ai';
+import { generateContentText } from '@/lib/ai';
+import type { ContentChannel, AIModel } from '@/types/ai';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;

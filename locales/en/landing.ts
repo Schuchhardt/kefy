@@ -1,4 +1,4 @@
-import type { KefyCopy } from '../types';
+import type { KefyCopy } from '@/types/locales';
 
 const en: KefyCopy = {
   nav: {

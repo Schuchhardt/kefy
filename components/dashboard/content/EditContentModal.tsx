@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Modal from './Modal';
-import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from './types';
+import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
 
 interface EditContentModalProps {
   open:      boolean;

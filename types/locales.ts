@@ -1,26 +1,41 @@
-// ─── Shared interfaces for landing-page copy ─────────────────────────────────
+// Landing-page copy, blog, dashboard navigation and common app strings
+// — types only; data lives in `locales/es/**` and `locales/en/**`.
 
-export interface NavLink { id: string; label: string; path?: string; }
-export interface FooterItem { label: string; href: string; }
-export interface WaitlistInterest { value: string; label: string; }
-export interface WaitlistCopy {
-  title: string;
-  subtitle: string;
-  nameLbl: string;
-  namePlaceholder: string;
-  emailLbl: string;
-  emailPlaceholder: string;
-  interestLbl: string;
-  interestPlaceholder: string;
-  interestOptions: WaitlistInterest[];
-  submit: string;
-  submitting: string;
-  successTitle: string;
-  successSub: string;
-  errorGeneric: string;
-  errorDuplicate: string;
+export interface NavLink {
+  id:    string;
+  label: string;
+  path?: string;
 }
-export interface HeroStat { big: string; lbl: string; }
+
+export interface FooterItem {
+  label: string;
+  href:  string;
+}
+
+export interface WaitlistInterest {
+  value: string;
+  label: string;
+}
+
+export interface WaitlistCopy {
+  title:               string;
+  subtitle:            string;
+  nameLbl:             string;
+  namePlaceholder:     string;
+  emailLbl:            string;
+  emailPlaceholder:    string;
+  interestLbl:         string;
+  interestPlaceholder: string;
+  interestOptions:     WaitlistInterest[];
+  submit:              string;
+  submitting:          string;
+  successTitle:        string;
+  successSub:          string;
+  errorGeneric:        string;
+  errorDuplicate:      string;
+}
+
+export interface HeroStat   { big: string; lbl: string; }
 export interface DemoOutput { channel: string; meta: string; body: string; }
 export interface DemoMessage { platform: string; from: string; text: string; type: string; pts: number; }
 export interface DemoDMMessage { sender: 'user' | 'brand'; text: string; }
@@ -33,12 +48,24 @@ export interface KillerPoint { k: string; d: string; }
 export interface DashStat { lbl: string; v: string; d: string; }
 export interface DashPost { ic: string; text: string; eng: string; winner: boolean; boost: string; }
 export interface ApBullet { ic: string; t: string; }
-export interface CalDay { day: string; items: { ic: string; t: string }[] }
+export interface CalDay { day: string; items: { ic: string; t: string }[]; }
 export interface FeatureItem { ic: string; t: string; d: string; }
 export interface FeatureLayer { name: string; badge: string; badgeColor?: string; items: string[]; }
 export interface WhoSegment { ic: string; t: string; d: string; }
 export interface PlanFeature { dim?: boolean; t: string; }
-export interface Plan { name: string; price: string; annualPrice?: string; annualBilled?: string; per: string; tagline: string; features: (string | PlanFeature)[]; cta: string; featured?: boolean; badge?: string; launchPrice?: string; }
+export interface Plan {
+  name:          string;
+  price:         string;
+  annualPrice?:  string;
+  annualBilled?: string;
+  per:           string;
+  tagline:       string;
+  features:      (string | PlanFeature)[];
+  cta:           string;
+  featured?:     boolean;
+  badge?:        string;
+  launchPrice?:  string;
+}
 export interface CreditItem { ic: string; label: string; }
 export interface CreditPack { credits: string; price: string; popular?: boolean; }
 export interface CmpRow { feature: string; values: string[]; }
@@ -55,7 +82,7 @@ export interface KefyCopy {
     contextLbl: string; contextProduct: string; contextDesc: string;
     channelsLbl: string; goalLbl: string; goalK: string; goalV: string;
     audienceK: string; audienceV: string; url: string;
-    outputs: { linkedin: DemoOutput; meta: DemoOutput; x: DemoOutput, facebook: DemoOutput};
+    outputs: { linkedin: DemoOutput; meta: DemoOutput; x: DemoOutput, facebook: DemoOutput };
     stepLabels: string[];
     strategyLbl: string;
     strategyGoal: string;
@@ -92,12 +119,11 @@ export interface KefyCopy {
     commentLabel?: string;
     dmLabel?: string;
     scoreBarLabel?: string;
-    // UI strings
-    stepDescriptions?: string[];   // [content, inbox, pipeline]
-    creationSteps?: string[];      // 5 short labels (col 1 mini list)
-    creationStepsLong?: string[];  // 5 long labels (col 3 progress)
+    stepDescriptions?: string[];
+    creationSteps?: string[];
+    creationStepsLong?: string[];
     progressLabel?: string;
-    botThoughts?: string[];        // [thought1, thought2]
+    botThoughts?: string[];
     commentBrandReply?: string;
     instagramNow?: string;
     statusGenerating?: string;
@@ -150,31 +176,25 @@ export interface KefyCopy {
   footer: { tagline: string; cols: { h: string; items: FooterItem[] }[]; origin: string; copy: string; };
 }
 
-// ─── Common (404, layout metadata) ───────────────────────────────────────────
-
 export interface CommonCopy {
   notFound: { msg: string; cta: string };
   metadata: {
-    title: string;
+    title:       string;
     description: string;
-    keywords: string[];
-    ogLocale: string;
+    keywords:    string[];
+    ogLocale:    string;
   };
 }
 
-// ─── Blog ─────────────────────────────────────────────────────────────────────
-
 export interface BlogCopy {
-  title: string;
-  sub: string;
-  readMore: string;
-  empty: string;
-  back: string;
+  title:      string;
+  sub:        string;
+  readMore:   string;
+  empty:      string;
+  back:       string;
   backToList: string;
-  by: string;
+  by:         string;
 }
-
-// ─── Dashboard – shared type helper ──────────────────────────────────────────
 
 export type DashboardPage =
   | 'home'

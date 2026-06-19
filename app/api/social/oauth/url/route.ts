@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
 
     const redirectUrl = callbackUrl.toString();
     const result = await getConnectUrl(
-      platform as import('@/lib/zernio').ZernioPlatform,
+      platform as import('@/types/social').ZernioPlatform,
       profileId,
       redirectUrl,
     );

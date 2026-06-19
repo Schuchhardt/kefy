@@ -2,15 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import type { BrandKit, CompanySize } from '@/lib/brand-kit';
-
-interface Industry {
-  id:      string;
-  slug:    string;
-  name_es: string;
-  name_en: string;
-  icon:    string;
-}
+import type { BrandKit, CompanySize } from '@/types/brand-kit';
+import type { Industry } from '@/types/strategy';
 
 import esT from '@/locales/es/dashboard/brand';
 import enT from '@/locales/en/dashboard/brand';

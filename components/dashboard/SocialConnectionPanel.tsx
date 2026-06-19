@@ -4,18 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
-import { CHANNELS, CHANNEL_LABELS, type Channel } from '@/lib/channels';
+import { CHANNELS, CHANNEL_LABELS } from '@/lib/channels';
+import type { Channel } from '@/types/channels';
+import type { SocialAccount } from '@/types/social';
 
 type Locale = 'es' | 'en';
 type Mode = 'settings' | 'onboarding';
-
-interface SocialAccount {
-  id: string;
-  platform: string;
-  username: string;
-  status: string;
-  token_expires_at?: string | null;
-}
 
 interface Props {
   locale: Locale;

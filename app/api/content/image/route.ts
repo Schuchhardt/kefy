@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { generateContentImage, BrandImageContext } from '@/lib/ai';
+import { generateContentImage } from '@/lib/ai';
+import type { BrandImageContext } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
 export const runtime = 'nodejs';

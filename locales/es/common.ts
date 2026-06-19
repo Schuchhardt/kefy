@@ -1,4 +1,4 @@
-import type { CommonCopy } from '../types';
+import type { CommonCopy } from '@/types/locales';
 
 const es: CommonCopy = {
   notFound: {

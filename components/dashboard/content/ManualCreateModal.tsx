@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Modal from './Modal';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { CHANNELS } from '@/lib/channels';
-import type { ContentItem, ContentType, CarouselSlide, ReelScene } from './types';
+import type { ContentItem, ContentType, CarouselSlide, ReelScene } from '@/types/content';
 
 interface ManualCreateModalProps {
   open:    boolean;

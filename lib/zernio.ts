@@ -8,59 +8,31 @@
 // Zernio acts as an abstraction layer over LinkedIn, Meta, X, TikTok, etc.
 // This client wraps its REST API with typed methods.
 
-export type ZernioPlatform =
-  | 'facebook'
-  | 'instagram'
-  | 'linkedin'
-  | 'twitter'
-  | 'tiktok'
-  | 'youtube'
-  | 'threads'
-  | 'reddit'
-  | 'pinterest'
-  | 'bluesky'
-  | 'googlebusiness'
-  | 'telegram'
-  | 'snapchat'
-  | 'discord'
-  | 'whatsapp';
-
-export interface ZernioAccount {
-  id:           string;   // Zernio account ID
-  platform:     ZernioPlatform;
-  external_id:  string;   // native platform user/page ID
-  username:     string;
-  avatar_url:   string | null;
-  access_token: string;
-  refresh_token: string | null;
-  token_expires_at: string | null; // ISO date
-}
-
-export interface ZernioPublishPayload {
-  account_id:    string;        // Zernio account ID
-  text:          string;
-  image_url?:    string;        // single cover image (post / reel cover)
-  media_urls?:   string[];      // ordered slide images for carousels
-  video_url?:    string;        // rendered video asset URL for reels
-  content_type?: 'post' | 'carousel' | 'reel';  // default 'post'
-  hashtags?:     string[];
-  scheduled_at?: string;        // ISO 8601 — omit for immediate publish
-}
-
-export interface ZernioPublishResult {
-  post_id:        string;   // Zernio post ID
-  platform_post_id: string | null; // native platform ID (may be async)
-  status:         'published' | 'scheduled' | 'pending';
-  published_at:   string | null;
-  scheduled_at:   string | null;
-}
-
-export interface ZernioConnectResult {
-  account:      ZernioAccount;
-  access_token: string;
-  refresh_token: string | null;
-  expires_at:   string | null;
-}
+import type {
+  ZernioPlatform,
+  ZernioAccount,
+  ZernioPublishPayload,
+  ZernioPublishResult,
+  ZernioConnectResult,
+  ZernioProfile,
+  ZernioAccountMetrics,
+  ZernioPostAnalytics,
+  ZernioInstagramInsightsMetric,
+  ZernioInstagramInsights,
+  ZernioMessage,
+  ZernioThread,
+  ListMessagesParams,
+  ZernioInboxConversation,
+  ZernioInboxResponse,
+  ZernioInboxMessage,
+  ZernioInboxMessagesResponse,
+  ZernioSendMessageResponse,
+  ZernioComment,
+  ZernioReview,
+  ZernioBoostObjective,
+  ZernioBoostPayload,
+  ZernioBoostResult,
+} from '@/types/social';
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -213,12 +185,6 @@ export async function getPostStatus(zernioPostId: string): Promise<ZernioPublish
 
 // ─── Profiles ─────────────────────────────────────────────────────────────────
 
-export interface ZernioProfile {
-  _id:         string;
-  name:        string;
-  description: string | null;
-  created_at:  string;
-}
 
 /**
  * Create a Zernio profile.
@@ -255,11 +221,6 @@ export async function getConnectUrl(
 
 // ─── Account Metrics (followers) ──────────────────────────────────────────────
 
-export interface ZernioAccountMetrics {
-  followers_count: number;
-  following_count: number;
-  posts_count:     number;
-}
 
 /**
  * Fetch follower count for a connected account.
@@ -283,17 +244,6 @@ export async function getAccountMetrics(
 
 // ─── Post Analytics ───────────────────────────────────────────────────────────
 
-export interface ZernioPostAnalytics {
-  impressions:    number;
-  reach:          number;
-  likes:          number;
-  comments:       number;
-  shares:         number;
-  saves:          number;
-  clicks:         number;
-  views:          number;
-  engagementRate: number;
-}
 
 /**
  * Fetch analytics for a single published post.
@@ -312,21 +262,6 @@ export async function getPostAnalytics(
 }
 
 // ─── Instagram Account Insights ───────────────────────────────────────────────
-
-export interface ZernioInstagramInsightsMetric {
-  total: number;
-  values?: Array<{ date: string; value: number }>;
-}
-
-export interface ZernioInstagramInsights {
-  success:    boolean;
-  accountId:  string;
-  platform:   string;
-  dateRange:  { since: string; until: string };
-  metricType: string;
-  metrics:    Record<string, ZernioInstagramInsightsMetric>;
-  dataDelay?: string;
-}
 
 /**
  * Fetch account-level Instagram insights (reach, views, accounts_engaged, etc.).
@@ -358,34 +293,6 @@ export async function getInstagramAccountInsights(params: {
 }
 
 // ─── Messaging (DMs) ──────────────────────────────────────────────────────────
-
-export interface ZernioMessage {
-  message_id:    string;
-  thread_id:     string;
-  sender_id:     string;
-  sender_name:   string | null;
-  sender_avatar: string | null;
-  body:          string;
-  direction:     'inbound' | 'outbound';
-  read_at:       string | null;
-  created_at:    string;
-}
-
-export interface ZernioThread {
-  thread_id:         string;
-  participant_id:    string;
-  participant_name:  string | null;
-  participant_avatar: string | null;
-  last_message_body: string;
-  last_message_at:   string;
-  unread_count:      number;
-}
-
-export interface ListMessagesParams {
-  thread_id?: string;
-  limit?:     number;
-  before?:    string; // ISO cursor for pagination
-}
 
 /**
  * List threads (or messages in a specific thread) for an account.
@@ -435,47 +342,6 @@ export async function markMessageRead(
 
 // ─── Inbox conversations ───────────────────────────────────────────────────────
 
-export interface ZernioInboxConversation {
-  id:                       string;          // Zernio conversation ID
-  platform:                 string;          // "facebook" | "instagram" | "twitter" | "bluesky" | "reddit" | "telegram"
-  accountId:                string;          // Zernio account ID that received the message
-  accountUsername:          string;
-  participantId:            string;          // platform user ID of the contact
-  participantName:          string | null;
-  participantPicture:       string | null;
-  participantVerifiedType:  string | null;   // "blue" if verified
-  lastMessage:              string;          // preview text of the last message
-  updatedTime:              string;          // ISO 8601 — last activity
-  status:                   'active' | 'archived';
-  unreadCount:              number;
-  url:                      string | null;   // direct URL to the conversation on the platform
-  instagramProfile?: {
-    isFollower:    boolean;
-    isFollowing:   boolean;
-    followerCount: number;
-    isVerified:    boolean;
-    fetchedAt:     string;
-  } | null;
-}
-
-export interface ZernioInboxResponse {
-  data:       ZernioInboxConversation[];
-  pagination: { hasMore: boolean; nextCursor: string | null };
-  meta: {
-    accountsQueried: number;
-    accountsFailed:  number;
-    failedAccounts:  Array<{
-      accountId:       string;
-      accountUsername: string;
-      platform:        string;
-      error:           string;
-      code:            string;
-      retryAfter:      number | null;
-    }>;
-    lastUpdated: string;
-  };
-}
-
 /**
  * Fetch conversations (DMs) from all connected messaging accounts.
  * Aggregates across all accounts in one call.
@@ -504,38 +370,6 @@ export async function getInboxConversations(params: {
 }
 
 // ─── Inbox conversation messages ──────────────────────────────────────────────
-
-export interface ZernioInboxMessage {
-  id:                  string;
-  conversationId:      string;
-  accountId:           string;
-  platform:            string;
-  message:             string;        // message text
-  senderId:            string;
-  senderName:          string | null;
-  direction:           'incoming' | 'outgoing';
-  createdAt:           string;        // ISO 8601
-  attachments?: Array<{
-    id:         string;
-    type:       string;
-    url:        string;
-    filename?:  string;
-    previewUrl?: string;
-  }>;
-}
-
-export interface ZernioInboxMessagesResponse {
-  status:            string;
-  pagination:        { hasMore: boolean; nextCursor: string | null };
-  sortOrderApplied:  'asc' | 'desc';
-  messages:          ZernioInboxMessage[];
-  lastUpdated:       string;
-}
-
-export interface ZernioSendMessageResponse {
-  messageId:      string;
-  conversationId: string;
-}
 
 /**
  * Fetch messages for a specific inbox conversation.
@@ -578,15 +412,6 @@ export async function sendConversationMessage(
 
 // ─── Comments ─────────────────────────────────────────────────────────────────
 
-export interface ZernioComment {
-  comment_id:    string;
-  post_id:       string;
-  author_id:     string;
-  author_name:   string | null;
-  author_avatar: string | null;
-  body:          string;
-  created_at:    string;
-}
 
 /**
  * List comments for a post (or all recent comments for an account).
@@ -618,17 +443,7 @@ export async function replyToComment(
   );
 }
 
-// ─── Reviews ──────────────────────────────────────────────────────────────────
-
-export interface ZernioReview {
-  review_id:       string;
-  reviewer_id:     string;
-  reviewer_name:   string | null;
-  reviewer_avatar: string | null;
-  rating:          number | null;
-  body:            string | null;
-  published_at:    string | null;
-}
+// ─── Reviews ─────────────────────────────────────────────────────────────────────
 
 /**
  * List reviews for a connected account (Facebook, LinkedIn).
@@ -659,26 +474,6 @@ export async function replyToReview(
 }
 
 // ─── Ads / Boost ──────────────────────────────────────────────────────────────
-
-export type ZernioBoostObjective = 'reach' | 'engagement' | 'traffic' | 'leads';
-
-export interface ZernioBoostPayload {
-  account_id:    string;
-  post_id:       string;          // Zernio post ID (zernio_post_id)
-  budget_cents:  number;
-  currency:      string;
-  duration_days: number;
-  objective:     ZernioBoostObjective;
-  targeting?:    Record<string, unknown>;
-}
-
-export interface ZernioBoostResult {
-  boost_id:       string;
-  platform_ad_id: string | null;
-  status:         'pending' | 'active' | 'completed' | 'cancelled' | 'failed';
-  started_at:     string | null;
-  ended_at:       string | null;
-}
 
 /**
  * Boost an existing published post.

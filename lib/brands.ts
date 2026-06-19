@@ -1,19 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
-import { ACTIVE_BRAND_COOKIE, activeBrandCookieOptions, type JWTPayload } from '@/lib/auth';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface Brand {
-  id:          string;
-  org_id:      string;
-  name:        string;
-  slug:        string;
-  avatar_url:  string | null;
-  archived:    boolean;
-  created_at:  string;
-  updated_at:  string;
-}
+import { ACTIVE_BRAND_COOKIE, activeBrandCookieOptions } from '@/lib/auth';
+import type { JWTPayload } from '@/types/auth';
+import type { Brand } from '@/types/brands';
 
 // ─── Plan limits ──────────────────────────────────────────────────────────────
 

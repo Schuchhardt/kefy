@@ -1,13 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-
-interface CarouselSlide {
-  slide_order: number;
-  title:       string;
-  body:        string;
-  image_url?:  string | null;
-}
+import type { CarouselSlide } from '@/types/content';
 
 // Gradient palette for slides without images
 const GRADIENTS = [

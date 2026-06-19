@@ -3,7 +3,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { resizeForPlatform } from '@/lib/image-processor';
 import { uploadBase64Image } from '@/lib/storage';
-import type { ContentChannel } from '@/lib/ai';
+import type { ContentChannel } from '@/types/ai';
 
 // ─── POST /api/social/publish ─────────────────────────────────────────────────
 // Publish a content item immediately to one or more social accounts.

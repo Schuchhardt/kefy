@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { boostPost } from '@/lib/zernio';
-import type { ZernioBoostObjective } from '@/lib/zernio';
+import type { ZernioBoostObjective } from '@/types/social';
 import { getBrandFromRequest } from '@/lib/brands';
 
 const VALID_OBJECTIVES = new Set<ZernioBoostObjective>(['reach', 'engagement', 'traffic', 'leads']);

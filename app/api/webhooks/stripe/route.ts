@@ -2,14 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import stripe from '@/lib/stripe';
 import { createSupabaseServer } from '@/lib/supabase';
 import type Stripe from 'stripe';
+import type { BillingPlan } from '@/types/billing';
 
-// ─── POST /api/webhooks/stripe ────────────────────────────────────────────────
+// ─── POST /api/webhooks/stripe ─────────────────────────────────────────────────────────────────
 // Receives and processes Stripe webhook events.
 // Syncs subscription state into kefy_subscriptions + kefy_organizations.plan
 
-type Plan = 'starter' | 'pro' | 'business';
-
-function planFromMetadata(metadata: Stripe.Metadata | null): Plan {
+function planFromMetadata(metadata: Stripe.Metadata | null): BillingPlan {
   const p = metadata?.plan;
   if (p === 'pro' || p === 'business') return p;
   return 'starter';
@@ -84,7 +83,7 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
     ? new Date(subscription.items.data[0].current_period_end * 1000).toISOString()
     : null;
 
-  const effectivePlan: Plan = (status === 'canceled' || status === 'unpaid') ? 'starter' : plan;
+  const effectivePlan: BillingPlan = (status === 'canceled' || status === 'unpaid') ? 'starter' : plan;
 
   const db = createSupabaseServer();
 

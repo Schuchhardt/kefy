@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import type { ContentChannel } from './ai';
+import type { ContentChannel } from '@/types/ai';
 
 // ─── Platform-specific image dimensions ───────────────────────────────────────
 // Width × Height in pixels for the primary/recommended crop per network.

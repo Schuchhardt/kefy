@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
   let connected;
   try {
     connected = await connectAccount(
-      input.platform as import('@/lib/zernio').ZernioPlatform,
+      input.platform as import('@/types/social').ZernioPlatform,
       input.code as string,
       input.redirect_uri as string,
     );

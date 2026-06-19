@@ -2,64 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Objective {
-  id:       string;
-  slug:     string;
-  name_es:  string;
-  name_en:  string;
-  desc_es:  string;
-  desc_en:  string;
-  icon:     string;
-}
-
-interface Industry {
-  id:       string;
-  slug:     string;
-  name_es:  string;
-  name_en:  string;
-  icon:     string;
-  desc_es:  string;
-}
-
-interface Strategy {
-  id:                 string;
-  framework_slug:     string;
-  framework_name_es:  string;
-  framework_name_en:  string;
-  framework_desc_es:  string;
-  framework_desc_en:  string;
-  kpi_primary_es:     string;
-  kpi_primary_en:     string;
-  kpi_secondary_es:   string;
-  kpi_secondary_en:   string;
-  interaction_layers: Array<{ num_es: string; num_en: string; title_es: string; title_en: string; items_es: string[]; items_en: string[] }>;
-  cta_mechanic_es:    string;
-  cta_mechanic_en:    string;
-}
-
-interface Template {
-  id:               string;
-  week_num:         number;
-  post_num:         number;
-  format:           string;
-  channel_hint:     string;
-  topic_es:         string;
-  topic_en:         string;
-  copy_structure_es: string;
-  copy_structure_en: string;
-  goal_es:          string;
-  goal_en:          string;
-}
-
-interface OrgSelection {
-  objective_id: string | null;
-  industry_id:  string | null;
-  strategy_id:  string | null;
-  custom_notes: string | null;
-}
+import type { Locale } from '@/types/i18n';
+import type { Objective, Industry, Strategy, Template, OrgSelection } from '@/types/strategy';
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -93,7 +37,6 @@ import esT from '@/locales/es/dashboard/strategy';
 import enT from '@/locales/en/dashboard/strategy';
 
 const T = { es: esT, en: enT } as const;
-type Locale = keyof typeof T;
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function StrategyPage() {

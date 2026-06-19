@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { createSupabaseServer } from '@/lib/supabase';
 
 // GET /api/automations/leads
@@ -7,6 +8,9 @@ import { createSupabaseServer } from '@/lib/supabase';
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const { searchParams } = new URL(req.url);
   const stage   = searchParams.get('stage');
@@ -20,7 +24,7 @@ export async function GET(req: NextRequest) {
   let query = supabase
     .from('kefy_leads')
     .select('*', { count: 'exact' })
-    .eq('org_id', auth.orgId)
+    .eq('brand_id', brand.id)
     .order('last_interaction_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -31,7 +35,9 @@ export async function GET(req: NextRequest) {
   const { data, error, count } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ leads: data ?? [], total: count ?? 0 });
+  const res = NextResponse.json({ leads: data ?? [], total: count ?? 0 });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }
 
 // POST /api/automations/leads
@@ -39,6 +45,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   let body: {
     username:      string;
@@ -67,6 +76,7 @@ export async function POST(req: NextRequest) {
     .from('kefy_leads')
     .upsert({
       org_id:       auth.orgId,
+      brand_id:     brand.id,
       username:     body.username.trim(),
       channel:      body.channel.trim(),
       display_name: body.display_name ?? null,
@@ -76,11 +86,13 @@ export async function POST(req: NextRequest) {
       notes:        body.notes        ?? null,
       tags:         body.tags         ?? [],
       last_interaction_at: new Date().toISOString(),
-    }, { onConflict: 'org_id,channel,username' })
+    }, { onConflict: 'brand_id,channel,username' })
     .select()
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ lead: data }, { status: 201 });
+  const res = NextResponse.json({ lead: data }, { status: 201 });
+  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+  return res;
 }

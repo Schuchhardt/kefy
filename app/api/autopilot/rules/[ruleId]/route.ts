@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { computeNextRun } from '../route';
+import type { Frequency } from '@/types/automations';
 
 const VALID_FREQ = ['daily', 'weekly', 'biweekly', 'monthly'] as const;
-type Frequency   = typeof VALID_FREQ[number];
 
 // ─── GET /api/autopilot/rules/[ruleId] ────────────────────────────────────────
 export async function GET(

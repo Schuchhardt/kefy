@@ -27,7 +27,7 @@ export default stripe;
 
 // ─── Plan → Price ID map ──────────────────────────────────────────────────────
 
-export type BillingPlan = 'starter' | 'pro' | 'business';
+import type { BillingPlan } from '@/types/billing';
 
 export function getPriceId(plan: BillingPlan): string {
   const ids: Record<BillingPlan, string | undefined> = {

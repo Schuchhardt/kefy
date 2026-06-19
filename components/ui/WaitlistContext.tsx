@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import WaitlistModal from '@/components/ui/WaitlistModal';
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 interface WaitlistCtxValue {
   open: () => void;

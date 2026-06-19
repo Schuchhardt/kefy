@@ -9,47 +9,14 @@ import enInbox from '@/locales/en/dashboard/inbox';
 import esEngage from '@/locales/es/dashboard/engage';
 import enEngage from '@/locales/en/dashboard/engage';
 
-type Locale = 'es' | 'en';
-const TI = { es: esInbox, en: enInbox } as const;
-const TE = { es: esEngage, en: enEngage } as const;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type Platform = 'linkedin' | 'instagram' | 'facebook' | 'twitter' | 'tiktok' | 'threads';
-type FilterType = 'dms' | 'comments' | 'reviews';
-
-interface SocialAccount {
-  id: string; platform: Platform; username: string; avatar_url?: string | null;
-}
-
-interface ThreadPreview {
-  id: string; platform: Platform; platform_thread_id: string; platform_message_id: string;
-  sender_id: string; sender_name: string | null; sender_avatar: string | null;
-  body: string; direction: 'inbound' | 'outbound'; read_at: string | null;
-  created_at: string; kefy_social_accounts: SocialAccount;
-}
-
-interface Message {
-  id: string; sender_id: string; sender_name: string | null; sender_avatar: string | null;
-  body: string; direction: 'inbound' | 'outbound'; read_at: string | null; created_at: string;
-}
-
-interface CommentItem {
-  id: string; platform: Platform; platform_post_id: string; platform_comment_id: string;
-  author_id: string; author_name: string | null; author_avatar: string | null;
-  body: string; replied_at: string | null; reply_body: string | null; created_at: string;
-  kefy_social_accounts: SocialAccount;
-}
-
-interface ReviewItem {
-  id: string; platform: Platform; reviewer_id: string; reviewer_name: string | null;
-  reviewer_avatar: string | null; rating: number; body: string | null;
-  replied_at: string | null; reply_body: string | null;
-  published_at: string | null; created_at: string; kefy_social_accounts: SocialAccount;
-}
+import type { MessagingPlatform, ThreadPreview, Message, CommentItem, ReviewItem, FilterType } from '@/types/conversations';
+import type { SocialAccount } from '@/types/social';
+import type { Locale } from '@/types/i18n';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+const TI = { es: esInbox,  en: enInbox  } as const;
+const TE = { es: esEngage, en: enEngage } as const;
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -106,7 +73,7 @@ export default function ConversationsPage() {
   const ti = TI[locale];
   const te = TE[locale];
 
-  const PLATFORMS: { value: Platform | 'all'; label: string }[] = [
+  const PLATFORMS: { value: MessagingPlatform | 'all'; label: string }[] = [
     { value: 'all',       label: locale === 'es' ? 'Todos'     : 'All'       },
     { value: 'linkedin',  label: 'LinkedIn'  },
     { value: 'instagram', label: 'Instagram' },
@@ -133,7 +100,7 @@ export default function ConversationsPage() {
 
   // ── Global filters ──
   const [filterType, setFilterType] = useState<FilterType>('dms');
-  const [platformFilter, setPlatformFilter] = useState<Platform | 'all'>('all');
+  const [platformFilter, setPlatformFilter] = useState<MessagingPlatform | 'all'>('all');
 
   // ── DMs state ──
   const [threads, setThreads]             = useState<ThreadPreview[]>([]);
@@ -351,7 +318,7 @@ export default function ConversationsPage() {
 
         {/* Platform filter */}
         {PLATFORMS.map(({ value, label }) => (
-          <button key={value} onClick={() => setPlatformFilter(value as Platform | 'all')}
+          <button key={value} onClick={() => setPlatformFilter(value as MessagingPlatform | 'all')}
             style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
               border: `1px solid ${platformFilter === value ? 'var(--accent)' : 'var(--border)'}`,
               background: platformFilter === value ? 'rgba(198,255,75,0.1)' : 'var(--surface)',

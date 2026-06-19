@@ -2,20 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
+import type { SlideInput } from '@/types/content';
 
 const VALID_CHANNELS = new Set([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
 ]);
 const VALID_STATUSES = new Set(['draft', 'approved', 'scheduled', 'published', 'archived']);
 const VALID_CONTENT_TYPES = new Set(['post', 'carousel', 'reel']);
-
-interface SlideInput {
-  slide_order: number;
-  title?: string | null;
-  body?: string | null;
-  image_url?: string | null;
-  duration_seconds?: number | null;
-}
 
 function sanitizeSlides(raw: unknown): SlideInput[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;

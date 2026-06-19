@@ -2,7 +2,7 @@
 
 import { useReveal } from '@/hooks/useReveal';
 import { useCounter } from '@/hooks/useCounter';
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 interface Props {
   copy: KefyCopy['problem'];

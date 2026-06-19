@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import type { KefyCopy } from '@/lib/content';
+import type { KefyCopy } from '@/types/locales';
 
 type DemoStep = 'content' | 'inbox' | 'pipeline';
 const STEP_IDS: DemoStep[] = ['content', 'inbox', 'pipeline'];

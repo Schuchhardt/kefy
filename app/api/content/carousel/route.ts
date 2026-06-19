@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateCarouselSlides, generateContentImage, type ContentChannel } from '@/lib/ai';
+import { generateCarouselSlides, generateContentImage } from '@/lib/ai';
+import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
 const VALID_CHANNELS = new Set<ContentChannel>([

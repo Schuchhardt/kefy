@@ -4,35 +4,11 @@ import { useEffect, useState, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import type { Locale } from '@/types/i18n';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
 import ChannelIcon    from '@/components/ui/ChannelIcon';
 import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
-
-/* ─── Types ────────────────────────────────────────────────────────────────── */
-interface Totals {
-  impressions: number;
-  reach: number;
-  likes: number;
-  comments: number;
-  shares: number;
-  clicks: number;
-}
-
-interface ContentItem {
-  id: string;
-  platform: string;
-  body: string;
-  status: 'published' | 'scheduled' | 'draft';
-  published_at: string | null;
-  created_at: string;
-}
-
-interface OnboardingStep {
-  key: string;
-  icon: string;
-  title: string;
-  desc: string;
-}
+import type { Totals, OnboardingStep, RecentContentItem } from '@/types/content';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────────── */
 function fmt(n: number) {
@@ -51,6 +27,9 @@ const T = {
     recentContent: 'Contenido reciente',
     noContent: 'Aún no tienes contenido publicado.',
     createFirst: 'Crear contenido',
+    publishReady: 'Tienes contenido listo para publicar',
+    publishReadyDesc: 'Ya creaste contenido. Publícalo o prográmalo directamente en tus redes sociales.',
+    goToContent: 'Ver mi contenido',
     quickActions: 'Acciones rápidas',
     actionBrand: 'Mi marca', actionBrandDesc: 'Completa tu identidad de marca',
     actionContent: 'Crear contenido', actionContentDesc: 'Genera posts con IA',
@@ -71,6 +50,9 @@ const T = {
     recentContent: 'Recent content',
     noContent: 'No published content yet.',
     createFirst: 'Create content',
+    publishReady: 'You have content ready to publish',
+    publishReadyDesc: 'You already created content. Publish it or schedule it to your social networks.',
+    goToContent: 'View my content',
     quickActions: 'Quick actions',
     actionBrand: 'My Brand', actionBrandDesc: 'Complete your brand identity',
     actionContent: 'Create content', actionContentDesc: 'Generate posts with AI',
@@ -83,7 +65,6 @@ const T = {
     statusPublished: 'Published', statusScheduled: 'Scheduled', statusDraft: 'Draft',
   },
 } as const;
-type Locale = keyof typeof T;
 
 /* ─── Page ─────────────────────────────────────────────────────────────────── */
 function DashboardPageInner() {
@@ -94,7 +75,7 @@ function DashboardPageInner() {
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
 
   const [totals, setTotals]           = useState<Totals | null>(null);
-  const [content, setContent]         = useState<ContentItem[]>([]);
+  const [content, setContent]         = useState<RecentContentItem[]>([]);
   const [metricsLoading, setMLoading] = useState(true);
   const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
   const [brandKitHasData, setBrandKitHasData] = useState<boolean | null>(null);
@@ -127,11 +108,11 @@ function DashboardPageInner() {
       })
       .catch(() => setBrandKitHasData(false));
 
-    // Fetch content
-    fetch('/api/content?limit=5&status=published', { credentials: 'include' })
+    // Fetch content (all statuses to detect drafts, scheduled, published)
+    fetch('/api/content?limit=5', { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) return;
-        const json = await res.json() as { items?: ContentItem[]; content?: ContentItem[] };
+        const json = await res.json() as { items?: RecentContentItem[]; content?: RecentContentItem[] };
         setContent(json.items ?? json.content ?? []);
       })
       .catch(() => {});
@@ -159,6 +140,7 @@ function DashboardPageInner() {
   }, [hasAccounts]);
 
   const isNewAccount = hasAccounts === false && brandKitHasData === false && content.length === 0;
+  const hasPublishedOrScheduled = content.some(c => c.status === 'published' || c.status === 'scheduled');
 
   useEffect(() => {
     if (isNewAccount) setOnboardingOpen(true);
@@ -365,7 +347,7 @@ function DashboardPageInner() {
         </section>
       )}
 
-      {/* ── Onboarding: Connect social / Create first content ── */}
+      {/* ── Onboarding: Connect social / Create first content (solo si no hay contenido) ── */}
       {content.length === 0 && (
         <section style={{ marginBottom: 40 }}>
           <div style={{
@@ -380,6 +362,35 @@ function DashboardPageInner() {
               contentHref={`/${lang}/dashboard/content`}
               onAccountsChange={(count) => setHasAccounts(count > 0)}
             />
+          </div>
+        </section>
+      )}
+
+      {/* ── CTA: publicar o programar (tiene cuenta + contenido pero nada publicado/programado) ── */}
+      {hasAccounts === true && content.length > 0 && !hasPublishedOrScheduled && (
+        <section style={{ marginBottom: 40 }}>
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(198,255,75,0.07) 0%, rgba(198,255,75,0.02) 100%)',
+            border: '1px solid rgba(198,255,75,0.3)',
+            borderRadius: 12,
+            padding: '20px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
+          }}>
+            <div>
+              <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{t.publishReady}</p>
+              <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>{t.publishReadyDesc}</p>
+            </div>
+            <Link href={`/${lang}/dashboard/content`} style={{
+              background: 'var(--accent)', color: 'var(--bg)', fontWeight: 700,
+              fontSize: 13, padding: '8px 18px', borderRadius: 8, textDecoration: 'none',
+              whiteSpace: 'nowrap', flexShrink: 0,
+            }}>
+              {t.goToContent}
+            </Link>
           </div>
         </section>
       )}
