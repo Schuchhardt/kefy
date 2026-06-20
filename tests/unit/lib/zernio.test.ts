@@ -87,9 +87,9 @@ describe('getConnectUrl', () => {
 
 describe('publishPost', () => {
   it('usa POST /posts', async () => {
-    mockOk({ post_id: 'post-1', platform_post_id: null, status: 'published', published_at: null, scheduled_at: null });
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
 
-    await publishPost({ account_id: 'acc-1', text: 'Hola mundo' });
+    await publishPost({ account_id: 'acc-1', platform: 'instagram', text: 'Hola mundo' });
 
     const [calledUrl, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(calledUrl).toContain('/posts');
@@ -97,9 +97,9 @@ describe('publishPost', () => {
   });
 
   it('incluye Authorization header', async () => {
-    mockOk({ post_id: 'post-1', platform_post_id: null, status: 'published', published_at: null, scheduled_at: null });
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
 
-    await publishPost({ account_id: 'acc-1', text: 'Test' });
+    await publishPost({ account_id: 'acc-1', platform: 'instagram', text: 'Test' });
 
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect((init.headers as Record<string, string>)['Authorization']).toMatch(/^Bearer /);

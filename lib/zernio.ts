@@ -48,6 +48,7 @@ async function zernioFetch<T>(
   method: 'GET' | 'POST' | 'DELETE' | 'PATCH',
   path: string,
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
   const url  = `${getBaseUrl()}${path}`;
   const key  = getApiKey();
@@ -63,6 +64,7 @@ async function zernioFetch<T>(
       'Authorization': `Bearer ${key}`,
       'Content-Type':  'application/json',
       'Accept':        'application/json',
+      ...extraHeaders,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     // Never cache — always fresh from Zernio
@@ -157,12 +159,104 @@ export async function refreshAccountToken(zernioAccountId: string): Promise<{
 
 /**
  * Publish or schedule a post via Zernio.
- * Pass `scheduled_at` (ISO 8601) to schedule; omit for immediate publish.
+ * Translates from our internal payload shape to Zernio's actual API format:
+ *   text → content
+ *   account_id + platform → platforms:[{ platform, accountId }]
+ *   image_url / media_urls / video_url → mediaItems:[{ type, url }]
+ *   scheduled_at → scheduledFor  (omitted = publishNow: true)
  */
 export async function publishPost(
   payload: ZernioPublishPayload,
 ): Promise<ZernioPublishResult> {
-  return zernioFetch<ZernioPublishResult>('POST', '/posts', payload);
+  // ── Build mediaItems ───────────────────────────────────────────────────────
+  const mediaItems: Array<{ type: 'image' | 'video'; url: string }> = [];
+  if (payload.image_url) {
+    mediaItems.push({ type: 'image', url: payload.image_url });
+  }
+  if (Array.isArray(payload.media_urls)) {
+    for (const url of payload.media_urls) {
+      if (url) mediaItems.push({ type: 'image', url });
+    }
+  }
+  if (payload.video_url) {
+    mediaItems.push({ type: 'video', url: payload.video_url });
+  }
+
+  // ── Translate to Zernio format ─────────────────────────────────────────────
+  // TikTok photo posts use content as the slideshow title (max 90 chars).
+  // Truncate silently to avoid TIKTOK_PHOTO_TITLE_TOO_LONG rejection.
+  const TIKTOK_PHOTO_TITLE_LIMIT = 90;
+  let postContent = payload.text;
+  if (
+    payload.platform === 'tiktok' &&
+    mediaItems.some((m) => m.type === 'image') &&
+    postContent.length > TIKTOK_PHOTO_TITLE_LIMIT
+  ) {
+    postContent = postContent.slice(0, TIKTOK_PHOTO_TITLE_LIMIT - 1).trimEnd() + '…';
+    console.log(`[Zernio] tiktok photo: content truncated to ${TIKTOK_PHOTO_TITLE_LIMIT} chars`);
+  }
+
+  const zernioBody: Record<string, unknown> = {
+    content:   postContent,
+    platforms: [{ platform: payload.platform, accountId: payload.account_id }],
+    hashtags:  payload.hashtags ?? [],
+  };
+  if (mediaItems.length > 0) zernioBody.mediaItems = mediaItems;
+  if (payload.scheduled_at) {
+    zernioBody.scheduledFor = payload.scheduled_at;
+  } else {
+    zernioBody.publishNow = true;
+  }
+
+  // Simple idempotency key to allow safe retries within 5 min
+  const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+
+  console.log(
+    `[Zernio] publishPost → platform=${payload.platform} accountId=${payload.account_id}` +
+    ` scheduled=${payload.scheduled_at ?? 'now'} requestId=${requestId}`,
+  );
+  console.log('[Zernio] publishPost request body:', JSON.stringify(zernioBody));
+
+  // ── Call Zernio ────────────────────────────────────────────────────────────
+  type ZernioPostResponse = {
+    post: {
+      _id:          string;
+      content?:     string;
+      status:       string;
+      scheduledFor?: string;
+      platforms?:   Array<{
+        platform:         string;
+        accountId:        unknown;
+        status:           string;
+        platformPostId?:  string;
+        platformPostUrl?: string;
+        publishedAt?:     string;
+      }>;
+    };
+    message?: string;
+  };
+
+  const raw = await zernioFetch<ZernioPostResponse>('POST', '/posts', zernioBody, {
+    'x-request-id': requestId,
+  });
+
+  console.log('[Zernio] publishPost response:', JSON.stringify(raw));
+
+  // ── Map response to our internal shape ────────────────────────────────────
+  const platformEntry = raw.post.platforms?.[0];
+  // Zernio status can be 'published' | 'scheduled' | 'pending' | 'publishing' (async)
+  const rawStatus = raw.post.status as string;
+  const mappedStatus: ZernioPublishResult['status'] =
+    rawStatus === 'published' ? 'published' :
+    rawStatus === 'scheduled' ? 'scheduled' :
+    'pending';
+  return {
+    post_id:          raw.post._id,
+    platform_post_id: platformEntry?.platformPostId ?? null,
+    status:           mappedStatus,
+    published_at:     platformEntry?.publishedAt ?? (payload.scheduled_at ? null : new Date().toISOString()),
+    scheduled_at:     raw.post.scheduledFor ?? null,
+  };
 }
 
 /**

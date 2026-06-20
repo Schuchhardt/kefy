@@ -1,4 +1,4 @@
-import { Composition } from 'remotion';
+import { Composition, registerRoot } from 'remotion';
 import { ReelComposition, getTotalFrames, type ReelCompositionProps } from './ReelComposition';
 
 // Sample scenes for Remotion Studio preview
@@ -32,3 +32,5 @@ export const RemotionRoot: React.FC = () => {
     </>
   );
 };
+
+registerRoot(RemotionRoot);

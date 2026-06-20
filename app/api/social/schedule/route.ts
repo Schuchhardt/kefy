@@ -125,6 +125,11 @@ export async function POST(req: NextRequest) {
 
   const { publishPost } = await import('@/lib/zernio');
 
+  console.log(
+    `[schedule] START itemId=${item.id} contentType=${item.content_type}` +
+    ` scheduledAt=${scheduledAt.toISOString()} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
+  );
+
   const results: Array<{
     social_account_id: string;
     platform: string;
@@ -143,8 +148,15 @@ export async function POST(req: NextRequest) {
           ? slides.map((s) => s.image_url).filter((u): u is string => !!u)
           : undefined;
 
+      console.log(
+        `[schedule] → account ${account.id} platform=${account.platform}` +
+        ` zernio_account_id=${account.zernio_account_id}` +
+        ` scheduledAt=${scheduledAt.toISOString()}`,
+      );
+
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
+        platform:     account.platform,
         text:         item.body,
         image_url:    item.image_url ?? undefined,
         media_urls:   mediaUrls,
@@ -152,6 +164,11 @@ export async function POST(req: NextRequest) {
         hashtags:     item.hashtags ?? [],
         scheduled_at: scheduledAt.toISOString(),
       });
+
+      console.log(
+        `[schedule] ✓ account ${account.id} zernio_post_id=${zernioResult.post_id}` +
+        ` status=${zernioResult.status} scheduledAt=${zernioResult.scheduled_at}`,
+      );
 
       const { data: post, error: dbError } = await db
         .from('kefy_scheduled_posts')
@@ -178,7 +195,8 @@ export async function POST(req: NextRequest) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Zernio scheduling failed';
-      console.error(`Schedule failed for account ${account.id}:`, msg);
+      console.error(`[schedule] ✗ account ${account.id} platform=${account.platform} error:`, msg);
+      if (err instanceof Error && err.stack) console.error('[schedule] stack:', err.stack);
       results.push({ social_account_id: account.id, platform: account.platform, status: 'failed', error: msg });
     }
   }

@@ -21,6 +21,7 @@
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
     "@remotion/bundler": "^4.0.465",
+    "@remotion/lambda": "^4.0.465",
     "@remotion/player": "^4.0.462",
     "@remotion/renderer": "^4.0.465",
     "@supabase/supabase-js": "^2.105.4",

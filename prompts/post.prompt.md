@@ -14,11 +14,13 @@ Include exactly {{hashtagCount}} relevant hashtags at the end, each starting wit
 {{extraCtx}}
 
 Rules:
+- **Respect the character limit strictly**: the body text (excluding hashtags) MUST NOT exceed {{maxChars}} characters. Count carefully before responding.
 - Hook the reader in the first line — use a bold statement, surprising fact, or question
-- **Platform-agnostic by default**: this copy may be published to LinkedIn, Instagram, Facebook, TikTok or X. Front-load the hook + key value in the first 240 characters so it survives X's tight limit; then expand for the long-form platforms.
+- **Platform-agnostic by default**: this copy will be published to LinkedIn, Instagram, Facebook, TikTok and X simultaneously. Keep it punchy and scannable — no reader wants to hit "see more" to get the point.
+- Favor depth over breadth: one strong insight fully developed beats five shallow points
 - Write naturally, as a human would speak — avoid corporate jargon
-- Vary sentence length for rhythm; short punchy sentences followed by elaboration
-- End with a clear call-to-action (question to the audience, "Save this", "Share with someone who needs this", etc.)
-- Hashtags go on the last line(s), separated from the body text
+- Short sentences, white space, no walls of text
+- End with one clear call-to-action (question to the audience, "Save this", "Share with someone who needs this", etc.)
+- Hashtags go on the last line, separated from the body by a blank line
 
-Return ONLY the post text followed by the hashtags. No extra commentary, no explanations.
+Return ONLY the post body followed by the hashtags. No extra commentary, no explanations.

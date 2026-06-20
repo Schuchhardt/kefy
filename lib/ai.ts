@@ -73,9 +73,9 @@ const CHANNEL_LIMITS: Record<ContentChannel, { maxChars: number; hashtagCount: n
   twitter:   { maxChars: 280,  hashtagCount: 3 },
   tiktok:    { maxChars: 2200, hashtagCount: 10 },
   threads:   { maxChars: 500,  hashtagCount: 5 },
-  // 'generic' is the multi-channel sweet spot: works on LinkedIn/IG/FB/TikTok
-  // out of the box; Zernio truncates/adapts per platform at publish time.
-  generic:   { maxChars: 2000, hashtagCount: 8 },
+  // 'generic' sweet spot: readable on all platforms, avoids Instagram truncation
+  // and TikTok photo title issues. ~700 chars fits comfortably on every feed.
+  generic:   { maxChars: 700, hashtagCount: 8 },
 };
 
 // ─── System prompt builder ────────────────────────────────────────────────────
@@ -115,7 +115,8 @@ function buildSystemPrompt(opts: GenerateTextOptions): string {
 // ─── Extract hashtags from generated text ────────────────────────────────────
 
 function extractHashtags(text: string): { body: string; hashtags: string[] } {
-  const hashtagRegex = /(#\w+)/g;
+  // Unicode-aware: \p{L} matches accented letters (Tecnología, etc.)
+  const hashtagRegex = /(#[\p{L}\p{N}_]+)/gu;
   const hashtags = text.match(hashtagRegex) ?? [];
   const body = text.replace(hashtagRegex, '').replace(/\s{2,}/g, ' ').trim();
   return { body, hashtags };
@@ -123,16 +124,37 @@ function extractHashtags(text: string): { body: string; hashtags: string[] } {
 
 // ─── Text generation ──────────────────────────────────────────────────────────
 
+/**
+ * Hard-truncate body text at the channel's maxChars limit.
+ * Cuts at the last sentence boundary (. ! ?) within the limit to avoid mid-sentence cuts.
+ */
+function enforceCharLimit(body: string, maxChars: number): string {
+  if (body.length <= maxChars) return body;
+  const slice = body.slice(0, maxChars);
+  // Try to cut at the last sentence boundary
+  const lastSentence = Math.max(
+    slice.lastIndexOf('. '),
+    slice.lastIndexOf('! '),
+    slice.lastIndexOf('? '),
+    slice.lastIndexOf('\n'),
+  );
+  return lastSentence > maxChars * 0.6
+    ? slice.slice(0, lastSentence + 1).trimEnd()
+    : slice.trimEnd() + '…';
+}
+
 export async function generateContentText(
   opts: GenerateTextOptions,
 ): Promise<GenerateTextResult> {
   const systemPrompt = buildSystemPrompt(opts);
   const userMessage  = `Write a ${opts.channel} post about: ${opts.topic}`;
+  const maxChars     = CHANNEL_LIMITS[opts.channel].maxChars;
 
-  if (!opts.model || opts.model === 'claude') {
-    return generateWithClaude(systemPrompt, userMessage);
-  }
-  return generateWithGPT(systemPrompt, userMessage);
+  const result = await (!opts.model || opts.model === 'claude'
+    ? generateWithClaude(systemPrompt, userMessage)
+    : generateWithGPT(systemPrompt, userMessage));
+
+  return { ...result, body: enforceCharLimit(result.body, maxChars) };
 }
 
 async function generateWithClaude(

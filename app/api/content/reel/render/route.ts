@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
     const { bundle }        = await import('@remotion/bundler');
     const { renderMedia, getCompositions } = await import('@remotion/renderer');
 
-    const entryPoint = path.join(process.cwd(), 'remotion', 'index.ts');
+    const entryPoint = path.join(process.cwd(), 'remotion', 'Root.tsx');
     const outputPath = path.join(os.tmpdir(), `reel-${itemId}-${Date.now()}.mp4`);
 
     // Bundle the composition (webpack build of remotion/ directory)

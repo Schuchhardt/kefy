@@ -155,6 +155,7 @@ async function runAutopilot(opts: { orgId: string | null; ruleIds: string[] | nu
         try {
           const zResult = await publishPost({
             account_id:   account.zernio_account_id!,
+            platform:     account.platform,
             text:         generated.body,
             hashtags:     generated.hashtags,
             scheduled_at: rule.next_run_at,

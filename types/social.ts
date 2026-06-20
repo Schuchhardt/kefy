@@ -56,6 +56,8 @@ export interface ZernioAccount {
 
 export interface ZernioPublishPayload {
   account_id:    string;
+  /** Platform identifier (e.g. 'instagram', 'linkedin') — required to build the Zernio `platforms` array. */
+  platform:      ZernioPlatform | string;
   text:          string;
   image_url?:    string;
   media_urls?:   string[];

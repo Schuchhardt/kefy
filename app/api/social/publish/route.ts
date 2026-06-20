@@ -68,6 +68,10 @@ export async function POST(req: NextRequest) {
 
   const { publishPost } = await import('@/lib/zernio');
 
+  console.log(
+    `[publish] START itemId=${item.id} contentType=${item.content_type} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
+  );
+
   // Pre-download source image once (if any) so we can resize per platform
   let sourceImageBuffer: Buffer | null = null;
   if (item.image_url) {
@@ -119,8 +123,15 @@ export async function POST(req: NextRequest) {
           ? slides.map((s) => s.image_url).filter((u): u is string => !!u)
           : undefined;
 
+      console.log(
+        `[publish] → account ${account.id} platform=${account.platform}` +
+        ` zernio_account_id=${account.zernio_account_id}` +
+        ` hasImage=${!!platformImageUrl} mediaUrls=${mediaUrls?.length ?? 0}`,
+      );
+
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
+        platform:     account.platform,
         text:         item.body,
         image_url:    platformImageUrl,
         media_urls:   mediaUrls,
@@ -128,6 +139,11 @@ export async function POST(req: NextRequest) {
         hashtags:     item.hashtags ?? [],
         // No scheduled_at → immediate
       });
+
+      console.log(
+        `[publish] ✓ account ${account.id} zernio_post_id=${zernioResult.post_id}` +
+        ` status=${zernioResult.status} platform_post_id=${zernioResult.platform_post_id}`,
+      );
 
       await db.from('kefy_scheduled_posts').insert({
         org_id:             auth.orgId,
@@ -148,7 +164,8 @@ export async function POST(req: NextRequest) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Publish failed';
-      console.error(`Publish failed for account ${account.id}:`, msg);
+      console.error(`[publish] ✗ account ${account.id} platform=${account.platform} error:`, msg);
+      if (err instanceof Error && err.stack) console.error('[publish] stack:', err.stack);
 
       await db.from('kefy_scheduled_posts').insert({
         org_id:            auth.orgId,
