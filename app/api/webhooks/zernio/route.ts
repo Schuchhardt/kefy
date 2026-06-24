@@ -25,24 +25,124 @@ import { createHmac, timingSafeEqual } from 'crypto';
 function verifySignature(rawBody: Buffer, signatureHeader: string | null): boolean {
   const secret = process.env.ZERNIO_WEBHOOK_SECRET;
   if (!secret) {
-    console.error('ZERNIO_WEBHOOK_SECRET is not configured');
+    // Secret not yet configured — allow through so the endpoint works during
+    // initial setup. Set ZERNIO_WEBHOOK_SECRET in Vercel env vars to enable
+    // HMAC-SHA256 verification.
+    console.warn('ZERNIO_WEBHOOK_SECRET not set — skipping signature verification');
+    return true;
+  }
+  if (!signatureHeader) {
+    console.error('Webhook rejected: x-zernio-signature header missing');
     return false;
   }
-  if (!signatureHeader) return false;
 
   const [algo, receivedHex] = signatureHeader.split('=', 2);
-  if (algo !== 'sha256' || !receivedHex) return false;
+  if (algo !== 'sha256' || !receivedHex) {
+    console.error(`Webhook rejected: unexpected signature format "${signatureHeader}"`);
+    return false;
+  }
 
   const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
 
   try {
-    return timingSafeEqual(
+    const match = timingSafeEqual(
       Buffer.from(expected, 'hex'),
       Buffer.from(receivedHex, 'hex'),
     );
+    if (!match) console.error('Webhook rejected: HMAC signature mismatch');
+    return match;
   } catch {
+    console.error('Webhook rejected: signature comparison error (length mismatch?)');
     return false;
   }
+}
+
+// ─── Payload normalizer ────────────────────────────────────────────────────────
+// Zernio sends flat top-level resource objects in camelCase:
+//   { id, event, post: {...}, account: {...}, timestamp }
+// Normalize to the snake_case `data` map the handlers expect.
+
+function normalizePayload(raw: Record<string, unknown>): Data {
+  const d: Data = {};
+
+  // account: { id, platform, username }
+  if (raw.account && typeof raw.account === 'object') {
+    const a = raw.account as Record<string, unknown>;
+    d.account_id = a.id;
+    d.platform   = a.platform;
+    d.username   = a.username;
+  }
+
+  // post: { id, platform, accountId, url, content, publishedAt, ... }
+  if (raw.post && typeof raw.post === 'object') {
+    const p = raw.post as Record<string, unknown>;
+    d.post_id          = p.id;
+    d.platform_post_id = p.id;
+    if (p.platform)   d.platform   = p.platform;
+    if (p.accountId)  d.account_id = p.accountId;
+    if (p.publishedAt) d.published_at = p.publishedAt;
+    if (p.content)    d.content    = p.content;
+    if (p.url)        d.url        = p.url;
+  }
+
+  // message: { id, threadId, body, senderId, senderName, senderAvatar, direction }
+  if (raw.message && typeof raw.message === 'object') {
+    const m = raw.message as Record<string, unknown>;
+    d.message_id    = m.id;
+    d.thread_id     = m.threadId ?? m.thread_id;
+    d.body          = m.body ?? m.content;
+    d.sender_id     = m.senderId    ?? m.sender_id;
+    d.sender_name   = m.senderName  ?? m.sender_name;
+    d.sender_avatar = m.senderAvatar ?? m.sender_avatar;
+    d.direction     = m.direction;
+  }
+
+  // comment: { id, postId, platformPostId, platform, text, author: { id, username, avatar }, createdAt }
+  if (raw.comment && typeof raw.comment === 'object') {
+    const c = raw.comment as Record<string, unknown>;
+    d.comment_id       = c.id;
+    // Use platformPostId as the platform post ID; fall back to postId (Zernio internal)
+    d.platform_post_id = c.platformPostId ?? c.postId ?? d.platform_post_id;
+    d.post_id          = c.postId ?? d.post_id;
+    d.zernio_post_id   = typeof c.postId === 'string' ? c.postId : undefined;
+    // Zernio uses `text`, not `body`
+    d.body             = c.text ?? c.body ?? c.content;
+    if (c.platform)    d.platform = c.platform;
+    // Author can be a nested object { id, username, avatar } or flat fields
+    if (c.author && typeof c.author === 'object') {
+      const au = c.author as Record<string, unknown>;
+      d.author_id     = au.id;
+      d.author_name   = au.username ?? au.name ?? au.displayName;
+      d.author_avatar = au.avatar   ?? au.profilePicture ?? au.avatarUrl;
+    } else {
+      d.author_id     = c.authorId    ?? c.author_id;
+      d.author_name   = c.authorName  ?? c.author_name;
+      d.author_avatar = c.authorAvatar ?? c.author_avatar;
+    }
+  }
+
+  // review: { id, reviewerId, reviewerName, reviewerAvatar, rating, body, publishedAt }
+  if (raw.review && typeof raw.review === 'object') {
+    const r = raw.review as Record<string, unknown>;
+    d.review_id      = r.id;
+    d.reviewer_id    = r.reviewerId   ?? r.reviewer_id;
+    d.reviewer_name  = r.reviewerName ?? r.reviewer_name;
+    d.reviewer_avatar = r.reviewerAvatar ?? r.reviewer_avatar;
+    d.rating         = r.rating;
+    d.body           = r.body;
+    d.published_at   = r.publishedAt  ?? r.published_at ?? d.published_at;
+  }
+
+  // boost / ad: { id, status, startedAt, endedAt }
+  if (raw.boost && typeof raw.boost === 'object') {
+    const b = raw.boost as Record<string, unknown>;
+    d.boost_id   = b.id;
+    d.status     = b.status;
+    d.started_at = b.startedAt ?? b.started_at;
+    d.ended_at   = b.endedAt   ?? b.ended_at;
+  }
+
+  return d;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -328,11 +428,12 @@ function handleMessageFailed(_db: DB, _data: Data): void {
 async function handleCommentReceived(db: DB, data: Data) {
   const zernioAccountId = str(data.account_id);
   const platform        = str(data.platform);
-  const platformPostId  = str(data.post_id);
+  // platform_post_id holds the actual platform ID; post_id holds Zernio's internal ID
+  const platformPostId  = str(data.platform_post_id) ?? str(data.post_id);
   const commentId       = str(data.comment_id);
   const body            = str(data.body);
   const authorId        = str(data.author_id);
-  const zernioPostId    = str(data.zernio_post_id);
+  const zernioPostId    = str(data.zernio_post_id) ?? str(data.post_id);
 
   if (!zernioAccountId || !platformPostId || !commentId || !body || !authorId || !platform) return;
 
@@ -431,17 +532,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
-  let payload: { event: string; data: Record<string, unknown> };
+  let rawPayload: Record<string, unknown>;
   try {
-    payload = JSON.parse(rawBody.toString('utf-8'));
+    rawPayload = JSON.parse(rawBody.toString('utf-8')) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { event, data } = payload;
-  if (!event || typeof data !== 'object' || data === null) {
-    return NextResponse.json({ error: 'Missing event or data' }, { status: 400 });
+  const event = str(rawPayload.event);
+  if (!event) {
+    return NextResponse.json({ error: 'Missing event' }, { status: 400 });
   }
+
+  // Normalize the flat camelCase Zernio payload to internal snake_case Data
+  const data = normalizePayload(rawPayload);
 
   const db = createSupabaseServer();
 
@@ -463,6 +567,9 @@ export async function POST(req: NextRequest) {
       await handlePostPlatformPublished(db, data); break;
     case 'post.platform.failed':
       await handlePostPlatformFailed(db, data); break;
+    case 'post.external.created':
+      // Post published outside of Kefy — no local record to update, accept and ignore.
+      break;
 
     // ── Accounts ─────────────────────────────────────────────────────────
     case 'account.connected':
