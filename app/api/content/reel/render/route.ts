@@ -1,16 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import path from 'path';
-import os from 'os';
-import fs from 'fs';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { createMuxDirectUpload, getMuxUploadStatus } from '@/lib/mux';
+import {
+  renderMediaOnLambda,
+  getRenderProgress,
+  type RenderProgress,
+} from '@remotion/lambda/client';
 
-export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const runtime     = 'nodejs';
+// Lambda renders async — 60 s is enough to trigger + return 202
+export const maxDuration = 60;
+
+// ─── Env helper ───────────────────────────────────────────────────────────────
+
+function getEnv(key: string): string {
+  const v = process.env[key];
+  if (!v) throw new Error(`Missing env var: ${key}`);
+  return v;
+}
+
+type AwsRegion = Parameters<typeof renderMediaOnLambda>[0]['region'];
 
 // ─── GET /api/content/reel/render?itemId=X ────────────────────────────────────
-// Poll the render/Mux status of a content item.
+// Poll Lambda render progress. When done, saves the S3 URL as video_url.
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -22,59 +34,85 @@ export async function GET(req: NextRequest) {
   const db = createSupabaseServer();
   const { data: item, error } = await db
     .from('kefy_content_items')
-    .select('id, render_status, mux_asset_id, mux_playback_id')
+    .select('id, render_status, video_url, metadata')
     .eq('id', itemId)
     .eq('org_id', auth.orgId)
     .single();
 
   if (error || !item) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  // If rendering is in progress and we have an upload_id in metadata, check Mux
-  if (item.render_status === 'rendering' && item.mux_asset_id?.startsWith('upload_')) {
-    try {
-      const status = await getMuxUploadStatus(item.mux_asset_id);
-      if (status.status === 'ready' && status.playbackId) {
-        await db
-          .from('kefy_content_items')
-          .update({
-            mux_asset_id:    status.assetId,
-            mux_playback_id: status.playbackId,
-            render_status:   'ready',
-          })
-          .eq('id', itemId);
+  // Already done — return immediately
+  if (item.render_status === 'ready' && item.video_url) {
+    return NextResponse.json({ render_status: 'ready', video_url: item.video_url });
+  }
+
+  if (item.render_status === 'rendering') {
+    const meta       = (item.metadata ?? {}) as Record<string, unknown>;
+    const renderId   = typeof meta.lambda_render_id === 'string' ? meta.lambda_render_id : null;
+    const bucketName = typeof meta.lambda_bucket    === 'string' ? meta.lambda_bucket    : null;
+
+    // ── Poll Lambda progress ──────────────────────────────────────────────────
+    if (renderId && bucketName) {
+      try {
+        const region       = getEnv('REMOTION_AWS_REGION') as AwsRegion;
+        const functionName = getEnv('REMOTION_LAMBDA_FUNCTION_NAME');
+
+        const progress: RenderProgress = await getRenderProgress({
+          renderId,
+          bucketName,
+          functionName,
+          region,
+        });
+
+        if (progress.fatalErrorEncountered) {
+          const errMsg = progress.errors?.[0]?.message ?? 'Lambda render failed';
+          // Reset to not_rendered so the client can retry cleanly
+          await db.from('kefy_content_items').update({ render_status: 'not_rendered' }).eq('id', itemId);
+          return NextResponse.json({ render_status: 'error', error: errMsg });
+        }
+
+        if (progress.done && progress.outputFile) {
+          // Save the public S3 URL directly — no Mux upload needed
+          await db.from('kefy_content_items').update({
+            video_url:     progress.outputFile,
+            render_status: 'ready',
+          }).eq('id', itemId);
+
+          console.log(`[reel/render GET] Done — video_url=${progress.outputFile}`);
+
+          return NextResponse.json({
+            render_status: 'ready',
+            video_url:     progress.outputFile,
+          });
+        }
 
         return NextResponse.json({
-          render_status:   'ready',
-          mux_asset_id:    status.assetId,
-          mux_playback_id: status.playbackId,
+          render_status: 'rendering',
+          progress:      progress.overallProgress ?? 0,
         });
-      } else if (status.status === 'errored') {
-        await db
-          .from('kefy_content_items')
-          .update({ render_status: 'error' })
-          .eq('id', itemId);
-        return NextResponse.json({ render_status: 'error' });
+      } catch (err) {
+        console.error('[reel/render GET] Lambda poll error:', err);
+        // Fall through to return current DB status
       }
-    } catch {
-      // Non-critical — return current DB status
     }
   }
 
   return NextResponse.json({
-    render_status:   item.render_status,
-    mux_asset_id:    item.mux_asset_id,
-    mux_playback_id: item.mux_playback_id,
+    render_status: item.render_status,
+    video_url:     item.video_url ?? null,
   });
 }
 
 // ─── POST /api/content/reel/render ────────────────────────────────────────────
-// Render the reel composition to MP4 with @remotion/renderer, upload to Mux.
+// Trigger a Remotion Lambda render. Returns 202 immediately; client polls GET.
 //
 // Body: { itemId: string }
 //
-// Deployment (Vercel): maxDuration=300 (5 min) configured via the top-level
-// `maxDuration` export and `vercel.json`. Pro plan or higher required.
-// For production scale, consider migrating to Remotion Lambda.
+// Required env vars (set in Vercel + .env.local):
+//   REMOTION_AWS_REGION, REMOTION_AWS_ACCESS_KEY_ID, REMOTION_AWS_SECRET_ACCESS_KEY
+//   REMOTION_LAMBDA_FUNCTION_NAME, REMOTION_SERVE_URL
+//
+// One-time setup: npx tsx scripts/deploy-remotion-lambda.ts
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -94,7 +132,7 @@ export async function POST(req: NextRequest) {
   // ── Fetch content item ──────────────────────────────────────────────────────
   const { data: item, error: fetchError } = await db
     .from('kefy_content_items')
-    .select('id, content_type, slides, title')
+    .select('id, content_type, slides, title, metadata, mux_playback_id, video_url')
     .eq('id', itemId)
     .eq('org_id', auth.orgId)
     .single();
@@ -104,6 +142,15 @@ export async function POST(req: NextRequest) {
   }
   if (item.content_type !== 'reel') {
     return NextResponse.json({ error: 'Only reel items can be rendered' }, { status: 422 });
+  }
+
+  // Already rendered — return existing video URL immediately
+  if (item.video_url) {
+    return NextResponse.json({ video_url: item.video_url, render_status: 'ready' });
+  }
+  // Backward compat: old items rendered via Mux
+  if (item.mux_playback_id) {
+    return NextResponse.json({ mux_playback_id: item.mux_playback_id, render_status: 'ready' });
   }
   if (!Array.isArray(item.slides) || item.slides.length === 0) {
     return NextResponse.json({ error: 'No scenes found in reel' }, { status: 422 });
@@ -123,100 +170,54 @@ export async function POST(req: NextRequest) {
     .eq('id', itemId);
 
   try {
-    // ── Dynamically import renderer (heavy — server only) ─────────────────────
-    const { bundle }        = await import('@remotion/bundler');
-    const { renderMedia, getCompositions } = await import('@remotion/renderer');
-
-    const entryPoint = path.join(process.cwd(), 'remotion', 'Root.tsx');
-    const outputPath = path.join(os.tmpdir(), `reel-${itemId}-${Date.now()}.mp4`);
-
-    // Bundle the composition (webpack build of remotion/ directory)
-    const bundleUrl = await bundle({ entryPoint, onProgress: () => {} });
-
-    // Get composition metadata
-    const compositions = await getCompositions(bundleUrl, {
-      inputProps: { scenes: item.slides },
-    });
-    const composition = compositions.find((c) => c.id === 'KefyReel');
-    if (!composition) throw new Error('KefyReel composition not found in bundle');
+    const region       = getEnv('REMOTION_AWS_REGION') as AwsRegion;
+    const functionName = getEnv('REMOTION_LAMBDA_FUNCTION_NAME');
+    const serveUrl     = getEnv('REMOTION_SERVE_URL');
 
     const inputProps = {
       scenes:       item.slides,
-      brandName:    brand?.name         ?? undefined,
-      accentColor:  brand?.accent_color ?? '#c6ff4b',
+      brandName:    brand?.name          ?? undefined,
+      accentColor:  brand?.accent_color  ?? '#c6ff4b',
       primaryColor: brand?.primary_color ?? undefined,
       fontHeading:  brand?.font_heading  ?? undefined,
       logoUrl:      brand?.logo_url      ?? undefined,
     };
 
-    // Render to MP4 using H.264 at 1080×1920 (9:16 portrait)
-    await renderMedia({
-      serveUrl:    bundleUrl,
-      composition: { ...composition, ...inputProps },
+    // Trigger Lambda render — returns immediately with a renderId
+    const { renderId, bucketName } = await renderMediaOnLambda({
+      region,
+      functionName,
+      serveUrl,
+      composition: 'KefyReel',
       inputProps,
-      codec:          'h264',
-      outputLocation: outputPath,
-      imageFormat:    'jpeg',
-      jpegQuality:    85,
-      onProgress:     () => {},
+      codec:       'h264',
+      imageFormat: 'jpeg',
+      jpegQuality: 85,
+      // Render more frames per invocation → fewer parallel Lambdas → avoids concurrency limit
+      framesPerLambda: 120,
+      downloadBehavior: { type: 'play-in-browser' },
     });
 
-    // ── Read the rendered file ─────────────────────────────────────────────────
-    const videoBuffer = fs.readFileSync(outputPath);
-
-    // ── Create Mux Direct Upload ──────────────────────────────────────────────
-    const muxUpload = await createMuxDirectUpload();
-
-    // ── PUT video to Mux GCS URL ──────────────────────────────────────────────
-    const putRes = await fetch(muxUpload.uploadUrl, {
-      method:  'PUT',
-      headers: { 'Content-Type': 'video/mp4' },
-      body:    videoBuffer,
-    });
-    if (!putRes.ok) throw new Error(`Mux upload failed: ${putRes.status} ${putRes.statusText}`);
-
-    // ── Clean up temp file ────────────────────────────────────────────────────
-    try { fs.unlinkSync(outputPath); } catch { /* non-critical */ }
-
-    // ── Poll Mux for asset readiness (up to 4 minutes) ───────────────────────
-    let muxStatus = await getMuxUploadStatus(muxUpload.uploadId);
-    const deadline = Date.now() + 240_000;  // 4 minute timeout
-
-    while (muxStatus.status !== 'ready' && muxStatus.status !== 'errored' && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 4000));
-      muxStatus = await getMuxUploadStatus(muxUpload.uploadId);
-    }
-
-    if (muxStatus.status === 'errored' || !muxStatus.playbackId) {
-      // Save upload_id so polling endpoint can check later
-      await db.from('kefy_content_items').update({
-        mux_asset_id:  `upload_${muxUpload.uploadId}`,
-        render_status: 'rendering',
-      }).eq('id', itemId);
-
-      return NextResponse.json({
-        message:   'Video en proceso. Usa GET /api/content/reel/render?itemId= para verificar.',
-        upload_id: muxUpload.uploadId,
-      }, { status: 202 });
-    }
-
-    // ── Save Mux data to DB ───────────────────────────────────────────────────
+    // Persist renderId + bucket so the GET endpoint can poll progress
+    const existingMeta = (item.metadata ?? {}) as Record<string, unknown>;
     await db.from('kefy_content_items').update({
-      mux_asset_id:    muxStatus.assetId,
-      mux_playback_id: muxStatus.playbackId,
-      render_status:   'ready',
+      metadata: {
+        ...existingMeta,
+        lambda_render_id: renderId,
+        lambda_bucket:    bucketName,
+      },
     }).eq('id', itemId);
 
-    return NextResponse.json({
-      mux_asset_id:    muxStatus.assetId,
-      mux_playback_id: muxStatus.playbackId,
-      thumbnail_url:   `https://image.mux.com/${muxStatus.playbackId}/thumbnail.jpg`,
-      gif_url:         `https://image.mux.com/${muxStatus.playbackId}/animated.gif`,
-    }, { status: 200 });
+    console.log(`[reel/render POST] Lambda render started — renderId=${renderId}`);
+
+    return NextResponse.json(
+      { message: 'Render iniciado. Usa GET /api/content/reel/render?itemId= para verificar el progreso.', renderId },
+      { status: 202 },
+    );
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Render failed';
-    console.error('reel/render error:', msg);
+    console.error('[reel/render POST] error:', msg);
 
     await db
       .from('kefy_content_items')

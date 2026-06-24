@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   // Verify content item
   const { data: item } = await db
     .from('kefy_content_items')
-    .select('id, body, image_url, hashtags, channel, content_type, slides')
+    .select('id, body, image_url, hashtags, channel, content_type, slides, video_url')
     .eq('id', input.content_item_id)
     .eq('org_id', auth.orgId)
     .maybeSingle();
@@ -122,6 +122,9 @@ export async function POST(req: NextRequest) {
         contentType === 'carousel' && Array.isArray(slides)
           ? slides.map((s) => s.image_url).filter((u): u is string => !!u)
           : undefined;
+      // For reels: pass the video URL (S3 from Lambda) directly to Zernio
+      const videoUrl: string | undefined =
+        contentType === 'reel' && item.video_url ? item.video_url : undefined;
 
       console.log(
         `[publish] → account ${account.id} platform=${account.platform}` +
@@ -135,6 +138,7 @@ export async function POST(req: NextRequest) {
         text:         item.body,
         image_url:    platformImageUrl,
         media_urls:   mediaUrls,
+        video_url:    videoUrl,
         content_type: contentType,
         hashtags:     item.hashtags ?? [],
         // No scheduled_at → immediate

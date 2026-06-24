@@ -9,10 +9,13 @@ const nextConfig: NextConfig = {
     ],
   },
   // Prevent Next.js from bundling heavy server-only packages into the edge runtime.
-  // @remotion/renderer and @remotion/bundler require native Node.js modules (Chromium, ffmpeg).
+  // @remotion/lambda/client uses AWS SDK which must stay external.
   serverExternalPackages: [
+    '@remotion/lambda',
     '@remotion/renderer',
     '@remotion/bundler',
+    '@aws-sdk/client-lambda',
+    '@aws-sdk/client-s3',
     '@mux/mux-node',
     'better-sqlite3',
   ],

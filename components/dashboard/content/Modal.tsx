@@ -38,7 +38,7 @@ export default function Modal({ open, onClose, title, subtitle, maxWidth = 560, 
         position: 'fixed', inset: 0, zIndex: 1000,
         background: 'rgba(0,0,0,0.72)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '32px 16px', overflowY: 'auto',
+        padding: '32px 16px',
         animation: 'modalFadeIn 0.15s ease-out',
       }}
     >
@@ -49,15 +49,17 @@ export default function Modal({ open, onClose, title, subtitle, maxWidth = 560, 
         style={{
           background: 'var(--bg)', borderRadius: 16, width: '100%', maxWidth,
           border: '1px solid var(--border)', flexShrink: 0,
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100vh - 64px)', overflow: 'hidden',
           animation: 'modalSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
         {(title || subtitle) && (
           <div style={{
-            position: 'sticky', top: 0, zIndex: 2,
             background: 'var(--bg)', borderBottom: '1px solid var(--border)',
             padding: '16px 20px', borderRadius: '16px 16px 0 0',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            flexShrink: 0,
           }}>
             <div style={{ minWidth: 0, flex: 1 }}>
               {title && (
@@ -81,7 +83,7 @@ export default function Modal({ open, onClose, title, subtitle, maxWidth = 560, 
           </div>
         )}
 
-        <div>
+        <div style={{ overflowY: 'auto', flex: '1 1 auto' }}>
           {children}
         </div>
       </div>

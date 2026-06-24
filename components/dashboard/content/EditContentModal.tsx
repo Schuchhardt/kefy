@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Modal from './Modal';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
+import esT from '@/locales/es/dashboard/content';
+import enT from '@/locales/en/dashboard/content';
 
 interface EditContentModalProps {
   open:      boolean;
@@ -13,40 +15,7 @@ interface EditContentModalProps {
   onUpdate:  (patch: Partial<ContentItem>) => void;
 }
 
-const T = {
-  es: {
-    title: 'Editar contenido', subtitle: 'Auto-guardado al modificar',
-    titleField: 'Título', bodyField: 'Texto',
-    hashtagsField: 'Hashtags', hashtagsHint: 'Separados por espacio o coma',
-    imageField: 'Imagen', uploadImage: 'Subir imagen', changeImage: 'Cambiar imagen', removeImage: 'Eliminar',
-    videoField: 'Video', uploadVideo: 'Subir video', changeVideo: 'Cambiar video',
-    slidesTitle: 'Slides', addSlide: '+ Añadir slide',
-    sceneTitle: 'Escenas', addScene: '+ Añadir escena',
-    regenText: 'Regenerar texto con IA', regenImage: 'Regenerar imagen con IA',
-    feedbackPlaceholder: 'Feedback opcional (qué cambiar)…', regenerate: 'Regenerar',
-    regenerating: 'Generando…', saving: 'Guardando…', saved: 'Guardado',
-    uploading: 'Subiendo…', uploadError: 'Error al subir',
-    slideTitle: 'Título', slideBody: 'Cuerpo', sceneDuration: 'Duración (s)',
-    moveUp: '↑', moveDown: '↓', delete: 'Eliminar slide',
-    close: 'Listo',
-  },
-  en: {
-    title: 'Edit content', subtitle: 'Auto-saved on change',
-    titleField: 'Title', bodyField: 'Body',
-    hashtagsField: 'Hashtags', hashtagsHint: 'Separated by space or comma',
-    imageField: 'Image', uploadImage: 'Upload image', changeImage: 'Change image', removeImage: 'Remove',
-    videoField: 'Video', uploadVideo: 'Upload video', changeVideo: 'Change video',
-    slidesTitle: 'Slides', addSlide: '+ Add slide',
-    sceneTitle: 'Scenes', addScene: '+ Add scene',
-    regenText: 'Regenerate text with AI', regenImage: 'Regenerate image with AI',
-    feedbackPlaceholder: 'Optional feedback (what to change)…', regenerate: 'Regenerate',
-    regenerating: 'Generating…', saving: 'Saving…', saved: 'Saved',
-    uploading: 'Uploading…', uploadError: 'Upload failed',
-    slideTitle: 'Title', slideBody: 'Body', sceneDuration: 'Duration (s)',
-    moveUp: '↑', moveDown: '↓', delete: 'Delete slide',
-    close: 'Done',
-  },
-};
+const T = { es: esT.editContentModal, en: enT.editContentModal } as const;
 
 export default function EditContentModal({
   open, onClose, item, lang, onUpdate,
@@ -68,6 +37,7 @@ export default function EditContentModal({
   const [regenTextFeedback, setRegenTextFeedback] = useState('');
   const [regenImageFeedback, setRegenImageFeedback] = useState('');
   const [editingSlide, setEditingSlide] = useState<number | null>(null);
+  const [regenSlideImageLoadingIdx, setRegenSlideImageLoadingIdx] = useState<number | null>(null);
 
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSentRef = useRef<string>('');
@@ -301,6 +271,29 @@ export default function EditContentModal({
     }
   }
 
+  async function handleRegenSlideImage(idx: number, feedback: string) {
+    const slide = slides[idx] as CarouselSlide | ReelScene;
+    setRegenSlideImageLoadingIdx(idx);
+    try {
+      const context = [slide.title, slide.body].filter(Boolean).join('. ');
+      const prompt = feedback.trim()
+        ? `${context ? context + '. ' : ''}${feedback.trim()}`
+        : context || (lang === 'en' ? 'image for slide' : 'imagen para slide');
+      const res = await fetch('/api/content/image', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium' }),
+      });
+      const d = await res.json() as { image?: { url: string }; error?: string };
+      if (!res.ok) throw new Error(d.error ?? 'Error');
+      if (d.image?.url) {
+        updateSlide(idx, { image_url: d.image.url });
+      }
+    } finally {
+      setRegenSlideImageLoadingIdx(null);
+    }
+  }
+
   const isPost     = item.content_type === 'post';
   const isCarousel = item.content_type === 'carousel';
   const isReel     = item.content_type === 'reel';
@@ -401,6 +394,8 @@ export default function EditContentModal({
                   onMove={(dir) => moveSlide(idx, dir)}
                   onDelete={() => deleteSlide(idx)}
                   onUploadImage={(e) => uploadSlideImage(idx, e)}
+                  onRegenSlideImage={(feedback) => { void handleRegenSlideImage(idx, feedback); }}
+                  regenSlideImageLoading={regenSlideImageLoadingIdx === idx}
                 />
               ))}
               <button type="button" onClick={addSlide} style={{
@@ -491,7 +486,7 @@ function UploadBtn({
 
 function SlideEditor({
   slide, idx, isLast, expanded, isReel, t, uploading,
-  onToggle, onUpdate, onMove, onDelete, onUploadImage,
+  onToggle, onUpdate, onMove, onDelete, onUploadImage, onRegenSlideImage, regenSlideImageLoading,
 }: {
   slide:    CarouselSlide | ReelScene;
   idx:      number;
@@ -500,12 +495,16 @@ function SlideEditor({
   isReel:   boolean;
   t:        (typeof T)['es'];
   uploading: boolean;
-  onToggle:     () => void;
-  onUpdate:     (patch: Partial<CarouselSlide & ReelScene>) => void;
-  onMove:       (dir: -1 | 1) => void;
-  onDelete:     () => void;
-  onUploadImage: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onToggle:          () => void;
+  onUpdate:          (patch: Partial<CarouselSlide & ReelScene>) => void;
+  onMove:            (dir: -1 | 1) => void;
+  onDelete:          () => void;
+  onUploadImage:     (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRegenSlideImage: (feedback: string) => void;
+  regenSlideImageLoading: boolean;
 }) {
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenFeedback, setRegenFeedback] = useState('');
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer' }} onClick={onToggle}>
@@ -564,12 +563,60 @@ function SlideEditor({
               />
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {slide.image_url && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={slide.image_url} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {slide.image_url && (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={slide.image_url} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }} />
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <UploadBtn label={slide.image_url ? t.changeImage : t.uploadImage} accept="image/*" onChange={onUploadImage} loading={uploading} />
+                {slide.image_url && (
+                  <button
+                    type="button"
+                    onClick={() => setRegenOpen((o) => !o)}
+                    disabled={regenSlideImageLoading}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '7px 12px', borderRadius: 8, border: '1px solid var(--accent)',
+                      background: regenOpen ? 'rgba(198,255,75,0.12)' : 'rgba(198,255,75,0.06)',
+                      fontSize: 12, fontWeight: 600, color: 'var(--accent)', cursor: regenSlideImageLoading ? 'not-allowed' : 'pointer',
+                      opacity: regenSlideImageLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {regenSlideImageLoading ? t.regenSlideImageLoading : t.regenSlideImageBtn}
+                  </button>
+                )}
+              </div>
+            </div>
+            {regenOpen && slide.image_url && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <input
+                  type="text"
+                  value={regenFeedback}
+                  onChange={(e) => setRegenFeedback(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && regenFeedback.trim()) {
+                      onRegenSlideImage(regenFeedback);
+                      setRegenFeedback(''); setRegenOpen(false);
+                    }
+                  }}
+                  placeholder={t.regenSlideImagePlaceholder}
+                  style={{ ...inputStyle, fontSize: 12, padding: '8px 12px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => { onRegenSlideImage(regenFeedback); setRegenFeedback(''); setRegenOpen(false); }}
+                  style={{
+                    background: 'rgba(198,255,75,0.08)', border: '1px solid var(--accent)',
+                    color: 'var(--accent)', borderRadius: 8, padding: '8px 0',
+                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  {t.regenSlideImageBtn}
+                </button>
+              </div>
             )}
-            <UploadBtn label={slide.image_url ? t.changeImage : t.uploadImage} accept="image/*" onChange={onUploadImage} loading={uploading} />
           </div>
         </div>
       )}

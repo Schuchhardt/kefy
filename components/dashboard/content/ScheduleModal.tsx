@@ -9,6 +9,8 @@ import { PostPreview } from '@/components/dashboard/PostPreview';
 import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
+import esT from '@/locales/es/dashboard/content';
+import enT from '@/locales/en/dashboard/content';
 
 const MuxReelPlayer = dynamic(
   () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
@@ -27,32 +29,7 @@ interface ScheduleModalProps {
   onSuccess?:       (mode: 'now' | 'scheduled') => void;
 }
 
-const T = {
-  es: {
-    titleNow: 'Publicar contenido', titleSched: 'Programar publicación',
-    pickContent: 'Selecciona el contenido', noItems: 'No hay contenido disponible. Crea uno primero.',
-    preview: 'Vista previa', accounts: '¿En qué cuentas publicar?',
-    noAccounts: 'No hay cuentas conectadas.', connectAccounts: 'Conectar cuentas →',
-    loadingAccounts: 'Cargando cuentas…',
-    publishNow: 'Publicar ahora', schedule: 'Programar',
-    when: '¿Cuándo publicar?', confirmNow: 'Publicar ahora',
-    confirmSched: 'Confirmar programación', publishing: 'Procesando…',
-    cancel: 'Cancelar', successNow: '✓ Publicado correctamente',
-    successSched: '¡Programado correctamente', back: '← Cambiar contenido',
-  },
-  en: {
-    titleNow: 'Publish content', titleSched: 'Schedule publication',
-    pickContent: 'Pick the content', noItems: 'No content available. Create one first.',
-    preview: 'Preview', accounts: 'Where to publish?',
-    noAccounts: 'No connected accounts.', connectAccounts: 'Connect accounts →',
-    loadingAccounts: 'Loading accounts…',
-    publishNow: 'Publish now', schedule: 'Schedule',
-    when: 'When to publish?', confirmNow: 'Publish now',
-    confirmSched: 'Confirm schedule', publishing: 'Processing…',
-    cancel: 'Cancel', successNow: '✓ Published successfully',
-    successSched: '✓ Scheduled successfully', back: '← Change content',
-  },
-};
+const T = { es: esT.scheduleModal, en: enT.scheduleModal } as const;
 
 export default function ScheduleModal({
   open, onClose, initialItem, initialDate, brandKit, lang, onSuccess,
@@ -70,6 +47,8 @@ export default function ScheduleModal({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [slideIdx, setSlideIdx] = useState(0);
+  // Track video_url for reels rendered inside this modal
+  const [reelVideoUrl, setReelVideoUrl] = useState<string | null>(null);
 
   // Reset state when reopened
   useEffect(() => {
@@ -81,6 +60,7 @@ export default function ScheduleModal({
     setError(null);
     setSuccess(false);
     setSlideIdx(0);
+    setReelVideoUrl(null);
   }, [open, initialItem, initialDate]);
 
   // Fetch accounts when opening
@@ -122,20 +102,13 @@ export default function ScheduleModal({
     setSubmitting(true);
     setError(null);
     try {
-      // For unrendered reels, render first
-      if (selectedItem.content_type === 'reel' && !selectedItem.mux_playback_id) {
-        const renderRes = await fetch('/api/content/reel/render', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itemId: selectedItem.id }),
-        });
-        const renderData = await renderRes.json() as { mux_playback_id?: string; error?: string };
-        if (!renderRes.ok) throw new Error(renderData.error ?? 'Error rendering reel');
-        if (!renderData.mux_playback_id) {
-          throw new Error(lang === 'en'
-            ? 'Video is processing. Try again in a moment.'
-            : 'El video está procesándose. Intenta de nuevo en un momento.');
-        }
+      // Block publish for reels still being generated
+      const reelReady = selectedItem.content_type !== 'reel' ||
+        !!selectedItem.video_url || !!selectedItem.mux_playback_id || !!reelVideoUrl;
+      if (!reelReady) {
+        throw new Error(lang === 'en'
+          ? 'The video is still being generated. Please wait until it finishes.'
+          : 'El video se está generando, espera a que termine antes de publicar.');
       }
 
       if (mode === 'scheduled' && scheduledAt) {
@@ -172,7 +145,7 @@ export default function ScheduleModal({
     } finally {
       setSubmitting(false);
     }
-  }, [selectedItem, canSubmit, mode, scheduledAt, selectedAccountIds, lang, onClose, onSuccess]);
+  }, [selectedItem, canSubmit, mode, scheduledAt, selectedAccountIds, lang, reelVideoUrl, onClose, onSuccess]);
 
   return (
     <Modal
@@ -215,6 +188,7 @@ export default function ScheduleModal({
                 brandKit={brandKit}
                 slideIdx={slideIdx}
                 setSlideIdx={setSlideIdx}
+                onReelRenderDone={(_id, url) => setReelVideoUrl(url)}
               />
             </div>
 
@@ -397,9 +371,7 @@ function ContentPicker({
 }
 
 function itemThumbnail(item: ContentItem): string | null {
-  if (item.content_type === 'reel' && item.mux_playback_id) {
-    return `https://image.mux.com/${item.mux_playback_id}/animated.gif?width=200&fps=10&end=4`;
-  }
+  if (item.content_type === 'reel' && item.video_url) return null; // use <video> in grid, skip gif
   if (item.image_url) return item.image_url;
   if (Array.isArray(item.slides) && item.slides.length > 0) {
     const first = item.slides[0] as { image_url?: string | null };
@@ -411,12 +383,13 @@ function itemThumbnail(item: ContentItem): string | null {
 // ─── ItemPreviewSlider ──────────────────────────────────────────────────────
 
 function ItemPreviewSlider({
-  item, brandKit, slideIdx, setSlideIdx,
+  item, brandKit, slideIdx, setSlideIdx, onReelRenderDone,
 }: {
   item: ContentItem;
   brandKit?: BrandKitInfo | null;
   slideIdx: number;
   setSlideIdx: (n: number) => void;
+  onReelRenderDone?: (itemId: string, playbackId: string) => void;
 }) {
   if (item.content_type === 'post') {
     return (
@@ -444,12 +417,11 @@ function ItemPreviewSlider({
   if (item.content_type === 'reel' && Array.isArray(item.slides) && item.slides.length > 0) {
     return (
       <ReelSlider
-        scenes={item.slides as ReelScene[]}
-        idx={slideIdx}
-        setIdx={setSlideIdx}
-        playbackId={item.mux_playback_id ?? null}
+        videoUrl={item.video_url ?? item.mux_playback_id ? (item.video_url ?? null) : null}
+        muxPlaybackId={!item.video_url ? (item.mux_playback_id ?? null) : null}
         itemId={item.id}
         brandKit={brandKit}
+        onRenderDone={onReelRenderDone}
       />
     );
   }
@@ -458,109 +430,27 @@ function ItemPreviewSlider({
 }
 
 function ReelSlider({
-  scenes, idx, setIdx, playbackId, itemId, brandKit,
+  videoUrl, muxPlaybackId, itemId, brandKit, onRenderDone,
 }: {
-  scenes: ReelScene[];
-  idx: number;
-  setIdx: (n: number) => void;
-  playbackId: string | null;
-  itemId: string;
-  brandKit?: BrandKitInfo | null;
+  videoUrl:        string | null;
+  muxPlaybackId:   string | null;
+  itemId:          string;
+  brandKit?:       BrandKitInfo | null;
+  onRenderDone?:   (itemId: string, url: string) => void;
 }) {
-  // If we have a rendered video, show it. Otherwise show a sliding scene preview.
-  if (playbackId) {
-    const muxScenes = scenes.map((s) => ({ ...s, image_url: s.image_url ?? undefined }));
-    return (
-      <div style={{ borderRadius: 10, overflow: 'hidden' }}>
-        <MuxReelPlayer
-          itemId={itemId}
-          scenes={muxScenes}
-          muxPlaybackId={playbackId}
-          renderStatus="ready"
-          height={360}
-          hideRenderButton
-          autoPlay
-          brandName={brandKit?.name ?? undefined}
-          accentColor={brandKit?.accent_color ?? brandKit?.primary_color ?? undefined}
-          primaryColor={brandKit?.primary_color ?? undefined}
-          fontHeading={brandKit?.font_heading ?? undefined}
-          logoUrl={brandKit?.logo_url ?? undefined}
-        />
-      </div>
-    );
-  }
-
-  const scene = scenes[Math.min(idx, scenes.length - 1)];
+  const hasVideo = !!(videoUrl || muxPlaybackId);
   return (
-    <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      <div style={{ aspectRatio: '9/16', background: '#000', position: 'relative', overflow: 'hidden' }}>
-        {scene?.image_url ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={scene.image_url} alt={scene.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, opacity: 0.5 }}>
-            ▶ {scene?.title}
-          </div>
-        )}
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          padding: '20px 16px 16px', color: '#fff',
-          background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)',
-        }}>
-          <p style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{scene?.title}</p>
-          <p style={{ fontSize: 12, margin: '4px 0 0', opacity: 0.9 }}>{scene?.body}</p>
-        </div>
-      </div>
-      <SliderControls idx={idx} total={scenes.length} setIdx={setIdx} />
+    <div style={{ borderRadius: 10, overflow: 'hidden' }}>
+      <MuxReelPlayer
+        itemId={itemId}
+        videoUrl={videoUrl}
+        muxPlaybackId={muxPlaybackId}
+        renderStatus={hasVideo ? 'ready' : 'not_rendered'}
+        height={360}
+        autoPlay={hasVideo}
+        accentColor={brandKit?.accent_color ?? brandKit?.primary_color ?? undefined}
+        onRenderDone={onRenderDone}
+      />
     </div>
   );
-}
-
-function SliderControls({ idx, total, setIdx }: { idx: number; total: number; setIdx: (n: number) => void }) {
-  if (total <= 1) return null;
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setIdx(Math.max(0, idx - 1))}
-        disabled={idx === 0}
-        style={navBtn('left')}
-        aria-label="Anterior"
-      >‹</button>
-      <button
-        type="button"
-        onClick={() => setIdx(Math.min(total - 1, idx + 1))}
-        disabled={idx === total - 1}
-        style={navBtn('right')}
-        aria-label="Siguiente"
-      >›</button>
-      <div style={{
-        position: 'absolute', bottom: 8, left: 0, right: 0,
-        display: 'flex', justifyContent: 'center', gap: 4,
-      }}>
-        {Array.from({ length: total }).map((_, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => setIdx(i)}
-            aria-label={`Slide ${i + 1}`}
-            style={{
-              width: i === idx ? 18 : 6, height: 6, borderRadius: 3,
-              background: i === idx ? 'var(--accent)' : 'rgba(255,255,255,0.5)',
-              border: 'none', padding: 0, cursor: 'pointer', transition: 'all 0.15s',
-            }}
-          />
-        ))}
-      </div>
-    </>
-  );
-}
-
-function navBtn(side: 'left' | 'right'): React.CSSProperties {
-  return {
-    position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-    [side]: 8, width: 32, height: 32, borderRadius: '50%',
-    background: 'rgba(0,0,0,0.4)', color: '#fff', border: 'none',
-    cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0,
-  } as React.CSSProperties;
 }

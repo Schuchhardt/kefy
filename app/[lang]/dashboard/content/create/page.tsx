@@ -642,20 +642,14 @@ function ContentPageInner() {
             {items.map((item) => {
               // Determine thumbnail URL for the card
               const thumbUrl = (() => {
-                if (item.content_type === 'reel' && item.mux_playback_id)
-                  // Animated GIF preview via Mux — autoloops, no extra JS needed
-                  return `https://image.mux.com/${item.mux_playback_id}/animated.gif?width=56&fps=10&end=4`;
                 if (item.content_type === 'reel' && Array.isArray(item.slides))
                   return (item.slides as ReelScene[])[0]?.image_url ?? null;
                 if (item.content_type === 'carousel' && Array.isArray(item.slides))
                   return (item.slides as CarouselSlide[])[0]?.image_url ?? null;
                 return item.image_url ?? null;
               })();
-              const isAnimatedPreview = item.content_type === 'reel' && !!item.mux_playback_id;
-              // In grid mode use a wider GIF for better preview quality
-              const gridThumbUrl = item.content_type === 'reel' && item.mux_playback_id
-                ? `https://image.mux.com/${item.mux_playback_id}/animated.gif?width=200&fps=10&end=4`
-                : thumbUrl;
+              const isAnimatedPreview = false;
+              const gridThumbUrl = thumbUrl;
               // Carousel without images: compute gradient+title fallback
               const firstSlide = !thumbUrl && item.content_type === 'carousel' && Array.isArray(item.slides) && item.slides.length > 0
                 ? (item.slides as CarouselSlide[])[0]
