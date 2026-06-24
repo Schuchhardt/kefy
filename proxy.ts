@@ -12,6 +12,7 @@ const PUBLIC_API_PATHS = [
   '/api/auth/refresh',
   '/api/waitlist',
   '/api/webhooks/',
+  '/api/autopilot/run',
 ];
 
 async function verifyToken(token: string) {
