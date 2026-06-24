@@ -123,6 +123,8 @@ export default function ConversationsPage() {
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [replyingComment, setReplyingComment] = useState<string | null>(null);
   const [showReplied, setShowReplied]     = useState(false);
+  const [syncingComments, setSyncingComments] = useState(false);
+  const [syncCommentsMsg, setSyncCommentsMsg] = useState<string | null>(null);
 
   // ── Reviews state ──
   const [reviews, setReviews]             = useState<ReviewItem[]>([]);
@@ -176,9 +178,15 @@ export default function ConversationsPage() {
   }, [platformFilter, showReplied]);
 
   useEffect(() => {
-    if (filterType === 'dms') fetchThreads();
-    else if (filterType === 'comments') fetchComments();
-    else fetchReviews();
+    if (filterType === 'dms') {
+      fetchThreads();
+    } else if (filterType === 'comments') {
+      fetchComments();
+      void handleSyncComments();
+    } else {
+      fetchReviews();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterType, fetchThreads, fetchComments, fetchReviews]);
 
   // ── DM actions ──
@@ -250,6 +258,22 @@ export default function ConversationsPage() {
   }
 
   // ── Comment/Review reply actions ──
+  async function handleSyncComments() {
+    setSyncingComments(true); setSyncCommentsMsg(null);
+    try {
+      const res = await fetch('/api/comments/sync', { method: 'POST', credentials: 'include' });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        setSyncCommentsMsg(err.error ?? te.syncError); return;
+      }
+      const json = await res.json() as { synced: number };
+      setSyncCommentsMsg(te.syncDone(json.synced));
+      fetchComments();
+      setTimeout(() => setSyncCommentsMsg(null), 4000);
+    } catch { setSyncCommentsMsg(te.syncError); }
+    finally { setSyncingComments(false); }
+  }
+
   async function replyComment(commentId: string, text: string): Promise<{ error?: string } | void> {
     const res = await fetch(`/api/comments/${commentId}/reply`, {
       method: 'POST', credentials: 'include',
@@ -356,11 +380,34 @@ export default function ConversationsPage() {
             {showReplied ? te.showAll : te.unansweredOnly}
           </button>
         )}
+        {filterType === 'comments' && (
+          <button onClick={() => void handleSyncComments()} disabled={syncingComments || commentsLoading}
+            title={syncingComments ? te.syncing : te.syncBtn}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 28, height: 28, borderRadius: 6, padding: 0,
+              cursor: syncingComments ? 'not-allowed' : 'pointer',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--muted)', opacity: syncingComments ? 0.4 : 1,
+              transition: 'opacity 0.15s' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ animation: syncingComments ? 'spin 0.8s linear infinite' : 'none' }}>
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {syncMsg && (
         <p style={{ fontSize: 11, paddingBottom: 8,
           color: syncMsg === ti.syncError ? '#ff6b6b' : 'var(--accent)' }}>{syncMsg}</p>
+      )}
+      {syncCommentsMsg && (
+        <p style={{ fontSize: 11, paddingBottom: 8,
+          color: syncCommentsMsg === te.syncError ? '#ff6b6b' : 'var(--accent)' }}>{syncCommentsMsg}</p>
       )}
     </div>
   );

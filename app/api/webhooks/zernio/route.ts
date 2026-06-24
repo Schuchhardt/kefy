@@ -61,7 +61,7 @@ function strOrNull(v: unknown): string | null {
 async function resolveAccount(db: DB, zernioAccountId: string) {
   const { data } = await db
     .from('kefy_social_accounts')
-    .select('id, org_id')
+    .select('id, org_id, brand_id')
     .eq('zernio_account_id', zernioAccountId)
     .maybeSingle();
   return data;
@@ -222,6 +222,7 @@ async function handleMessageReceived(db: DB, data: Data) {
   await db.from('kefy_messages').upsert(
     {
       org_id:              account.org_id,
+      brand_id:            account.brand_id ?? null,
       social_account_id:   account.id,
       platform,
       platform_thread_id:  threadId,
@@ -254,6 +255,7 @@ async function handleMessageSent(db: DB, data: Data) {
   await db.from('kefy_messages').upsert(
     {
       org_id:              account.org_id,
+      brand_id:            account.brand_id ?? null,
       social_account_id:   account.id,
       platform,
       platform_thread_id:  threadId,
@@ -350,6 +352,7 @@ async function handleCommentReceived(db: DB, data: Data) {
   await db.from('kefy_comments').upsert(
     {
       org_id:              account.org_id,
+      brand_id:            account.brand_id ?? null,
       social_account_id:   account.id,
       scheduled_post_id:   scheduledPostId,
       platform,

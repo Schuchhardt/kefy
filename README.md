@@ -151,7 +151,7 @@ AUTOPILOT_CRON_SECRET=your-cron-secret  # openssl rand -hex 32
 CRON_SECRET=your-vercel-cron-secret    # openssl rand -hex 32 (Vercel Cron)
 
 # URL pública (para callbacks OAuth; omitir en dev)
-NEXT_PUBLIC_APP_URL=https://app.kefy.app
+NEXT_PUBLIC_APP_URL=https://kefy.app
 ```
 
 ## Desarrollo
