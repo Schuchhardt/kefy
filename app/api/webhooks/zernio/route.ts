@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
-import { createHmac, timingSafeEqual } from 'crypto';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
 // Receives real-time events from Zernio and processes them.
@@ -19,43 +18,6 @@ import { createHmac, timingSafeEqual } from 'crypto';
 //   Comments: comment.received
 //   Reviews:  review.new, review.updated
 //   Ads:      ad.status_changed
-
-// ─── Signature verification ────────────────────────────────────────────────────
-
-function verifySignature(rawBody: Buffer, signatureHeader: string | null): boolean {
-  const secret = process.env.ZERNIO_WEBHOOK_SECRET;
-  if (!secret) {
-    // Secret not yet configured — allow through so the endpoint works during
-    // initial setup. Set ZERNIO_WEBHOOK_SECRET in Vercel env vars to enable
-    // HMAC-SHA256 verification.
-    console.warn('ZERNIO_WEBHOOK_SECRET not set — skipping signature verification');
-    return true;
-  }
-  if (!signatureHeader) {
-    console.error('Webhook rejected: x-zernio-signature header missing');
-    return false;
-  }
-
-  const [algo, receivedHex] = signatureHeader.split('=', 2);
-  if (algo !== 'sha256' || !receivedHex) {
-    console.error(`Webhook rejected: unexpected signature format "${signatureHeader}"`);
-    return false;
-  }
-
-  const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
-
-  try {
-    const match = timingSafeEqual(
-      Buffer.from(expected, 'hex'),
-      Buffer.from(receivedHex, 'hex'),
-    );
-    if (!match) console.error('Webhook rejected: HMAC signature mismatch');
-    return match;
-  } catch {
-    console.error('Webhook rejected: signature comparison error (length mismatch?)');
-    return false;
-  }
-}
 
 // ─── Payload normalizer ────────────────────────────────────────────────────────
 // Zernio sends flat top-level resource objects in camelCase:
@@ -526,11 +488,6 @@ async function handleAdStatusChanged(db: DB, data: Data) {
 
 export async function POST(req: NextRequest) {
   const rawBody = Buffer.from(await req.arrayBuffer());
-
-  const signature = req.headers.get('x-zernio-signature');
-  if (!verifySignature(rawBody, signature)) {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-  }
 
   let rawPayload: Record<string, unknown>;
   try {
