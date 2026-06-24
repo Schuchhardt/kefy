@@ -11,6 +11,7 @@ const PUBLIC_API_PATHS = [
   '/api/auth/reset-password',
   '/api/auth/refresh',
   '/api/waitlist',
+  '/api/webhooks/',
 ];
 
 async function verifyToken(token: string) {
