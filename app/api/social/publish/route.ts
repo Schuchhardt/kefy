@@ -122,25 +122,37 @@ export async function POST(req: NextRequest) {
         contentType === 'carousel' && Array.isArray(slides)
           ? slides.map((s) => s.image_url).filter((u): u is string => !!u)
           : undefined;
-      // For reels: pass the video URL (S3 from Lambda) directly to Zernio
+      // For reels: pass the video URL (S3 from Lambda) directly to Zernio.
+      // Do NOT pass image_url for reels — it would publish a separate photo + video.
       const videoUrl: string | undefined =
         contentType === 'reel' && item.video_url ? item.video_url : undefined;
+      const publishImageUrl = contentType === 'reel' ? undefined : platformImageUrl;
+
+      // For reels, embed hashtags directly in the description text so they
+      // appear in the published caption (Zernio's separate hashtags field is
+      // not always applied to video/reel posts).
+      const hashtags = (item.hashtags ?? []) as string[];
+      let publishText = item.body;
+      if (contentType === 'reel' && hashtags.length > 0) {
+        const hashtagLine = hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ');
+        publishText = `${item.body}\n\n${hashtagLine}`;
+      }
 
       console.log(
         `[publish] → account ${account.id} platform=${account.platform}` +
         ` zernio_account_id=${account.zernio_account_id}` +
-        ` hasImage=${!!platformImageUrl} mediaUrls=${mediaUrls?.length ?? 0}`,
+        ` hasImage=${!!publishImageUrl} mediaUrls=${mediaUrls?.length ?? 0} hasVideo=${!!videoUrl}`,
       );
 
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
         platform:     account.platform,
-        text:         item.body,
-        image_url:    platformImageUrl,
+        text:         publishText,
+        image_url:    publishImageUrl,
         media_urls:   mediaUrls,
         video_url:    videoUrl,
         content_type: contentType,
-        hashtags:     item.hashtags ?? [],
+        hashtags:     contentType === 'reel' ? [] : hashtags,
         // No scheduled_at → immediate
       });
 
