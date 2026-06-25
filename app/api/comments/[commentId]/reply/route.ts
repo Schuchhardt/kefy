@@ -35,7 +35,7 @@ export async function POST(
   const { data: comment } = await db
     .from('kefy_comments')
     .select(`
-      id, platform_comment_id, zernio_comment_id, replied_at,
+      id, platform_comment_id, zernio_comment_id, platform_post_id, replied_at,
       kefy_social_accounts!inner ( id, zernio_account_id )
     `)
     .eq('id', commentId)
@@ -51,10 +51,11 @@ export async function POST(
     return NextResponse.json({ error: 'Account not connected to Zernio' }, { status: 422 });
   }
 
-  const replyId = comment.zernio_comment_id ?? comment.platform_comment_id;
+  const platformCommentId = comment.zernio_comment_id ?? comment.platform_comment_id;
+  const platformPostId = comment.platform_post_id;
 
   try {
-    await replyToComment(account.zernio_account_id, replyId, (input.text as string).trim());
+    await replyToComment(account.zernio_account_id, platformPostId, platformCommentId, (input.text as string).trim());
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to reply';
     console.error('replyToComment error:', msg);

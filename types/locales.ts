@@ -132,8 +132,8 @@ export interface KefyCopy {
     imageReady?: string;
     likesLabel?: string;
   };
-  problem: { tag: string; h2: string; intro: string; pains: Pain[]; stats: StatCard[]; };
-  how: { tag: string; h2: string; intro: string; steps: Step[]; closer: string[]; };
+  problem: { tag: string; h2: string; intro: string; pains: Pain[]; stats: StatCard[]; result?: string; };
+  how: { tag: string; h2: string; intro: string; steps: Step[]; closer: string[]; noNeeds?: string[]; };
   mult: { tag: string; h2: string[]; sub: string; bullets: { ic: string; t: string }[]; inLbl: string; inV: string; outLbl: string; outputs: MultOutput[]; };
   brand: { tag: string; h2: string[]; sub: string; bullets: BrandBullet[]; kit: { palette: string; type: string; logo: string; tone: string; toneV: string; typeV: string }; };
   killer: { tag: string; h2: string[]; sub: string; points: KillerPoint[]; dash: { title: string; range: string; stats: DashStat[]; posts: DashPost[] }; };
@@ -156,7 +156,7 @@ export interface KefyCopy {
   features: { tag: string; h2: string; items: FeatureItem[]; layers?: FeatureLayer[]; };
   who: { tag: string; h2: string[]; segments: WhoSegment[]; };
   channels: { h3: string[]; sub: string; items: string[]; };
-  cmp: { tag: string; h2: string; cols: string[]; rows: (string | string[])[]; partial: string; };
+  cmp: { tag: string; h2: string; cols: string[]; rows: (string | string[])[]; partial: string; simpleMode?: boolean; withoutTitle?: string; withoutItems?: string[]; withTitle?: string; withItems?: string[]; };
   lang: { h2: string[]; em: string; sub: string; more: string; };
   pricing: {
     tag: string; h2: string; sub: string;

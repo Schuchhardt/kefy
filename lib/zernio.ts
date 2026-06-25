@@ -520,16 +520,18 @@ export async function listComments(
 
 /**
  * Reply to a comment.
+ * Endpoint: POST /v1/inbox/comments/{postId}
  */
 export async function replyToComment(
   zernioAccountId: string,
+  postId: string,
   commentId: string,
   text: string,
-): Promise<ZernioComment> {
-  return zernioFetch<ZernioComment>(
+): Promise<{ success: boolean; data: { commentId: string; isReply: boolean } }> {
+  return zernioFetch<{ success: boolean; data: { commentId: string; isReply: boolean } }>(
     'POST',
-    `/accounts/${encodeURIComponent(zernioAccountId)}/comments/${encodeURIComponent(commentId)}/reply`,
-    { text },
+    `/inbox/comments/${encodeURIComponent(postId)}`,
+    { accountId: zernioAccountId, message: text, commentId },
   );
 }
 

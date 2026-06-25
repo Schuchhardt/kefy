@@ -80,6 +80,10 @@ export default function ProblemSection({ copy }: Props) {
             </div>
           )}
         </div>
+
+        {copy.result && (
+          <p className="problem-result reveal">{copy.result}</p>
+        )}
       </div>
     </section>
   );

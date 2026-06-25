@@ -12,6 +12,38 @@ function CellValue({ val, partial }: { val: string; partial: string }) {
 }
 
 export default function ComparisonSection({ copy }: Props) {
+  if (copy.simpleMode && copy.withoutItems && copy.withItems) {
+    return (
+      <section className="section" id="compare">
+        <div className="container">
+          <div className="section-head reveal">
+            <span className="label">{copy.tag}</span>
+            <h2 className="h2">{copy.h2}</h2>
+          </div>
+
+          <div className="cmp-simple reveal" style={{ animationDelay: '0.12s' }}>
+            <div className="cmp-side cmp-side--without">
+              <h3>{copy.withoutTitle}</h3>
+              <ul>
+                {copy.withoutItems.map((item, i) => (
+                  <li key={i}><span className="cmp-no">✕</span>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="cmp-side cmp-side--with">
+              <h3>{copy.withTitle}</h3>
+              <ul>
+                {copy.withItems.map((item, i) => (
+                  <li key={i}><span className="cmp-yes">✓</span>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="section" id="compare">
       <div className="container">

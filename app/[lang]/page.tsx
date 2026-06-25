@@ -7,14 +7,11 @@ import HowSection from '@/components/landing/HowSection';
 import BrandSection from '@/components/landing/BrandSection';
 import KillerSection from '@/components/landing/KillerSection';
 import AutopilotSection from '@/components/landing/AutopilotSection';
-import AutoEngageSection from '@/components/landing/AutoEngageSection';
-import StrategySection from '@/components/landing/StrategySection';
-import FeaturesGrid from '@/components/landing/FeaturesGrid';
 import WhoSection from '@/components/landing/WhoSection';
 import ChannelsSection from '@/components/landing/ChannelsSection';
 import ComparisonSection from '@/components/landing/ComparisonSection';
 import BilingualBand from '@/components/landing/BilingualBand';
-import PricingSection from '@/components/landing/PricingSection';
+import PricingSimple from '@/components/landing/PricingSimple';
 import Testimonials from '@/components/landing/Testimonials';
 import FinalCTA from '@/components/landing/FinalCTA';
 import Footer from '@/components/landing/Footer';
@@ -93,19 +90,13 @@ export default async function LandingPage({
 
         <AutopilotSection copy={copy.autopilot} />
 
-        <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(168,85,247,0.11) 0%, transparent 60%), #08080A' }}>
-          <AutoEngageSection copy={copy.engage} />
-        </div>
-
-        <StrategySection copy={copy.strategy} />
-        <FeaturesGrid copy={copy.features} />
         <WhoSection copy={copy.who} />
         <ChannelsSection copy={copy.channels} />
         <ComparisonSection copy={copy.cmp} />
         <BilingualBand copy={copy.lang} />
 
         <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(198,255,75,0.08) 0%, transparent 60%), #08080A' }}>
-          <PricingSection copy={copy.pricing} />
+          <PricingSimple copy={copy.pricing} lang={lang} />
         </div>
 
         <Testimonials copy={copy.testi} />

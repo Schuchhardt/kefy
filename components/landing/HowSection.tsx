@@ -37,6 +37,14 @@ export default function HowSection({ copy }: Props) {
           <span className="how-closer-pill">{copy.closer[1]}</span>{' '}
           {copy.closer[2]}
         </div>
+
+        {copy.noNeeds && copy.noNeeds.length > 0 && (
+          <ul className="how-no-needs reveal" style={{ animationDelay: '0.2s' }}>
+            {copy.noNeeds.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        )}
       </div>
     </section>
   );
