@@ -138,7 +138,7 @@ export default function AutopilotPage() {
       method: 'PATCH',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !rule.is_active }),
+      body: JSON.stringify({ status: rule.status === 'active' ? 'paused' : 'active' }),
     });
     fetchData();
   }
@@ -159,9 +159,9 @@ export default function AutopilotPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rule_ids: [ruleId] }),
       });
-      const data = await res.json() as { processed?: number; error?: string };
+      const data = await res.json() as { executed?: number; error?: string };
       if (!res.ok) throw new Error(data.error ?? t.errorRun);
-      setRunMsg(t.runSuccess(data.processed ?? 0));
+      setRunMsg(t.runSuccess(data.executed ?? 0));
       fetchData();
     } catch (err) {
       setRunMsg(err instanceof Error ? err.message : t.errorUnknown);
@@ -331,7 +331,7 @@ export default function AutopilotPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {rules.map((rule) => (
             <div key={rule.id} style={{
-              background: 'var(--surface)', border: `1px solid ${rule.is_active ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
+              background: 'var(--surface)', border: `1px solid ${rule.status === 'active' ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
               borderRadius: 12, padding: '18px 20px',
             }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
@@ -346,11 +346,11 @@ export default function AutopilotPage() {
                     </span>
                     <span style={{
                       fontSize: 11, fontWeight: 600, borderRadius: 4, padding: '2px 8px',
-                      background: rule.is_active ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
-                      color: rule.is_active ? 'var(--accent)' : 'var(--muted)',
-                      border: `1px solid ${rule.is_active ? 'var(--accent)' : 'var(--border)'}`,
+                      background: rule.status === 'active' ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
+                      color: rule.status === 'active' ? 'var(--accent)' : 'var(--muted)',
+                      border: `1px solid ${rule.status === 'active' ? 'var(--accent)' : 'var(--border)'}`,
                     }}>
-                      {rule.is_active ? t.active : t.paused}
+                      {rule.status === 'active' ? t.active : t.paused}
                     </span>
                   </div>
                   <p style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{rule.name}</p>
@@ -386,12 +386,12 @@ export default function AutopilotPage() {
                     onClick={() => handleToggle(rule)}
                     style={{
                       background: 'none',
-                      border: `1px solid ${rule.is_active ? 'var(--accent)' : 'var(--border)'}`,
+                      border: `1px solid ${rule.status === 'active' ? 'var(--accent)' : 'var(--border)'}`,
                       borderRadius: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer',
-                      color: rule.is_active ? 'var(--accent)' : 'var(--muted)',
+                      color: rule.status === 'active' ? 'var(--accent)' : 'var(--muted)',
                     }}
                   >
-                    {rule.is_active ? t.pauseBtn : t.activateBtn}
+                    {rule.status === 'active' ? t.pauseBtn : t.activateBtn}
                   </button>
                   <button
                     onClick={() => handleDelete(rule.id)}

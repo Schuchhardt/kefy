@@ -68,12 +68,15 @@ async function runAutopilot(opts: { orgId: string | null; ruleIds: string[] | nu
   const db = createSupabaseServer();
   const now = new Date();
 
-  // Build rules query — due rules only
+  // Build rules query — skip next_run_at filter for manual runs (explicit rule_ids)
   let rulesQuery = db
     .from('kefy_autopilot_rules')
     .select('*')
-    .eq('status', 'active')
-    .lte('next_run_at', now.toISOString());
+    .eq('status', 'active');
+
+  if (!ruleIds?.length) {
+    rulesQuery = rulesQuery.lte('next_run_at', now.toISOString());
+  }
 
   if (orgId)               rulesQuery = rulesQuery.eq('org_id', orgId);
   if (ruleIds?.length)     rulesQuery = rulesQuery.in('id', ruleIds);

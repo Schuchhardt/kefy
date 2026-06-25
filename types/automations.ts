@@ -14,7 +14,7 @@ export interface AutopilotRule {
   timezone:           string;
   ai_model:           AIModel;
   prompt_hint:        string | null;
-  is_active:          boolean;
+  status:             'active' | 'paused';
   next_run_at:        string | null;
   last_run_at:        string | null;
   created_at:         string;
@@ -22,8 +22,29 @@ export interface AutopilotRule {
 
 // ─── Engagement rules ────────────────────────────────────────────────────────
 
-export type TriggerType = 'new_comment' | 'new_review' | 'new_follower' | 'mention';
-export type ActionType  = 'reply_comment' | 'reply_review' | 'send_dm' | 'like_comment';
+export type TriggerType =
+  | 'new_comment'
+  | 'new_review'
+  | 'new_follower'
+  | 'mention'
+  | 'comment_contains_keyword'
+  | 'new_dm'
+  | 'dm_contains_keyword'
+  | 'brand_mention'
+  | 'dm_no_response'
+  | 'post_shared'
+  | 'lead_score_threshold';
+
+export type ActionType =
+  | 'reply_comment'
+  | 'reply_review'
+  | 'send_dm'
+  | 'like_comment'
+  | 'reply_comment_ai'
+  | 'reply_review_ai'
+  | 'send_dm_ai_response'
+  | 'notify_team'
+  | 'add_to_list';
 
 /** Platforms supported by engagement rules (subset of ZernioPlatform + 'all'). */
 export type EngagementPlatform =
@@ -44,6 +65,10 @@ export interface EngagementRule {
   condition_rating:   number | null;
   action_type:        ActionType;
   action_template:    string;
+  ai_context:         string | null;
+  delay_minutes:      number;
   is_active:          boolean;
+  times_triggered:    number;
+  last_triggered_at:  string | null;
   created_at:         string;
 }
