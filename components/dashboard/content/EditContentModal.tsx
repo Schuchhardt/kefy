@@ -259,11 +259,11 @@ export default function EditContentModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium', itemId: item.id }),
       });
-      const d = await res.json() as { url?: string; error?: string };
+      const d = await res.json() as { image?: { url: string }; error?: string };
       if (!res.ok) throw new Error(d.error);
-      if (d.url) {
-        setImageUrl(d.url);
-        onUpdate({ image_url: d.url });
+      if (d.image?.url) {
+        setImageUrl(d.image.url);
+        onUpdate({ image_url: d.image.url });
       }
       setRegenImageFeedback('');
     } finally {
@@ -571,25 +571,23 @@ function SlideEditor({
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <UploadBtn label={slide.image_url ? t.changeImage : t.uploadImage} accept="image/*" onChange={onUploadImage} loading={uploading} />
-                {slide.image_url && (
-                  <button
-                    type="button"
-                    onClick={() => setRegenOpen((o) => !o)}
-                    disabled={regenSlideImageLoading}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                      padding: '7px 12px', borderRadius: 8, border: '1px solid var(--accent)',
-                      background: regenOpen ? 'rgba(198,255,75,0.12)' : 'rgba(198,255,75,0.06)',
-                      fontSize: 12, fontWeight: 600, color: 'var(--accent)', cursor: regenSlideImageLoading ? 'not-allowed' : 'pointer',
-                      opacity: regenSlideImageLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {regenSlideImageLoading ? t.regenSlideImageLoading : t.regenSlideImageBtn}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setRegenOpen((o) => !o)}
+                  disabled={regenSlideImageLoading}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '7px 12px', borderRadius: 8, border: '1px solid var(--accent)',
+                    background: regenOpen ? 'rgba(198,255,75,0.12)' : 'rgba(198,255,75,0.06)',
+                    fontSize: 12, fontWeight: 600, color: 'var(--accent)', cursor: regenSlideImageLoading ? 'not-allowed' : 'pointer',
+                    opacity: regenSlideImageLoading ? 0.6 : 1,
+                  }}
+                >
+                  {regenSlideImageLoading ? t.regenSlideImageLoading : t.regenSlideImageBtn}
+                </button>
               </div>
             </div>
-            {regenOpen && slide.image_url && (
+            {regenOpen && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <input
                   type="text"
