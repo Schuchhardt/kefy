@@ -584,48 +584,66 @@ export default function ConversationsPage() {
             {comments.map((c) => (
               <div key={c.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)',
                 borderRadius: 12, padding: '16px 20px' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                {/* Card header: author + platform + time */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                     background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 14, fontWeight: 700,
+                    fontSize: 13, fontWeight: 700,
                     backgroundImage: c.author_avatar ? `url(${c.author_avatar})` : undefined,
                     backgroundSize: 'cover' }}>
                     {!c.author_avatar && (c.author_name?.[0]?.toUpperCase() ?? '?')}
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{c.author_name ?? c.author_id}</span>
-                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                        background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <ChannelIcon name={c.platform} size={10} /> {c.platform}
-                      </span>
-                      <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{timeAgo(c.created_at)}</span>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{c.author_name ?? c.author_id}</span>
+                  <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                    background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <ChannelIcon name={c.platform} size={10} /> {c.platform}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{timeAgo(c.created_at)}</span>
+                </div>
+
+                {/* Thread */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {/* Original comment bubble (inbound) */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <div style={{ maxWidth: '85%', background: 'var(--bg)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '12px 12px 12px 4px', padding: '10px 14px' }}>
+                      <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.body}</p>
                     </div>
-                    <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word' }}>{c.body}</p>
-                    {c.replied_at && c.reply_body && (
-                      <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8,
-                        background: 'rgba(198,255,75,0.07)', border: '1px solid rgba(198,255,75,0.2)' }}>
+                  </div>
+
+                  {/* Reply bubble (outbound) */}
+                  {c.replied_at && c.reply_body && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <div style={{ maxWidth: '85%',
+                        background: 'rgba(198,255,75,0.12)',
+                        border: '1px solid rgba(198,255,75,0.3)',
+                        borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
                         <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
                           {te.yourReply} · {timeAgo(c.replied_at)}
                         </p>
-                        <p style={{ fontSize: 13 }}>{c.reply_body}</p>
+                        <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.reply_body}</p>
                       </div>
-                    )}
-                    {!c.replied_at && (
-                      replyingComment === c.id ? (
-                        <ReplyBox onSend={(text) => replyComment(c.id, text)}
-                          placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
-                      ) : (
-                        <button onClick={() => setReplyingComment(c.id)}
-                          style={{ marginTop: 8, fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                            border: '1px solid var(--border)', background: 'transparent',
-                            color: 'var(--muted)', cursor: 'pointer' }}>
-                          {te.replyBtn}
-                        </button>
-                      )
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Reply action */}
+                {!c.replied_at && (
+                  replyingComment === c.id ? (
+                    <div style={{ marginTop: 10 }}>
+                      <ReplyBox onSend={(text) => replyComment(c.id, text)}
+                        placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
+                    </div>
+                  ) : (
+                    <button onClick={() => setReplyingComment(c.id)}
+                      style={{ marginTop: 10, fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                        border: '1px solid var(--border)', background: 'transparent',
+                        color: 'var(--muted)', cursor: 'pointer' }}>
+                      {te.replyBtn}
+                    </button>
+                  )
+                )}
               </div>
             ))}
           </div>
@@ -652,53 +670,73 @@ export default function ConversationsPage() {
           {reviews.map((r) => (
             <div key={r.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)',
               borderRadius: 12, padding: '16px 20px' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+              {/* Card header: reviewer + platform + stars + time */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                   background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14, fontWeight: 700,
+                  fontSize: 13, fontWeight: 700,
                   backgroundImage: r.reviewer_avatar ? `url(${r.reviewer_avatar})` : undefined,
                   backgroundSize: 'cover' }}>
                   {!r.reviewer_avatar && (r.reviewer_name?.[0]?.toUpperCase() ?? '?')}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>{r.reviewer_name ?? r.reviewer_id}</span>
-                    <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                      background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <ChannelIcon name={r.platform} size={10} /> {r.platform}
-                    </span>
-                    <span style={{ fontSize: 13, letterSpacing: 1 }}>
-                      {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
-                      {timeAgo(r.published_at ?? r.created_at)}
-                    </span>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{r.reviewer_name ?? r.reviewer_id}</span>
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                  background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ChannelIcon name={r.platform} size={10} /> {r.platform}
+                </span>
+                <span style={{ fontSize: 13, letterSpacing: 1 }}>
+                  {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
+                  {timeAgo(r.published_at ?? r.created_at)}
+                </span>
+              </div>
+
+              {/* Thread */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {/* Review bubble (inbound) — only shown if there's body text */}
+                {r.body && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <div style={{ maxWidth: '85%', background: 'var(--bg)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '12px 12px 12px 4px', padding: '10px 14px' }}>
+                      <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{r.body}</p>
+                    </div>
                   </div>
-                  {r.body && <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word' }}>{r.body}</p>}
-                  {r.replied_at && r.reply_body && (
-                    <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8,
-                      background: 'rgba(198,255,75,0.07)', border: '1px solid rgba(198,255,75,0.2)' }}>
+                )}
+
+                {/* Reply bubble (outbound) */}
+                {r.replied_at && r.reply_body && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div style={{ maxWidth: '85%',
+                      background: 'rgba(198,255,75,0.12)',
+                      border: '1px solid rgba(198,255,75,0.3)',
+                      borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
                       <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
                         {te.yourReply} · {timeAgo(r.replied_at)}
                       </p>
-                      <p style={{ fontSize: 13 }}>{r.reply_body}</p>
+                      <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{r.reply_body}</p>
                     </div>
-                  )}
-                  {!r.replied_at && (
-                    replyingReview === r.id ? (
-                      <ReplyBox onSend={(text) => replyReview(r.id, text)}
-                        placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
-                    ) : (
-                      <button onClick={() => setReplyingReview(r.id)}
-                        style={{ marginTop: 8, fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                          border: '1px solid var(--border)', background: 'transparent',
-                          color: 'var(--muted)', cursor: 'pointer' }}>
-                        {te.replyBtn}
-                      </button>
-                    )
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
+
+              {/* Reply action */}
+              {!r.replied_at && (
+                replyingReview === r.id ? (
+                  <div style={{ marginTop: 10 }}>
+                    <ReplyBox onSend={(text) => replyReview(r.id, text)}
+                      placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
+                  </div>
+                ) : (
+                  <button onClick={() => setReplyingReview(r.id)}
+                    style={{ marginTop: 10, fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                      border: '1px solid var(--border)', background: 'transparent',
+                      color: 'var(--muted)', cursor: 'pointer' }}>
+                    {te.replyBtn}
+                  </button>
+                )
+              )}
             </div>
           ))}
         </div>
