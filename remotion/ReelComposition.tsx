@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   AbsoluteFill,
   Img,
@@ -6,6 +7,8 @@ import {
   useCurrentFrame,
   useVideoConfig,
   Sequence,
+  delayRender,
+  continueRender,
 } from 'remotion';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -264,6 +267,20 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
   const frame  = useCurrentFrame();
   const { fps } = useVideoConfig();
   const ranges  = getSceneRanges(scenes, fps);
+
+  // Load Google Font before rendering so Remotion (browser + Lambda) can use it
+  const [fontHandle] = useState(() => delayRender('Loading brand font'));
+  useEffect(() => {
+    if (!fontHeading) { continueRender(fontHandle); return; }
+    const family = fontHeading.replace(/ /g, '+');
+    const link   = document.createElement('link');
+    link.rel     = 'stylesheet';
+    link.href    = `https://fonts.googleapis.com/css2?family=${family}:wght@400;700;900&display=swap`;
+    link.onload  = () => continueRender(fontHandle);
+    link.onerror = () => continueRender(fontHandle);
+    document.head.appendChild(link);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Animated logo entrance (first 18 frames)
   const logoSpring  = spring({ frame, fps, config: { damping: 16, stiffness: 100 } });

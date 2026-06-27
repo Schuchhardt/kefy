@@ -5,6 +5,7 @@ import { getBrandFromRequest } from '@/lib/brands';
 import { generateCarouselSlides, generateContentImage } from '@/lib/ai';
 import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
+import { compositeTextOnImage } from '@/lib/image-processor';
 
 const VALID_CHANNELS = new Set<ContentChannel>([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  // 2. Optionally generate one image per slide in parallel
+  // 2. Optionally generate one image per slide in parallel (with text composited in)
   const slides = await Promise.all(
     generated.slides.map(async (slide) => {
       if (!genImages || !slide.image_prompt) return { ...slide, image_url: null };
@@ -101,8 +102,17 @@ export async function POST(req: NextRequest) {
           size:    '1024x1024',
           quality: imageQuality,
         });
+
+        // Composite slide title + body text onto the image
+        let finalB64 = imgResult.b64;
+        try {
+          finalB64 = await compositeTextOnImage(imgResult.b64, slide.title, slide.body ?? '');
+        } catch (compErr) {
+          console.warn(`Carousel slide ${slide.slide_order} text composite failed:`, compErr);
+        }
+
         const imageUrl = await uploadBase64Image(
-          imgResult.b64,
+          finalB64,
           auth.orgId,
           `carousel-slide-${slide.slide_order}-${Date.now()}.jpeg`,
         );
@@ -116,7 +126,13 @@ export async function POST(req: NextRequest) {
 
   const shouldSave = input.save !== false;
   if (!shouldSave) {
-    return NextResponse.json({ slides, model: generated.model, tokensUsed: generated.tokensUsed });
+    return NextResponse.json({
+      slides,
+      description: generated.description,
+      hashtags:    generated.hashtags,
+      model:       generated.model,
+      tokensUsed:  generated.tokensUsed,
+    });
   }
 
   // 3. Persist as a content item with content_type='carousel'
@@ -131,10 +147,10 @@ export async function POST(req: NextRequest) {
       channel,
       content_type: 'carousel',
       title:        firstSlide?.title ?? null,
-      body:         firstSlide?.body  ?? null,
+      body:         generated.description,
       image_url:    firstSlide?.image_url ?? null,
       slides:       slides,
-      hashtags:     [],
+      hashtags:     generated.hashtags,
       status:       'draft',
       metadata:     { slide_count: slides.length, model: generated.model },
     })
@@ -147,7 +163,14 @@ export async function POST(req: NextRequest) {
   }
 
   const res = NextResponse.json(
-    { itemId: item.id, slides, model: generated.model, tokensUsed: generated.tokensUsed },
+    {
+      itemId:      item.id,
+      slides,
+      description: generated.description,
+      hashtags:    generated.hashtags,
+      model:       generated.model,
+      tokensUsed:  generated.tokensUsed,
+    },
     { status: 201 },
   );
   if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);

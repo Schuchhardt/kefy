@@ -334,9 +334,12 @@ export async function generateContentImage(
 export async function generateCarouselSlides(
   opts: GenerateCarouselOptions,
 ): Promise<GenerateCarouselResult> {
-  const lang       = opts.language === 'en' ? 'English' : 'Spanish';
-  const tone       = opts.tone?.join(', ') || 'professional';
-  const slideCount = Math.min(10, Math.max(3, opts.slide_count));
+  const lang         = opts.language === 'en' ? 'English' : 'Spanish';
+  const tone         = opts.tone?.join(', ') || 'professional';
+  const slideCount   = Math.min(10, Math.max(3, opts.slide_count));
+  const limits       = CHANNEL_LIMITS[opts.channel];
+  const maxChars     = String(limits.maxChars);
+  const hashtagCount = String(limits.hashtagCount);
 
   const brandCtx = opts.brandName
     ? `Brand: "${opts.brandName}"${opts.tagline ? ` — "${opts.tagline}"` : ''}.`
@@ -347,18 +350,20 @@ export async function generateCarouselSlides(
     `Tone: ${tone}.`,
     brandCtx,
     opts.extraCtx ?? '',
-    'Return ONLY a valid JSON array with exactly this shape, no markdown fences:',
-    `[{"slide_order":1,"title":"...","body":"...","image_prompt":"..."}]`,
-    'title: short hook (max 60 chars). body: slide copy (max 150 chars). image_prompt: visual description for image generation (max 100 chars, English).',
+    'Return ONLY valid JSON (no markdown fences) with this shape:',
+    `{"description":"<single post caption max ${limits.maxChars} chars + ${limits.hashtagCount} hashtags>","slides":[{"slide_order":1,"title":"<max 60 chars, text on image>","body":"<max 120 chars, text on image>","image_prompt":"<background visual, English, max 100 chars>"}]}`,
+    'description: one caption for the whole post with hashtags appended. title/body: text that will appear ON each slide image. image_prompt: background only (app overlays text).',
   ].filter(Boolean).join(' ');
 
   const system = loadPrompt('carousel', {
-    slideCount: String(slideCount),
-    channel:    opts.channel,
-    language:   lang,
+    slideCount:   String(slideCount),
+    channel:      opts.channel,
+    language:     lang,
     tone,
-    brandCtx:   brandCtx,
-    extraCtx:   opts.extraCtx ?? '',
+    brandCtx,
+    extraCtx:     opts.extraCtx ?? '',
+    maxChars,
+    hashtagCount,
   }, inlineCarouselSystem);
 
   const userMessage = `Create a ${slideCount}-slide carousel about: ${opts.topic}`;
@@ -378,16 +383,22 @@ export async function generateCarouselSlides(
     .map((b) => (b as { type: 'text'; text: string }).text)
     .join('');
 
-  let slides: CarouselSlide[];
+  let parsed: { description: string; slides: CarouselSlide[] };
   try {
-    slides = JSON.parse(stripJsonFences(raw)) as CarouselSlide[];
-    if (!Array.isArray(slides)) throw new Error('Not an array');
+    parsed = JSON.parse(stripJsonFences(raw)) as typeof parsed;
+    if (!Array.isArray(parsed.slides)) throw new Error('slides is not an array');
+    if (typeof parsed.description !== 'string') throw new Error('description missing');
   } catch {
     throw new Error(`Claude returned invalid carousel JSON: ${raw.slice(0, 200)}`);
   }
 
+  const { body: descBody, hashtags } = extractHashtags(parsed.description);
+  const description = enforceCharLimit(descBody, limits.maxChars);
+
   return {
-    slides,
+    slides:     parsed.slides,
+    description,
+    hashtags,
     model,
     tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
   };
