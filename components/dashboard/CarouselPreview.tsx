@@ -21,10 +21,12 @@ export function CarouselPreview({
   slides,
   username = 'tu_marca',
   logoUrl,
+  description,
 }: {
-  slides:    CarouselSlide[];
-  username?: string;
-  logoUrl?:  string | null;
+  slides:       CarouselSlide[];
+  username?:    string;
+  logoUrl?:     string | null;
+  description?: string;
 }) {
   const [idx, setIdx] = useState(0);
   const slide = slides[idx];
@@ -86,12 +88,40 @@ export function CarouselPreview({
         }}
       >
         {slide.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={slide.image_url}
-            alt={slide.title}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={slide.image_url}
+              alt={slide.title}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+            {/* Text overlay: title + body baked into stored image; shown here for slides without compositing */}
+            <div
+              style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0,
+                background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 100%)',
+                padding: '48px 18px 18px',
+                boxSizing: 'border-box',
+                pointerEvents: 'none',
+              }}
+            >
+              <p style={{
+                margin: '0 0 5px', fontSize: 17, fontWeight: 800,
+                color: '#fff', lineHeight: 1.25,
+                textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+              }}>
+                {slide.title}
+              </p>
+              {slide.body && (
+                <p style={{
+                  margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.88)',
+                  lineHeight: 1.45, textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+                }}>
+                  {slide.body}
+                </p>
+              )}
+            </div>
+          </>
         ) : (
           /* Gradient card with text */
           <div
@@ -224,13 +254,12 @@ export function CarouselPreview({
 
       {/* ── Caption ──────────────────────────────────── */}
       <div style={{ padding: '2px 12px 14px', fontSize: 13, lineHeight: 1.5 }}>
-        <p style={{ margin: '0 0 2px' }}>
+        <p style={{ margin: 0 }}>
           <span style={{ fontWeight: 700, color: 'var(--text)' }}>{username} </span>
-          <span style={{ color: 'var(--text)', opacity: 0.9 }}>{slide.title}</span>
+          <span style={{ color: 'var(--text)', opacity: 0.9 }}>
+            {description ?? slides[0]?.title ?? ''}
+          </span>
         </p>
-        {slide.body && (
-          <p style={{ margin: 0, color: 'var(--muted)', fontSize: 12 }}>{slide.body}</p>
-        )}
       </div>
     </div>
   );

@@ -410,6 +410,7 @@ function ItemPreviewSlider({
         slides={item.slides as CarouselSlide[]}
         username={brandKit?.name ?? undefined}
         logoUrl={brandKit?.logo_url ?? undefined}
+        description={item.body ?? undefined}
       />
     );
   }

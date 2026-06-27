@@ -74,9 +74,11 @@ export interface GenerateCarouselOptions {
 }
 
 export interface GenerateCarouselResult {
-  slides:     CarouselSlide[];
-  model:      string;
-  tokensUsed: number;
+  slides:      CarouselSlide[];
+  description: string;
+  hashtags:    string[];
+  model:       string;
+  tokensUsed:  number;
 }
 
 // ─── Reel script generation ──────────────────────────────────────────────────
