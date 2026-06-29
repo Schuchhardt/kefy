@@ -1,7 +1,6 @@
 const es = {
-  subtitle: 'Gestiona comentarios y reseñas de todas tus plataformas',
+  subtitle: 'Gestiona comentarios y mensajes de todas tus plataformas',
   tabComments: 'Comentarios',
-  tabReviews: 'Reseñas',
   showAll: 'Mostrando todos',
   unansweredOnly: 'Solo sin responder',
   loadingComments: 'Cargando comentarios...',
@@ -9,9 +8,6 @@ const es = {
   noCommentsHint: 'Los comentarios llegan automáticamente',
   yourReply: 'Tu respuesta',
   replyBtn: '↩ Responder',
-  loadingReviews: 'Cargando reseñas...',
-  noReviews: 'Sin reseñas pendientes',
-  noReviewsHint: 'Las reseñas llegan automáticamente',
   all: 'Todos',
   replyPlaceholder: 'Escribe tu respuesta...',
   replyBtnSend: 'Responder',

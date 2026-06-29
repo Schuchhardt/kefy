@@ -88,7 +88,7 @@ describe('GET /api/content', () => {
     // El route llama .range() y DESPUÉS .eq() sobre el resultado,
     // así que todos los métodos deben retornar `this` y el objeto debe ser thenable.
     const resolved = { data: [] as unknown[], error: null, count: 0 };
-    const dbChain: ReturnType<typeof vi.fn> & Record<string, unknown> = {
+    const dbChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockReturnThis(),

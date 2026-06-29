@@ -24,27 +24,20 @@ export interface AutopilotRule {
 
 export type TriggerType =
   | 'new_comment'
-  | 'new_review'
   | 'new_follower'
   | 'mention'
   | 'comment_contains_keyword'
   | 'new_dm'
   | 'dm_contains_keyword'
   | 'brand_mention'
-  | 'dm_no_response'
   | 'post_shared'
   | 'lead_score_threshold';
 
 export type ActionType =
   | 'reply_comment'
-  | 'reply_review'
   | 'send_dm'
-  | 'like_comment'
   | 'reply_comment_ai'
-  | 'reply_review_ai'
-  | 'send_dm_ai_response'
-  | 'notify_team'
-  | 'add_to_list';
+  | 'send_dm_ai_response';
 
 /** Platforms supported by engagement rules (subset of ZernioPlatform + 'all'). */
 export type EngagementPlatform =

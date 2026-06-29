@@ -20,13 +20,11 @@ const PLATFORMS: { value: EngagementPlatform; label: string }[] = [
 
 const TRIGGER_TYPES: TriggerType[] = [
   'new_comment',
-  'new_review',
   'new_follower',
   'mention',
   'brand_mention',
   'post_shared',
   'new_dm',
-  'dm_no_response',
   'comment_contains_keyword',
   'dm_contains_keyword',
   'lead_score_threshold',
@@ -35,18 +33,13 @@ const TRIGGER_TYPES: TriggerType[] = [
 const ACTION_TYPES: ActionType[] = [
   'reply_comment',
   'reply_comment_ai',
-  'reply_review',
-  'reply_review_ai',
   'send_dm',
   'send_dm_ai_response',
-  'like_comment',
-  'notify_team',
-  'add_to_list',
 ];
 
 const KEYWORD_TRIGGERS: TriggerType[] = ['comment_contains_keyword', 'dm_contains_keyword'];
-const AI_ACTIONS: ActionType[]        = ['reply_comment_ai', 'reply_review_ai', 'send_dm_ai_response'];
-const NEEDS_TEMPLATE: ActionType[]    = ['reply_comment', 'reply_review', 'send_dm', 'notify_team'];
+const AI_ACTIONS: ActionType[]        = ['reply_comment_ai', 'send_dm_ai_response'];
+const NEEDS_TEMPLATE: ActionType[]    = ['reply_comment', 'send_dm'];
 
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '10px 14px', borderRadius: 8, fontSize: 14,
@@ -78,7 +71,6 @@ export default function EngagementPage() {
   const [triggerType, setTriggerType] = useState<TriggerType>('new_comment');
   const [platform, setPlatform]       = useState<EngagementPlatform | 'all'>('all');
   const [keyword, setKeyword]         = useState('');
-  const [minRating, setMinRating]     = useState<number | ''>('');
   const [actionType, setActionType]   = useState<ActionType>('reply_comment');
   const [template, setTemplate]       = useState('');
   const [aiContext, setAiContext]     = useState('');
@@ -100,7 +92,7 @@ export default function EngagementPage() {
 
   function resetForm() {
     setName(''); setTriggerType('new_comment'); setPlatform('all');
-    setKeyword(''); setMinRating(''); setActionType('reply_comment');
+    setKeyword(''); setActionType('reply_comment');
     setTemplate(''); setAiContext(''); setDelayMinutes(0);
     setFormError(null);
   }
@@ -124,7 +116,6 @@ export default function EngagementPage() {
           trigger_type:       triggerType,
           condition_platform: platform !== 'all' ? platform : null,
           condition_keyword:  needsKeyword ? (keyword.trim() || null) : null,
-          condition_rating:   minRating !== '' ? Number(minRating) : null,
           action_type:        actionType,
           action_template:    template.trim(),
           ai_context:         isAiAction ? (aiContext.trim() || null) : null,
@@ -230,20 +221,6 @@ export default function EngagementPage() {
                 <label style={labelStyle}>{t.keywordLabel}</label>
                 <input value={keyword} onChange={(e) => setKeyword(e.target.value)}
                   placeholder={t.keywordPlaceholder} style={inputStyle} />
-              </div>
-            )}
-
-            {/* Min rating — only for review trigger */}
-            {triggerType === 'new_review' && (
-              <div style={{ maxWidth: 240 }}>
-                <label style={labelStyle}>{t.ratingLabel}</label>
-                <select value={minRating} onChange={(e) => setMinRating(e.target.value === '' ? '' : Number(e.target.value))}
-                  style={{ ...inputStyle, cursor: 'pointer' }}>
-                  <option value="">—</option>
-                  {[1,2,3,4,5].map((n) => (
-                    <option key={n} value={n}>{'★'.repeat(n)} ({n}+)</option>
-                  ))}
-                </select>
               </div>
             )}
 

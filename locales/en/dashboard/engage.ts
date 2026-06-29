@@ -1,7 +1,6 @@
 const en = {
-  subtitle: 'Manage comments and reviews from all your platforms',
+  subtitle: 'Manage comments and messages from all your platforms',
   tabComments: 'Comments',
-  tabReviews: 'Reviews',
   showAll: 'Showing all',
   unansweredOnly: 'Unanswered only',
   loadingComments: 'Loading comments...',
@@ -9,9 +8,6 @@ const en = {
   noCommentsHint: 'Comments arrive automatically',
   yourReply: 'Your reply',
   replyBtn: '↩ Reply',
-  loadingReviews: 'Loading reviews...',
-  noReviews: 'No pending reviews',
-  noReviewsHint: 'Reviews arrive automatically',
   all: 'All',
   replyPlaceholder: 'Write your reply...',
   replyBtnSend: 'Reply',

@@ -7,7 +7,7 @@ import DateTimePicker from './DateTimePicker';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from '@/components/dashboard/PostPreview';
 import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
-import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
+import type { ContentItem, BrandKitInfo, CarouselSlide } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
@@ -383,7 +383,7 @@ function itemThumbnail(item: ContentItem): string | null {
 // ─── ItemPreviewSlider ──────────────────────────────────────────────────────
 
 function ItemPreviewSlider({
-  item, brandKit, slideIdx, setSlideIdx, onReelRenderDone,
+  item, brandKit, slideIdx: _slideIdx, setSlideIdx: _setSlideIdx, onReelRenderDone,
 }: {
   item: ContentItem;
   brandKit?: BrandKitInfo | null;

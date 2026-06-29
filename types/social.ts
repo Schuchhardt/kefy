@@ -231,7 +231,7 @@ export interface ZernioSendMessageResponse {
   conversationId: string;
 }
 
-// ─── Zernio comments & reviews ───────────────────────────────────────────────
+// ─── Zernio comments ─────────────────────────────────────────────────────────
 
 export interface ZernioComment {
   comment_id:    string;
@@ -241,16 +241,6 @@ export interface ZernioComment {
   author_avatar: string | null;
   body:          string;
   created_at:    string;
-}
-
-export interface ZernioReview {
-  review_id:       string;
-  reviewer_id:     string;
-  reviewer_name:   string | null;
-  reviewer_avatar: string | null;
-  rating:          number | null;
-  body:            string | null;
-  published_at:    string | null;
 }
 
 // ─── Zernio ads / boost ──────────────────────────────────────────────────────

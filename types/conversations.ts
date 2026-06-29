@@ -2,7 +2,7 @@ import type { MessagingPlatform, SocialAccount } from '@/types/social';
 
 export type { MessagingPlatform } from '@/types/social';
 
-export type FilterType = 'dms' | 'comments' | 'reviews';
+export type FilterType = 'dms' | 'comments';
 
 export interface ThreadPreview {
   id:                   string;
@@ -45,17 +45,3 @@ export interface CommentItem {
   kefy_social_accounts: SocialAccount;
 }
 
-export interface ReviewItem {
-  id:                   string;
-  platform:             MessagingPlatform;
-  reviewer_id:          string;
-  reviewer_name:        string | null;
-  reviewer_avatar:      string | null;
-  rating:               number;
-  body:                 string | null;
-  replied_at:           string | null;
-  reply_body:           string | null;
-  published_at:         string | null;
-  created_at:           string;
-  kefy_social_accounts: SocialAccount;
-}

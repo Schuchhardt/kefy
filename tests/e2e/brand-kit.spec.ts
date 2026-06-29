@@ -43,7 +43,7 @@ test.describe('Brand Kit', () => {
     const saveBtn = page.getByRole('button', { name: /guardar|save/i }).first();
     if (await saveBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await saveBtn.click();
-      await expect.poll(() => patchBody).not.toBeNull({ timeout: 5000 });
+      await expect.poll(() => patchBody, { timeout: 5000 }).not.toBeNull();
       
       // Validar payload: NO debe incluir campos de mercado
       expect(patchBody).not.toHaveProperty('company_size');

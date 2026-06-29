@@ -368,24 +368,6 @@ export interface CommentRow {
   created_at:          ISODate;
 }
 
-export interface ReviewRow {
-  id:                 string;
-  org_id:             string;
-  social_account_id:  string;
-  platform:           SocialPlatform;
-  platform_review_id: string;
-  zernio_review_id:   string | null;
-  reviewer_id:        string;
-  reviewer_name:      string | null;
-  reviewer_avatar:    string | null;
-  rating:             number | null;
-  body:               string | null;
-  replied_at:         ISODate | null;
-  reply_body:         string | null;
-  published_at:       ISODate | null;
-  created_at:         ISODate;
-}
-
 // ─── Ads / boosts ────────────────────────────────────────────────────────────
 
 export type BoostStatus = 'pending' | 'active' | 'completed' | 'cancelled' | 'failed';
@@ -534,7 +516,6 @@ export interface LeadRow {
 
 export type LeadInteractionType =
   | 'comment'
-  | 'review'
   | 'dm'
   | 'mention'
   | 'follow'

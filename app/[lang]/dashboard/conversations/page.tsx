@@ -9,7 +9,7 @@ import enInbox from '@/locales/en/dashboard/inbox';
 import esEngage from '@/locales/es/dashboard/engage';
 import enEngage from '@/locales/en/dashboard/engage';
 
-import type { MessagingPlatform, ThreadPreview, Message, CommentItem, ReviewItem, FilterType } from '@/types/conversations';
+import type { MessagingPlatform, ThreadPreview, Message, CommentItem, FilterType } from '@/types/conversations';
 import type { SocialAccount } from '@/types/social';
 import type { Locale } from '@/types/i18n';
 
@@ -99,11 +99,9 @@ export default function ConversationsPage() {
   const FILTER_LABELS: Record<FilterType, string> = {
     dms:      locale === 'es' ? 'DMs'         : 'DMs',
     comments: locale === 'es' ? 'Comentarios' : 'Comments',
-    reviews:  locale === 'es' ? 'Reseñas'     : 'Reviews',
   };
 
   function timeAgo(iso: string): string {
-    // eslint-disable-next-line react-hooks/purity
     const diff = Date.now() - new Date(iso).getTime();
     const m = Math.floor(diff / 60_000);
     if (m < 1) return ti.timeNow;
@@ -140,11 +138,6 @@ export default function ConversationsPage() {
   const [syncCommentsMsg, setSyncCommentsMsg] = useState<string | null>(null);
   const [commentModal, setCommentModal]   = useState<CommentThread | null>(null);
 
-  // ── Reviews state ──
-  const [reviews, setReviews]             = useState<ReviewItem[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [replyingReview, setReplyingReview] = useState<string | null>(null);
-
   // ── Data fetching ──
   const fetchThreads = useCallback(() => {
     setThreadsLoading(true);
@@ -176,32 +169,15 @@ export default function ConversationsPage() {
       .finally(() => setCommentsLoading(false));
   }, [platformFilter]);
 
-  const fetchReviews = useCallback(() => {
-    setReviewsLoading(true);
-    const qs = new URLSearchParams({ limit: '50' });
-    if (platformFilter !== 'all') qs.set('platform', platformFilter);
-    if (!showReplied) qs.set('replied', 'false');
-    fetch(`/api/reviews?${qs.toString()}`, { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const json = await res.json() as { reviews: ReviewItem[] };
-        setReviews(json.reviews ?? []);
-      })
-      .catch(() => { /* ignore */ })
-      .finally(() => setReviewsLoading(false));
-  }, [platformFilter, showReplied]);
-
   useEffect(() => {
     if (filterType === 'dms') {
       fetchThreads();
     } else if (filterType === 'comments') {
       fetchComments();
       void handleSyncComments();
-    } else {
-      fetchReviews();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterType, fetchThreads, fetchComments, fetchReviews]);
+  }, [filterType, fetchThreads, fetchComments]);
 
   // ── DM actions ──
   async function handleSync() {
@@ -303,26 +279,10 @@ export default function ConversationsPage() {
     setReplyingComment(null);
   }
 
-  async function replyReview(reviewId: string, text: string): Promise<{ error?: string } | void> {
-    const res = await fetch(`/api/reviews/${reviewId}/reply`, {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
-    });
-    if (!res.ok) {
-      const err = await res.json() as { error?: string };
-      return { error: err.error ?? te.errorSend };
-    }
-    setReviews((prev) => prev.map((r) =>
-      r.id === reviewId ? { ...r, replied_at: new Date().toISOString(), reply_body: text } : r,
-    ));
-    setReplyingReview(null);
-  }
-
   const dmUnread = threads.filter((t) => !t.read_at && t.direction === 'inbound').length;
 
   // ─── Group comments by external author ─────────────────────────────────────
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const commentThreads = useMemo<CommentThread[]>(() => {
     const map = new Map<string, CommentThread>();
 
@@ -434,7 +394,7 @@ export default function ConversationsPage() {
             </button>
           </>
         )}
-        {(filterType === 'comments' || filterType === 'reviews') && (
+        {filterType === 'comments' && (
           <button onClick={() => setShowReplied((v) => !v)}
             style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
               border: `1px solid ${!showReplied ? 'var(--accent)' : 'var(--border)'}`,
@@ -865,95 +825,4 @@ export default function ConversationsPage() {
     );
   }
 
-  // ─── Reviews view ──────────────────────────────────────────────────────────
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      {HeaderBar}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
-        <div style={{ maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {reviewsLoading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{te.loadingReviews}</p>}
-          {!reviewsLoading && reviews.length === 0 && (
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: '40px 24px', textAlign: 'center' }}>
-              <p style={{ color: 'var(--muted)', fontSize: 14 }}>{te.noReviews}</p>
-              <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>{te.noReviewsHint}</p>
-            </div>
-          )}
-          {reviews.map((r) => (
-            <div key={r.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: '16px 20px' }}>
-              {/* Card header: reviewer + platform + stars + time */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                  background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, fontWeight: 700,
-                  backgroundImage: r.reviewer_avatar ? `url(${r.reviewer_avatar})` : undefined,
-                  backgroundSize: 'cover' }}>
-                  {!r.reviewer_avatar && (r.reviewer_name?.[0]?.toUpperCase() ?? '?')}
-                </div>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{r.reviewer_name ?? r.reviewer_id}</span>
-                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                  background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <ChannelIcon name={r.platform} size={10} /> {r.platform}
-                </span>
-                <span style={{ fontSize: 13, letterSpacing: 1 }}>
-                  {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
-                  {timeAgo(r.published_at ?? r.created_at)}
-                </span>
-              </div>
-
-              {/* Thread */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {/* Review bubble (inbound) — only shown if there's body text */}
-                {r.body && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                    <div style={{ maxWidth: '85%', background: 'var(--bg)',
-                      border: '1px solid var(--border)',
-                      borderRadius: '12px 12px 12px 4px', padding: '10px 14px' }}>
-                      <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{r.body}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Reply bubble (outbound) */}
-                {r.replied_at && r.reply_body && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <div style={{ maxWidth: '85%',
-                      background: 'rgba(198,255,75,0.12)',
-                      border: '1px solid rgba(198,255,75,0.3)',
-                      borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
-                      <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
-                        {te.yourReply} · {timeAgo(r.replied_at)}
-                      </p>
-                      <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{r.reply_body}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Reply action */}
-              {!r.replied_at && (
-                replyingReview === r.id ? (
-                  <div style={{ marginTop: 10 }}>
-                    <ReplyBox onSend={(text) => replyReview(r.id, text)}
-                      placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
-                  </div>
-                ) : (
-                  <button onClick={() => setReplyingReview(r.id)}
-                    style={{ marginTop: 10, fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                      border: '1px solid var(--border)', background: 'transparent',
-                      color: 'var(--muted)', cursor: 'pointer' }}>
-                    {te.replyBtn}
-                  </button>
-                )
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }

@@ -25,7 +25,6 @@ import type {
   ZernioInboxMessagesResponse,
   ZernioSendMessageResponse,
   ZernioComment,
-  ZernioReview,
   ZernioBoostPayload,
   ZernioBoostResult,
 } from '@/types/social';
@@ -532,36 +531,6 @@ export async function replyToComment(
     'POST',
     `/inbox/comments/${encodeURIComponent(postId)}`,
     { accountId: zernioAccountId, message: text, commentId },
-  );
-}
-
-// ─── Reviews ─────────────────────────────────────────────────────────────────────
-
-/**
- * List reviews for a connected account (Facebook, LinkedIn).
- */
-export async function listReviews(
-  zernioAccountId: string,
-): Promise<ZernioReview[]> {
-  const res = await zernioFetch<{ reviews: ZernioReview[] }>(
-    'GET',
-    `/accounts/${encodeURIComponent(zernioAccountId)}/reviews`,
-  );
-  return res.reviews;
-}
-
-/**
- * Reply to a review.
- */
-export async function replyToReview(
-  zernioAccountId: string,
-  reviewId: string,
-  text: string,
-): Promise<void> {
-  await zernioFetch<void>(
-    'POST',
-    `/accounts/${encodeURIComponent(zernioAccountId)}/reviews/${encodeURIComponent(reviewId)}/reply`,
-    { text },
   );
 }
 

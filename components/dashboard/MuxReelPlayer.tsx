@@ -1,6 +1,19 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+import type React from 'react';
+
+type MuxLegacyPlayerProps = {
+  playbackId: string; streamType: string; style: React.CSSProperties;
+  accentColor: string; thumbnailTime: number; muted: boolean; autoPlay: boolean;
+};
+
+// Dynamic import to keep Mux out of the main bundle
+const MuxLegacyPlayer = dynamic(
+  () => import('@mux/mux-player-react').then((m) => ({ default: m.default as unknown as React.ComponentType<MuxLegacyPlayerProps> })),
+  { ssr: false },
+) as unknown as React.ComponentType<MuxLegacyPlayerProps>;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -179,8 +192,7 @@ export function MuxReelPlayer({
   if (localUrl && !isMuxLegacy) {
     return (
       <div style={cs}>
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video
+          <video
           src={localUrl}
           controls
           playsInline
@@ -194,11 +206,6 @@ export function MuxReelPlayer({
 
   // ── Video ready (Mux legacy) ───────────────────────────────────────────────
   if (isMuxLegacy && muxId) {
-    // Dynamic import to keep Mux out of the main bundle
-    const MuxLegacyPlayer = require('@mux/mux-player-react').default as React.ComponentType<{
-      playbackId: string; streamType: string; style: React.CSSProperties;
-      accentColor: string; thumbnailTime: number; muted: boolean; autoPlay: boolean;
-    }>;
     return (
       <div style={cs}>
         <MuxLegacyPlayer

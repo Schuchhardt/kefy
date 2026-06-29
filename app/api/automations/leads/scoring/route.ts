@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   // Return defaults inline if no config exists yet
   const config = data ?? {
     defaults: {
-      comment: 5, review: 10, dm: 15, mention: 8,
+      comment: 5, dm: 15, mention: 8,
       follow: 3, share: 12, click: 2, manual: 0,
     },
     thresholds: {

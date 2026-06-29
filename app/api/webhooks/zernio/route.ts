@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
+import { executeEngagementRules } from '@/lib/engagement-executor';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
 // Receives real-time events from Zernio and processes them.
@@ -16,7 +17,6 @@ import { createSupabaseServer } from '@/lib/supabase';
 //   Messages: message.received, message.sent, message.edited,
 //             message.deleted, message.delivered, message.read, message.failed
 //   Comments: comment.received
-//   Reviews:  review.new, review.updated
 //   Ads:      ad.status_changed
 
 // ─── Payload normalizer ────────────────────────────────────────────────────────
@@ -47,15 +47,25 @@ function normalizePayload(raw: Record<string, unknown>): Data {
     if (p.url)        d.url        = p.url;
   }
 
-  // message: { id, threadId, body, senderId, senderName, senderAvatar, direction }
+  // message: { id, conversationId|threadId, text|body, sender:{id,name}|senderId, direction }
   if (raw.message && typeof raw.message === 'object') {
     const m = raw.message as Record<string, unknown>;
     d.message_id    = m.id;
-    d.thread_id     = m.threadId ?? m.thread_id;
-    d.body          = m.body ?? m.content;
-    d.sender_id     = m.senderId    ?? m.sender_id;
-    d.sender_name   = m.senderName  ?? m.sender_name;
-    d.sender_avatar = m.senderAvatar ?? m.sender_avatar;
+    // Zernio sends conversationId; some versions send threadId
+    d.thread_id     = m.conversationId ?? m.threadId ?? m.thread_id;
+    // Zernio sends text; some versions send body or content
+    d.body          = m.text ?? m.body ?? m.content;
+    // Zernio sends sender as a nested object { id, name } or flat senderId
+    if (m.sender && typeof m.sender === 'object') {
+      const s = m.sender as Record<string, unknown>;
+      d.sender_id     = s.id;
+      d.sender_name   = s.name ?? s.username ?? s.displayName;
+      d.sender_avatar = s.avatar ?? s.profilePicture ?? s.avatarUrl;
+    } else {
+      d.sender_id     = m.senderId    ?? m.sender_id;
+      d.sender_name   = m.senderName  ?? m.sender_name;
+      d.sender_avatar = m.senderAvatar ?? m.sender_avatar;
+    }
     d.direction     = m.direction;
   }
 
@@ -81,18 +91,6 @@ function normalizePayload(raw: Record<string, unknown>): Data {
       d.author_name   = c.authorName  ?? c.author_name;
       d.author_avatar = c.authorAvatar ?? c.author_avatar;
     }
-  }
-
-  // review: { id, reviewerId, reviewerName, reviewerAvatar, rating, body, publishedAt }
-  if (raw.review && typeof raw.review === 'object') {
-    const r = raw.review as Record<string, unknown>;
-    d.review_id      = r.id;
-    d.reviewer_id    = r.reviewerId   ?? r.reviewer_id;
-    d.reviewer_name  = r.reviewerName ?? r.reviewer_name;
-    d.reviewer_avatar = r.reviewerAvatar ?? r.reviewer_avatar;
-    d.rating         = r.rating;
-    d.body           = r.body;
-    d.published_at   = r.publishedAt  ?? r.published_at ?? d.published_at;
   }
 
   // boost / ad: { id, status, startedAt, endedAt }
@@ -298,6 +296,16 @@ async function handleMessageReceived(db: DB, data: Data) {
     },
     { onConflict: 'social_account_id,platform_message_id', ignoreDuplicates: true },
   );
+
+  await executeEngagementRules(db, account.org_id, {
+    type:            'new_dm',
+    socialAccountId: account.id,
+    zernioAccountId,
+    threadId,
+    body,
+    platform,
+    senderId,
+  });
 }
 
 // message.sent: an outbound message was sent (possibly from another tool or the platform itself)
@@ -429,39 +437,17 @@ async function handleCommentReceived(db: DB, data: Data) {
     },
     { onConflict: 'social_account_id,platform_comment_id', ignoreDuplicates: true },
   );
-}
 
-// ─── Review handlers ───────────────────────────────────────────────────────────
-
-async function upsertReview(db: DB, data: Data) {
-  const zernioAccountId = str(data.account_id);
-  const platform        = str(data.platform);
-  const reviewId        = str(data.review_id);
-  const reviewerId      = str(data.reviewer_id) ?? 'unknown';
-  const rating          = typeof data.rating === 'number' ? data.rating : null;
-  const publishedAt     = strOrNull(data.published_at);
-
-  if (!zernioAccountId || !platform || !reviewId) return;
-
-  const account = await resolveAccount(db, zernioAccountId);
-  if (!account) return;
-
-  await db.from('kefy_reviews').upsert(
-    {
-      org_id:            account.org_id,
-      social_account_id: account.id,
-      platform,
-      platform_review_id: reviewId,
-      zernio_review_id:   strOrNull(data.zernio_review_id),
-      reviewer_id:        reviewerId,
-      reviewer_name:      strOrNull(data.reviewer_name),
-      reviewer_avatar:    strOrNull(data.reviewer_avatar),
-      rating,
-      body:               strOrNull(data.body),
-      published_at:       publishedAt,
-    },
-    { onConflict: 'social_account_id,platform_review_id' },
-  );
+  await executeEngagementRules(db, account.org_id, {
+    type:            'new_comment',
+    socialAccountId: account.id,
+    zernioAccountId,
+    commentId,
+    postId:          platformPostId,
+    body,
+    platform,
+    authorId,
+  });
 }
 
 // ─── Ads handler ───────────────────────────────────────────────────────────────
@@ -555,11 +541,6 @@ export async function POST(req: NextRequest) {
     // ── Comments ─────────────────────────────────────────────────────────
     case 'comment.received':
       await handleCommentReceived(db, data); break;
-
-    // ── Reviews ──────────────────────────────────────────────────────────
-    case 'review.new':
-    case 'review.updated':
-      await upsertReview(db, data); break;
 
     // ── Ads ───────────────────────────────────────────────────────────────
     case 'ad.status_changed':
