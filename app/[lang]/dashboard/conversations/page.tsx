@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 
@@ -17,6 +17,19 @@ import type { Locale } from '@/types/i18n';
 
 const TI = { es: esInbox,  en: enInbox  } as const;
 const TE = { es: esEngage, en: enEngage } as const;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type CommentThread = {
+  key: string;
+  platform: MessagingPlatform;
+  socialAccount: CommentItem['kefy_social_accounts'];
+  latestAt: string;
+  messages: CommentItem[];
+  hasUnanswered: boolean;
+  // First external (non-brand) commenter used as conversation avatar/name
+  externalAuthor: { id: string; name: string | null; avatar: string | null } | null;
+};
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -122,9 +135,10 @@ export default function ConversationsPage() {
   const [comments, setComments]           = useState<CommentItem[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [replyingComment, setReplyingComment] = useState<string | null>(null);
-  const [showReplied, setShowReplied]     = useState(false);
+  const [showReplied, setShowReplied]     = useState(true);
   const [syncingComments, setSyncingComments] = useState(false);
   const [syncCommentsMsg, setSyncCommentsMsg] = useState<string | null>(null);
+  const [commentModal, setCommentModal]   = useState<CommentThread | null>(null);
 
   // ── Reviews state ──
   const [reviews, setReviews]             = useState<ReviewItem[]>([]);
@@ -151,7 +165,7 @@ export default function ConversationsPage() {
     setCommentsLoading(true);
     const qs = new URLSearchParams({ limit: '50' });
     if (platformFilter !== 'all') qs.set('platform', platformFilter);
-    if (!showReplied) qs.set('replied', 'false');
+    // No replied filter — all comments fetched; unanswered filtering happens in commentThreads
     fetch(`/api/comments?${qs.toString()}`, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) return;
@@ -160,7 +174,7 @@ export default function ConversationsPage() {
       })
       .catch(() => { /* ignore */ })
       .finally(() => setCommentsLoading(false));
-  }, [platformFilter, showReplied]);
+  }, [platformFilter]);
 
   const fetchReviews = useCallback(() => {
     setReviewsLoading(true);
@@ -306,6 +320,55 @@ export default function ConversationsPage() {
 
   const dmUnread = threads.filter((t) => !t.read_at && t.direction === 'inbound').length;
 
+  // ─── Group comments by external author ─────────────────────────────────────
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const commentThreads = useMemo<CommentThread[]>(() => {
+    const map = new Map<string, CommentThread>();
+
+    for (const c of comments) {
+      // Group by post so all messages on the same post form one conversation
+      const key = `${c.platform_post_id}::${c.kefy_social_accounts.id}`;
+      const isOutbound = c.author_name === c.kefy_social_accounts.username;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          platform: c.platform,
+          socialAccount: c.kefy_social_accounts,
+          latestAt: c.created_at,
+          messages: [],
+          hasUnanswered: false,
+          externalAuthor: null,
+        });
+      }
+      const thread = map.get(key)!;
+      thread.messages.push(c);
+      if (c.created_at > thread.latestAt) thread.latestAt = c.created_at;
+      // Thread is unanswered if any inbound comment has no reply
+      if (!isOutbound && !c.replied_at) thread.hasUnanswered = true;
+      // Track first external commenter for the thread header
+      if (!isOutbound && !thread.externalAuthor) {
+        thread.externalAuthor = { id: c.author_id, name: c.author_name, avatar: c.author_avatar };
+      }
+    }
+
+    // Sort messages chronologically within each thread
+    for (const thread of map.values()) {
+      thread.messages.sort((a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
+    }
+
+    // When filter is active, only show threads with unanswered inbound comments
+    let threads = Array.from(map.values());
+    if (!showReplied) threads = threads.filter((t) => t.hasUnanswered);
+
+    return threads.sort((a, b) =>
+      new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime(),
+    );
+  }, [comments, showReplied]);
+
   // ─── Shared header ─────────────────────────────────────────────────────────
 
   const HeaderBar = (
@@ -374,10 +437,10 @@ export default function ConversationsPage() {
         {(filterType === 'comments' || filterType === 'reviews') && (
           <button onClick={() => setShowReplied((v) => !v)}
             style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-              border: `1px solid ${showReplied ? 'var(--accent)' : 'var(--border)'}`,
-              background: showReplied ? 'rgba(198,255,75,0.1)' : 'var(--surface)',
-              color: showReplied ? 'var(--accent)' : 'var(--muted)' }}>
-            {showReplied ? te.showAll : te.unansweredOnly}
+              border: `1px solid ${!showReplied ? 'var(--accent)' : 'var(--border)'}`,
+              background: !showReplied ? 'rgba(198,255,75,0.1)' : 'var(--surface)',
+              color: !showReplied ? 'var(--accent)' : 'var(--muted)' }}>
+            {!showReplied ? te.showAll : te.unansweredOnly}
           </button>
         )}
         {filterType === 'comments' && (
@@ -567,87 +630,237 @@ export default function ConversationsPage() {
 
   // ─── Comments view ─────────────────────────────────────────────────────────
 
+  // Render conversation bubbles.
+  // Outbound (brand) comments skip if their body already appears as an inline reply_body
+  // to avoid showing the same message twice.
+  function renderBubbles(messages: CommentItem[], socialAccountUsername: string) {
+    // Collect reply bodies already shown inline so we can dedup outbound comments
+    const inlineReplied = new Set(
+      messages.flatMap((c) => (c.reply_body ? [c.reply_body.trim()] : [])),
+    );
+
+    return messages.map((c) => {
+      const isOutbound = c.author_name === socialAccountUsername;
+
+      // Skip outbound comment if it's a duplicate of an inline reply already shown
+      if (isOutbound && inlineReplied.has(c.body.trim())) return null;
+
+      return (
+        <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {isOutbound ? (
+            /* Outbound (brand) bubble — right-aligned green */
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{ maxWidth: '85%',
+                background: 'rgba(198,255,75,0.12)',
+                border: '1px solid rgba(198,255,75,0.3)',
+                borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
+                {messages.length > 1 && (
+                  <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
+                    {te.yourReply} · {timeAgo(c.created_at)}
+                  </p>
+                )}
+                <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.body}</p>
+              </div>
+            </div>
+          ) : (
+            /* Inbound (external user) bubble — left-aligned */
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                <div style={{ maxWidth: '85%', background: 'var(--bg)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px 12px 12px 4px', padding: '10px 14px' }}>
+                  {messages.length > 1 && (
+                    <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{timeAgo(c.created_at)}</p>
+                  )}
+                  <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.body}</p>
+                </div>
+              </div>
+              {/* Inline reply (stored in DB, no matching outbound comment synced yet) */}
+              {c.replied_at && c.reply_body && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div style={{ maxWidth: '85%',
+                    background: 'rgba(198,255,75,0.12)',
+                    border: '1px solid rgba(198,255,75,0.3)',
+                    borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
+                    <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
+                      {te.yourReply} · {timeAgo(c.replied_at)}
+                    </p>
+                    <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.reply_body}</p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      );
+    });
+  }
+
   if (filterType === 'comments') {
+    const modalLastUnanswered = commentModal
+      ? ([...commentModal.messages].reverse().find((c) => !c.replied_at) ?? null)
+      : null;
+    const modalIsReplying = modalLastUnanswered && replyingComment === modalLastUnanswered.id;
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
         {HeaderBar}
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
           <div style={{ maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 12 }}>
             {commentsLoading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{te.loadingComments}</p>}
-            {!commentsLoading && comments.length === 0 && (
+            {!commentsLoading && commentThreads.length === 0 && (
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
                 borderRadius: 12, padding: '40px 24px', textAlign: 'center' }}>
                 <p style={{ color: 'var(--muted)', fontSize: 14 }}>{te.noComments}</p>
                 <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>{te.noCommentsHint}</p>
               </div>
             )}
-            {comments.map((c) => (
-              <div key={c.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 12, padding: '16px 20px' }}>
-                {/* Card header: author + platform + time */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                    background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 13, fontWeight: 700,
-                    backgroundImage: c.author_avatar ? `url(${c.author_avatar})` : undefined,
-                    backgroundSize: 'cover' }}>
-                    {!c.author_avatar && (c.author_name?.[0]?.toUpperCase() ?? '?')}
-                  </div>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{c.author_name ?? c.author_id}</span>
-                  <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                    background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <ChannelIcon name={c.platform} size={10} /> {c.platform}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{timeAgo(c.created_at)}</span>
-                </div>
-
-                {/* Thread */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {/* Original comment bubble (inbound) */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                    <div style={{ maxWidth: '85%', background: 'var(--bg)',
-                      border: '1px solid var(--border)',
-                      borderRadius: '12px 12px 12px 4px', padding: '10px 14px' }}>
-                      <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.body}</p>
+            {commentThreads.map((thread) => {
+              const username = thread.socialAccount.username ?? '';
+              // Build visible messages: outbound dedup is handled inside renderBubbles
+              const allVisible = thread.messages;
+              const preview = allVisible.slice(-2);
+              const hiddenCount = allVisible.length - preview.length;
+              // "Responder" targets the last unanswered inbound comment
+              const lastUnanswered = [...thread.messages]
+                .reverse()
+                .find((c) => c.author_name !== username && !c.replied_at) ?? null;
+              const isReplying = lastUnanswered && replyingComment === lastUnanswered.id;
+              const headerName = thread.externalAuthor?.name ?? username;
+              const headerAvatar = thread.externalAuthor?.avatar ?? null;
+              return (
+                <div key={thread.key} style={{ background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 12, padding: '16px 20px' }}>
+                  {/* Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                      background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 700,
+                      backgroundImage: headerAvatar ? `url(${headerAvatar})` : undefined,
+                      backgroundSize: 'cover' }}>
+                      {!headerAvatar && (headerName?.[0]?.toUpperCase() ?? '?')}
                     </div>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{headerName}</span>
+                    <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                      background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <ChannelIcon name={thread.platform} size={10} /> {thread.platform}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{timeAgo(thread.latestAt)}</span>
                   </div>
 
-                  {/* Reply bubble (outbound) */}
-                  {c.replied_at && c.reply_body && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <div style={{ maxWidth: '85%',
-                        background: 'rgba(198,255,75,0.12)',
-                        border: '1px solid rgba(198,255,75,0.3)',
-                        borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
-                        <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
-                          {te.yourReply} · {timeAgo(c.replied_at)}
-                        </p>
-                        <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.reply_body}</p>
-                      </div>
-                    </div>
+                  {/* "Ver X más" link */}
+                  {hiddenCount > 0 && (
+                    <button onClick={() => setCommentModal(thread)}
+                      style={{ fontSize: 12, color: 'var(--accent)', background: 'none',
+                        border: 'none', cursor: 'pointer', padding: 0, marginBottom: 8, display: 'block' }}>
+                      {locale === 'es'
+                        ? `Ver ${hiddenCount} mensaje${hiddenCount > 1 ? 's' : ''} anterior${hiddenCount > 1 ? 'es' : ''}`
+                        : `View ${hiddenCount} earlier message${hiddenCount > 1 ? 's' : ''}`}
+                    </button>
                   )}
-                </div>
 
-                {/* Reply action */}
-                {!c.replied_at && (
-                  replyingComment === c.id ? (
-                    <div style={{ marginTop: 10 }}>
-                      <ReplyBox onSend={(text) => replyComment(c.id, text)}
-                        placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
-                    </div>
+                  {/* Last 2 message bubbles */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {renderBubbles(preview, username)}
+                  </div>
+
+                  {/* Reply action + "Ver conversación" */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                    {lastUnanswered && (
+                      isReplying ? (
+                        <div style={{ flex: 1 }}>
+                          <ReplyBox onSend={(text) => replyComment(lastUnanswered.id, text)}
+                            placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
+                        </div>
+                      ) : (
+                        <button onClick={() => setReplyingComment(lastUnanswered.id)}
+                          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                            border: '1px solid var(--border)', background: 'transparent',
+                            color: 'var(--muted)', cursor: 'pointer' }}>
+                          {te.replyBtn}
+                        </button>
+                      )
+                    )}
+                    <button onClick={() => setCommentModal(thread)}
+                      style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                        border: '1px solid var(--border)', background: 'transparent',
+                        color: 'var(--muted)', cursor: 'pointer', marginLeft: 'auto' }}>
+                      {locale === 'es' ? 'Ver conversación' : 'View conversation'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Conversation modal ── */}
+        {commentModal && (
+          <div onClick={(e) => { if (e.target === e.currentTarget) setCommentModal(null); }}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+              zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)',
+              borderRadius: 16, width: '100%', maxWidth: 600,
+              maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* Modal header */}
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)',
+                display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                  background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 700,
+                  backgroundImage: commentModal.externalAuthor?.avatar ? `url(${commentModal.externalAuthor.avatar})` : undefined,
+                  backgroundSize: 'cover' }}>
+                  {!commentModal.externalAuthor?.avatar && ((commentModal.externalAuthor?.name ?? commentModal.socialAccount.username ?? '?')[0]?.toUpperCase())}
+                </div>
+                <span style={{ fontWeight: 600, fontSize: 14 }}>{commentModal.externalAuthor?.name ?? commentModal.socialAccount.username}</span>
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                  background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ChannelIcon name={commentModal.platform} size={10} /> {commentModal.platform}
+                </span>
+                <button onClick={() => setCommentModal(null)}
+                  style={{ marginLeft: 'auto', background: 'none', border: 'none',
+                    cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1, padding: 4 }}>
+                  ×
+                </button>
+              </div>
+              {/* Modal body — full conversation */}
+              <div style={{ overflowY: 'auto', padding: '16px 20px',
+                display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                {renderBubbles(commentModal.messages, commentModal.socialAccount.username ?? '')}
+              </div>
+              {/* Modal reply action */}
+              {modalLastUnanswered && (
+                <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+                  {modalIsReplying ? (
+                    <ReplyBox onSend={async (text) => {
+                      const result = await replyComment(modalLastUnanswered.id, text);
+                      if (!result) {
+                        // Update modal thread messages optimistically
+                        setCommentModal((prev) => prev
+                          ? { ...prev, messages: prev.messages.map((c) =>
+                              c.id === modalLastUnanswered.id
+                                ? { ...c, replied_at: new Date().toISOString(), reply_body: text }
+                                : c,
+                            ), hasUnanswered: false }
+                          : null,
+                        );
+                      }
+                      return result;
+                    }}
+                      placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
                   ) : (
-                    <button onClick={() => setReplyingComment(c.id)}
-                      style={{ marginTop: 10, fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                    <button onClick={() => setReplyingComment(modalLastUnanswered.id)}
+                      style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6,
                         border: '1px solid var(--border)', background: 'transparent',
                         color: 'var(--muted)', cursor: 'pointer' }}>
                       {te.replyBtn}
                     </button>
-                  )
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }

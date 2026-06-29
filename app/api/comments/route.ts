@@ -8,9 +8,11 @@ import { getBrandFromRequest } from '@/lib/brands';
 //
 // Query params:
 //   platform  — filter by platform (optional)
-//   replied   — 'false' to return only unreplied comments (default: all)
 //   limit     — default 50, max 100
 //   offset    — default 0
+//
+// All filtering (unanswered, own-account) happens on the client after grouping
+// comments into post-level conversation threads.
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -20,10 +22,9 @@ export async function GET(req: NextRequest) {
   if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const { searchParams } = req.nextUrl;
-  const platform   = searchParams.get('platform');
-  const repliedStr = searchParams.get('replied');
-  const limit      = Math.min(parseInt(searchParams.get('limit')  ?? '50', 10), 100);
-  const offset     = Math.max(parseInt(searchParams.get('offset') ?? '0',  10), 0);
+  const platform = searchParams.get('platform');
+  const limit    = Math.min(parseInt(searchParams.get('limit')  ?? '50', 10), 100);
+  const offset   = Math.max(parseInt(searchParams.get('offset') ?? '0',  10), 0);
 
   const VALID_PLATFORMS = new Set(['linkedin','instagram','facebook','twitter','tiktok','threads']);
 
@@ -44,9 +45,6 @@ export async function GET(req: NextRequest) {
 
   if (platform && VALID_PLATFORMS.has(platform)) {
     query = query.eq('platform', platform);
-  }
-  if (repliedStr === 'false') {
-    query = query.is('replied_at', null);
   }
 
   const { data: comments, error } = await query;
