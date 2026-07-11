@@ -4,6 +4,7 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { generateContentImage } from '@/lib/ai';
 import type { BrandImageContext } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
+import { compositeTextOnImage } from '@/lib/image-processor';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -21,6 +22,9 @@ const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
 //   size?      — '1024x1024' (default) | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto'
 //   quality?   — 'medium' (default) | 'low' | 'high' | 'auto'
 //   itemId?    — if provided, updates the content item's image_url
+//   compositeTitle? / compositeBody? — when provided, bakes this title/body
+//     text onto the generated image (used for carousel slide images, which
+//     are infographic-style and need the copy burned into the photo itself)
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -98,10 +102,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
+  // Bake title/body text onto the image when requested (carousel slides)
+  let finalB64 = result.b64;
+  const compositeTitle = typeof input.compositeTitle === 'string' ? input.compositeTitle.trim() : '';
+  if (compositeTitle) {
+    const compositeBody = typeof input.compositeBody === 'string' ? input.compositeBody.trim() : '';
+    try {
+      finalB64 = await compositeTextOnImage(result.b64, compositeTitle, compositeBody);
+    } catch (compErr) {
+      console.warn('image text composite failed:', compErr);
+    }
+  }
+
   // Upload base64 to Supabase Storage and get a public URL
   let publicUrl: string;
   try {
-    publicUrl = await uploadBase64Image(result.b64, auth.orgId, `generated-${Date.now()}.jpeg`);
+    publicUrl = await uploadBase64Image(finalB64, auth.orgId, `generated-${Date.now()}.jpeg`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Storage upload failed';
     console.error('image storage error:', msg);

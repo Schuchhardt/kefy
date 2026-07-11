@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Modal from './Modal';
+import { PostPreview } from '@/components/dashboard/PostPreview';
+import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
@@ -18,7 +20,7 @@ interface EditContentModalProps {
 const T = { es: esT.editContentModal, en: enT.editContentModal } as const;
 
 export default function EditContentModal({
-  open, onClose, item, lang, onUpdate,
+  open, onClose, item, brandKit, lang, onUpdate,
 }: EditContentModalProps) {
   const t = T[lang];
 
@@ -279,10 +281,16 @@ export default function EditContentModal({
       const prompt = feedback.trim()
         ? `${context ? context + '. ' : ''}${feedback.trim()}`
         : context || (lang === 'en' ? 'image for slide' : 'imagen para slide');
+      // Carousel slides are infographic-style: bake the slide's title/body
+      // back onto the regenerated image (reel scene backgrounds must stay
+      // clean — Remotion overlays that text dynamically at render time).
+      const compositePayload = item!.content_type !== 'reel'
+        ? { compositeTitle: slide.title ?? '', compositeBody: slide.body ?? '' }
+        : {};
       const res = await fetch('/api/content/image', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium' }),
+        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium', ...compositePayload }),
       });
       const d = await res.json() as { image?: { url: string }; error?: string };
       if (!res.ok) throw new Error(d.error ?? 'Error');
@@ -302,9 +310,61 @@ export default function EditContentModal({
     : saveState === 'saved' ? `✓ ${t.saved}`
     : saveState === 'error' ? '⚠' : '';
 
+  // Same hashtag normalization as onTagsChange, kept in sync for the live preview
+  const previewHashtags = tagsText
+    .split(/[\s,]+/)
+    .map((s) => s.trim().replace(/^#+/, ''))
+    .filter(Boolean)
+    .map((s) => `#${s}`);
+
   return (
-    <Modal open={open} onClose={onClose} title={t.title} subtitle={saveBadge || t.subtitle} maxWidth={640}>
-      <div style={{ padding: '20px 24px 24px' }}>
+    <Modal open={open} onClose={onClose} title={t.title} subtitle={saveBadge || t.subtitle} maxWidth={960}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '20px 24px 24px' }}>
+        {/* ── Live Instagram-style preview ─────────────────────────────── */}
+        <div style={{ width: 300, flexShrink: 0 }}>
+          <div style={{ position: 'sticky', top: 0 }}>
+            <p style={{
+              fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8,
+              letterSpacing: '0.05em', textTransform: 'uppercase',
+            }}>
+              {t.previewLabel}
+            </p>
+            {isPost && (
+              <PostPreview
+                channel="instagram"
+                body={bodyText}
+                imageUrl={imageUrl}
+                hashtags={previewHashtags}
+                username={brandKit?.name ?? 'tu_marca'}
+                logoUrl={brandKit?.logo_url ?? undefined}
+              />
+            )}
+            {isCarousel && (
+              slides.length > 0 ? (
+                <CarouselPreview
+                  slides={slides as CarouselSlide[]}
+                  username={brandKit?.name ?? undefined}
+                  logoUrl={brandKit?.logo_url ?? undefined}
+                  description={bodyText || title || undefined}
+                />
+              ) : (
+                <EmptyPreview lang={lang} />
+              )
+            )}
+            {isReel && (
+              <ReelEditPreview
+                videoUrl={videoUrl}
+                scenes={slides as ReelScene[]}
+                caption={bodyText || title}
+                username={brandKit?.name ?? 'tu_marca'}
+                logoUrl={brandKit?.logo_url ?? undefined}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* ── Editable fields ──────────────────────────────────────────── */}
+        <div style={{ flex: 1, minWidth: 280 }}>
         {/* Title */}
         <Field label={t.titleField}>
           <input
@@ -444,6 +504,7 @@ export default function EditContentModal({
         >
           {t.close}
         </button>
+        </div>
       </div>
     </Modal>
   );
@@ -658,6 +719,88 @@ function RegenBlock({
       >
         {loading ? t.regenerating : t.regenerate}
       </button>
+    </div>
+  );
+}
+
+function EmptyPreview({ lang }: { lang: 'es' | 'en' }) {
+  return (
+    <div style={{
+      width: '100%', aspectRatio: '1 / 1', borderRadius: 10,
+      border: '1px dashed var(--border)', background: 'var(--surface)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: 20,
+    }}>
+      {lang === 'en' ? 'Add a slide to see the preview' : 'Añade un slide para ver la vista previa'}
+    </div>
+  );
+}
+
+/** Instagram Reels-style live preview (vertical 9:16) used while editing a reel. */
+function ReelEditPreview({
+  videoUrl, scenes, caption, username, logoUrl,
+}: {
+  videoUrl:  string | null;
+  scenes:    ReelScene[];
+  caption:   string;
+  username:  string;
+  logoUrl?:  string;
+}) {
+  const scene = scenes[0];
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '9 / 16', background: '#000' }}>
+        {videoUrl ? (
+          <video src={videoUrl} controls style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : scene?.image_url ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={scene.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.75) 100%)',
+            }} />
+          </>
+        ) : (
+          <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #080810 0%, #0d0d1c 45%, #080814 100%)' }} />
+        )}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0, padding: '18px 16px',
+          display: 'flex', flexDirection: 'column', gap: 6,
+        }}>
+          {scene?.title && (
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#fff', textShadow: '0 2px 10px rgba(0,0,0,0.7)' }}>
+              {scene.title}
+            </p>
+          )}
+          {scene?.body && (
+            <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.85)', textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
+              {scene.body}
+            </p>
+          )}
+        </div>
+        <span style={{
+          position: 'absolute', top: 12, right: 12, fontSize: 10, fontWeight: 800,
+          background: 'rgba(0,0,0,0.55)', color: '#fff', borderRadius: 4, padding: '2px 6px',
+        }}>▶ REEL</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
+        <div style={{
+          width: 26, height: 26, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
+          background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#fff' }}>{username[0]?.toUpperCase()}</span>
+          )}
+        </div>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ fontWeight: 700 }}>{username} </span>
+          {caption}
+        </p>
+      </div>
     </div>
   );
 }

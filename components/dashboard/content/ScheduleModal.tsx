@@ -192,22 +192,7 @@ export default function ScheduleModal({
               />
             </div>
 
-            {/* Mode toggle */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <ToggleBtn active={mode === 'now'}      onClick={() => setMode('now')}      label={t.publishNow} />
-              <ToggleBtn active={mode === 'scheduled'} onClick={() => setMode('scheduled')} label={t.schedule} />
-            </div>
-
-            {mode === 'scheduled' && (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  {t.when}
-                </label>
-                <DateTimePicker value={scheduledAt} onChange={setScheduledAt} lang={lang} />
-              </div>
-            )}
-
-            {/* Accounts */}
+            {/* Accounts — choose where to publish before picking now/schedule */}
             <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 10, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
               {t.accounts}
             </p>
@@ -246,6 +231,21 @@ export default function ScheduleModal({
                     </button>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Mode toggle — only relevant once at least one account is picked */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <ToggleBtn active={mode === 'now'}      onClick={() => setMode('now')}      label={t.publishNow} />
+              <ToggleBtn active={mode === 'scheduled'} onClick={() => setMode('scheduled')} label={t.schedule} />
+            </div>
+
+            {mode === 'scheduled' && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  {t.when}
+                </label>
+                <DateTimePicker value={scheduledAt} onChange={setScheduledAt} lang={lang} />
               </div>
             )}
 

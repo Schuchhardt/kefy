@@ -123,6 +123,10 @@ function ContentPageInner() {
   // Reference images for AI-guided image generation
   const [referenceImages, setReferenceImages]   = useState<string[]>([]);
   const [referenceUploading, setReferenceUploading] = useState(false);
+  const [referenceSource, setReferenceSource]   = useState<'upload' | 'previous'>('upload');
+
+  // Advanced config (slide/scene count, reference images) collapsed by default
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Modals
   const [viewItem,    setViewItem]    = useState<ContentItem | null>(null);
@@ -329,6 +333,12 @@ function ContentPageInner() {
     }
   }
 
+  function togglePreviousPostReference(url: string) {
+    setReferenceImages((prev) =>
+      prev.includes(url) ? prev.filter((u) => u !== url) : (prev.length < 3 ? [...prev, url] : prev),
+    );
+  }
+
   async function handleDelete(id: string) {
     if (!confirm('¿Eliminar este contenido?')) return;
     await fetch(`/api/content/${id}`, { method: 'DELETE', credentials: 'include' });
@@ -347,6 +357,29 @@ function ContentPageInner() {
   // Content type display label (no "Genérico")
   const contentTypeLabel = (ct: ContentType) =>
     ct === 'reel' ? 'Video' : CONTENT_TYPES_BASE.find((x) => x.value === ct)?.label ?? ct;
+
+  // Blurb explaining where the current recommendations came from
+  const recsSourceText = (() => {
+    if (!recsSource) return '';
+    if ((recsSource === 'strategy' || recsSource === 'industry_fallback') && recsMeta) {
+      return t.recommendSourceStrategy(recsMeta.framework_name, recsMeta.kpi_primary, recsMeta.current_week, recsMeta.total_weeks);
+    }
+    if (recsSource === 'ai_only') return t.recommendSourceAI;
+    return '';
+  })();
+
+  // Thumbnails of previous posts with an image, offered as reference-photo picks
+  const previousPostThumbs = items
+    .map((it) => {
+      const url = it.content_type === 'reel' && Array.isArray(it.slides)
+        ? (it.slides as ReelScene[])[0]?.image_url
+        : it.content_type === 'carousel' && Array.isArray(it.slides)
+        ? (it.slides as CarouselSlide[])[0]?.image_url
+        : it.image_url;
+      return url ? { id: it.id, url } : null;
+    })
+    .filter((x): x is { id: string; url: string } => !!x)
+    .slice(0, 12);
 
   return (
     <>
@@ -380,23 +413,8 @@ function ContentPageInner() {
           </div>
         </div>
 
-        {/* Generate form */}
+        {/* Generate form — recommendations, topic, and advanced settings all in one flow */}
         {showGenerate && (
-          <>
-            {/* ─── Smart recommendation block ─────────────────────────────── */}
-            <RecommendationBlock
-              t={t}
-              recs={recs}
-              source={recsSource}
-              meta={recsMeta}
-              loading={recsLoading}
-              error={recsError}
-              hint={recsHint}
-              onHintChange={setRecsHint}
-              onRecommend={handleRecommendClick}
-              onRotate={handleRotateRecommendations}
-              onApply={handleApplyRecommendation}
-            />
           <form onSubmit={handleGenerate} style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 12, padding: '20px 24px', marginBottom: 28,
@@ -427,78 +445,24 @@ function ContentPageInner() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              {/* Channel & language pickers were intentionally removed:
-                  copy is channel-agnostic (Zernio adapts per platform) and
-                  language follows the active dashboard locale. */}
-            </div>
-
-            {/* Slides / Scenes count — only for carousel and reel */}
-            {(genType === 'carousel' || genType === 'reel') && (
-              <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
-                  {genType === 'carousel' ? t.slidesLabel : t.scenesLabel}
-                  <span style={{ fontWeight: 400, marginLeft: 8 }}>{genSlides}</span>
-                </label>
-                <input
-                  type="range"
-                  min={genType === 'reel' ? 3 : 3}
-                  max={genType === 'reel' ? 8 : 10}
-                  value={genSlides}
-                  onChange={(e) => setGenSlides(Number(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--accent)' }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                  <span>3</span>
-                  <span>{genType === 'reel' ? 8 : 10}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Reference images upload — always shown for reel/carousel (images are always-on) */}
-            {(genType === 'reel' || genType === 'carousel') && (
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-                  Imágenes de referencia{' '}
-                  <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— guía el estilo visual de la IA (máx. 3)</span>
-                </label>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                  {referenceImages.map((url, i) => (
-                    <div key={url} style={{ position: 'relative' }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt={`Ref ${i + 1}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
-                      <button
-                        type="button"
-                        onClick={() => setReferenceImages((p) => p.filter((_, j) => j !== i))}
-                        style={{
-                          position: 'absolute', top: -6, right: -6, width: 18, height: 18,
-                          borderRadius: '50%', background: '#ff6b6b', color: '#fff', border: 'none',
-                          cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-                        }}
-                      >×</button>
-                    </div>
-                  ))}
-                  {referenceImages.length < 3 && (
-                    <label style={{
-                      width: 56, height: 56, borderRadius: 8, border: '1.5px dashed var(--border)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: referenceUploading ? 'wait' : 'pointer', color: 'var(--muted)', fontSize: 22,
-                      background: 'var(--bg)',
-                    }}>
-                      {referenceUploading ? '…' : '+'}
-                      <input
-                        type="file" accept="image/*" multiple hidden
-                        disabled={referenceUploading}
-                        onChange={handleReferenceImageUpload}
-                      />
-                    </label>
-                  )}
-                </div>
-              </div>
-            )}
-
+            {/* Topic — write it yourself, or get a recommendation right here */}
             <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{t.topicLabel}</label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{t.topicLabel}</label>
+                <button
+                  type="button"
+                  onClick={handleRecommendClick}
+                  disabled={recsLoading}
+                  style={{
+                    background: 'rgba(198,255,75,0.1)', color: 'var(--accent)',
+                    border: '1px solid rgba(198,255,75,0.4)', borderRadius: 999,
+                    padding: '5px 12px', fontWeight: 700, fontSize: 12,
+                    cursor: recsLoading ? 'wait' : 'pointer', opacity: recsLoading ? 0.7 : 1, whiteSpace: 'nowrap',
+                  }}
+                >
+                  {recsLoading ? t.recommendLoading : t.recommendInlineBtn}
+                </button>
+              </div>
               <textarea
                 id="gen-topic-textarea"
                 style={{ ...inputStyle, minHeight: 72, resize: 'vertical' }}
@@ -513,7 +477,216 @@ function ContentPageInner() {
                 }
                 required
               />
+              <input
+                type="text"
+                value={recsHint}
+                onChange={(e) => setRecsHint(e.target.value.slice(0, 500))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !recsLoading) { e.preventDefault(); handleRecommendClick(); }
+                }}
+                placeholder={t.recommendHintPlaceholder}
+                maxLength={500}
+                disabled={recsLoading}
+                style={{ ...inputStyle, marginTop: 8, fontSize: 12.5, padding: '7px 12px' }}
+              />
+              {recsError && <p style={{ color: '#ff6b6b', fontSize: 12.5, marginTop: 6 }}>{recsError}</p>}
+              {recs.length > 0 && (
+                <div style={{
+                  marginTop: 12, background: 'rgba(198,255,75,0.04)',
+                  border: '1px solid rgba(198,255,75,0.2)', borderRadius: 10, padding: '12px 14px',
+                }}>
+                  {recsSourceText && (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>{recsSourceText}</div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {recs.map((r, i) => (
+                      <button
+                        key={`${r.template_id ?? 'ai'}-${i}`}
+                        type="button"
+                        onClick={() => handleApplyRecommendation(r)}
+                        title={r.rationale.goal || r.rationale.rationale_short || t.recCardCtaHint}
+                        style={{
+                          textAlign: 'left', background: 'var(--surface)', border: '1px solid var(--border)',
+                          borderRadius: 10, padding: '10px 12px', cursor: 'pointer', color: 'var(--text)',
+                          display: 'flex', flexDirection: 'column', gap: 6,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
+                            color: 'var(--accent)', background: 'rgba(198,255,75,0.12)',
+                            padding: '2px 8px', borderRadius: 999,
+                          }}>
+                            {r.week_num && r.post_num ? t.weekBadge(r.week_num, r.post_num) : 'IA'}
+                          </span>
+                          <span style={{ fontSize: 13, color: 'var(--muted)' }}>{CONTENT_TYPE_ICONS[r.content_type]}</span>
+                        </div>
+                        <p style={{
+                          fontSize: 12.5, lineHeight: 1.4, margin: 0,
+                          display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                        }}>
+                          {r.topic}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                    <button
+                      type="button"
+                      onClick={handleRotateRecommendations}
+                      disabled={recsLoading}
+                      style={{
+                        background: 'transparent', color: 'var(--accent)',
+                        border: '1px solid rgba(198,255,75,0.4)', borderRadius: 8,
+                        padding: '6px 12px', fontSize: 12, fontWeight: 600,
+                        cursor: recsLoading ? 'wait' : 'pointer', opacity: recsLoading ? 0.6 : 1,
+                      }}
+                    >
+                      {recsLoading ? t.recommendLoading : t.recommendMoreBtn}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Advanced config — slide/scene count + reference images (collapsed by default) */}
+            {(genType === 'carousel' || genType === 'reel') && (
+              <div style={{ marginBottom: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((o) => !o)}
+                  style={{
+                    background: 'none', border: 'none', color: 'var(--muted)',
+                    fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  {advancedOpen ? t.advancedConfigHide : t.advancedConfigShow}
+                </button>
+
+                {advancedOpen && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                    {/* Slides / Scenes count */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
+                        {genType === 'carousel' ? t.slidesLabel : t.scenesLabel}
+                        <span style={{ fontWeight: 400, marginLeft: 8 }}>{genSlides}</span>
+                      </label>
+                      <input
+                        type="range"
+                        min={3}
+                        max={genType === 'reel' ? 8 : 10}
+                        value={genSlides}
+                        onChange={(e) => setGenSlides(Number(e.target.value))}
+                        style={{ width: '100%', accentColor: 'var(--accent)' }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                        <span>3</span>
+                        <span>{genType === 'reel' ? 8 : 10}</span>
+                      </div>
+                    </div>
+
+                    {/* Reference images — upload or pick from a previous post */}
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
+                        {t.referenceImagesLabel}{' '}
+                        <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— {t.referenceImagesHint}</span>
+                      </label>
+
+                      {referenceImages.length > 0 && (
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                          {referenceImages.map((url, i) => (
+                            <div key={url} style={{ position: 'relative' }}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={url} alt={`Ref ${i + 1}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                              <button
+                                type="button"
+                                onClick={() => setReferenceImages((p) => p.filter((_, j) => j !== i))}
+                                style={{
+                                  position: 'absolute', top: -6, right: -6, width: 18, height: 18,
+                                  borderRadius: '50%', background: '#ff6b6b', color: '#fff', border: 'none',
+                                  cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                                }}
+                              >×</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                        {(['upload', 'previous'] as const).map((src) => (
+                          <button
+                            key={src}
+                            type="button"
+                            onClick={() => setReferenceSource(src)}
+                            style={{
+                              padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                              border: `1px solid ${referenceSource === src ? 'var(--accent)' : 'var(--border)'}`,
+                              background: referenceSource === src ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
+                              color: referenceSource === src ? 'var(--accent)' : 'var(--text)',
+                            }}
+                          >
+                            {src === 'upload' ? t.referenceTabUpload : t.referenceTabPrevious}
+                          </button>
+                        ))}
+                      </div>
+
+                      {referenceSource === 'upload' ? (
+                        referenceImages.length < 3 && (
+                          <label style={{
+                            width: 56, height: 56, borderRadius: 8, border: '1.5px dashed var(--border)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: referenceUploading ? 'wait' : 'pointer', color: 'var(--muted)', fontSize: 22,
+                            background: 'var(--bg)',
+                          }}>
+                            {referenceUploading ? '…' : '+'}
+                            <input
+                              type="file" accept="image/*" multiple hidden
+                              disabled={referenceUploading}
+                              onChange={handleReferenceImageUpload}
+                            />
+                          </label>
+                        )
+                      ) : (
+                        previousPostThumbs.length === 0 ? (
+                          <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>{t.referenceNoPrevious}</p>
+                        ) : (
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {previousPostThumbs.map((p) => {
+                              const selected = referenceImages.includes(p.url);
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => togglePreviousPostReference(p.url)}
+                                  title={selected ? t.referenceSelected : undefined}
+                                  style={{
+                                    position: 'relative', width: 56, height: 56, padding: 0, borderRadius: 8,
+                                    overflow: 'hidden', cursor: 'pointer',
+                                    border: `2px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+                                  }}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={p.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                  {selected && (
+                                    <span style={{
+                                      position: 'absolute', inset: 0, background: 'rgba(198,255,75,0.28)',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      color: '#000', fontWeight: 800, fontSize: 14,
+                                    }}>✓</span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <button
                 type="submit" disabled={generating}
@@ -559,7 +732,6 @@ function ContentPageInner() {
               </div>
             )}
           </form>
-          </>
         )}
 
         {/* Filters + view toggle */}
@@ -921,203 +1093,5 @@ export default function ContentPage() {
     <Suspense fallback={<div style={{ padding: 48, color: 'var(--muted)', fontSize: 14 }}>Loading…</div>}>
       <ContentPageInner />
     </Suspense>
-  );
-}
-
-// ─── RecommendationBlock ──────────────────────────────────────────────────────
-
-const CONTENT_TYPE_ICONS_LOCAL: Record<ContentType, string> = {
-  post:     '✦',
-  carousel: '▦',
-  reel:     '▶',
-};
-
-interface RecommendationBlockProps {
-  t:            typeof esT;
-  recs:         Recommendation[];
-  source:       RecSource | null;
-  meta:         StrategyMeta | null;
-  loading:      boolean;
-  error:        string | null;
-  hint:         string;
-  onHintChange: (next: string) => void;
-  onRecommend:  () => void;
-  onRotate:     () => void;
-  onApply:      (r: Recommendation) => void;
-}
-
-function RecommendationBlock(props: RecommendationBlockProps) {
-  const { t, recs, source, meta, loading, error, hint, onHintChange, onRecommend, onRotate, onApply } = props;
-  const hasRecs = recs.length > 0;
-  const sourceText = (() => {
-    if (!source) return '';
-    if (source === 'strategy' && meta) {
-      return t.recommendSourceStrategy(meta.framework_name, meta.kpi_primary, meta.current_week, meta.total_weeks);
-    }
-    if (source === 'industry_fallback' && meta) {
-      return t.recommendSourceStrategy(meta.framework_name, meta.kpi_primary, meta.current_week, meta.total_weeks);
-    }
-    if (source === 'ai_only') return t.recommendSourceAI;
-    return '';
-  })();
-
-  return (
-    <section style={{
-      background: 'linear-gradient(135deg, rgba(198,255,75,0.06) 0%, rgba(198,255,75,0.02) 100%)',
-      border: '1px solid rgba(198,255,75,0.25)',
-      borderRadius: 12, padding: '18px 22px', marginBottom: 20,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: hasRecs ? 14 : 4 }}>
-        <div>
-          <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 15, fontWeight: 700, margin: 0 }}>
-            {t.recommendBlockTitle}
-          </h2>
-          <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 4, margin: 0 }}>
-            {t.recommendBlockSubtitle}
-          </p>
-        </div>
-        {!hasRecs && (
-          <button
-            type="button"
-            onClick={onRecommend}
-            disabled={loading}
-            style={{
-              background: 'var(--accent)', color: '#000', border: 'none',
-              borderRadius: 8, padding: '9px 16px', fontWeight: 700, fontSize: 13,
-              cursor: loading ? 'wait' : 'pointer', whiteSpace: 'nowrap',
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? t.recommendLoading : t.recommendBtn}
-          </button>
-        )}
-      </div>
-
-      {error && (
-        <p style={{ color: '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{error}</p>
-      )}
-
-      {/* User guidance comment — drives the AI prompt */}
-      <div style={{ marginTop: hasRecs ? 0 : 12, marginBottom: hasRecs ? 12 : 0 }}>
-        <label
-          htmlFor="rec-hint-input"
-          style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}
-        >
-          {t.recommendHintLabel}
-        </label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            id="rec-hint-input"
-            type="text"
-            value={hint}
-            onChange={(e) => onHintChange(e.target.value.slice(0, 500))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !loading) {
-                e.preventDefault();
-                onRecommend();
-              }
-            }}
-            placeholder={t.recommendHintPlaceholder}
-            maxLength={500}
-            disabled={loading}
-            style={{
-              flex: 1, padding: '9px 12px', borderRadius: 8, fontSize: 13,
-              background: 'var(--bg)', color: 'var(--text)',
-              border: '1px solid var(--border)', outline: 'none',
-            }}
-          />
-          {hasRecs && (
-            <button
-              type="button"
-              onClick={onRecommend}
-              disabled={loading}
-              style={{
-                background: 'var(--accent)', color: '#000', border: 'none',
-                borderRadius: 8, padding: '0 16px', fontWeight: 700, fontSize: 13,
-                cursor: loading ? 'wait' : 'pointer', whiteSpace: 'nowrap',
-                opacity: loading ? 0.7 : 1,
-              }}
-            >
-              {loading ? t.recommendLoading : t.recommendBtn}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {hasRecs && sourceText && (
-        <div style={{
-          background: 'rgba(0,0,0,0.18)', borderRadius: 8, padding: '8px 12px',
-          fontSize: 12, color: 'var(--muted)', marginBottom: 12,
-        }}>
-          {sourceText}
-        </div>
-      )}
-
-      {hasRecs && (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-            {recs.map((r, i) => (
-              <button
-                key={`${r.template_id ?? 'ai'}-${i}`}
-                type="button"
-                onClick={() => onApply(r)}
-                title={r.rationale.goal || r.rationale.rationale_short || t.recCardCtaHint}
-                style={{
-                  textAlign: 'left',
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 10, padding: '12px 14px',
-                  cursor: 'pointer', color: 'var(--text)',
-                  display: 'flex', flexDirection: 'column', gap: 8,
-                  transition: 'border-color 120ms ease, transform 120ms ease',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-                    color: 'var(--accent)', background: 'rgba(198,255,75,0.12)',
-                    padding: '2px 8px', borderRadius: 999,
-                  }}>
-                    {r.week_num && r.post_num
-                      ? t.weekBadge(r.week_num, r.post_num)
-                      : 'IA'}
-                  </span>
-                  <span style={{ fontSize: 14, color: 'var(--muted)' }}>
-                    {CONTENT_TYPE_ICONS_LOCAL[r.content_type]}
-                  </span>
-                </div>
-                <p style={{
-                  fontSize: 13, lineHeight: 1.4, margin: 0,
-                  display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                }}>
-                  {r.topic}
-                </p>
-                <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 'auto' }}>
-                  {t.recCardCtaHint}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-            <button
-              type="button"
-              onClick={onRotate}
-              disabled={loading}
-              style={{
-                background: 'transparent', color: 'var(--accent)',
-                border: '1px solid rgba(198,255,75,0.4)', borderRadius: 8,
-                padding: '7px 14px', fontSize: 12.5, fontWeight: 600,
-                cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.6 : 1,
-              }}
-            >
-              {loading ? t.recommendLoading : t.recommendMoreBtn}
-            </button>
-          </div>
-        </>
-      )}
-    </section>
   );
 }
