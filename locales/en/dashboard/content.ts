@@ -13,6 +13,7 @@ const en = {
   topicPlaceholderReel: 'E.g. 5 tips to grow on TikTok in 2026...',
   topicPlaceholderCarousel: 'E.g. benefits of our analytics tool...',
   topicPlaceholderPost: 'E.g. launch of our new analytics feature...',
+  topicPlaceholderStory: 'E.g. behind the scenes of the team prepping the launch...',
   generating: 'Generating...',
   generateType: (l: string) => `Generate ${l}`,
   resultLabel: 'RESULT',
@@ -51,6 +52,7 @@ const en = {
     post: 'Text + image post',
     carousel: 'Multiple swipeable slides',
     reel: 'Short vertical video',
+    story: 'Ephemeral content, visible for 24h',
   } as Record<string, string>,
   statusLabels: {
     draft: 'Draft',
@@ -81,6 +83,7 @@ const en = {
   weekBadge: (week: number, post: number) => `Week ${week} · Post ${post}`,
   recCardCtaHint: 'Click to autofill the form',
   recommendInlineBtn: '✨ Recommend a topic',
+  recommendModalHint: 'Pick an idea and we generate it right away — no extra steps.',
   // ── Advanced config ──
   advancedConfigShow: '⚙ Advanced settings',
   advancedConfigHide: '⚙ Hide advanced settings',

@@ -523,8 +523,8 @@ export async function generateContentRecommendations(
     recentLines,
     hintLines,
     'Return ONLY a valid JSON array (no markdown fences) with this exact shape:',
-    `[{"topic":"<concrete content idea, 1-2 sentences, max 240 chars>","content_type":"post"|"carousel"|"reel","rationale_short":"<why this idea fits the brand, max 100 chars>"}]`,
-    'Mix the 3 content_type values across the 3 items when possible. Avoid generic motivational fluff — be specific to the brand.',
+    `[{"topic":"<concrete content idea, 1-2 sentences, max 240 chars>","content_type":"post"|"carousel"|"reel"|"story","rationale_short":"<why this idea fits the brand, max 100 chars>"}]`,
+    'Mix the 4 content_type values across the items when possible: post (single image), carousel (multi-slide), reel (short video), story (timely/ephemeral, 24h). Avoid generic motivational fluff — be specific to the brand.',
   ].filter(Boolean).join(' ');
 
   const system = loadPrompt('recommend', {
@@ -560,7 +560,7 @@ export async function generateContentRecommendations(
   }
 
   // Sanitize + clamp
-  const valid: RecommendedContentType[] = ['post', 'carousel', 'reel'];
+  const valid: RecommendedContentType[] = ['post', 'carousel', 'reel', 'story'];
   const recommendations = parsed.slice(0, count).map((r) => ({
     topic:           String(r.topic ?? '').slice(0, 280),
     content_type:    valid.includes(r.content_type) ? r.content_type : ('post' as RecommendedContentType),

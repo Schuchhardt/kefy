@@ -1,12 +1,19 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import Modal from './Modal';
 import { PostPreview } from '@/components/dashboard/PostPreview';
 import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
+import { StoryPreview } from '@/components/dashboard/StoryPreview';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
+
+const MuxReelPlayer = dynamic(
+  () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
+  { ssr: false, loading: () => null },
+);
 
 interface EditContentModalProps {
   open:      boolean;
@@ -40,6 +47,9 @@ export default function EditContentModal({
   const [regenImageFeedback, setRegenImageFeedback] = useState('');
   const [editingSlide, setEditingSlide] = useState<number | null>(null);
   const [regenSlideImageLoadingIdx, setRegenSlideImageLoadingIdx] = useState<number | null>(null);
+  const [storyVideoScriptLoading, setStoryVideoScriptLoading] = useState(false);
+  const [storyVideoError, setStoryVideoError] = useState<string | null>(null);
+  const [storyHasScript, setStoryHasScript] = useState(false);
 
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSentRef = useRef<string>('');
@@ -57,6 +67,8 @@ export default function EditContentModal({
     setRegenTextFeedback('');
     setRegenImageFeedback('');
     setEditingSlide(null);
+    setStoryVideoError(null);
+    setStoryHasScript(Array.isArray(item.slides) && item.slides.length > 0);
     lastSentRef.current = '';
   }, [item?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -259,7 +271,7 @@ export default function EditContentModal({
       const res = await fetch('/api/content/image', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium', itemId: item.id }),
+        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: item.content_type === 'story' ? '1024x1536' : '1024x1024', quality: 'medium', itemId: item.id }),
       });
       const d = await res.json() as { image?: { url: string }; error?: string };
       if (!res.ok) throw new Error(d.error);
@@ -302,9 +314,35 @@ export default function EditContentModal({
     }
   }
 
+  // Writes a short (1-3 scene) vertical script + background images into
+  // `slides`, so mounting <MuxReelPlayer> right after can render it through
+  // the same Remotion pipeline used for reels.
+  async function handleGenerateStoryVideoScript() {
+    if (!item) return;
+    setStoryVideoScriptLoading(true);
+    setStoryVideoError(null);
+    try {
+      const res = await fetch('/api/content/story', {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId: item.id }),
+      });
+      const d = await res.json() as { scenes?: ReelScene[]; error?: string };
+      if (!res.ok) throw new Error(d.error ?? 'Error');
+      setSlides((d.scenes ?? []) as unknown as (CarouselSlide | ReelScene)[]);
+      onUpdate({ slides: (d.scenes ?? []) as unknown as ReelScene[] });
+      setStoryHasScript(true);
+    } catch (err) {
+      setStoryVideoError(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setStoryVideoScriptLoading(false);
+    }
+  }
+
   const isPost     = item.content_type === 'post';
   const isCarousel = item.content_type === 'carousel';
   const isReel     = item.content_type === 'reel';
+  const isStory    = item.content_type === 'story';
 
   const saveBadge = saveState === 'saving' ? t.saving
     : saveState === 'saved' ? `✓ ${t.saved}`
@@ -360,6 +398,16 @@ export default function EditContentModal({
                 logoUrl={brandKit?.logo_url ?? undefined}
               />
             )}
+            {isStory && (
+              <StoryPreview
+                imageUrl={imageUrl}
+                videoUrl={videoUrl}
+                caption={bodyText || title}
+                username={brandKit?.name ?? 'tu_marca'}
+                logoUrl={brandKit?.logo_url ?? undefined}
+                height={420}
+              />
+            )}
           </div>
         </div>
 
@@ -376,8 +424,8 @@ export default function EditContentModal({
           />
         </Field>
 
-        {/* Body (only post) */}
-        {isPost && (
+        {/* Body (post & story) */}
+        {(isPost || isStory) && (
           <Field label={t.bodyField}>
             <textarea
               value={bodyText}
@@ -399,8 +447,8 @@ export default function EditContentModal({
           />
         </Field>
 
-        {/* Image (post & carousel cover) */}
-        {(isPost || isCarousel) && (
+        {/* Image (post, carousel cover & story) */}
+        {(isPost || isCarousel || isStory) && (
           <Field label={t.imageField}>
             {imageUrl ? (
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -430,6 +478,47 @@ export default function EditContentModal({
             ) : (
               <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
             )}
+          </Field>
+        )}
+
+        {/* Video (story — optional, generated on demand or uploaded manually) */}
+        {isStory && (
+          <Field label={t.videoField}>
+            {videoUrl ? (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <video src={videoUrl} controls style={{ width: 140, height: 200, borderRadius: 8, border: '1px solid var(--border)', objectFit: 'cover', background: '#000' }} />
+                <UploadBtn label={t.changeVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
+              </div>
+            ) : storyHasScript ? (
+              <MuxReelPlayer
+                itemId={item.id}
+                renderStatus="not_rendered"
+                height={200}
+                onRenderDone={(_id, url) => {
+                  setVideoUrl(url);
+                  onUpdate({ video_url: url });
+                }}
+              />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleGenerateStoryVideoScript}
+                  disabled={storyVideoScriptLoading}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                    padding: '9px 16px', borderRadius: 8, border: '1px solid var(--accent)',
+                    background: 'rgba(198,255,75,0.08)', color: 'var(--accent)',
+                    fontSize: 13, fontWeight: 700, cursor: storyVideoScriptLoading ? 'not-allowed' : 'pointer',
+                    opacity: storyVideoScriptLoading ? 0.6 : 1,
+                  }}
+                >
+                  {storyVideoScriptLoading ? t.regenerating : `🎬 ${lang === 'en' ? 'Generate video for this story' : 'Generar video de esta story'}`}
+                </button>
+                <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
+              </div>
+            )}
+            {storyVideoError && <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 8 }}>{storyVideoError}</p>}
           </Field>
         )}
 
@@ -468,8 +557,8 @@ export default function EditContentModal({
           </Field>
         )}
 
-        {/* AI Regen — text (post & carousel) */}
-        {(isPost || isCarousel) && (
+        {/* AI Regen — text (post, carousel & story) */}
+        {(isPost || isCarousel || isStory) && (
           <RegenBlock
             title={t.regenText}
             placeholder={t.feedbackPlaceholder}
@@ -481,8 +570,8 @@ export default function EditContentModal({
           />
         )}
 
-        {/* AI Regen — image (post & carousel) */}
-        {(isPost || isCarousel) && (
+        {/* AI Regen — image (post, carousel & story) */}
+        {(isPost || isCarousel || isStory) && (
           <RegenBlock
             title={t.regenImage}
             placeholder={t.feedbackPlaceholder}

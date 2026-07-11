@@ -5,7 +5,7 @@ import { generateContentRecommendations } from '@/lib/ai';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RecommendedContentType = 'post' | 'carousel' | 'reel';
+type RecommendedContentType = 'post' | 'carousel' | 'reel' | 'story';
 type RecommendSource = 'strategy' | 'industry_fallback' | 'ai_only';
 
 interface Recommendation {
@@ -46,6 +46,7 @@ interface StrategyTemplate {
 // Map a template `format` to the supported content_type values
 function formatToContentType(format: string | null): RecommendedContentType {
   const f = (format ?? '').toLowerCase();
+  if (f.includes('historia') || f.includes('story') || f.includes('stories')) return 'story';
   if (f.includes('carrusel') || f.includes('carousel')) return 'carousel';
   if (f.includes('reel') || f.includes('video') || f.includes('short') || f.includes('tiktok')) return 'reel';
   return 'post';

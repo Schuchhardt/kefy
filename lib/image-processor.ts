@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import type { ContentChannel } from '@/types/ai';
+import type { ContentType } from '@/types/content';
 
 // ─── Platform-specific image dimensions ───────────────────────────────────────
 // Width × Height in pixels for the primary/recommended crop per network.
@@ -28,6 +29,31 @@ export async function resizeForPlatform(
   quality = 88,
 ): Promise<Buffer> {
   const { width, height } = PLATFORM_SIZES[platform] ?? PLATFORM_SIZES.generic;
+
+  return sharp(input)
+    .resize(width, height, { fit: 'cover', position: 'centre' })
+    .jpeg({ quality, mozjpeg: true })
+    .toBuffer();
+}
+
+// Reels and Stories are always vertical 9:16 regardless of destination
+// network — unlike posts, which follow each platform's canonical crop.
+const VERTICAL_SIZE = { width: 1080, height: 1920 };
+
+/**
+ * Resize (cover-fit + center-crop) an image buffer for the given (platform, format)
+ * pair. Reel/Story formats always use the vertical 9:16 crop; other formats fall
+ * back to the platform's canonical size.
+ */
+export async function resizeForFormat(
+  input: Buffer,
+  platform: ContentChannel,
+  format: ContentType,
+  quality = 88,
+): Promise<Buffer> {
+  const { width, height } = (format === 'reel' || format === 'story')
+    ? VERTICAL_SIZE
+    : (PLATFORM_SIZES[platform] ?? PLATFORM_SIZES.generic);
 
   return sharp(input)
     .resize(width, height, { fit: 'cover', position: 'centre' })

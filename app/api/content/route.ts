@@ -8,7 +8,7 @@ const VALID_CHANNELS = new Set([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
 ]);
 const VALID_STATUSES = new Set(['draft', 'approved', 'scheduled', 'published', 'archived']);
-const VALID_CONTENT_TYPES = new Set(['post', 'carousel', 'reel']);
+const VALID_CONTENT_TYPES = new Set(['post', 'carousel', 'reel', 'story']);
 
 function sanitizeSlides(raw: unknown): SlideInput[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const videoUrl = contentType === 'reel' && typeof input.video_url === 'string' && input.video_url
+  const videoUrl = (contentType === 'reel' || contentType === 'story') && typeof input.video_url === 'string' && input.video_url
     ? input.video_url
     : null;
 

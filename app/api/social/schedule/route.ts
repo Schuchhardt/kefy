@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import type { ContentType } from '@/types/content';
+
+const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 
 // ─── GET /api/social/schedule ─────────────────────────────────────────────────
 // List scheduled posts for the org.
@@ -51,6 +54,9 @@ export async function GET(req: NextRequest) {
 //   social_account_id  — single account (kept for backwards compatibility)
 //   social_account_ids — array of account IDs (preferred; union with social_account_id)
 //   scheduled_at       — ISO 8601 datetime (required; must be in the future)
+//   format?             — 'post' | 'carousel' | 'reel' | 'story' (defaults to
+//                         the item's own content_type; see /api/social/publish
+//                         for the alternate-format rendition behavior)
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -72,6 +78,9 @@ export async function POST(req: NextRequest) {
   }
   if (typeof input.scheduled_at !== 'string' || !input.scheduled_at) {
     return NextResponse.json({ error: 'scheduled_at is required (ISO 8601)' }, { status: 422 });
+  }
+  if (input.format !== undefined && !VALID_FORMATS.includes(input.format as ContentType)) {
+    return NextResponse.json({ error: `format must be one of: ${VALID_FORMATS.join(', ')}` }, { status: 422 });
   }
 
   const scheduledAt = new Date(input.scheduled_at);
@@ -103,13 +112,38 @@ export async function POST(req: NextRequest) {
   // Verify ownership of content item
   const { data: item } = await db
     .from('kefy_content_items')
-    .select('id, body, image_url, hashtags, channel, status, content_type, slides')
+    .select('id, body, image_url, hashtags, channel, status, content_type, slides, video_url')
     .eq('id', input.content_item_id)
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
   if (!item) return NextResponse.json({ error: 'Content item not found' }, { status: 404 });
-  if (!item.body) return NextResponse.json({ error: 'Content item has no body text' }, { status: 422 });
+
+  const format = (input.format as ContentType | undefined) ?? (item.content_type as ContentType);
+
+  let scheduleSource: {
+    body: string | null;
+    image_url: string | null;
+    slides: unknown;
+    video_url: string | null;
+    hashtags: string[];
+  };
+  if (format === item.content_type) {
+    scheduleSource = { body: item.body, image_url: item.image_url, slides: item.slides, video_url: item.video_url, hashtags: item.hashtags ?? [] };
+  } else {
+    const { data: rendition } = await db
+      .from('kefy_content_renditions')
+      .select('body, image_url, slides, video_url, hashtags, status')
+      .eq('content_item_id', item.id)
+      .eq('format', format)
+      .maybeSingle();
+    if (!rendition || rendition.status !== 'ready') {
+      return NextResponse.json({ error: `The ${format} version of this content hasn't been generated yet` }, { status: 422 });
+    }
+    scheduleSource = rendition;
+  }
+
+  if (!scheduleSource.body) return NextResponse.json({ error: 'Content has no body text' }, { status: 422 });
 
   // Fetch all requested active accounts belonging to this org
   const { data: accounts } = await db
@@ -126,7 +160,7 @@ export async function POST(req: NextRequest) {
   const { publishPost } = await import('@/lib/zernio');
 
   console.log(
-    `[schedule] START itemId=${item.id} contentType=${item.content_type}` +
+    `[schedule] START itemId=${item.id} format=${format}` +
     ` scheduledAt=${scheduledAt.toISOString()} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
   );
 
@@ -141,12 +175,22 @@ export async function POST(req: NextRequest) {
 
   for (const account of accounts) {
     try {
-      const contentType = (item.content_type ?? 'post') as 'post' | 'carousel' | 'reel';
-      const slides = item.slides as Array<{ image_url?: string }> | null;
+      const slides = scheduleSource.slides as Array<{ image_url?: string }> | null;
       const mediaUrls: string[] | undefined =
-        contentType === 'carousel' && Array.isArray(slides)
+        format === 'carousel' && Array.isArray(slides)
           ? slides.map((s) => s.image_url).filter((u): u is string => !!u)
           : undefined;
+
+      // Same video/hashtag rules as immediate publish — see /api/social/publish
+      const isVideoFormat = (format === 'reel' || format === 'story') && !!scheduleSource.video_url;
+      const videoUrl: string | undefined = isVideoFormat ? (scheduleSource.video_url ?? undefined) : undefined;
+      const publishImageUrl = isVideoFormat ? undefined : (scheduleSource.image_url ?? undefined);
+      const hashtags = scheduleSource.hashtags ?? [];
+      let publishText = scheduleSource.body;
+      if (isVideoFormat && hashtags.length > 0) {
+        const hashtagLine = hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ');
+        publishText = `${scheduleSource.body}\n\n${hashtagLine}`;
+      }
 
       console.log(
         `[schedule] → account ${account.id} platform=${account.platform}` +
@@ -157,11 +201,12 @@ export async function POST(req: NextRequest) {
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
         platform:     account.platform,
-        text:         item.body,
-        image_url:    item.image_url ?? undefined,
+        text:         publishText!,
+        image_url:    publishImageUrl,
         media_urls:   mediaUrls,
-        content_type: contentType,
-        hashtags:     item.hashtags ?? [],
+        video_url:    videoUrl,
+        content_type: format,
+        hashtags:     isVideoFormat ? [] : hashtags,
         scheduled_at: scheduledAt.toISOString(),
       });
 
@@ -179,6 +224,7 @@ export async function POST(req: NextRequest) {
           scheduled_at:      scheduledAt.toISOString(),
           zernio_post_id:    zernioResult.post_id,
           status:            'scheduled',
+          format,
           created_by:        auth.userId,
         })
         .select('id')

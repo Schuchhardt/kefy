@@ -19,6 +19,9 @@ const MuxLegacyPlayer = dynamic(
 
 export interface MuxReelPlayerProps {
   itemId:           string;
+  /** Render target format when it differs from the item's own content_type
+   *  (e.g. rendering a 'reel'/'story' rendition of a 'post'-primary item). */
+  format?:          'reel' | 'story';
   /** S3 URL of the rendered MP4 (preferred). */
   videoUrl?:        string | null;
   /** Legacy: Mux playback ID (backward compat for older renders). */
@@ -64,6 +67,7 @@ function resolveInitialUrl(videoUrl?: string | null, muxPlaybackId?: string | nu
 
 export function MuxReelPlayer({
   itemId,
+  format,
   videoUrl,
   muxPlaybackId,
   renderStatus,
@@ -89,7 +93,8 @@ export function MuxReelPlayer({
   const pollStatus = useCallback(async () => {
     if (!isRenderingRef.current) return;
     try {
-      const res  = await fetch(`/api/content/reel/render?itemId=${itemId}`, { credentials: 'include' });
+      const qs = format ? `itemId=${itemId}&format=${format}` : `itemId=${itemId}`;
+      const res  = await fetch(`/api/content/reel/render?${qs}`, { credentials: 'include' });
       const data = await res.json() as {
         render_status?: string;
         video_url?:     string;
@@ -124,7 +129,7 @@ export function MuxReelPlayer({
     } catch {
       if (isRenderingRef.current) setTimeout(pollStatus, 6000);
     }
-  }, [itemId, onRenderDone]);
+  }, [itemId, format, onRenderDone]);
 
   // ── Start render ───────────────────────────────────────────────────────────
   const startRender = useCallback(async () => {
@@ -139,7 +144,7 @@ export function MuxReelPlayer({
         method:      'POST',
         credentials: 'include',
         headers:     { 'Content-Type': 'application/json' },
-        body:        JSON.stringify({ itemId }),
+        body:        JSON.stringify(format ? { itemId, format } : { itemId }),
       });
       const data = await res.json() as {
         video_url?:       string;
@@ -171,7 +176,7 @@ export function MuxReelPlayer({
       setIsRendering(false);
       setRenderError(err instanceof Error ? err.message : 'Error desconocido');
     }
-  }, [itemId, pollStatus, onRenderStart, onRenderDone]);
+  }, [itemId, format, pollStatus, onRenderStart, onRenderDone]);
 
   // ── Auto-render on mount ───────────────────────────────────────────────────
   useEffect(() => {

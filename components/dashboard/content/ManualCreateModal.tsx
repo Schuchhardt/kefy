@@ -50,6 +50,7 @@ const TYPE_OPTIONS: { value: ContentType; icon: string; label: { es: string; en:
   { value: 'post',     icon: '✦', label: { es: 'Post',     en: 'Post'     } },
   { value: 'carousel', icon: '▦', label: { es: 'Carrusel', en: 'Carousel' } },
   { value: 'reel',     icon: '▶', label: { es: 'Reel',     en: 'Reel'     } },
+  { value: 'story',    icon: '◎', label: { es: 'Story',    en: 'Story'    } },
 ];
 
 export default function ManualCreateModal({ open, onClose, lang, onCreated }: ManualCreateModalProps) {
@@ -149,6 +150,10 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
         if (videoUrl)           payload.video_url = videoUrl;
         if (imageUrl)           payload.image_url = imageUrl;
       }
+      if (type === 'story') {
+        if (imageUrl) payload.image_url = imageUrl;
+        if (videoUrl) payload.video_url = videoUrl;
+      }
 
       const res = await fetch('/api/content', {
         method: 'POST', credentials: 'include',
@@ -225,7 +230,7 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
         </Field>
 
         {/* Body */}
-        {(type === 'post' || type === 'reel') && (
+        {(type === 'post' || type === 'reel' || type === 'story') && (
           <Field label={t.bodyField}>
             <textarea
               value={body}
@@ -242,8 +247,8 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
           <input type="text" value={tagsText} onChange={(e) => setTagsText(e.target.value)} style={inputStyle} placeholder="#marketing #branding" />
         </Field>
 
-        {/* Cover image (post) */}
-        {type === 'post' && (
+        {/* Cover image (post / story) */}
+        {(type === 'post' || type === 'story') && (
           <Field label={t.imageField}>
             <UploadPreview
               url={imageUrl}
@@ -256,8 +261,8 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
           </Field>
         )}
 
-        {/* Video (reel) */}
-        {type === 'reel' && (
+        {/* Video (reel / story) */}
+        {(type === 'reel' || type === 'story') && (
           <Field label={t.videoField}>
             <UploadPreview
               url={videoUrl}

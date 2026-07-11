@@ -7,6 +7,7 @@ import ContentActions      from '@/components/dashboard/content/ContentActions';
 import ScheduleModal       from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
 import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
+import RecommendModal      from '@/components/dashboard/content/RecommendModal';
 import type { ContentItem, ContentType, ContentStatus, ReelScene, CarouselSlide } from '@/types/content';
 import type { Channel } from '@/types/channels';
 import type { Locale } from '@/types/i18n';
@@ -28,12 +29,14 @@ const CONTENT_TYPES_BASE: { value: ContentType; label: string }[] = [
   { value: 'post',     label: 'Post'     },
   { value: 'carousel', label: 'Carrusel' },
   { value: 'reel',     label: 'Reel'     },
+  { value: 'story',    label: 'Story'    },
 ];
 
 const CONTENT_TYPE_ICONS: Record<ContentType, string> = {
   post:     '✦',
   carousel: '▦',
   reel:     '▶',
+  story:    '◎',
 };
 
 const STATUS_COLORS: Record<ContentStatus, string> = {
@@ -99,7 +102,7 @@ function ContentPageInner() {
   const [showGenerate, setShowGenerate] = useState(() => !!(searchParams?.get('topic')));
   const [genType, setGenType]           = useState<ContentType>(() => {
     const t = searchParams?.get('type') ?? '';
-    const valid: ContentType[] = ['post', 'carousel', 'reel'];
+    const valid: ContentType[] = ['post', 'carousel', 'reel', 'story'];
     return (valid.includes(t as ContentType) ? t : 'post') as ContentType;
   });
   const [genTopic, setGenTopic]         = useState(() => searchParams?.get('topic') ?? '');
@@ -119,6 +122,7 @@ function ContentPageInner() {
   const [recsSource, setRecsSource]   = useState<RecSource | null>(null);
   const [recsMeta, setRecsMeta]       = useState<StrategyMeta | null>(null);
   const [recsHint, setRecsHint]       = useState('');
+  const [recommendModalOpen, setRecommendModalOpen] = useState(false);
 
   // Reference images for AI-guided image generation
   const [referenceImages, setReferenceImages]   = useState<string[]>([]);
@@ -164,9 +168,15 @@ function ContentPageInner() {
       .catch(() => {/* non-critical */});
   }, []);
 
-  async function handleGenerate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!genTopic.trim()) return;
+  // `opts` lets callers (e.g. the recommendation modal) trigger a generation
+  // immediately with explicit values, without waiting for genTopic/genType
+  // state to catch up via setState — avoids a stale-state click-and-wait.
+  async function handleGenerate(e: React.FormEvent | null, opts?: { topic: string; type: ContentType; slides?: number }) {
+    e?.preventDefault();
+    const topic  = opts?.topic ?? genTopic;
+    const type   = opts?.type ?? genType;
+    const slides = opts?.slides ?? genSlides;
+    if (!topic.trim()) return;
     setGenerating(true);
     setGenError(null);
     setGenResult(null);
@@ -177,17 +187,20 @@ function ContentPageInner() {
       // Note: channel is omitted on purpose — backend defaults to 'generic'
       // (Zernio adapts per platform at publish time). Images are always-on.
       let payload: Record<string, unknown> = {
-        topic:    genTopic,
+        topic,
         language,
-        save:     true,
+        save: true,
       };
 
-      if (genType === 'carousel') {
+      if (type === 'carousel') {
         url = '/api/content/carousel';
-        payload = { topic: genTopic, language, slide_count: genSlides, save: true };
-      } else if (genType === 'reel') {
+        payload = { topic, language, slide_count: slides, save: true };
+      } else if (type === 'reel') {
         url = '/api/content/reel';
-        payload = { topic: genTopic, language, scene_count: genSlides, save: true, reference_image_urls: referenceImages };
+        payload = { topic, language, scene_count: slides, save: true, reference_image_urls: referenceImages };
+      } else if (type === 'story') {
+        url = '/api/content/story';
+        payload = { topic, language, save: true };
       }
 
       const res  = await fetch(url, {
@@ -196,12 +209,13 @@ function ContentPageInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { itemId?: string; body?: string; hook?: string; hashtags?: string[]; slides?: unknown[]; scenes?: unknown[]; error?: string };
+      const data = await res.json() as { itemId?: string; body?: string; hook?: string; hashtags?: string[]; slides?: unknown[]; scenes?: unknown[]; image_url?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Error al generar');
 
-      if (genType === 'post')     setGenResult(data.body ?? '');
-      if (genType === 'carousel') setGenResult(`Carrusel generado con ${(data.slides ?? []).length} slides ✓`);
-      if (genType === 'reel')     setGenResult(`Reel generado con ${(data.scenes ?? []).length} escenas ✓`);
+      if (type === 'post')     setGenResult(data.body ?? '');
+      if (type === 'carousel') setGenResult(`Carrusel generado con ${(data.slides ?? []).length} slides ✓`);
+      if (type === 'reel')     setGenResult(`Reel generado con ${(data.scenes ?? []).length} escenas ✓`);
+      if (type === 'story')    setGenResult('Story generada ✓');
 
       // Check for active keyword rules to show CTA banner
       setCtaBannerDismissed(false);
@@ -217,10 +231,10 @@ function ContentPageInner() {
 
       // For posts: kick off background image generation so the user sees the image
       // appear in the list without needing to open the modal manually.
-      if (genType === 'post' && data.itemId) {
+      if (type === 'post' && data.itemId) {
         const newItemId = data.itemId;
         setImagePending((prev) => { const n = new Set(prev); n.add(newItemId); return n; });
-        const imagePrompt = (data.body ?? genTopic).slice(0, 900);
+        const imagePrompt = (data.body ?? topic).slice(0, 900);
         fetch('/api/content/image', {
           method: 'POST',
           credentials: 'include',
@@ -281,6 +295,7 @@ function ContentPageInner() {
   }, [lang, t.recommendError]);
 
   function handleRecommendClick() {
+    setRecommendModalOpen(true);
     setRecsOffset(0);
     fetchRecommendations(0, recsHint);
   }
@@ -291,24 +306,21 @@ function ContentPageInner() {
     fetchRecommendations(next, recsHint);
   }
 
-  function handleApplyRecommendation(r: Recommendation) {
+  // Picking a recommendation card generates it immediately — no extra click.
+  function handleSelectRecommendation(r: Recommendation) {
+    const slides = r.content_type === 'carousel' && r.slide_count
+      ? Math.min(10, Math.max(3, r.slide_count))
+      : 5;
+
+    setShowGenerate(true);
     setGenType(r.content_type);
     setGenTopic(r.topic);
-    if (r.content_type === 'carousel' && r.slide_count) {
-      setGenSlides(Math.min(10, Math.max(3, r.slide_count)));
-    } else if (r.content_type === 'reel') {
-      setGenSlides(5);
-    }
+    setGenSlides(slides);
     setGenError(null);
     setGenResult(null);
-    // Scroll the topic textarea into view (smooth)
-    setTimeout(() => {
-      const el = document.getElementById('gen-topic-textarea');
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        (el as HTMLTextAreaElement).focus();
-      }
-    }, 60);
+    setRecommendModalOpen(false);
+
+    handleGenerate(null, { topic: r.topic, type: r.content_type, slides });
   }
 
   async function handleReferenceImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -473,6 +485,8 @@ function ContentPageInner() {
                     ? t.topicPlaceholderReel
                     : genType === 'carousel'
                     ? t.topicPlaceholderCarousel
+                    : genType === 'story'
+                    ? t.topicPlaceholderStory
                     : t.topicPlaceholderPost
                 }
                 required
@@ -490,63 +504,6 @@ function ContentPageInner() {
                 style={{ ...inputStyle, marginTop: 8, fontSize: 12.5, padding: '7px 12px' }}
               />
               {recsError && <p style={{ color: '#ff6b6b', fontSize: 12.5, marginTop: 6 }}>{recsError}</p>}
-              {recs.length > 0 && (
-                <div style={{
-                  marginTop: 12, background: 'rgba(198,255,75,0.04)',
-                  border: '1px solid rgba(198,255,75,0.2)', borderRadius: 10, padding: '12px 14px',
-                }}>
-                  {recsSourceText && (
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>{recsSourceText}</div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                    {recs.map((r, i) => (
-                      <button
-                        key={`${r.template_id ?? 'ai'}-${i}`}
-                        type="button"
-                        onClick={() => handleApplyRecommendation(r)}
-                        title={r.rationale.goal || r.rationale.rationale_short || t.recCardCtaHint}
-                        style={{
-                          textAlign: 'left', background: 'var(--surface)', border: '1px solid var(--border)',
-                          borderRadius: 10, padding: '10px 12px', cursor: 'pointer', color: 'var(--text)',
-                          display: 'flex', flexDirection: 'column', gap: 6,
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                          <span style={{
-                            fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-                            color: 'var(--accent)', background: 'rgba(198,255,75,0.12)',
-                            padding: '2px 8px', borderRadius: 999,
-                          }}>
-                            {r.week_num && r.post_num ? t.weekBadge(r.week_num, r.post_num) : 'IA'}
-                          </span>
-                          <span style={{ fontSize: 13, color: 'var(--muted)' }}>{CONTENT_TYPE_ICONS[r.content_type]}</span>
-                        </div>
-                        <p style={{
-                          fontSize: 12.5, lineHeight: 1.4, margin: 0,
-                          display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                        }}>
-                          {r.topic}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                    <button
-                      type="button"
-                      onClick={handleRotateRecommendations}
-                      disabled={recsLoading}
-                      style={{
-                        background: 'transparent', color: 'var(--accent)',
-                        border: '1px solid rgba(198,255,75,0.4)', borderRadius: 8,
-                        padding: '6px 12px', fontSize: 12, fontWeight: 600,
-                        cursor: recsLoading ? 'wait' : 'pointer', opacity: recsLoading ? 0.6 : 1,
-                      }}
-                    >
-                      {recsLoading ? t.recommendLoading : t.recommendMoreBtn}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Advanced config — slide/scene count + reference images (collapsed by default) */}
@@ -1082,6 +1039,18 @@ function ContentPageInner() {
           setItems((prev) => [item as ContentItem, ...prev]);
           setManualOpen(false);
         }}
+      />
+
+      <RecommendModal
+        open={recommendModalOpen}
+        onClose={() => setRecommendModalOpen(false)}
+        lang={lang}
+        recs={recs}
+        loading={recsLoading}
+        error={recsError}
+        sourceText={recsSourceText}
+        onSelect={handleSelectRecommendation}
+        onRotate={handleRotateRecommendations}
       />
 
     </>
