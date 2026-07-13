@@ -127,6 +127,7 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
   const [form, setForm] = useState<Partial<BrandKit>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(true);
 
   const [arraySugg, setArraySugg] = useState<Record<string, string[]>>({});
@@ -152,8 +153,8 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
         fetch('/api/strategies/org'),
       ]);
       if (bkRes.ok) {
-        const data = (await bkRes.json()) as { brandKit: BrandKit | null };
-        if (data.brandKit) setForm(data.brandKit);
+        const { kit } = (await bkRes.json()) as { kit: BrandKit | null };
+        if (kit) setForm(kit);
       }
       if (catRes.ok) {
         const { industries: inds } = (await catRes.json()) as { industries: Industry[] };
@@ -193,15 +194,24 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     try {
       setSaving(true);
-      await fetch('/api/brand-kit', {
+      const res = await fetch('/api/brand-kit', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
+      if (!res.ok) {
+        const { error: msg } = (await res.json()) as { error?: string };
+        throw new Error(msg ?? (locale === 'es' ? 'Error al guardar' : 'Failed to save'));
+      }
+      const { kit } = (await res.json()) as { kit: BrandKit };
+      setForm(kit);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (locale === 'es' ? 'Error al guardar' : 'Failed to save'));
     } finally {
       setSaving(false);
     }
@@ -380,6 +390,11 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
 
         {/* Save button */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
+          {error && (
+            <span style={{ fontSize: 13, color: '#ff6b6b', alignSelf: 'center' }}>
+              {error}
+            </span>
+          )}
           {saved && (
             <span style={{ fontSize: 13, color: 'var(--accent)', alignSelf: 'center' }}>
               {locale === 'es' ? '✓ Guardado' : '✓ Saved'}
