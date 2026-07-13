@@ -104,7 +104,7 @@ export interface GenerateReelResult {
 
 // ─── Content recommendations ─────────────────────────────────────────────────
 
-export type RecommendedContentType = 'post' | 'carousel' | 'reel';
+export type RecommendedContentType = 'post' | 'carousel' | 'reel' | 'story';
 
 export interface ContentRecommendation {
   topic:           string;

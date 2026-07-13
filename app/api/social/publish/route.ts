@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { resizeForPlatform } from '@/lib/image-processor';
+import { resizeForFormat } from '@/lib/image-processor';
 import { uploadBase64Image } from '@/lib/storage';
 import type { ContentChannel } from '@/types/ai';
+import type { ContentType } from '@/types/content';
+
+const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 
 // ─── POST /api/social/publish ─────────────────────────────────────────────────
 // Publish a content item immediately to one or more social accounts.
@@ -11,6 +14,12 @@ import type { ContentChannel } from '@/types/ai';
 // Body:
 //   content_item_id     — required
 //   social_account_ids  — required (array of account IDs)
+//   format?              — 'post' | 'carousel' | 'reel' | 'story' (defaults to
+//                          the item's own content_type). When it differs, the
+//                          published media comes from that alternate-format
+//                          rendition (kefy_content_renditions) instead of the
+//                          item itself — the same topic, published as a
+//                          different format depending on the target network.
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -33,6 +42,9 @@ export async function POST(req: NextRequest) {
   if (!Array.isArray(input.social_account_ids) || input.social_account_ids.length === 0) {
     return NextResponse.json({ error: 'social_account_ids must be a non-empty array' }, { status: 422 });
   }
+  if (input.format !== undefined && !VALID_FORMATS.includes(input.format as ContentType)) {
+    return NextResponse.json({ error: `format must be one of: ${VALID_FORMATS.join(', ')}` }, { status: 422 });
+  }
 
   const accountIds = (input.social_account_ids as unknown[]).filter(
     (id): id is string => typeof id === 'string',
@@ -52,7 +64,34 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
 
   if (!item) return NextResponse.json({ error: 'Content item not found' }, { status: 404 });
-  if (!item.body) return NextResponse.json({ error: 'Content item has no body text' }, { status: 422 });
+
+  const format = (input.format as ContentType | undefined) ?? (item.content_type as ContentType);
+
+  // Resolve the media/text to publish: the item's own columns for its primary
+  // format, or the matching rendition row for an alternate format.
+  let publishSource: {
+    body: string | null;
+    image_url: string | null;
+    slides: unknown;
+    video_url: string | null;
+    hashtags: string[];
+  };
+  if (format === item.content_type) {
+    publishSource = { body: item.body, image_url: item.image_url, slides: item.slides, video_url: item.video_url, hashtags: item.hashtags ?? [] };
+  } else {
+    const { data: rendition } = await db
+      .from('kefy_content_renditions')
+      .select('body, image_url, slides, video_url, hashtags, status')
+      .eq('content_item_id', item.id)
+      .eq('format', format)
+      .maybeSingle();
+    if (!rendition || rendition.status !== 'ready') {
+      return NextResponse.json({ error: `The ${format} version of this content hasn't been generated yet` }, { status: 422 });
+    }
+    publishSource = rendition;
+  }
+
+  if (!publishSource.body) return NextResponse.json({ error: 'Content has no body text' }, { status: 422 });
 
   // Fetch requested accounts (only active + belonging to this org)
   const { data: accounts } = await db
@@ -69,14 +108,14 @@ export async function POST(req: NextRequest) {
   const { publishPost } = await import('@/lib/zernio');
 
   console.log(
-    `[publish] START itemId=${item.id} contentType=${item.content_type} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
+    `[publish] START itemId=${item.id} format=${format} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
   );
 
   // Pre-download source image once (if any) so we can resize per platform
   let sourceImageBuffer: Buffer | null = null;
-  if (item.image_url) {
+  if (publishSource.image_url) {
     try {
-      const resp = await fetch(item.image_url);
+      const resp = await fetch(publishSource.image_url);
       if (resp.ok) {
         const ab = await resp.arrayBuffer();
         sourceImageBuffer = Buffer.from(ab);
@@ -97,13 +136,14 @@ export async function POST(req: NextRequest) {
   // Publish to each account independently — don't abort on partial failure
   for (const account of accounts) {
     try {
-      // Resize image to the platform's canonical dimensions
-      let platformImageUrl = item.image_url ?? undefined;
+      // Resize image to the platform's canonical dimensions (reel/story always vertical)
+      let platformImageUrl = publishSource.image_url ?? undefined;
       if (sourceImageBuffer) {
         try {
-          const resizedBuf = await resizeForPlatform(
+          const resizedBuf = await resizeForFormat(
             sourceImageBuffer,
             (account.platform ?? 'generic') as ContentChannel,
+            format,
           );
           const b64 = resizedBuf.toString('base64');
           platformImageUrl = await uploadBase64Image(
@@ -116,26 +156,25 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const contentType = (item.content_type ?? 'post') as 'post' | 'carousel' | 'reel';
-      const slides = item.slides as Array<{ image_url?: string }> | null;
+      const slides = publishSource.slides as Array<{ image_url?: string }> | null;
       const mediaUrls: string[] | undefined =
-        contentType === 'carousel' && Array.isArray(slides)
+        format === 'carousel' && Array.isArray(slides)
           ? slides.map((s) => s.image_url).filter((u): u is string => !!u)
           : undefined;
-      // For reels: pass the video URL (S3 from Lambda) directly to Zernio.
-      // Do NOT pass image_url for reels — it would publish a separate photo + video.
-      const videoUrl: string | undefined =
-        contentType === 'reel' && item.video_url ? item.video_url : undefined;
-      const publishImageUrl = contentType === 'reel' ? undefined : platformImageUrl;
+      // For video formats: pass the video URL (S3 from Lambda) directly to Zernio.
+      // Do NOT pass image_url alongside it — it would publish a separate photo + video.
+      const isVideoFormat = (format === 'reel' || format === 'story') && !!publishSource.video_url;
+      const videoUrl: string | undefined = isVideoFormat ? (publishSource.video_url ?? undefined) : undefined;
+      const publishImageUrl = isVideoFormat ? undefined : platformImageUrl;
 
-      // For reels, embed hashtags directly in the description text so they
-      // appear in the published caption (Zernio's separate hashtags field is
-      // not always applied to video/reel posts).
-      const hashtags = (item.hashtags ?? []) as string[];
-      let publishText = item.body;
-      if (contentType === 'reel' && hashtags.length > 0) {
+      // For video posts, embed hashtags directly in the description text so
+      // they appear in the published caption (Zernio's separate hashtags
+      // field is not always applied to video posts).
+      const hashtags = publishSource.hashtags ?? [];
+      let publishText = publishSource.body;
+      if (isVideoFormat && hashtags.length > 0) {
         const hashtagLine = hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ');
-        publishText = `${item.body}\n\n${hashtagLine}`;
+        publishText = `${publishSource.body}\n\n${hashtagLine}`;
       }
 
       console.log(
@@ -147,12 +186,12 @@ export async function POST(req: NextRequest) {
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
         platform:     account.platform,
-        text:         publishText,
+        text:         publishText!,
         image_url:    publishImageUrl,
         media_urls:   mediaUrls,
         video_url:    videoUrl,
-        content_type: contentType,
-        hashtags:     contentType === 'reel' ? [] : hashtags,
+        content_type: format,
+        hashtags:     isVideoFormat ? [] : hashtags,
         // No scheduled_at → immediate
       });
 
@@ -169,6 +208,7 @@ export async function POST(req: NextRequest) {
         platform_post_id:   zernioResult.platform_post_id ?? null,
         published_at:       new Date().toISOString(),
         status:             'published',
+        format,
         created_by:         auth.userId,
       });
 
@@ -189,6 +229,7 @@ export async function POST(req: NextRequest) {
         social_account_id: account.id,
         status:            'failed',
         error_message:     msg,
+        format,
         created_by:        auth.userId,
       });
 

@@ -7,10 +7,14 @@ import DateTimePicker from './DateTimePicker';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from '@/components/dashboard/PostPreview';
 import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
-import type { ContentItem, BrandKitInfo, CarouselSlide } from '@/types/content';
+import { StoryPreview } from '@/components/dashboard/StoryPreview';
+import FormatExample from './FormatExample';
+import type { ContentItem, BrandKitInfo, CarouselSlide, ContentType, ContentRendition } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
+
+const ALL_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 
 const MuxReelPlayer = dynamic(
   () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
@@ -46,9 +50,16 @@ export default function ScheduleModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [slideIdx, setSlideIdx] = useState(0);
   // Track video_url for reels rendered inside this modal
   const [reelVideoUrl, setReelVideoUrl] = useState<string | null>(null);
+
+  // ── Format picker: publish the same topic as post/carousel/reel/story,
+  // generating whichever alternate format hasn't been made yet ──────────────
+  const [selectedFormat, setSelectedFormat]   = useState<ContentType | null>(null);
+  const [renditions, setRenditions]           = useState<ContentRendition[]>([]);
+  const [renditionsLoading, setRenditionsLoading] = useState(false);
+  const [renditionGenerating, setRenditionGenerating] = useState(false);
+  const [renditionError, setRenditionError]   = useState<string | null>(null);
 
   // Reset state when reopened
   useEffect(() => {
@@ -59,9 +70,49 @@ export default function ScheduleModal({
     setScheduledAt(initialDate ?? null);
     setError(null);
     setSuccess(false);
-    setSlideIdx(0);
     setReelVideoUrl(null);
+    setSelectedFormat(initialItem?.content_type ?? null);
+    setRenditions([]);
+    setRenditionError(null);
   }, [open, initialItem, initialDate]);
+
+  // Fetch the topic's alternate-format renditions whenever the selected item changes
+  useEffect(() => {
+    if (!open || !selectedItem) return;
+    setSelectedFormat(selectedItem.content_type);
+    setRenditionError(null);
+    setRenditionsLoading(true);
+    fetch(`/api/content/${selectedItem.id}/renditions`, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d: { renditions?: ContentRendition[] }) => setRenditions(d.renditions ?? []))
+      .catch(() => setRenditions([]))
+      .finally(() => setRenditionsLoading(false));
+  }, [open, selectedItem]);
+
+  const activeRendition = useMemo(
+    () => renditions.find((r) => r.format === selectedFormat) ?? null,
+    [renditions, selectedFormat],
+  );
+
+  async function handleGenerateRendition(format: ContentType) {
+    if (!selectedItem) return;
+    setRenditionGenerating(true);
+    setRenditionError(null);
+    try {
+      const res = await fetch(`/api/content/${selectedItem.id}/renditions`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format }),
+      });
+      const d = await res.json() as { rendition?: ContentRendition; error?: string };
+      if (!res.ok || !d.rendition) throw new Error(d.error ?? 'Error');
+      setRenditions((prev) => [...prev.filter((r) => r.format !== format), d.rendition as ContentRendition]);
+    } catch (err) {
+      setRenditionError(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setRenditionGenerating(false);
+    }
+  }
 
   // Fetch accounts when opening
   useEffect(() => {
@@ -91,20 +142,31 @@ export default function ScheduleModal({
     [accounts],
   );
 
+  const isPrimaryFormat = !!selectedItem && selectedFormat === selectedItem.content_type;
+  const renditionReady  = isPrimaryFormat || activeRendition?.status === 'ready';
+
   /* eslint-disable react-hooks/purity */
   const canSubmit = !!selectedItem
+    && !!selectedFormat
+    && renditionReady
     && selectedAccountIds.length > 0
     && (mode === 'now' || (mode === 'scheduled' && scheduledAt && scheduledAt.getTime() > Date.now()));
   /* eslint-enable react-hooks/purity */
 
   const handleSubmit = useCallback(async () => {
-    if (!selectedItem || !canSubmit) return;
+    if (!selectedItem || !selectedFormat || !canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
-      // Block publish for reels still being generated
-      const reelReady = selectedItem.content_type !== 'reel' ||
-        !!selectedItem.video_url || !!selectedItem.mux_playback_id || !!reelVideoUrl;
+      // Reels always need a finished video. Stories can be image-only, so only
+      // block them while a video render is actively in progress.
+      const activeVideoUrl     = isPrimaryFormat ? selectedItem.video_url        : (activeRendition?.video_url ?? null);
+      const activeMuxId        = isPrimaryFormat ? selectedItem.mux_playback_id  : (activeRendition?.mux_playback_id ?? null);
+      const activeRenderStatus = isPrimaryFormat ? selectedItem.render_status    : (activeRendition?.render_status ?? null);
+      const hasVideo  = !!activeVideoUrl || !!activeMuxId || !!reelVideoUrl;
+      const reelReady = selectedFormat === 'reel' ? hasVideo
+        : selectedFormat === 'story' ? activeRenderStatus !== 'rendering'
+        : true;
       if (!reelReady) {
         throw new Error(lang === 'en'
           ? 'The video is still being generated. Please wait until it finishes.'
@@ -119,6 +181,7 @@ export default function ScheduleModal({
             content_item_id:    selectedItem.id,
             social_account_ids: selectedAccountIds,
             scheduled_at:       scheduledAt.toISOString(),
+            format:             selectedFormat,
           }),
         });
         const d = await res.json() as { error?: string };
@@ -130,6 +193,7 @@ export default function ScheduleModal({
           body: JSON.stringify({
             content_item_id:    selectedItem.id,
             social_account_ids: selectedAccountIds,
+            format:             selectedFormat,
           }),
         });
         const d = await res.json() as { error?: string };
@@ -145,7 +209,7 @@ export default function ScheduleModal({
     } finally {
       setSubmitting(false);
     }
-  }, [selectedItem, canSubmit, mode, scheduledAt, selectedAccountIds, lang, reelVideoUrl, onClose, onSuccess]);
+  }, [selectedItem, selectedFormat, isPrimaryFormat, activeRendition, canSubmit, mode, scheduledAt, selectedAccountIds, lang, reelVideoUrl, onClose, onSuccess]);
 
   return (
     <Modal
@@ -183,13 +247,37 @@ export default function ScheduleModal({
                   </button>
                 )}
               </div>
-              <ItemPreviewSlider
-                item={selectedItem}
-                brandKit={brandKit}
-                slideIdx={slideIdx}
-                setSlideIdx={setSlideIdx}
-                onReelRenderDone={(_id, url) => setReelVideoUrl(url)}
+
+              {/* Format — publish this same topic as post/carousel/reel/story */}
+              <FormatPicker
+                lang={lang}
+                selected={selectedFormat}
+                primaryFormat={selectedItem.content_type}
+                renditions={renditions}
+                loading={renditionsLoading}
+                onSelect={setSelectedFormat}
               />
+
+              {selectedFormat && (
+                <FormatPreview
+                  item={selectedItem}
+                  format={selectedFormat}
+                  rendition={activeRendition}
+                  brandKit={brandKit}
+                  generating={renditionGenerating}
+                  error={renditionError}
+                  lang={lang}
+                  onGenerate={() => handleGenerateRendition(selectedFormat)}
+                  onReelRenderDone={(_id, url) => {
+                    setReelVideoUrl(url);
+                    if (!isPrimaryFormat) {
+                      setRenditions((prev) => prev.map((r) =>
+                        r.format === selectedFormat ? { ...r, video_url: url, render_status: 'ready' } : r,
+                      ));
+                    }
+                  }}
+                />
+              )}
             </div>
 
             {/* Accounts — choose where to publish before picking now/schedule */}
@@ -350,7 +438,7 @@ function ContentPicker({
                   <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
                   <span style={{ fontSize: 24, opacity: 0.5 }}>
-                    {item.content_type === 'reel' ? '▶' : item.content_type === 'carousel' ? '▦' : '✦'}
+                    {item.content_type === 'reel' ? '▶' : item.content_type === 'carousel' ? '▦' : item.content_type === 'story' ? '◎' : '✦'}
                   </span>
                 )}
               </div>
@@ -380,62 +468,198 @@ function itemThumbnail(item: ContentItem): string | null {
   return null;
 }
 
-// ─── ItemPreviewSlider ──────────────────────────────────────────────────────
+// ─── FormatPicker ───────────────────────────────────────────────────────────
+// Publish the same topic as post/carousel/reel/story regardless of which
+// format it was originally generated as — pick a format, and it's generated
+// on demand (via FormatPreview/GenerateFormatPrompt below) if missing.
 
-function ItemPreviewSlider({
-  item, brandKit, slideIdx: _slideIdx, setSlideIdx: _setSlideIdx, onReelRenderDone,
+const FORMAT_ICONS: Record<ContentType, string> = { post: '✦', carousel: '▦', reel: '▶', story: '◎' };
+const FORMAT_LABELS: Record<'es' | 'en', Record<ContentType, string>> = {
+  es: { post: 'Post', carousel: 'Carrusel', reel: 'Reel', story: 'Story' },
+  en: { post: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' },
+};
+
+function FormatPicker({
+  lang, selected, primaryFormat, renditions, loading, onSelect,
 }: {
-  item: ContentItem;
-  brandKit?: BrandKitInfo | null;
-  slideIdx: number;
-  setSlideIdx: (n: number) => void;
-  onReelRenderDone?: (itemId: string, playbackId: string) => void;
+  lang:          'es' | 'en';
+  selected:      ContentType | null;
+  primaryFormat: ContentType;
+  renditions:    ContentRendition[];
+  loading:       boolean;
+  onSelect:      (f: ContentType) => void;
 }) {
-  if (item.content_type === 'post') {
+  return (
+    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+      {ALL_FORMATS.map((f) => {
+        const isSelected = selected === f;
+        const isReady = f === primaryFormat || renditions.some((r) => r.format === f && r.status === 'ready');
+        return (
+          <button
+            key={f}
+            type="button"
+            onClick={() => onSelect(f)}
+            style={{
+              flex: 1, padding: '8px 6px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+              border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
+              background: isSelected ? 'rgba(198,255,75,0.10)' : 'var(--bg)',
+              color: isSelected ? 'var(--accent)' : 'var(--text)',
+              fontWeight: isSelected ? 700 : 500,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            }}
+          >
+            {FORMAT_ICONS[f]} {FORMAT_LABELS[lang][f]}
+            {isReady && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)' }} />}
+          </button>
+        );
+      })}
+      {loading && <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>…</span>}
+    </div>
+  );
+}
+
+// ─── FormatPreview ──────────────────────────────────────────────────────────
+// Renders whichever format is selected — from the item's own columns when
+// it's the primary format, or from its rendition row otherwise. Shows a
+// "generate this format" prompt when that rendition doesn't exist yet.
+
+function FormatPreview({
+  item, format, rendition, brandKit, generating, error, lang, onGenerate, onReelRenderDone,
+}: {
+  item:       ContentItem;
+  format:     ContentType;
+  rendition:  ContentRendition | null;
+  brandKit?:  BrandKitInfo | null;
+  generating: boolean;
+  error:      string | null;
+  lang:       'es' | 'en';
+  onGenerate: () => void;
+  onReelRenderDone?: (itemId: string, url: string) => void;
+}) {
+  const isPrimary = format === item.content_type;
+
+  const body     = isPrimary ? item.body           : rendition?.body ?? null;
+  const imageUrl = isPrimary ? item.image_url       : rendition?.image_url ?? null;
+  const slides   = isPrimary ? item.slides          : rendition?.slides ?? null;
+  const videoUrl = isPrimary ? item.video_url       : rendition?.video_url ?? null;
+  const muxId    = (isPrimary ? item.mux_playback_id : rendition?.mux_playback_id) ?? null;
+  const hashtags = isPrimary ? item.hashtags        : rendition?.hashtags ?? [];
+
+  const needsGeneration = !isPrimary && (!rendition || rendition.status === 'error');
+
+  if (needsGeneration) {
+    return (
+      <GenerateFormatPrompt
+        format={format} lang={lang} generating={generating}
+        error={error ?? rendition?.error_message ?? null}
+        onGenerate={onGenerate}
+      />
+    );
+  }
+
+  if (format === 'post') {
     return (
       <PostPreview
         channel={item.channel}
-        body={item.body}
-        imageUrl={item.image_url}
-        hashtags={item.hashtags}
+        body={body}
+        imageUrl={imageUrl}
+        hashtags={hashtags}
         username={brandKit?.name ?? 'tu_marca'}
         logoUrl={brandKit?.logo_url ?? undefined}
       />
     );
   }
 
-  if (item.content_type === 'carousel' && Array.isArray(item.slides) && item.slides.length > 0) {
+  if (format === 'carousel') {
+    if (!Array.isArray(slides) || slides.length === 0) {
+      return <GenerateFormatPrompt format={format} lang={lang} generating={generating} error={error} onGenerate={onGenerate} />;
+    }
     return (
       <CarouselPreview
-        slides={item.slides as CarouselSlide[]}
+        slides={slides as CarouselSlide[]}
         username={brandKit?.name ?? undefined}
         logoUrl={brandKit?.logo_url ?? undefined}
-        description={item.body ?? undefined}
+        description={body ?? undefined}
       />
     );
   }
 
-  if (item.content_type === 'reel' && Array.isArray(item.slides) && item.slides.length > 0) {
+  if (format === 'reel') {
+    if (!Array.isArray(slides) || slides.length === 0) {
+      return <GenerateFormatPrompt format={format} lang={lang} generating={generating} error={error} onGenerate={onGenerate} />;
+    }
     return (
       <ReelSlider
-        videoUrl={item.video_url ?? item.mux_playback_id ? (item.video_url ?? null) : null}
-        muxPlaybackId={!item.video_url ? (item.mux_playback_id ?? null) : null}
+        videoUrl={videoUrl}
+        muxPlaybackId={!videoUrl ? muxId : null}
         itemId={item.id}
+        renderFormat={isPrimary ? undefined : 'reel'}
         brandKit={brandKit}
         onRenderDone={onReelRenderDone}
       />
     );
   }
 
-  return null;
+  // story
+  return (
+    <StoryPreview
+      imageUrl={imageUrl}
+      videoUrl={videoUrl}
+      caption={body}
+      username={brandKit?.name ?? 'tu_marca'}
+      logoUrl={brandKit?.logo_url ?? undefined}
+      height={420}
+    />
+  );
+}
+
+const GENERATE_PROMPT_T = {
+  es: { cta: (label: string) => `Generar versión de ${label}`, loading: 'Generando…' },
+  en: { cta: (label: string) => `Generate ${label} version`, loading: 'Generating…' },
+};
+
+function GenerateFormatPrompt({
+  format, lang, generating, error, onGenerate,
+}: {
+  format:     ContentType;
+  lang:       'es' | 'en';
+  generating: boolean;
+  error:      string | null;
+  onGenerate: () => void;
+}) {
+  const gt = GENERATE_PROMPT_T[lang];
+  return (
+    <div style={{
+      border: '1px dashed var(--border)', borderRadius: 12, padding: '20px 16px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+    }}>
+      <FormatExample format={format} lang={lang} />
+      <button
+        type="button"
+        onClick={onGenerate}
+        disabled={generating}
+        style={{
+          background: 'rgba(198,255,75,0.08)', border: '1px solid var(--accent)',
+          color: 'var(--accent)', borderRadius: 8, padding: '9px 18px',
+          fontSize: 13, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer',
+          opacity: generating ? 0.6 : 1,
+        }}
+      >
+        {generating ? gt.loading : gt.cta(FORMAT_LABELS[lang][format])}
+      </button>
+      {error && <p style={{ fontSize: 12, color: '#ff6b6b', margin: 0, textAlign: 'center' }}>{error}</p>}
+    </div>
+  );
 }
 
 function ReelSlider({
-  videoUrl, muxPlaybackId, itemId, brandKit, onRenderDone,
+  videoUrl, muxPlaybackId, itemId, renderFormat, brandKit, onRenderDone,
 }: {
   videoUrl:        string | null;
   muxPlaybackId:   string | null;
   itemId:          string;
+  /** Set when rendering an alternate-format rendition (e.g. a 'reel' rendition of a 'post'-primary item). */
+  renderFormat?:   'reel' | 'story';
   brandKit?:       BrandKitInfo | null;
   onRenderDone?:   (itemId: string, url: string) => void;
 }) {
@@ -444,6 +668,7 @@ function ReelSlider({
     <div style={{ borderRadius: 10, overflow: 'hidden' }}>
       <MuxReelPlayer
         itemId={itemId}
+        format={renderFormat}
         videoUrl={videoUrl}
         muxPlaybackId={muxPlaybackId}
         renderStatus={hasVideo ? 'ready' : 'not_rendered'}

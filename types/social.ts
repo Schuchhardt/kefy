@@ -62,7 +62,7 @@ export interface ZernioPublishPayload {
   image_url?:    string;
   media_urls?:   string[];
   video_url?:    string;
-  content_type?: 'post' | 'carousel' | 'reel';
+  content_type?: 'post' | 'carousel' | 'reel' | 'story';
   hashtags?:     string[];
   scheduled_at?: string;
 }

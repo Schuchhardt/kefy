@@ -3,7 +3,7 @@ import type { Channel } from '@/types/channels';
 // ─── Status & type ───────────────────────────────────────────────────────────
 
 export type ContentStatus = 'draft' | 'approved' | 'scheduled' | 'published' | 'archived';
-export type ContentType   = 'post' | 'carousel' | 'reel';
+export type ContentType   = 'post' | 'carousel' | 'reel' | 'story';
 
 // ─── Slides & scenes (canonical, supersets) ──────────────────────────────────
 
@@ -46,6 +46,33 @@ export interface ContentItem {
   created_at:       string;
   /** Frontend-only: indicates the cover image is still being generated. */
   image_pending?:   boolean;
+  /** Alternate formats generated on demand for the same topic (post/carousel/reel/story). */
+  renditions?:      ContentRendition[];
+}
+
+// ─── Content rendition (alternate format for the same topic) ────────────────
+
+/** A specific format (post/carousel/reel/story) generated for a content item.
+ *  The item's own content_type/body/image_url/... columns are the "primary"
+ *  rendition; additional renditions are generated on demand at publish time
+ *  so the same topic can be published as different formats per network. */
+export interface ContentRendition {
+  id:               string;
+  content_item_id:  string;
+  format:           ContentType;
+  status:           'pending' | 'generating' | 'ready' | 'error';
+  body:             string | null;
+  hashtags:         string[];
+  image_url:        string | null;
+  slides:           ReelScene[] | CarouselSlide[] | null;
+  video_url:        string | null;
+  mux_playback_id?: string | null;
+  mux_asset_id?:    string | null;
+  render_status?:   'not_rendered' | 'rendering' | 'ready' | 'error' | null;
+  error_message?:   string | null;
+  created_at?:      string;
+  /** True for the item's own (primary) format, synthesized rather than a real row. */
+  is_primary?:      boolean;
 }
 
 /** Slimmer shape used by the dashboard home "recent content" list. */

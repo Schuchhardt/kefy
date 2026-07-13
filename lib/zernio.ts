@@ -195,6 +195,14 @@ export async function publishPost(
     console.log(`[Zernio] tiktok photo: content truncated to ${TIKTOK_PHOTO_TITLE_LIMIT} chars`);
   }
 
+  // NOTE — Story publishing (payload.content_type === 'story'): Zernio's docs
+  // site (docs.zernio.com) could not be reached to confirm the exact field
+  // that marks a post as a Story vs. a regular feed post (e.g. Instagram/
+  // Facebook Stories are a distinct surface from the feed/Reels tab on most
+  // platforms' native APIs). Verify against Zernio's real API docs or
+  // support before relying on this in production — as-is, publishing a
+  // story just sends a normal post (image/video + caption), which is very
+  // likely wrong for platforms that require an explicit Stories endpoint.
   const zernioBody: Record<string, unknown> = {
     content:   postContent,
     platforms: [{ platform: payload.platform, accountId: payload.account_id }],
