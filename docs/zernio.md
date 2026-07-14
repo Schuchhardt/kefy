@@ -254,6 +254,28 @@ POST /v1/posts
 
 **Deduplicación de contenido:** Zernio rechaza con `409` si se envía el mismo contenido + cuenta en las últimas 24 horas.
 
+### Stories (`content_type = 'story'`)
+
+Confirmado contra `docs.zernio.com/guides/platform-settings` y `docs.zernio.com/platforms/{instagram,facebook}`: una Story **no** es un flag a nivel de post — se marca dentro de `platforms[].platformSpecificData`:
+
+```json
+{
+  "mediaItems": [{ "type": "image", "url": "https://cdn.example.com/story.jpg" }],
+  "platforms": [{
+    "platform": "instagram",
+    "accountId": "...",
+    "platformSpecificData": { "contentType": "story" }
+  }],
+  "publishNow": true
+}
+```
+
+Solo **Instagram**, **Facebook** y **Snapchat** tienen superficie de Stories en la API de Zernio (`contentType: "story"`; en Snapchat es el default). El resto de plataformas soportadas por Kefy no tienen concepto de Story — `lib/zernio.ts::publishPost` detecta esto y publica como post normal en vez de fallar, dejando un `console.warn`.
+
+> ⚠️ Las Stories no muestran texto/caption (Instagram y Facebook), no permiten link stickers vía API, y expiran a las 24h. `firstComment`, `collaborators` y `userTags` no aplican a Stories.
+
+Nota aparte: Facebook Reels también requieren `platformSpecificData: { contentType: "reel" }` explícito (Instagram puede auto-detectarlo de un vídeo vertical 9:16), pero eso no está implementado todavía — Kefy hoy publica reels enviando solo el vídeo sin ese flag.
+
 ### Listar posts
 
 ```

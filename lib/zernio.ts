@@ -156,6 +156,13 @@ export async function refreshAccountToken(zernioAccountId: string): Promise<{
 
 // ─── Publishing ───────────────────────────────────────────────────────────────
 
+// Platforms with a distinct Stories surface (24h ephemeral) in Zernio's API.
+// Confirmed via docs.zernio.com/guides/platform-settings — Instagram and
+// Facebook expose `contentType: 'story'` in platformSpecificData; Snapchat's
+// contentType already defaults to 'story'. Other platforms have no Story
+// concept in Zernio, so we fall back to a regular post for them.
+const STORY_CAPABLE_PLATFORMS = new Set(['instagram', 'facebook', 'snapchat']);
+
 /**
  * Publish or schedule a post via Zernio.
  * Translates from our internal payload shape to Zernio's actual API format:
@@ -195,17 +202,21 @@ export async function publishPost(
     console.log(`[Zernio] tiktok photo: content truncated to ${TIKTOK_PHOTO_TITLE_LIMIT} chars`);
   }
 
-  // NOTE — Story publishing (payload.content_type === 'story'): Zernio's docs
-  // site (docs.zernio.com) could not be reached to confirm the exact field
-  // that marks a post as a Story vs. a regular feed post (e.g. Instagram/
-  // Facebook Stories are a distinct surface from the feed/Reels tab on most
-  // platforms' native APIs). Verify against Zernio's real API docs or
-  // support before relying on this in production — as-is, publishing a
-  // story just sends a normal post (image/video + caption), which is very
-  // likely wrong for platforms that require an explicit Stories endpoint.
+  const platformTarget: Record<string, unknown> = {
+    platform:  payload.platform,
+    accountId: payload.account_id,
+  };
+  if (payload.content_type === 'story') {
+    if (STORY_CAPABLE_PLATFORMS.has(payload.platform)) {
+      platformTarget.platformSpecificData = { contentType: 'story' };
+    } else {
+      console.warn(`[Zernio] platform=${payload.platform} has no Story surface — publishing as a regular post`);
+    }
+  }
+
   const zernioBody: Record<string, unknown> = {
     content:   postContent,
-    platforms: [{ platform: payload.platform, accountId: payload.account_id }],
+    platforms: [platformTarget],
     hashtags:  payload.hashtags ?? [],
   };
   if (mediaItems.length > 0) zernioBody.mediaItems = mediaItems;

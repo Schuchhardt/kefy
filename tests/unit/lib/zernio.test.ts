@@ -104,6 +104,79 @@ describe('publishPost', () => {
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect((init.headers as Record<string, string>)['Authorization']).toMatch(/^Bearer /);
   });
+
+  it('sin content_type: no incluye platformSpecificData', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({ account_id: 'acc-1', platform: 'instagram', text: 'Post normal' });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.platforms[0].platformSpecificData).toBeUndefined();
+  });
+
+  it('content_type story en Instagram: incluye platformSpecificData.contentType=story', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({
+      account_id:    'acc-1',
+      platform:      'instagram',
+      text:          'Mi story',
+      image_url:     'https://cdn.example.com/story.jpg',
+      content_type:  'story',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.platforms[0].platformSpecificData).toEqual({ contentType: 'story' });
+  });
+
+  it('content_type story en Facebook: incluye platformSpecificData.contentType=story', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({
+      account_id:    'acc-1',
+      platform:      'facebook',
+      text:          'Mi story',
+      image_url:     'https://cdn.example.com/story.jpg',
+      content_type:  'story',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.platforms[0].platformSpecificData).toEqual({ contentType: 'story' });
+  });
+
+  it('content_type story en una plataforma sin Stories (twitter): publica como post normal', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({
+      account_id:   'acc-1',
+      platform:     'twitter',
+      text:         'Mi story',
+      image_url:    'https://cdn.example.com/story.jpg',
+      content_type: 'story',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.platforms[0].platformSpecificData).toBeUndefined();
+  });
+
+  it('content_type post/carousel/reel: no incluye platformSpecificData en Instagram', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({
+      account_id:   'acc-1',
+      platform:     'instagram',
+      text:         'Carousel post',
+      content_type: 'carousel',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.platforms[0].platformSpecificData).toBeUndefined();
+  });
 });
 
 // ─── createProfile ────────────────────────────────────────────────────────────

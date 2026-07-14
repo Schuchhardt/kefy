@@ -467,13 +467,28 @@ export default function EditContentModal({
           </Field>
         )}
 
-        {/* Video (reel) */}
+        {/* Video (reel) — scenes already carry background images + text from
+            generation, but the text only gets baked in when Remotion renders
+            them into a video. Auto-trigger that render here, same as Story. */}
         {isReel && (
           <Field label={t.videoField}>
             {videoUrl ? (
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <video src={videoUrl} controls style={{ width: 140, height: 200, borderRadius: 8, border: '1px solid var(--border)', objectFit: 'cover', background: '#000' }} />
                 <UploadBtn label={t.changeVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
+              </div>
+            ) : slides.length > 0 ? (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <MuxReelPlayer
+                  itemId={item.id}
+                  renderStatus={item.render_status ?? 'not_rendered'}
+                  height={200}
+                  onRenderDone={(_id, url) => {
+                    setVideoUrl(url);
+                    onUpdate({ video_url: url });
+                  }}
+                />
+                <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
               </div>
             ) : (
               <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
