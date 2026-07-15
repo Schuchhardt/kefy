@@ -429,7 +429,9 @@ function ContentPicker({
               }}
             >
               <div style={{
-                width: '100%', aspectRatio: '1/1', overflow: 'hidden',
+                width: '100%',
+                aspectRatio: item.content_type === 'reel' ? '3/4' : item.content_type === 'story' ? '2/3' : '1/1',
+                overflow: 'hidden',
                 background: `linear-gradient(135deg, ${brandKit?.accent_color ?? '#c6ff4b'}20, ${brandKit?.primary_color ?? '#888'}10)`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>

@@ -27,8 +27,11 @@ export function StoryPreview({
       {videoUrl ? (
         <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
       ) : imageUrl ? (
+        // Story images are generated at 1024x1536 (2:3) — narrower than this
+        // 9:16 mockup frame. `contain` avoids cropping the top/bottom off;
+        // `cover` would clip a meaningful chunk of the image.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
       ) : (
         <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #a18cd1 0%, #fbc2eb 100%)' }} />
       )}

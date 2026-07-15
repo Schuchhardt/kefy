@@ -87,6 +87,13 @@ function ContentPageInner() {
     ...ct,
     desc: t.contentDescs[ct.value] ?? '',
   }));
+  // Creation only asks image vs. video — the exact format (post/carousel/
+  // reel/story) is chosen later in the publish modal, which can generate any
+  // format on demand from the same topic (see ScheduleModal's FormatPicker).
+  const CONTENT_KINDS: { value: ContentType; label: string; icon: string }[] = [
+    { value: 'post', label: t.kindImageLabel, icon: CONTENT_TYPE_ICONS.post },
+    { value: 'reel', label: t.kindVideoLabel, icon: CONTENT_TYPE_ICONS.reel },
+  ];
   const STATUS_LABELS = t.statusLabels as Record<ContentStatus, string>;
 
 
@@ -320,6 +327,13 @@ function ContentPageInner() {
     setGenResult(null);
     setRecommendModalOpen(false);
 
+    // Scroll the form into view so the "Generando..." state (and, once ready,
+    // the result / new item) is visible right after the modal closes — without
+    // this the modal just disappears and generation looks like a no-op.
+    setTimeout(() => {
+      document.getElementById('gen-topic-textarea')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
+
     handleGenerate(null, { topic: r.topic, type: r.content_type, slides });
   }
 
@@ -435,26 +449,30 @@ function ContentPageInner() {
               {t.generateFormTitle}
             </h2>
 
-            {/* Content type selector */}
+            {/* Content kind selector — image vs. video only; the exact publish
+                format (post/carousel/reel/story) is picked later. */}
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>{t.typeLabel}</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {CONTENT_TYPES.map((ct) => (
-                  <button
-                    key={ct.value} type="button" onClick={() => setGenType(ct.value)}
-                    title={ct.desc}
-                    style={{
-                      flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
-                      border: `1px solid ${genType === ct.value ? 'var(--accent)' : 'var(--border)'}`,
-                      background: genType === ct.value ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
-                      color: genType === ct.value ? 'var(--accent)' : 'var(--text)',
-                      fontWeight: genType === ct.value ? 700 : 400,
-                    }}
-                  >
-                    {CONTENT_TYPE_ICONS[ct.value]} {ct.label}
-                  </button>
-                ))}
+                {CONTENT_KINDS.map((ck) => {
+                  const active = ck.value === 'reel' ? genType === 'reel' : genType !== 'reel';
+                  return (
+                    <button
+                      key={ck.value} type="button" onClick={() => setGenType(ck.value)}
+                      style={{
+                        flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+                        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                        background: active ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
+                        color: active ? 'var(--accent)' : 'var(--text)',
+                        fontWeight: active ? 700 : 400,
+                      }}
+                    >
+                      {ck.icon} {ck.label}
+                    </button>
+                  );
+                })}
               </div>
+              <p style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 0' }}>{t.kindHint}</p>
             </div>
 
             {/* Topic — write it yourself, or get a recommendation right here */}
@@ -491,6 +509,9 @@ function ContentPageInner() {
                 }
                 required
               />
+              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', margin: '10px 0 4px' }}>
+                {t.recommendHintLabel}
+              </label>
               <input
                 type="text"
                 value={recsHint}
@@ -501,9 +522,14 @@ function ContentPageInner() {
                 placeholder={t.recommendHintPlaceholder}
                 maxLength={500}
                 disabled={recsLoading}
-                style={{ ...inputStyle, marginTop: 8, fontSize: 12.5, padding: '7px 12px' }}
+                style={{ ...inputStyle, fontSize: 12.5, padding: '7px 12px', background: 'transparent', borderStyle: 'dashed' }}
               />
               {recsError && <p style={{ color: '#ff6b6b', fontSize: 12.5, marginTop: 6 }}>{recsError}</p>}
+              {generating && (
+                <p style={{ color: 'var(--accent)', fontSize: 12.5, marginTop: 8, fontWeight: 600 }}>
+                  ⏳ {t.generating}
+                </p>
+              )}
             </div>
 
             {/* Advanced config — slide/scene count + reference images (collapsed by default) */}

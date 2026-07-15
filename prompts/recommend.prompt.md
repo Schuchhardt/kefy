@@ -18,14 +18,14 @@ CRITICAL: Return ONLY a valid JSON array (no markdown fences, no commentary) wit
 [
   {
     "topic": "<concrete content idea, 1-2 sentences, max 240 chars, in {{language}}>",
-    "content_type": "post" | "carousel" | "reel",
+    "content_type": "post" | "carousel" | "reel" | "story",
     "rationale_short": "<why this idea fits the brand, max 100 chars, in {{language}}>"
   }
 ]
 
 Rules:
 - If USER GUIDANCE is present, every single idea MUST clearly address it; treat it as the top constraint over everything else.
-- Mix the three content_type values across the {{count}} ideas when possible (one post, one carousel, one reel).
+- Mix the four content_type values across the {{count}} ideas when possible (post, carousel, reel, story).
 - Avoid generic motivational fluff — anchor every idea to a specific, ownable angle for THIS brand (industry, niche, audience, differentiator).
 - `topic` must be actionable enough that a copywriter could draft the piece without follow-up questions.
 - Each idea must be **platform-agnostic** — playable on LinkedIn, Instagram, TikTok, Facebook or X with minor adaptation.
