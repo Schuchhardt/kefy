@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { CarouselSlide } from '@/types/content';
+import type { CarouselSlide, ReelScene } from '@/types/content';
 
 // Gradient palette for slides without images
 const GRADIENTS = [
@@ -16,6 +16,116 @@ const GRADIENTS = [
   'linear-gradient(135deg, #f6d365 0%, #fda085 100%)',
   'linear-gradient(135deg, #96fbc4 0%, #f9f586 100%)',
 ];
+
+/** The 1:1 media area of a carousel slide: the generated image with its text
+ *  overlay, or a gradient card with the slide copy when there's no image yet.
+ *  Extracted so channel-specific chrome (Instagram, LinkedIn, TikTok…) can
+ *  reuse the exact same slide rendering. */
+export function SlideCanvas({
+  slide, index, total, showCounter = true,
+}: {
+  slide:        CarouselSlide | ReelScene;
+  index:        number;
+  total:        number;
+  showCounter?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        position: 'relative', width: '100%',
+        aspectRatio: '1 / 1', overflow: 'hidden', background: '#000',
+      }}
+    >
+      {slide.image_url ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={slide.image_url}
+            alt={slide.title}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+          {/* Text overlay: title + body baked into stored image; shown here for slides without compositing */}
+          <div
+            style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 100%)',
+              padding: '48px 18px 18px',
+              boxSizing: 'border-box',
+              pointerEvents: 'none',
+            }}
+          >
+            <p style={{
+              margin: '0 0 5px', fontSize: 17, fontWeight: 800,
+              color: '#fff', lineHeight: 1.25,
+              textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+            }}>
+              {slide.title}
+            </p>
+            {slide.body && (
+              <p style={{
+                margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.88)',
+                lineHeight: 1.45, textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+              }}>
+                {slide.body}
+              </p>
+            )}
+          </div>
+        </>
+      ) : (
+        /* Gradient card with text */
+        <div
+          style={{
+            width: '100%', height: '100%',
+            background: GRADIENTS[index % GRADIENTS.length],
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            padding: '28px 24px', boxSizing: 'border-box',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.55)',
+              textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 18,
+            }}
+          >
+            {index + 1} / {total}
+          </span>
+          <p
+            style={{
+              fontSize: index === 0 ? 26 : 22, fontWeight: 800, color: '#fff',
+              textAlign: 'center', lineHeight: 1.25,
+              margin: '0 0 16px', textShadow: '0 2px 10px rgba(0,0,0,0.25)',
+            }}
+          >
+            {slide.title}
+          </p>
+          <p
+            style={{
+              fontSize: 15, color: 'rgba(255,255,255,0.85)',
+              textAlign: 'center', lineHeight: 1.55, margin: 0, maxWidth: 260,
+            }}
+          >
+            {slide.body}
+          </p>
+        </div>
+      )}
+
+      {/* Slide counter badge (only when image is present) */}
+      {showCounter && slide.image_url && (
+        <div
+          style={{
+            position: 'absolute', top: 12, right: 12,
+            background: 'rgba(0,0,0,0.55)', color: '#fff',
+            fontSize: 12, fontWeight: 600, borderRadius: 20,
+            padding: '3px 9px', backdropFilter: 'blur(6px)',
+          }}
+        >
+          {index + 1}/{total}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function CarouselPreview({
   slides,
@@ -87,93 +197,7 @@ export function CarouselPreview({
           aspectRatio: '1 / 1', overflow: 'hidden', background: '#000',
         }}
       >
-        {slide.image_url ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={slide.image_url}
-              alt={slide.title}
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            />
-            {/* Text overlay: title + body baked into stored image; shown here for slides without compositing */}
-            <div
-              style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 100%)',
-                padding: '48px 18px 18px',
-                boxSizing: 'border-box',
-                pointerEvents: 'none',
-              }}
-            >
-              <p style={{
-                margin: '0 0 5px', fontSize: 17, fontWeight: 800,
-                color: '#fff', lineHeight: 1.25,
-                textShadow: '0 1px 6px rgba(0,0,0,0.6)',
-              }}>
-                {slide.title}
-              </p>
-              {slide.body && (
-                <p style={{
-                  margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.88)',
-                  lineHeight: 1.45, textShadow: '0 1px 4px rgba(0,0,0,0.5)',
-                }}>
-                  {slide.body}
-                </p>
-              )}
-            </div>
-          </>
-        ) : (
-          /* Gradient card with text */
-          <div
-            style={{
-              width: '100%', height: '100%',
-              background: GRADIENTS[idx % GRADIENTS.length],
-              display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center',
-              padding: '28px 24px', boxSizing: 'border-box',
-            }}
-          >
-            <span
-              style={{
-                fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.55)',
-                textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 18,
-              }}
-            >
-              {idx + 1} / {total}
-            </span>
-            <p
-              style={{
-                fontSize: idx === 0 ? 26 : 22, fontWeight: 800, color: '#fff',
-                textAlign: 'center', lineHeight: 1.25,
-                margin: '0 0 16px', textShadow: '0 2px 10px rgba(0,0,0,0.25)',
-              }}
-            >
-              {slide.title}
-            </p>
-            <p
-              style={{
-                fontSize: 15, color: 'rgba(255,255,255,0.85)',
-                textAlign: 'center', lineHeight: 1.55, margin: 0, maxWidth: 260,
-              }}
-            >
-              {slide.body}
-            </p>
-          </div>
-        )}
-
-        {/* Slide counter badge (only when image is present) */}
-        {slide.image_url && (
-          <div
-            style={{
-              position: 'absolute', top: 12, right: 12,
-              background: 'rgba(0,0,0,0.55)', color: '#fff',
-              fontSize: 12, fontWeight: 600, borderRadius: 20,
-              padding: '3px 9px', backdropFilter: 'blur(6px)',
-            }}
-          >
-            {idx + 1}/{total}
-          </div>
-        )}
+        <SlideCanvas slide={slide} index={idx} total={total} />
 
         {/* ◀ Prev */}
         {idx > 0 && (

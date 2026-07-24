@@ -14,6 +14,8 @@ import type {
   ReelScene,
   GenerateReelOptions,
   GenerateReelResult,
+  GenerateSlideTextOptions,
+  GenerateSlideTextResult,
   RecommendedContentType,
   ContentRecommendation,
   RecommendBrandContext,
@@ -399,6 +401,75 @@ export async function generateCarouselSlides(
     slides:     parsed.slides,
     description,
     hashtags,
+    model,
+    tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+  };
+}
+
+// ─── Single slide / scene text regeneration ───────────────────────────────────
+
+/**
+ * Regenerate the on-image text (title + body) for ONE carousel slide or reel
+ * scene, keeping it consistent with the brand voice. Used by the per-slide
+ * "Regenerar texto con IA" button in the edit modal.
+ */
+export async function generateSlideText(
+  opts: GenerateSlideTextOptions,
+): Promise<GenerateSlideTextResult> {
+  const lang = opts.language === 'en' ? 'English' : 'Spanish';
+  const tone = opts.tone?.join(', ') || 'professional';
+  const unit = opts.kind === 'reel' ? 'reel scene' : 'carousel slide';
+
+  const brandCtx = opts.brandName
+    ? `Brand: "${opts.brandName}"${opts.tagline ? ` — "${opts.tagline}"` : ''}.`
+    : '';
+
+  const current = [
+    opts.title ? `Current title: "${opts.title}"` : '',
+    opts.body ? `Current body: "${opts.body}"` : '',
+  ].filter(Boolean).join('\n');
+
+  const system = [
+    `You are an expert social media copywriter rewriting the on-image text of a single ${unit} for ${opts.channel} in ${lang}.`,
+    `Tone: ${tone}.`,
+    brandCtx,
+    'Return ONLY valid JSON (no markdown fences) with this exact shape:',
+    '{"title":"<max 60 chars headline shown on the slide>","body":"<max 120 chars supporting copy shown on the slide>"}',
+    'Keep it punchy and self-contained. Do not add hashtags or emojis unless clearly on-brand.',
+  ].filter(Boolean).join(' ');
+
+  const instruction = opts.feedback?.trim()
+    ? `Rewrite this ${unit} applying: "${opts.feedback.trim()}".`
+    : `Rewrite this ${unit} to be sharper and more engaging while keeping the same idea.`;
+
+  const userMessage = [instruction, current].filter(Boolean).join('\n\n')
+    || `Write an engaging ${unit}.`;
+
+  const client = getAnthropic();
+  const model  = 'claude-opus-4-5';
+
+  const response = await client.messages.create({
+    model,
+    max_tokens: 512,
+    system,
+    messages: [{ role: 'user', content: userMessage }],
+  });
+
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
+
+  let parsed: { title?: string; body?: string };
+  try {
+    parsed = JSON.parse(stripJsonFences(raw)) as typeof parsed;
+  } catch {
+    throw new Error(`Claude returned invalid slide JSON: ${raw.slice(0, 200)}`);
+  }
+
+  return {
+    title:      (parsed.title ?? '').slice(0, 80),
+    body:       (parsed.body ?? '').slice(0, 200),
     model,
     tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
   };

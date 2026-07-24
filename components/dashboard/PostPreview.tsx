@@ -65,7 +65,7 @@ function RichText({ text, color = 'var(--text)', hashColor = '#1d9bf0', fontSize
 
 // ─── Channel renderers ────────────────────────────────────────────────────────
 
-function InstagramPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreviewProps) {
+function InstagramPost({ body, imageUrl, hashtags, username, logoUrl, media, mediaFooter }: PostPreviewProps) {
   const caption = [body, ...hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`))].filter(Boolean).join(' ');
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', marginBottom: 16 }}>
@@ -79,16 +79,21 @@ function InstagramPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrev
         <span style={{ fontSize: 18, color: 'var(--muted)', cursor: 'pointer', padding: '0 4px' }}>•••</span>
       </div>
       {/* Image / placeholder */}
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', overflow: 'hidden', background: '#000' }}>
-        {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt="post" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-        ) : (
-          <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28, boxSizing: 'border-box' }}>
-            <p style={{ fontSize: 20, fontWeight: 800, color: '#fff', textAlign: 'center', lineHeight: 1.3, margin: 0, textShadow: '0 2px 10px rgba(0,0,0,0.25)' }}>{body}</p>
-          </div>
-        )}
-      </div>
+      {media ? (
+        <div style={{ position: 'relative', width: '100%' }}>{media}</div>
+      ) : (
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', overflow: 'hidden', background: '#000' }}>
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt="post" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          ) : (
+            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28, boxSizing: 'border-box' }}>
+              <p style={{ fontSize: 20, fontWeight: 800, color: '#fff', textAlign: 'center', lineHeight: 1.3, margin: 0, textShadow: '0 2px 10px rgba(0,0,0,0.25)' }}>{body}</p>
+            </div>
+          )}
+        </div>
+      )}
+      {mediaFooter}
       {/* Actions */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 4px', gap: 14 }}>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ cursor: 'pointer' }}><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" /></svg>
@@ -108,7 +113,7 @@ function InstagramPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrev
   );
 }
 
-function LinkedInPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreviewProps) {
+function LinkedInPost({ body, imageUrl, hashtags, username, logoUrl, media, mediaFooter }: PostPreviewProps) {
   const handle = username.toLowerCase().replace(/\s+/g, '');
   const fullText = [body, ...hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`))].filter(Boolean).join('\n');
   return (
@@ -132,7 +137,9 @@ function LinkedInPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevi
         </div>
       )}
       {/* Image */}
-      {imageUrl && (
+      {media ? (
+        <div style={{ width: '100%' }}>{media}{mediaFooter}</div>
+      ) : imageUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={imageUrl} alt="post" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} />
       )}
@@ -148,7 +155,7 @@ function LinkedInPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevi
   );
 }
 
-function TwitterPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreviewProps) {
+function TwitterPost({ body, imageUrl, hashtags, username, logoUrl, media, mediaFooter }: PostPreviewProps) {
   const handle = username.toLowerCase().replace(/\s+/g, '_');
   const fullText = [body, ...hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`))].filter(Boolean).join(' ');
   return (
@@ -163,9 +170,11 @@ function TwitterPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevie
             <span style={{ fontSize: 14, color: 'var(--muted)' }}>@{handle} · 2h</span>
           </div>
           {/* Tweet text */}
-          {fullText && <div style={{ marginBottom: imageUrl ? 10 : 0 }}><RichText text={fullText} hashColor="#1d9bf0" fontSize={15} /></div>}
+          {fullText && <div style={{ marginBottom: (imageUrl || media) ? 10 : 0 }}><RichText text={fullText} hashColor="#1d9bf0" fontSize={15} /></div>}
           {/* Image */}
-          {imageUrl && (
+          {media ? (
+            <div style={{ width: '100%', borderRadius: 14, overflow: 'hidden', marginTop: 8 }}>{media}{mediaFooter}</div>
+          ) : imageUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt="post" style={{ width: '100%', borderRadius: 14, display: 'block', maxHeight: 280, objectFit: 'cover', marginTop: 8 }} />
           )}
@@ -186,7 +195,7 @@ function TwitterPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevie
   );
 }
 
-function ThreadsPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreviewProps) {
+function ThreadsPost({ body, imageUrl, hashtags, username, logoUrl, media, mediaFooter }: PostPreviewProps) {
   const handle = username.toLowerCase().replace(/\s+/g, '_');
   const fullText = [body, ...hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`))].filter(Boolean).join(' ');
   return (
@@ -201,8 +210,10 @@ function ThreadsPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevie
             <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>@{handle}</span>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>· 2h</span>
           </div>
-          {fullText && <div style={{ marginBottom: imageUrl ? 10 : 0 }}><RichText text={fullText} hashColor="#1d9bf0" fontSize={14} /></div>}
-          {imageUrl && (
+          {fullText && <div style={{ marginBottom: (imageUrl || media) ? 10 : 0 }}><RichText text={fullText} hashColor="#1d9bf0" fontSize={14} /></div>}
+          {media ? (
+            <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', marginTop: 8 }}>{media}{mediaFooter}</div>
+          ) : imageUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt="post" style={{ width: '100%', borderRadius: 10, display: 'block', maxHeight: 260, objectFit: 'cover', marginTop: 8 }} />
           )}
@@ -217,7 +228,7 @@ function ThreadsPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevie
   );
 }
 
-function FacebookPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreviewProps) {
+function FacebookPost({ body, imageUrl, hashtags, username, logoUrl, media, mediaFooter }: PostPreviewProps) {
   const fullText = [body, ...hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`))].filter(Boolean).join(' ');
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', marginBottom: 16 }}>
@@ -234,7 +245,9 @@ function FacebookPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevi
           <RichText text={fullText} hashColor="#0866ff" fontSize={14} />
         </div>
       )}
-      {imageUrl && (
+      {media ? (
+        <div style={{ width: '100%' }}>{media}{mediaFooter}</div>
+      ) : imageUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={imageUrl} alt="post" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} />
       )}
@@ -249,14 +262,16 @@ function FacebookPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevi
   );
 }
 
-function TikTokPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreviewProps) {
+function TikTokPost({ body, imageUrl, hashtags, username, logoUrl, media }: PostPreviewProps) {
   const handle = username.toLowerCase().replace(/\s+/g, '_');
   const fullText = [body, ...hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`))].filter(Boolean).join(' ');
   return (
     <div style={{ background: '#000', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', marginBottom: 16, position: 'relative' }}>
       {/* Background image or gradient */}
       <div style={{ aspectRatio: '9 / 16', position: 'relative', background: 'linear-gradient(180deg, #0a0a0a 0%, #1a1a2e 100%)', overflow: 'hidden', maxHeight: 420 }}>
-        {imageUrl && (
+        {media ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{media}</div>
+        ) : imageUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="post" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }} />
         )}
@@ -280,7 +295,7 @@ function TikTokPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreview
   );
 }
 
-function GenericPost({ body, imageUrl, hashtags, username, logoUrl }: PostPreviewProps) {
+function GenericPost({ body, imageUrl, hashtags, username, logoUrl, media, mediaFooter }: PostPreviewProps) {
   const fullText = [body, ...hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`))].filter(Boolean).join(' ');
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', marginBottom: 16 }}>
@@ -289,7 +304,9 @@ function GenericPost({ body, imageUrl, hashtags, username, logoUrl }: PostPrevie
         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{username}</span>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>Ahora</span>
       </div>
-      {imageUrl && (
+      {media ? (
+        <div style={{ width: '100%' }}>{media}{mediaFooter}</div>
+      ) : imageUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={imageUrl} alt="post" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} />
       )}
@@ -311,6 +328,11 @@ interface PostPreviewProps {
   hashtags:  string[];
   username:  string;
   logoUrl?:  string | null;
+  /** Custom media node rendered in place of `imageUrl` — lets carousel slides
+   *  (see `SlideCanvas`) reuse each network's chrome. */
+  media?:    React.ReactNode;
+  /** Extra node rendered right under the media (slide dots, counters…). */
+  mediaFooter?: React.ReactNode;
 }
 
 export function PostPreview(props: PostPreviewProps) {

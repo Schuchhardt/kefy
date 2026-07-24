@@ -81,6 +81,30 @@ export interface GenerateCarouselResult {
   tokensUsed:  number;
 }
 
+// ─── Single slide / scene text regeneration ──────────────────────────────────
+
+export interface GenerateSlideTextOptions {
+  /** 'carousel' slide or 'reel' scene — tunes the copy length + style. */
+  kind:         'carousel' | 'reel';
+  channel:      ContentChannel;
+  /** Current title/body of the slide, used as the thing to rewrite. */
+  title?:       string;
+  body?:        string;
+  /** Optional user instruction on what to change. */
+  feedback?:    string;
+  tone?:        string[];
+  language?:    'es' | 'en';
+  brandName?:   string;
+  tagline?:     string;
+}
+
+export interface GenerateSlideTextResult {
+  title:      string;
+  body:       string;
+  model:      string;
+  tokensUsed: number;
+}
+
 // ─── Reel script generation ──────────────────────────────────────────────────
 
 export interface GenerateReelOptions {
