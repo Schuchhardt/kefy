@@ -7,6 +7,10 @@
     {
       "path": "/api/autopilot/run",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/content-library/generate",
+      "schedule": "0 6 * * *"
     }
   ],
   "functions": {
@@ -25,6 +29,9 @@
     },
     "app/api/content/generate/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/content-library/generate/route.ts": {
+      "maxDuration": 300
     }
   }
 }

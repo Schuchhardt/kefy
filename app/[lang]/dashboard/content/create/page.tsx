@@ -8,7 +8,9 @@ import ScheduleModal       from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
 import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
 import RecommendModal      from '@/components/dashboard/content/RecommendModal';
+import ContentLibraryModal from '@/components/dashboard/content/ContentLibraryModal';
 import type { ContentItem, ContentType, ContentStatus, ReelScene, CarouselSlide } from '@/types/content';
+import type { LibraryItemWithIndustry } from '@/types/content-library';
 import type { Channel } from '@/types/channels';
 import type { Locale } from '@/types/i18n';
 import type { RecSource, Recommendation, StrategyMeta } from '@/types/strategy';
@@ -70,6 +72,68 @@ const inputStyle: React.CSSProperties = {
   outline: 'none',
   boxSizing: 'border-box',
 };
+
+// ─── Library Reference Grid (for reference images tab) ───────────────────────
+
+function LibraryReferenceGrid({ lang, referenceImages, onToggle, selectedLabel }: {
+  lang: 'es' | 'en';
+  referenceImages: string[];
+  onToggle: (url: string) => void;
+  selectedLabel: string;
+}) {
+  const [thumbs, setThumbs] = useState<{ id: string; url: string }[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/content-library?limit=12&language=${lang}`, { credentials: 'include' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json() as { items: Array<{ id: string; image_url: string | null }> };
+        if (!cancelled) {
+          setThumbs(data.items.filter((i) => i.image_url).map((i) => ({ id: i.id, url: i.image_url! })));
+        }
+      } catch { /* non-critical */ }
+      if (!cancelled) setLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [lang]);
+
+  if (!loaded) return <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading…</p>;
+  if (thumbs.length === 0) return <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>{lang === 'en' ? 'No library images yet.' : 'No hay imágenes en la biblioteca aún.'}</p>;
+
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {thumbs.map((p) => {
+        const selected = referenceImages.includes(p.url);
+        return (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => onToggle(p.url)}
+            title={selected ? selectedLabel : undefined}
+            style={{
+              position: 'relative', width: 56, height: 56, padding: 0, borderRadius: 8,
+              overflow: 'hidden', cursor: 'pointer',
+              border: `2px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            {selected && (
+              <span style={{
+                position: 'absolute', inset: 0, background: 'rgba(198,255,75,0.28)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#000', fontWeight: 800, fontSize: 14,
+              }}>✓</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -134,7 +198,7 @@ function ContentPageInner() {
   // Reference images for AI-guided image generation
   const [referenceImages, setReferenceImages]   = useState<string[]>([]);
   const [referenceUploading, setReferenceUploading] = useState(false);
-  const [referenceSource, setReferenceSource]   = useState<'upload' | 'previous'>('upload');
+  const [referenceSource, setReferenceSource]   = useState<'upload' | 'previous' | 'library'>('upload');
 
   // Advanced config (slide/scene count, reference images) collapsed by default
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -143,6 +207,7 @@ function ContentPageInner() {
   const [viewItem,    setViewItem]    = useState<ContentItem | null>(null);
   const [editItem,    setEditItem]    = useState<ContentItem | null>(null);
   const [manualOpen,  setManualOpen]  = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // Track items whose cover image is being generated in background
   const [imagePending, setImagePending] = useState<Set<string>>(new Set());
@@ -337,6 +402,26 @@ function ContentPageInner() {
     handleGenerate(null, { topic: r.topic, type: r.content_type, slides });
   }
 
+  function handleSelectLibraryItem(item: LibraryItemWithIndustry) {
+    setShowGenerate(true);
+    setGenType(item.content_type);
+    setGenTopic(item.title);
+    setGenError(null);
+    setGenResult(null);
+    setLibraryOpen(false);
+
+    if (item.image_url) {
+      setReferenceImages((prev) => prev.includes(item.image_url!) ? prev : [...prev, item.image_url!].slice(0, 3));
+      setAdvancedOpen(true);
+    }
+
+    setTimeout(() => {
+      document.getElementById('gen-topic-textarea')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
+
+    handleGenerate(null, { topic: item.title, type: item.content_type });
+  }
+
   async function handleReferenceImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
@@ -479,19 +564,33 @@ function ContentPageInner() {
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{t.topicLabel}</label>
-                <button
-                  type="button"
-                  onClick={handleRecommendClick}
-                  disabled={recsLoading}
-                  style={{
-                    background: 'rgba(198,255,75,0.1)', color: 'var(--accent)',
-                    border: '1px solid rgba(198,255,75,0.4)', borderRadius: 999,
-                    padding: '5px 12px', fontWeight: 700, fontSize: 12,
-                    cursor: recsLoading ? 'wait' : 'pointer', opacity: recsLoading ? 0.7 : 1, whiteSpace: 'nowrap',
-                  }}
-                >
-                  {recsLoading ? t.recommendLoading : t.recommendInlineBtn}
-                </button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setLibraryOpen(true)}
+                    style={{
+                      background: 'rgba(198,255,75,0.06)', color: 'var(--accent)',
+                      border: '1px solid rgba(198,255,75,0.3)', borderRadius: 999,
+                      padding: '5px 12px', fontWeight: 700, fontSize: 12,
+                      cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {t.libraryBtn}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRecommendClick}
+                    disabled={recsLoading}
+                    style={{
+                      background: 'rgba(198,255,75,0.1)', color: 'var(--accent)',
+                      border: '1px solid rgba(198,255,75,0.4)', borderRadius: 999,
+                      padding: '5px 12px', fontWeight: 700, fontSize: 12,
+                      cursor: recsLoading ? 'wait' : 'pointer', opacity: recsLoading ? 0.7 : 1, whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {recsLoading ? t.recommendLoading : t.recommendInlineBtn}
+                  </button>
+                </div>
               </div>
               <textarea
                 id="gen-topic-textarea"
@@ -597,7 +696,7 @@ function ContentPageInner() {
                       )}
 
                       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                        {(['upload', 'previous'] as const).map((src) => (
+                        {(['upload', 'previous', 'library'] as const).map((src) => (
                           <button
                             key={src}
                             type="button"
@@ -609,7 +708,7 @@ function ContentPageInner() {
                               color: referenceSource === src ? 'var(--accent)' : 'var(--text)',
                             }}
                           >
-                            {src === 'upload' ? t.referenceTabUpload : t.referenceTabPrevious}
+                            {src === 'upload' ? t.referenceTabUpload : src === 'previous' ? t.referenceTabPrevious : t.libraryTabLabel}
                           </button>
                         ))}
                       </div>
@@ -630,7 +729,7 @@ function ContentPageInner() {
                             />
                           </label>
                         )
-                      ) : (
+                      ) : referenceSource === 'previous' ? (
                         previousPostThumbs.length === 0 ? (
                           <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>{t.referenceNoPrevious}</p>
                         ) : (
@@ -663,6 +762,13 @@ function ContentPageInner() {
                             })}
                           </div>
                         )
+                      ) : (
+                        <LibraryReferenceGrid
+                          lang={lang}
+                          referenceImages={referenceImages}
+                          onToggle={togglePreviousPostReference}
+                          selectedLabel={t.referenceSelected}
+                        />
                       )}
                     </div>
                   </div>
@@ -1077,6 +1183,13 @@ function ContentPageInner() {
         sourceText={recsSourceText}
         onSelect={handleSelectRecommendation}
         onRotate={handleRotateRecommendations}
+      />
+
+      <ContentLibraryModal
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        lang={lang}
+        onSelect={handleSelectLibraryItem}
       />
 
     </>

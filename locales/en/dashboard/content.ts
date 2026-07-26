@@ -163,6 +163,17 @@ const en = {
     successSched: '✓ Scheduled successfully',
     back: '← Change content',
   },
+  // ── Content Library ──
+  libraryBtn: '📚 Library',
+  libraryModalTitle: 'Content Library',
+  libraryModalSubtitle: 'Get inspired by industry-proven ideas — use the topic and image as reference.',
+  libraryAllIndustries: 'All industries',
+  libraryAllTypes: 'All',
+  libraryUseBtn: 'Use as inspiration',
+  libraryEmpty: 'No library content available for these filters.',
+  libraryLoading: 'Loading…',
+  libraryLoadMore: 'Load more',
+  libraryTabLabel: 'Library',
 };
 
 export default en;
