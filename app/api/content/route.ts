@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
 
   let query = db
     .from('kefy_content_items')
-    .select('id, channel, content_type, status, title, body, image_url, hashtags, slides, video_url, created_by, created_at, updated_at')
+    .select('id, channel, content_type, status, title, body, image_url, image_status, hashtags, slides, video_url, render_status, created_by, created_at, updated_at')
     .eq('brand_id', brand.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);

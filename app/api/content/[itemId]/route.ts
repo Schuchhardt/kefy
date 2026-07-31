@@ -3,6 +3,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 
 const VALID_STATUSES = new Set(['draft', 'approved', 'scheduled', 'published', 'archived']);
+const VALID_RENDER_STATUSES = new Set(['not_rendered', 'rendering', 'ready', 'error']);
 
 // ─── GET /api/content/[itemId] ────────────────────────────────────────────────
 
@@ -64,6 +65,9 @@ export async function PATCH(
   if (input.status !== undefined && !VALID_STATUSES.has(input.status as string)) {
     return NextResponse.json({ error: `Invalid status` }, { status: 422 });
   }
+  if (input.render_status !== undefined && input.render_status !== null && !VALID_RENDER_STATUSES.has(input.render_status as string)) {
+    return NextResponse.json({ error: `Invalid render_status` }, { status: 422 });
+  }
 
   // Sanitize slides if provided
   let sanitizedSlides: Array<Record<string, unknown>> | undefined;
@@ -84,7 +88,7 @@ export async function PATCH(
       .map((s, i) => ({ ...s, slide_order: i + 1 }));
   }
 
-  const allowed = ['title', 'body', 'image_url', 'image_prompt', 'hashtags', 'status', 'metadata', 'video_url'] as const;
+  const allowed = ['title', 'body', 'image_url', 'image_prompt', 'hashtags', 'status', 'metadata', 'video_url', 'render_status'] as const;
   const update: Record<string, unknown> = {};
   for (const key of allowed) {
     if (key in input) update[key] = input[key] ?? null;

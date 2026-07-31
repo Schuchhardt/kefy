@@ -182,7 +182,12 @@ function ReelScene({
       <AbsoluteFill style={{
         display: 'flex', flexDirection: 'column',
         justifyContent: 'flex-end', alignItems: 'flex-start',
-        padding: '80px 68px 144px',
+        // Bottom padding is generous on purpose: Instagram/TikTok reserve the
+        // bottom ~20% of the frame for their own UI (username, caption,
+        // action icons), which otherwise covers this text (144px wasn't
+        // enough — Facebook doesn't have that overlay, but the extra margin
+        // there is a fine tradeoff since the video is shared across networks).
+        padding: '80px 68px 260px',
       }}>
         {/* Scene chip */}
         <div style={{ marginBottom: 22, opacity: chipOpacity }}>

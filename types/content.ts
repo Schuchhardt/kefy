@@ -43,9 +43,9 @@ export interface ContentItem {
   mux_playback_id?: string | null;
   mux_asset_id?:    string | null;
   render_status?:   'not_rendered' | 'rendering' | 'ready' | 'error' | null;
+  /** State of the async cover-image generation pipeline; NULL when no generation is in flight. */
+  image_status?:    'generating' | 'ready' | 'error' | null;
   created_at:       string;
-  /** Frontend-only: indicates the cover image is still being generated. */
-  image_pending?:   boolean;
   /** Alternate formats generated on demand for the same topic (post/carousel/reel/story). */
   renditions?:      ContentRendition[];
 }
