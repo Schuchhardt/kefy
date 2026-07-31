@@ -1,0 +1,4 @@
+[build.environment]
+  # ZERNIO_API_URL no es un secreto: es la URL base pública de la API de Zernio
+  # (https://zernio.com/api/v1), documentada en AGENTS.md, README.md y docs/zernio.md.
+  SECRETS_SCAN_OMIT_KEYS = "ZERNIO_API_URL"
