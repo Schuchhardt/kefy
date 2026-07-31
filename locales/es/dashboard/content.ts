@@ -163,6 +163,17 @@ const es = {
     successSched: '✓ Programado correctamente',
     back: '← Cambiar contenido',
   },
+  // ── Content Library ──
+  libraryBtn: '📚 Biblioteca',
+  libraryModalTitle: 'Biblioteca de contenido',
+  libraryModalSubtitle: 'Inspírate con ideas probadas por industria — usa el tema y la imagen como referencia.',
+  libraryAllIndustries: 'Todas las industrias',
+  libraryAllTypes: 'Todos',
+  libraryUseBtn: 'Usar como inspiración',
+  libraryEmpty: 'No hay contenido en la biblioteca para estos filtros.',
+  libraryLoading: 'Cargando…',
+  libraryLoadMore: 'Cargar más',
+  libraryTabLabel: 'Biblioteca',
 };
 
 export default es;

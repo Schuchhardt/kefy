@@ -644,3 +644,70 @@ export async function generateContentRecommendations(
     tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
   };
 }
+
+// ─── Library content generation ──────────────────────────────────────────────
+
+export interface GenerateLibraryContentOptions {
+  industryName:  string;
+  contentType:   'post' | 'carousel' | 'reel' | 'story';
+  language:      'es' | 'en';
+  recentTopics?: string[];
+}
+
+export interface GenerateLibraryContentResult {
+  title:       string;
+  body:        string;
+  hashtags:    string[];
+  imagePrompt: string;
+  contentType: 'post' | 'carousel' | 'reel' | 'story';
+}
+
+export async function generateLibraryContent(
+  opts: GenerateLibraryContentOptions,
+): Promise<GenerateLibraryContentResult> {
+  const lang = opts.language === 'en' ? 'English' : 'Spanish';
+
+  const recentLines = opts.recentTopics?.length
+    ? `Recently generated topics (DO NOT reuse):\n${opts.recentTopics.map((t) => `- ${t}`).join('\n')}`
+    : '';
+
+  const system = loadPrompt('library-content', {
+    content_type:  opts.contentType,
+    industry_name: opts.industryName,
+    language:      lang,
+    recent_topics: recentLines,
+  });
+
+  const client = getAnthropic();
+
+  const response = await client.messages.create({
+    model: 'claude-opus-4-5',
+    max_tokens: 1024,
+    system,
+    messages: [{ role: 'user', content: `Generate a ${opts.contentType} for the ${opts.industryName} industry.` }],
+  });
+
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
+
+  let parsed: { title?: string; body?: string; hashtags?: string[]; image_prompt?: string; content_type?: string };
+  try {
+    parsed = JSON.parse(stripJsonFences(raw));
+  } catch {
+    throw new Error(`Claude returned invalid library content JSON: ${raw.slice(0, 200)}`);
+  }
+
+  const valid: Array<'post' | 'carousel' | 'reel' | 'story'> = ['post', 'carousel', 'reel', 'story'];
+
+  return {
+    title:       String(parsed.title ?? '').slice(0, 120),
+    body:        String(parsed.body ?? '').slice(0, 1000),
+    hashtags:    Array.isArray(parsed.hashtags) ? parsed.hashtags.map(String).slice(0, 8) : [],
+    imagePrompt: String(parsed.image_prompt ?? '').slice(0, 200),
+    contentType: valid.includes(parsed.content_type as typeof valid[number])
+      ? (parsed.content_type as typeof valid[number])
+      : opts.contentType,
+  };
+}
