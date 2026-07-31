@@ -38,14 +38,20 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
 
     if (brandKit?.industry) {
-      const { data: industryRow } = await db
+      // Matched in JS (not a PostgREST `.or()` filter) since brandKit.industry is
+      // free-text and could otherwise break or manipulate the filter expression.
+      const { data: industries } = await db
         .from('kefy_content_industries')
-        .select('id')
-        .or(`slug.eq.${brandKit.industry},name_es.ilike.${brandKit.industry},name_en.ilike.${brandKit.industry}`)
-        .limit(1)
-        .maybeSingle();
+        .select('id, slug, name_es, name_en');
 
-      if (industryRow?.id) industryId = industryRow.id;
+      const needle = brandKit.industry.trim().toLowerCase();
+      const match = (industries ?? []).find((ind) =>
+        ind.slug.toLowerCase() === needle ||
+        ind.name_es.toLowerCase() === needle ||
+        ind.name_en.toLowerCase() === needle,
+      );
+
+      if (match?.id) industryId = match.id;
     }
   }
 
