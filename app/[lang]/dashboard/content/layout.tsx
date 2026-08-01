@@ -5,8 +5,8 @@ import { usePathname, useParams } from 'next/navigation';
 import { ReactNode } from 'react';
 
 const LABELS = {
-  es: { create: 'Crear', calendar: 'Calendario' },
-  en: { create: 'Create', calendar: 'Calendar' },
+  es: { create: 'Crear', calendar: 'Calendario', library: 'Librería' },
+  en: { create: 'Create', calendar: 'Calendar', library: 'Library' },
 };
 
 export default function ContentLayout({ children }: { children: ReactNode }) {
@@ -18,6 +18,7 @@ export default function ContentLayout({ children }: { children: ReactNode }) {
   const tabs = [
     { key: 'create',   label: t.create,   href: `/${lang}/dashboard/content/create`   },
     { key: 'calendar', label: t.calendar, href: `/${lang}/dashboard/content/calendar` },
+    { key: 'library',  label: t.library,  href: `/${lang}/dashboard/content/library`  },
   ];
 
   return (

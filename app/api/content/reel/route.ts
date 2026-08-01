@@ -67,6 +67,9 @@ export async function POST(req: NextRequest) {
     .includes(input.image_quality as 'low' | 'medium' | 'high')
     ? (input.image_quality as 'low' | 'medium' | 'high')
     : 'medium';
+  const referenceImages = Array.isArray(input.reference_image_urls)
+    ? input.reference_image_urls.filter((u): u is string => typeof u === 'string').slice(0, 3)
+    : undefined;
 
   const db = createSupabaseServer();
 
@@ -103,7 +106,6 @@ export async function POST(req: NextRequest) {
 
       try {
         // For reel backgrounds: do NOT pass logo (it's overlaid by Remotion, not baked in).
-        // Do NOT pass referenceImages either — those are brand references, not backgrounds.
         const bgPrompt = `Background scene for a reel: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks, NO signs with writing, NO UI overlays. Pure cinematic background scene only.`;
         const imgResult = await generateContentImage({
           prompt:  bgPrompt,
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest) {
             tone:           brandKit?.tone           ?? undefined,
             // NO logoB64/logoMimeType — logo is overlaid by Remotion, must not be baked into background
           },
+          referenceImages,
         });
         const imageUrl = await uploadBase64Image(
           imgResult.b64,

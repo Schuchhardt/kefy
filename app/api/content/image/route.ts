@@ -25,6 +25,8 @@ const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
 //   compositeTitle? / compositeBody? — when provided, bakes this title/body
 //     text onto the generated image (used for carousel slide images, which
 //     are infographic-style and need the copy burned into the photo itself)
+//   reference_image_urls? — public URLs of reference images to guide the
+//     generated visual style/composition (max 3)
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -53,6 +55,9 @@ export async function POST(req: NextRequest) {
 
   const sanitizedPrompt = (input.prompt as string).trim().slice(0, 1000);
   const itemId = typeof input.itemId === 'string' && input.itemId ? input.itemId : null;
+  const referenceImages = Array.isArray(input.reference_image_urls)
+    ? input.reference_image_urls.filter((u): u is string => typeof u === 'string').slice(0, 3)
+    : undefined;
 
   // ── Fetch brand kit for this org ──────────────────────────────────────────
   const db = createSupabaseServer();
@@ -108,6 +113,7 @@ export async function POST(req: NextRequest) {
       size:    (input.size    as '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto' | undefined) ?? '1024x1024',
       quality: (input.quality as 'low' | 'medium' | 'high' | 'auto' | undefined) ?? 'medium',
       brand,
+      referenceImages,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Image generation failed';
