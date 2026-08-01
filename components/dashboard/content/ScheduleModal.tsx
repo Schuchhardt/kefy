@@ -6,6 +6,7 @@ import Modal from './Modal';
 import DateTimePicker from './DateTimePicker';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from '@/components/dashboard/PostPreview';
+import { ImageGeneratingSpinner } from '@/components/dashboard/ImageGeneratingSpinner';
 import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
 import { StoryPreview } from '@/components/dashboard/StoryPreview';
 import FormatExample from './FormatExample';
@@ -560,6 +561,7 @@ function FormatPreview({
   }
 
   if (format === 'post') {
+    const imageGenerating = isPrimary && !imageUrl && item.image_status === 'generating';
     return (
       <PostPreview
         channel={item.channel}
@@ -568,6 +570,12 @@ function FormatPreview({
         hashtags={hashtags}
         username={brandKit?.name ?? 'tu_marca'}
         logoUrl={brandKit?.logo_url ?? undefined}
+        media={imageGenerating ? (
+          <ImageGeneratingSpinner
+            label={lang === 'en' ? 'Generating image…' : 'Generando imagen…'}
+            accentColor={brandKit?.accent_color ?? undefined}
+          />
+        ) : undefined}
       />
     );
   }

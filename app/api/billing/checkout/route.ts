@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
     const customer = await stripe.customers.create({
       email: user?.email,
       name:  user?.name ?? org.name,
-      metadata: { org_id: auth.orgId },
+      metadata: { org_id: auth.orgId, app: 'kefy' },
     });
     customerId = customer.id;
 
@@ -94,9 +94,10 @@ export async function POST(req: NextRequest) {
     metadata: {
       org_id: auth.orgId,
       plan,
+      app: 'kefy',
     },
     subscription_data: {
-      metadata: { org_id: auth.orgId, plan },
+      metadata: { org_id: auth.orgId, plan, app: 'kefy' },
     },
     allow_promotion_codes: true,
   });

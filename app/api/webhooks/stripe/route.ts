@@ -15,6 +15,10 @@ function planFromMetadata(metadata: Stripe.Metadata | null): BillingPlan {
 }
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+  // This Stripe account is shared with other products (e.g. Depando) whose
+  // events can land on this same endpoint — only touch sessions Kefy created.
+  if (session.metadata?.app !== 'kefy') return;
+
   const orgId = session.metadata?.org_id;
   const plan  = planFromMetadata(session.metadata);
   if (!orgId) return;
@@ -52,6 +56,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 }
 
 async function handleSubscriptionChange(subscription: Stripe.Subscription) {
+  // Same shared-account guard as handleCheckoutCompleted.
+  if (subscription.metadata?.app !== 'kefy') return;
+
   const orgId = subscription.metadata?.org_id;
   if (!orgId) {
     // Fallback: look up org by stripe_customer_id

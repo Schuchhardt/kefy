@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import Modal from './Modal';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
+import { ImageGeneratingSpinner } from '@/components/dashboard/ImageGeneratingSpinner';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
@@ -52,7 +53,12 @@ export default function EditContentModal({
   const [storyHasScript, setStoryHasScript] = useState(false);
 
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveRef = useRef<{ itemId: string; patch: Partial<ContentItem> } | null>(null);
   const lastSentRef = useRef<string>('');
+  // Always-fresh ref so the unmount flush below (registered once, empty deps)
+  // never calls a stale onUpdate closure.
+  const onUpdateRef = useRef(onUpdate);
+  useEffect(() => { onUpdateRef.current = onUpdate; });
 
   // Hydrate state when item changes / modal opens
   useEffect(() => {
@@ -73,33 +79,48 @@ export default function EditContentModal({
     lastSentRef.current = '';
   }, [item?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const sendPatch = useCallback((itemId: string, patch: Partial<ContentItem>) => {
+    const payload = JSON.stringify(patch);
+    if (payload === lastSentRef.current) return;
+    lastSentRef.current = payload;
+    setSaveState('saving');
+    fetch(`/api/content/${itemId}`, {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+    }).then(async (res) => {
+      const d = await res.json() as { item?: ContentItem; error?: string };
+      if (!res.ok) throw new Error(d.error ?? 'PATCH failed');
+      setSaveState('saved');
+      onUpdateRef.current(patch);
+      setTimeout(() => setSaveState((s) => s === 'saved' ? 'idle' : s), 1500);
+    }).catch(() => setSaveState('error'));
+  }, []);
+
   // Debounced auto-save
   const scheduleSave = useCallback((patch: Partial<ContentItem>) => {
     if (!item) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      const payload = JSON.stringify(patch);
-      if (payload === lastSentRef.current) return;
-      lastSentRef.current = payload;
-      setSaveState('saving');
-      try {
-        const res = await fetch(`/api/content/${item.id}`, {
-          method: 'PATCH', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload,
-        });
-        const d = await res.json() as { item?: ContentItem; error?: string };
-        if (!res.ok) throw new Error(d.error ?? 'PATCH failed');
-        setSaveState('saved');
-        onUpdate(patch);
-        setTimeout(() => setSaveState((s) => s === 'saved' ? 'idle' : s), 1500);
-      } catch {
-        setSaveState('error');
-      }
+    pendingSaveRef.current = { itemId: item.id, patch };
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      pendingSaveRef.current = null;
+      sendPatch(item.id, patch);
     }, 700);
-  }, [item, onUpdate]);
+  }, [item, sendPatch]);
 
-  useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); }, []);
+  // Flush a still-pending debounced save when this component actually
+  // unmounts (e.g. navigating away mid-edit) instead of silently discarding
+  // the last edit — closing the modal alone doesn't unmount it (only its
+  // internal <Modal> does), so this only matters for real navigation.
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    if (pendingSaveRef.current) {
+      sendPatch(pendingSaveRef.current.itemId, pendingSaveRef.current.patch);
+      pendingSaveRef.current = null;
+    }
+  }, [sendPatch]);
 
   if (!item) return null;
 
@@ -172,7 +193,47 @@ export default function EditContentModal({
     scheduleSave({ image_url: null });
   }
 
-  // ── Slide handlers (carousel + reel use same slides column) ───────────────
+  // ── Slide handlers (carousel + reel/story share the same slides column) ────
+
+  // A reel/story's rendered video bakes in each scene's image AND its title/body
+  // (Remotion overlays the text at render time), so any scene edit makes the
+  // existing video stale. POST /api/content/reel/render short-circuits and
+  // returns the cached video whenever video_url is still set, so the new
+  // slides + the invalidated video_url/render_status must land in the DB
+  // *before* MuxReelPlayer mounts and auto-triggers a re-render — this is
+  // why the invalidating case bypasses the normal debounced scheduleSave
+  // (which could still be pending when MuxReelPlayer's mount effect fires).
+  async function saveSlides(normalized: CarouselSlide[] | ReelScene[]) {
+    const isVideoFormat = item!.content_type === 'reel' || item!.content_type === 'story';
+    const hasExistingRender = isVideoFormat && (!!videoUrl || item!.render_status === 'ready' || item!.render_status === 'rendering');
+
+    if (!hasExistingRender) {
+      scheduleSave({ slides: normalized });
+      return;
+    }
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    pendingSaveRef.current = null;
+    setSaveState('saving');
+    const patch: Partial<ContentItem> = { slides: normalized, video_url: null, render_status: 'not_rendered' };
+    try {
+      const res = await fetch(`/api/content/${item!.id}`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error('PATCH failed');
+      setSaveState('saved');
+      onUpdate(patch);
+      // Only now is it safe to flip local state — this is what mounts
+      // MuxReelPlayer, and by this point the DB already reflects the edit.
+      setVideoUrl(null);
+    } catch {
+      setSaveState('error');
+    }
+  }
+
   function updateSlide(idx: number, patch: Partial<CarouselSlide & ReelScene>) {
     const isReel = item!.content_type === 'reel';
     const next = (slides as Array<CarouselSlide | ReelScene>).map((s, i) => i === idx ? { ...s, ...patch } : s);
@@ -181,7 +242,7 @@ export default function EditContentModal({
       ? { ...(s as ReelScene), scene_order: i + 1, slide_order: i + 1 }
       : { ...(s as CarouselSlide), slide_order: i + 1 },
     );
-    scheduleSave({ slides: normalized as CarouselSlide[] | ReelScene[] });
+    saveSlides(normalized as CarouselSlide[] | ReelScene[]);
   }
 
   function moveSlide(idx: number, dir: -1 | 1) {
@@ -195,7 +256,7 @@ export default function EditContentModal({
       ? { ...(s as ReelScene), scene_order: i + 1, slide_order: i + 1 }
       : { ...(s as CarouselSlide), slide_order: i + 1 },
     );
-    scheduleSave({ slides: normalized as CarouselSlide[] | ReelScene[] });
+    saveSlides(normalized as CarouselSlide[] | ReelScene[]);
   }
 
   function deleteSlide(idx: number) {
@@ -206,7 +267,7 @@ export default function EditContentModal({
       ? { ...(s as ReelScene), scene_order: i + 1, slide_order: i + 1 }
       : { ...(s as CarouselSlide), slide_order: i + 1 },
     );
-    scheduleSave({ slides: normalized as CarouselSlide[] | ReelScene[] });
+    saveSlides(normalized as CarouselSlide[] | ReelScene[]);
   }
 
   function addSlide() {
@@ -216,7 +277,7 @@ export default function EditContentModal({
       : { slide_order: slides.length + 1, title: '', body: '', image_url: null };
     const arr = [...slides, newSlide as unknown as (CarouselSlide | ReelScene)];
     setSlides(arr as CarouselSlide[] | ReelScene[]);
-    scheduleSave({ slides: arr as CarouselSlide[] | ReelScene[] });
+    saveSlides(arr as CarouselSlide[] | ReelScene[]);
   }
 
   async function uploadSlideImage(idx: number, e: React.ChangeEvent<HTMLInputElement>) {
@@ -406,6 +467,8 @@ export default function EditContentModal({
               onActiveSlideChange={setPreviewSlide}
               username={brandKit?.name ?? 'tu_marca'}
               logoUrl={brandKit?.logo_url ?? undefined}
+              imagePending={item.image_status === 'generating'}
+              accentColor={brandKit?.accent_color ?? undefined}
             />
           </div>
         </div>
@@ -463,6 +526,10 @@ export default function EditContentModal({
                     {t.removeImage}
                   </button>
                 </div>
+              </div>
+            ) : item.image_status === 'generating' ? (
+              <div style={{ width: 120, height: 120, borderRadius: 8, overflow: 'hidden' }}>
+                <ImageGeneratingSpinner label={lang === 'en' ? 'Generating…' : 'Generando…'} height={120} accentColor={brandKit?.accent_color ?? undefined} />
               </div>
             ) : (
               <UploadBtn label={t.uploadImage} accept="image/*" onChange={onImageUpload} loading={uploading} />

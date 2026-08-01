@@ -465,6 +465,29 @@ function ContentPageInner() {
     setViewItem((prev) => prev?.id === id ? { ...prev, ...patch } : prev);
   }
 
+  // Cover-image generation is a background job on the server (can take
+  // several minutes) — `imagePending` only covers the same-tab, same-load
+  // window where handleGenerate's fetch is still in flight. If the user
+  // reloads or comes back later, the item's own `image_status` (persisted
+  // in the DB) is the only remaining signal, so poll it until it settles.
+  useEffect(() => {
+    const pendingIds = items.filter((i) => i.image_status === 'generating').map((i) => i.id);
+    if (pendingIds.length === 0) return;
+    const interval = setInterval(() => {
+      pendingIds.forEach((id) => {
+        fetch(`/api/content/${id}`, { credentials: 'include' })
+          .then((r) => r.ok ? r.json() : null)
+          .then((d: { item?: ContentItem } | null) => {
+            if (d?.item && d.item.image_status !== 'generating') {
+              handleItemUpdate(id, { image_url: d.item.image_url, image_status: d.item.image_status });
+            }
+          })
+          .catch(() => {/* retry on next tick */});
+      });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [items]);
+
   // Content type display label (no "Genérico")
   const contentTypeLabel = (ct: ContentType) =>
     ct === 'reel' ? 'Video' : CONTENT_TYPES_BASE.find((x) => x.value === ct)?.label ?? ct;
@@ -962,7 +985,7 @@ function ContentPageInner() {
                           WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
                         }}>{carouselFallback.title}</span>
                       </div>
-                    ) : imagePending.has(item.id) ? (
+                    ) : (imagePending.has(item.id) || item.image_status === 'generating') ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: 'var(--muted)' }}>
                         <span style={{ fontSize: 28, animation: 'pulse 1.6s ease-in-out infinite' }}>✨</span>
                         <span style={{ fontSize: 11 }}>{lang === 'en' ? 'Generating image…' : 'Generando imagen…'}</span>
@@ -1040,7 +1063,7 @@ function ContentPageInner() {
                         WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                       }}>{carouselFallback.title}</span>
                     </div>
-                  ) : imagePending.has(item.id) ? (
+                  ) : (imagePending.has(item.id) || item.image_status === 'generating') ? (
                     <span style={{ fontSize: 18, opacity: 0.6, animation: 'pulse 1.6s ease-in-out infinite' }}>✨</span>
                   ) : (
                     <span style={{ fontSize: 20, opacity: 0.5 }}>{CONTENT_TYPE_ICONS[item.content_type]}</span>

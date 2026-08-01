@@ -10,6 +10,7 @@ import { useState } from 'react';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from './PostPreview';
 import { SlideCanvas } from './CarouselPreview';
+import { ImageGeneratingSpinner } from './ImageGeneratingSpinner';
 import type { CarouselSlide, ReelScene, ContentType } from '@/types/content';
 
 /** Networks worth showing per format. Square formats (post/carousel) map to the
@@ -39,11 +40,17 @@ interface NetworkPreviewProps {
   onActiveSlideChange: (idx: number) => void;
   username:       string;
   logoUrl?:       string | null;
+  /** True while the cover image is still being generated in the background
+   *  (no imageUrl yet, but it's not a failure — shows a spinner instead of
+   *  the plain text-only fallback). */
+  imagePending?:  boolean;
+  accentColor?:   string;
 }
 
 export function NetworkPreview({
   contentType, defaultChannel, body, imageUrl, videoUrl, hashtags,
   slides, activeSlide, onActiveSlideChange, username, logoUrl,
+  imagePending, accentColor,
 }: NetworkPreviewProps) {
   const networks = NETWORKS[contentType];
   // Default to the item's own channel when it's in the relevant set.
@@ -90,6 +97,9 @@ export function NetworkPreview({
           hashtags={hashtags}
           username={username}
           logoUrl={logoUrl ?? undefined}
+          media={!imageUrl && imagePending ? (
+            <ImageGeneratingSpinner accentColor={accentColor} />
+          ) : undefined}
         />
       )}
 

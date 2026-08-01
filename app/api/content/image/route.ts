@@ -52,9 +52,22 @@ export async function POST(req: NextRequest) {
   }
 
   const sanitizedPrompt = (input.prompt as string).trim().slice(0, 1000);
+  const itemId = typeof input.itemId === 'string' && input.itemId ? input.itemId : null;
 
   // ── Fetch brand kit for this org ──────────────────────────────────────────
   const db = createSupabaseServer();
+
+  // Mark the item as generating up front so a page reload (or the user
+  // opening the item mid-generation) shows a pending state instead of a
+  // blank/failed-looking image slot for the several minutes this can take.
+  if (itemId) {
+    await db
+      .from('kefy_content_items')
+      .update({ image_status: 'generating' })
+      .eq('id', itemId)
+      .eq('org_id', auth.orgId);
+  }
+
   const { data: brandKit } = await db
     .from('kefy_brand_kits')
     .select('name, tone, primary_color, secondary_color, accent_color, logo_url')
@@ -99,6 +112,9 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Image generation failed';
     console.error('image generate error:', msg);
+    if (itemId) {
+      await db.from('kefy_content_items').update({ image_status: 'error' }).eq('id', itemId).eq('org_id', auth.orgId);
+    }
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
@@ -121,17 +137,20 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Storage upload failed';
     console.error('image storage error:', msg);
+    if (itemId) {
+      await db.from('kefy_content_items').update({ image_status: 'error' }).eq('id', itemId).eq('org_id', auth.orgId);
+    }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   const imagePayload = { url: publicUrl, revisedPrompt: result.revisedPrompt };
 
   // Optionally link to a content item
-  if (typeof input.itemId === 'string' && input.itemId) {
+  if (itemId) {
     const { error } = await db
       .from('kefy_content_items')
-      .update({ image_url: publicUrl, image_prompt: sanitizedPrompt })
-      .eq('id', input.itemId)
+      .update({ image_url: publicUrl, image_prompt: sanitizedPrompt, image_status: 'ready' })
+      .eq('id', itemId)
       .eq('org_id', auth.orgId);
 
     if (error) {
