@@ -195,13 +195,18 @@ function ContentPageInner() {
   const [recsHint, setRecsHint]       = useState('');
   const [recommendModalOpen, setRecommendModalOpen] = useState(false);
 
-  // Reference images for AI-guided image generation
-  const [referenceImages, setReferenceImages]   = useState<string[]>([]);
+  // Reference images for AI-guided image generation — pre-populate from
+  // ?refImage=Y (library page deep-link).
+  const [referenceImages, setReferenceImages]   = useState<string[]>(() => {
+    const refImage = searchParams?.get('refImage');
+    return refImage ? [refImage] : [];
+  });
   const [referenceUploading, setReferenceUploading] = useState(false);
   const [referenceSource, setReferenceSource]   = useState<'upload' | 'previous' | 'library'>('upload');
 
-  // Advanced config (slide/scene count, reference images) collapsed by default
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Advanced config (slide/scene count, reference images) — open by default
+  // when a reference image was deep-linked in, collapsed otherwise.
+  const [advancedOpen, setAdvancedOpen] = useState(() => !!searchParams?.get('refImage'));
 
   // Modals
   const [viewItem,    setViewItem]    = useState<ContentItem | null>(null);
@@ -311,7 +316,7 @@ function ContentPageInner() {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: imagePrompt, size: '1024x1024', quality: 'medium', itemId: newItemId }),
+          body: JSON.stringify({ prompt: imagePrompt, size: '1024x1024', quality: 'medium', itemId: newItemId, reference_image_urls: referenceImages }),
         })
           .then((r) => r.ok ? r.json() : null)
           .then((d: { url?: string } | null) => {
@@ -655,7 +660,7 @@ function ContentPageInner() {
             </div>
 
             {/* Advanced config — slide/scene count + reference images (collapsed by default) */}
-            {(genType === 'carousel' || genType === 'reel') && (
+            {(genType === 'post' || genType === 'carousel' || genType === 'reel') && (
               <div style={{ marginBottom: 16 }}>
                 <button
                   type="button"
@@ -671,25 +676,27 @@ function ContentPageInner() {
 
                 {advancedOpen && (
                   <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-                    {/* Slides / Scenes count */}
-                    <div style={{ marginBottom: 16 }}>
-                      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
-                        {genType === 'carousel' ? t.slidesLabel : t.scenesLabel}
-                        <span style={{ fontWeight: 400, marginLeft: 8 }}>{genSlides}</span>
-                      </label>
-                      <input
-                        type="range"
-                        min={3}
-                        max={genType === 'reel' ? 8 : 10}
-                        value={genSlides}
-                        onChange={(e) => setGenSlides(Number(e.target.value))}
-                        style={{ width: '100%', accentColor: 'var(--accent)' }}
-                      />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                        <span>3</span>
-                        <span>{genType === 'reel' ? 8 : 10}</span>
+                    {/* Slides / Scenes count — only for carousel/reel, which have multiple frames */}
+                    {(genType === 'carousel' || genType === 'reel') && (
+                      <div style={{ marginBottom: 16 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
+                          {genType === 'carousel' ? t.slidesLabel : t.scenesLabel}
+                          <span style={{ fontWeight: 400, marginLeft: 8 }}>{genSlides}</span>
+                        </label>
+                        <input
+                          type="range"
+                          min={3}
+                          max={genType === 'reel' ? 8 : 10}
+                          value={genSlides}
+                          onChange={(e) => setGenSlides(Number(e.target.value))}
+                          style={{ width: '100%', accentColor: 'var(--accent)' }}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                          <span>3</span>
+                          <span>{genType === 'reel' ? 8 : 10}</span>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Reference images — upload or pick from a previous post */}
                     <div>
