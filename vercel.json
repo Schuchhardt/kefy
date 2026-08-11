@@ -11,6 +11,10 @@
     {
       "path": "/api/content-library/generate",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/content/reel/reconcile",
+      "schedule": "*/5 * * * *"
     }
   ],
   "functions": {
@@ -23,6 +27,10 @@
     },
     "app/api/content/reel/route.ts": {
       "maxDuration": 180
+    },
+    "app/api/content/reel/reconcile/route.ts": {
+      "maxDuration": 120,
+      "memory": 512
     },
     "app/api/content/image/route.ts": {
       "maxDuration": 120

@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import {
-  renderMediaOnLambda,
-  getRenderProgress,
-  type RenderProgress,
-} from '@remotion/lambda/client';
+import { renderMediaOnLambda } from '@remotion/lambda/client';
+import { reconcileRenderTarget, type RenderTarget } from '@/lib/reel-render';
 
 export const runtime     = 'nodejs';
 // Lambda renders async — 60 s is enough to trigger + return 202
@@ -31,18 +28,14 @@ type AwsRegion = Parameters<typeof renderMediaOnLambda>[0]['region'];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
 
-interface RenderTarget {
-  table:         'kefy_content_items' | 'kefy_content_renditions';
-  id:            string;
+/** The render-relevant columns plus what this route needs to trigger a render. */
+type RenderableTarget = RenderTarget & {
   slides:        unknown;
-  metadata:      Record<string, unknown>;
-  videoUrl:      string | null;
   muxPlaybackId: string | null;
-  renderStatus:  string | null;
-}
+};
 
 async function resolveTarget(db: Db, itemId: string, orgId: string, format: string | null): Promise<
-  { target: RenderTarget; itemContentType: string } | null
+  { target: RenderableTarget; itemContentType: string } | null
 > {
   const { data: item } = await db
     .from('kefy_content_items')
@@ -116,53 +109,22 @@ export async function GET(req: NextRequest) {
   }
 
   if (target.renderStatus === 'rendering') {
-    const renderId   = typeof target.metadata.lambda_render_id === 'string' ? target.metadata.lambda_render_id : null;
-    const bucketName = typeof target.metadata.lambda_bucket    === 'string' ? target.metadata.lambda_bucket    : null;
+    // Shared with the reconcile cron: a render that finished (or died) while
+    // nobody was polling is resolved here too.
+    const outcome = await reconcileRenderTarget(db, target);
 
-    // ── Poll Lambda progress ──────────────────────────────────────────────────
-    if (renderId && bucketName) {
-      try {
-        const region       = getEnv('REMOTION_AWS_REGION') as AwsRegion;
-        const functionName = getEnv('REMOTION_LAMBDA_FUNCTION_NAME');
-
-        const progress: RenderProgress = await getRenderProgress({
-          renderId,
-          bucketName,
-          functionName,
-          region,
-        });
-
-        if (progress.fatalErrorEncountered) {
-          const errMsg = progress.errors?.[0]?.message ?? 'Lambda render failed';
-          // Reset to not_rendered so the client can retry cleanly
-          await db.from(target.table).update({ render_status: 'not_rendered' }).eq('id', target.id);
-          return NextResponse.json({ render_status: 'error', error: errMsg });
-        }
-
-        if (progress.done && progress.outputFile) {
-          // Save the public S3 URL directly — no Mux upload needed
-          await db.from(target.table).update({
-            video_url:     progress.outputFile,
-            render_status: 'ready',
-          }).eq('id', target.id);
-
-          console.log(`[reel/render GET] Done — video_url=${progress.outputFile}`);
-
-          return NextResponse.json({
-            render_status: 'ready',
-            video_url:     progress.outputFile,
-          });
-        }
-
-        return NextResponse.json({
-          render_status: 'rendering',
-          progress:      progress.overallProgress ?? 0,
-        });
-      } catch (err) {
-        console.error('[reel/render GET] Lambda poll error:', err);
-        // Fall through to return current DB status
-      }
+    if (outcome.status === 'ready') {
+      return NextResponse.json({ render_status: 'ready', video_url: outcome.video_url });
     }
+    if (outcome.status === 'rendering') {
+      return NextResponse.json({ render_status: 'rendering', progress: outcome.progress });
+    }
+    // The render is gone: report the failure but leave the row retriable.
+    return NextResponse.json({
+      render_status: outcome.reason === 'render_failed' ? 'error' : 'not_rendered',
+      error:         outcome.error,
+      reason:        outcome.reason,
+    });
   }
 
   return NextResponse.json({
@@ -214,6 +176,23 @@ export async function POST(req: NextRequest) {
   if (target.videoUrl) {
     return NextResponse.json({ video_url: target.videoUrl, render_status: 'ready' });
   }
+  // A render already in flight: resolve its real state instead of starting a
+  // second one. If it turns out to be finished or dead, we continue below and
+  // either return the video or trigger a fresh render.
+  if (target.renderStatus === 'rendering') {
+    const outcome = await reconcileRenderTarget(db, target);
+    if (outcome.status === 'ready') {
+      return NextResponse.json({ video_url: outcome.video_url, render_status: 'ready' });
+    }
+    if (outcome.status === 'rendering') {
+      return NextResponse.json(
+        { message: 'Ya hay un render en curso para este contenido.', render_status: 'rendering' },
+        { status: 202 },
+      );
+    }
+    console.log(`[reel/render POST] stale render discarded (${outcome.reason}) — re-triggering`);
+    target.metadata = {};
+  }
   // Backward compat: old items rendered via Mux
   if (target.muxPlaybackId) {
     return NextResponse.json({ mux_playback_id: target.muxPlaybackId, render_status: 'ready' });
@@ -230,9 +209,14 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
 
   // ── Mark as rendering ────────────────────────────────────────────────────────
+  // The start timestamp goes in *before* triggering Lambda: if this function
+  // dies between the trigger and the metadata write below, the reconciler uses
+  // it to tell "just started" apart from "trigger lost" (see lib/reel-render).
+  const startedAt = new Date().toISOString();
+  target.metadata = { ...target.metadata, lambda_started_at: startedAt };
   await db
     .from(target.table)
-    .update({ render_status: 'rendering' })
+    .update({ render_status: 'rendering', metadata: target.metadata })
     .eq('id', target.id);
 
   try {
@@ -264,12 +248,13 @@ export async function POST(req: NextRequest) {
       downloadBehavior: { type: 'play-in-browser' },
     });
 
-    // Persist renderId + bucket so the GET endpoint can poll progress
+    // Persist renderId + bucket so the poller / reconciler can track progress
     await db.from(target.table).update({
       metadata: {
         ...target.metadata,
-        lambda_render_id: renderId,
-        lambda_bucket:    bucketName,
+        lambda_render_id:  renderId,
+        lambda_bucket:     bucketName,
+        lambda_started_at: startedAt,
       },
     }).eq('id', target.id);
 

@@ -163,6 +163,11 @@ export async function refreshAccountToken(zernioAccountId: string): Promise<{
 // concept in Zernio, so we fall back to a regular post for them.
 const STORY_CAPABLE_PLATFORMS = new Set(['instagram', 'facebook', 'snapchat']);
 
+// Facebook needs an explicit `contentType: 'reel'` to publish a video as a Reel
+// instead of a plain feed video. Instagram auto-detects it from a vertical 9:16
+// video, and the remaining platforms have no Reels surface.
+const REEL_EXPLICIT_PLATFORMS = new Set(['facebook']);
+
 /**
  * Publish or schedule a post via Zernio.
  * Translates from our internal payload shape to Zernio's actual API format:
@@ -186,6 +191,17 @@ export async function publishPost(
   }
   if (payload.video_url) {
     mediaItems.push({ type: 'video', url: payload.video_url });
+  }
+
+  const hasVideo = mediaItems.some((m) => m.type === 'video');
+
+  // Safety net: a reel is a video post by definition. Publishing one with only
+  // an image would silently post the reel *cover* as a photo — fail instead.
+  if (payload.content_type === 'reel' && !hasVideo) {
+    throw new ZernioError(
+      'Cannot publish a reel without a video — the reel video URL is missing.',
+      422,
+    );
   }
 
   // ── Translate to Zernio format ─────────────────────────────────────────────
@@ -212,6 +228,8 @@ export async function publishPost(
     } else {
       console.warn(`[Zernio] platform=${payload.platform} has no Story surface — publishing as a regular post`);
     }
+  } else if (payload.content_type === 'reel' && hasVideo && REEL_EXPLICIT_PLATFORMS.has(payload.platform)) {
+    platformTarget.platformSpecificData = { contentType: 'reel' };
   }
 
   const zernioBody: Record<string, unknown> = {

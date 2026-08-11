@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams, useParams } from 'next/navigation';
 import ChannelIcon         from '@/components/ui/ChannelIcon';
+import GenerationLoader    from '@/components/ui/GenerationLoader';
 import ContentActions      from '@/components/dashboard/content/ContentActions';
 import ScheduleModal       from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
@@ -61,6 +62,47 @@ const CAROUSEL_GRADIENTS = [
   'linear-gradient(135deg, #f6d365 0%, #fda085 100%)',
 ];
 
+// A cover image whose generation started longer ago than this is treated as
+// abandoned (serverless timeout, tab closed mid-request…): the card renders
+// normally instead of skeletoning forever, so the user can still edit/delete it.
+const IMAGE_PENDING_MAX_MS = 10 * 60 * 1000;
+
+// Typical wall-clock for the whole create flow (copy + cover image). Neither
+// step reports real progress — /api/content/image is a single POST that only
+// answers when it is done — so the bar is estimated from elapsed time.
+const CREATION_ESTIMATED_MS = 60_000;
+
+/** Near-linear up to the typical duration, then asymptotic towards 99 %: the
+ *  bar must never reach 100 % while the server is still working. */
+function estimateProgress(elapsedMs: number): number {
+  const t = Math.max(0, elapsedMs);
+  if (t < CREATION_ESTIMATED_MS) return 0.9 * (t / CREATION_ESTIMATED_MS);
+  return 0.9 + 0.09 * (1 - Math.exp(-(t - CREATION_ESTIMATED_MS) / CREATION_ESTIMATED_MS));
+}
+
+/** Re-renders while a skeleton is on screen so its progress bar advances. */
+function useElapsedMs(startedAt: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt === null) return;
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return startedAt === null ? 0 : Math.max(0, now - startedAt);
+}
+
+/** Resolve once the browser actually has the bitmap. Swapping a card out of
+ *  its loading state before this would show an empty <img> frame for as long
+ *  as the freshly-uploaded (so uncached) file takes to download. */
+function preloadImage(url: string): Promise<void> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload  = () => resolve();
+    img.onerror = () => resolve();  // show the card anyway; a broken thumb beats an endless skeleton
+    img.src = url;
+  });
+}
+
 const inputStyle: React.CSSProperties = {
   width: '100%',
   background: 'var(--bg)',
@@ -72,6 +114,103 @@ const inputStyle: React.CSSProperties = {
   outline: 'none',
   boxSizing: 'border-box',
 };
+
+// ─── Skeleton card ───────────────────────────────────────────────────────────
+// Shown while a card is still incomplete — either the copy is being written
+// or its cover image has not finished generating. A post only leaves this
+// state once text *and* image are ready, so the card never appears half-built.
+
+function SkeletonCard({ mode, label, startedAt, lang = 'es', accentColor }: {
+  mode:         'list' | 'grid';
+  label?:       string;
+  /** Epoch ms when the generation started — drives the progress bar. */
+  startedAt?:   number;
+  lang?:        Locale;
+  accentColor?: string;
+}) {
+  const elapsed  = useElapsedMs(startedAt ?? null);
+  const progress = estimateProgress(elapsed);
+
+  const remainingMs = CREATION_ESTIMATED_MS - elapsed;
+  const eta = startedAt === undefined ? undefined
+    : remainingMs > 0 ? `~${Math.ceil(remainingMs / 1000)} s`
+    : lang === 'en' ? 'almost there…' : 'casi listo…';
+
+  // The pulse belongs to the grey placeholder blocks, not to the whole card —
+  // a progress bar that fades in and out reads as broken.
+  const pulse = 'skeletonPulse 1.5s ease-in-out infinite';
+
+  if (mode === 'grid') return (
+    <div data-testid="content-card-skeleton" style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 10, overflow: 'hidden',
+    }}>
+      <div style={{
+        width: '100%', aspectRatio: '1/1', background: 'var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12,
+      }}>
+        {startedAt !== undefined ? (
+          <GenerationLoader
+            progress={progress}
+            label={label}
+            hint={eta}
+            size={36}
+            tone="surface"
+            accentColor={accentColor}
+          />
+        ) : label && <span style={{ fontSize: 28 }}>✨</span>}
+      </div>
+      <div style={{ padding: '8px 10px', animation: pulse }}>
+        <div style={{ height: 9, borderRadius: 4, background: 'var(--border)', marginBottom: 6, width: '60%' }} />
+        <div style={{ height: 8, borderRadius: 4, background: 'var(--border)', width: '80%' }} />
+      </div>
+    </div>
+  );
+
+  return (
+    <div data-testid="content-card-skeleton" style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 10, padding: '12px 14px',
+      display: 'flex', gap: 12, alignItems: 'center',
+    }}>
+      {/* 56px leaves no room for the bar — the ring alone marks the slot */}
+      <div style={{
+        width: 56, height: 56, borderRadius: 8, background: 'var(--border)', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {startedAt !== undefined ? (
+          <GenerationLoader
+            progress={progress}
+            size={24}
+            tone="surface"
+            showBar={false}
+            showPercent={false}
+            accentColor={accentColor}
+          />
+        ) : null}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ height: 10, borderRadius: 4, background: 'var(--border)', marginBottom: 8, width: '55%', animation: pulse }} />
+        {startedAt !== undefined ? (
+          <GenerationLoader
+            progress={progress}
+            label={label}
+            hint={eta}
+            tone="surface"
+            accentColor={accentColor}
+            showSpinner={false}
+            fullWidthBar
+            size={24}
+            style={{ alignItems: 'stretch', gap: 6 }}
+          />
+        ) : (
+          <div style={{ height: 9, borderRadius: 4, background: 'var(--border)', width: '75%', animation: pulse }} />
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── Library Reference Grid (for reference images tab) ───────────────────────
 
@@ -216,6 +355,10 @@ function ContentPageInner() {
 
   // Track items whose cover image is being generated in background
   const [imagePending, setImagePending] = useState<Set<string>>(new Set());
+  // When each in-flight creation started, so the progress bar survives the
+  // handoff from the "writing copy" skeleton to the item's own card.
+  const [genStartedAt, setGenStartedAt]     = useState<number | null>(null);
+  const [imageStartedAt, setImageStartedAt] = useState<Record<string, number>>({});
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -254,6 +397,8 @@ function ContentPageInner() {
     const type   = opts?.type ?? genType;
     const slides = opts?.slides ?? genSlides;
     if (!topic.trim()) return;
+    const startedAt = Date.now();
+    setGenStartedAt(startedAt);
     setGenerating(true);
     setGenError(null);
     setGenResult(null);
@@ -311,6 +456,11 @@ function ContentPageInner() {
       if (type === 'post' && data.itemId) {
         const newItemId = data.itemId;
         setImagePending((prev) => { const n = new Set(prev); n.add(newItemId); return n; });
+        setImageStartedAt((prev) => ({ ...prev, [newItemId]: startedAt }));
+        // fetchItems() above ran before the image route flipped the row to
+        // 'generating', so the freshly-fetched item still carries a stale
+        // status — mark it locally so the poll fallback is armed too.
+        handleItemUpdate(newItemId, { image_status: 'generating' });
         const imagePrompt = (data.body ?? topic).slice(0, 900);
         fetch('/api/content/image', {
           method: 'POST',
@@ -319,14 +469,19 @@ function ContentPageInner() {
           body: JSON.stringify({ prompt: imagePrompt, size: '1024x1024', quality: 'medium', itemId: newItemId, reference_image_urls: referenceImages }),
         })
           .then((r) => r.ok ? r.json() : null)
-          .then((d: { url?: string } | null) => {
-            if (d?.url) {
-              setItems((prev) => prev.map((i) => i.id === newItemId ? { ...i, image_url: d.url ?? i.image_url } : i));
-              setViewItem((prev) => prev?.id === newItemId ? { ...prev, image_url: d.url ?? prev.image_url } : prev);
-              setEditItem((prev) => prev?.id === newItemId ? { ...prev, image_url: d.url ?? prev.image_url } : prev);
+          .then(async (d: { image?: { url?: string } } | null) => {
+            const imageUrl = d?.image?.url;
+            if (!imageUrl) {
+              handleItemUpdate(newItemId, { image_status: 'error' });
+              return;
             }
+            await preloadImage(imageUrl);
+            handleItemUpdate(newItemId, { image_url: imageUrl, image_status: 'ready' });
           })
-          .catch(() => {/* non-fatal: user can regenerate from Edit modal */})
+          .catch(() => {
+            // non-fatal: user can regenerate from Edit modal
+            handleItemUpdate(newItemId, { image_status: 'error' });
+          })
           .finally(() => {
             setImagePending((prev) => { const n = new Set(prev); n.delete(newItemId); return n; });
           });
@@ -476,16 +631,26 @@ function ContentPageInner() {
   // reloads or comes back later, the item's own `image_status` (persisted
   // in the DB) is the only remaining signal, so poll it until it settles.
   useEffect(() => {
-    const pendingIds = items.filter((i) => i.image_status === 'generating').map((i) => i.id);
+    const pending = items.filter((i) => i.image_status === 'generating');
+    if (pending.length === 0) return;
+
+    // Give up on generations that can no longer be in flight (serverless
+    // timeout, tab closed mid-request) — otherwise their cards would stay in
+    // the loading state forever, with no way to edit or delete them.
+    const stale = pending.filter((i) => Date.now() - new Date(i.created_at).getTime() > IMAGE_PENDING_MAX_MS);
+    stale.forEach((i) => handleItemUpdate(i.id, { image_status: 'error' }));
+
+    const pendingIds = pending.filter((i) => !stale.includes(i)).map((i) => i.id);
     if (pendingIds.length === 0) return;
     const interval = setInterval(() => {
       pendingIds.forEach((id) => {
         fetch(`/api/content/${id}`, { credentials: 'include' })
           .then((r) => r.ok ? r.json() : null)
-          .then((d: { item?: ContentItem } | null) => {
-            if (d?.item && d.item.image_status !== 'generating') {
-              handleItemUpdate(id, { image_url: d.item.image_url, image_status: d.item.image_status });
-            }
+          .then(async (d: { item?: ContentItem } | null) => {
+            if (!d?.item || d.item.image_status === 'generating') return;
+            const { image_url, image_status } = d.item;
+            if (image_url) await preloadImage(image_url);
+            handleItemUpdate(id, { image_url, image_status });
           })
           .catch(() => {/* retry on next tick */});
       });
@@ -902,33 +1067,15 @@ function ContentPageInner() {
             ? { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }
             : { display: 'flex', flexDirection: 'column', gap: 10 }
           }>
-            {/* Skeleton card while generating */}
-            {generating && viewMode === 'list' && (
-              <div style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 10, padding: '12px 14px',
-                display: 'flex', gap: 12, alignItems: 'center',
-                animation: 'skeletonPulse 1.5s ease-in-out infinite',
-              }}>
-                <div style={{ width: 56, height: 56, borderRadius: 8, background: 'var(--border)', flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ height: 10, borderRadius: 4, background: 'var(--border)', marginBottom: 8, width: '55%' }} />
-                  <div style={{ height: 9, borderRadius: 4, background: 'var(--border)', width: '75%' }} />
-                </div>
-              </div>
-            )}
-            {generating && viewMode === 'grid' && (
-              <div style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 10, overflow: 'hidden',
-                animation: 'skeletonPulse 1.5s ease-in-out infinite',
-              }}>
-                <div style={{ width: '100%', aspectRatio: '1/1', background: 'var(--border)' }} />
-                <div style={{ padding: '8px 10px' }}>
-                  <div style={{ height: 9, borderRadius: 4, background: 'var(--border)', marginBottom: 6, width: '60%' }} />
-                  <div style={{ height: 8, borderRadius: 4, background: 'var(--border)', width: '80%' }} />
-                </div>
-              </div>
+            {/* Skeleton card while the copy is being written */}
+            {generating && (
+              <SkeletonCard
+                mode={viewMode}
+                lang={lang}
+                startedAt={genStartedAt ?? undefined}
+                accentColor={brandKit?.accent_color ?? undefined}
+                label={lang === 'en' ? 'Writing copy…' : 'Escribiendo texto…'}
+              />
             )}
             {items.map((item) => {
               // Determine thumbnail URL for the card
@@ -949,9 +1096,30 @@ function ContentPageInner() {
                 ? { title: firstSlide.title ?? '', gradient: CAROUSEL_GRADIENTS[(firstSlide.slide_order - 1) % CAROUSEL_GRADIENTS.length] }
                 : null;
 
+              // Cover image still on its way: keep the whole card in its
+              // loading state rather than showing text next to an empty
+              // thumbnail. `thumbUrl` is only set once the file is preloaded,
+              // so the swap to the real card never flashes a blank image.
+              const waitingForImage =
+                !thumbUrl && !carouselFallback
+                && (imagePending.has(item.id) || item.image_status === 'generating')
+                && Date.now() - new Date(item.created_at).getTime() < IMAGE_PENDING_MAX_MS;
+
+              if (waitingForImage) return (
+                <SkeletonCard
+                  key={item.id}
+                  mode={viewMode}
+                  lang={lang}
+                  startedAt={imageStartedAt[item.id] ?? new Date(item.created_at).getTime()}
+                  accentColor={brandKit?.accent_color ?? undefined}
+                  label={lang === 'en' ? 'Generating image…' : 'Generando imagen…'}
+                />
+              );
+
               if (viewMode === 'grid') return (
                 <div
                   key={item.id}
+                  data-testid="content-card"
                   onClick={() => setViewItem(item)}
                   style={{
                     background: 'var(--surface)',
@@ -1043,6 +1211,7 @@ function ContentPageInner() {
               return (
               <div
                 key={item.id}
+                data-testid="content-card"
                 onClick={() => setViewItem(item)}
                 style={{
                   background: 'var(--surface)', border: `1px solid ${viewItem?.id === item.id ? 'var(--accent)' : 'var(--border)'}`,

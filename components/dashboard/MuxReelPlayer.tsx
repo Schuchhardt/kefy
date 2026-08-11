@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import type React from 'react';
+import GenerationLoader from '@/components/ui/GenerationLoader';
 
 type MuxLegacyPlayerProps = {
   playbackId: string; streamType: string; style: React.CSSProperties;
@@ -85,6 +86,9 @@ export function MuxReelPlayer({
   const isRenderingRef  = useRef(renderStatus === 'rendering');
   const pollCountRef    = useRef(0);
   const hasTriggeredRef = useRef(false);
+  // Auto-restart of a render the server declared dead — capped to avoid loops.
+  const restartCountRef = useRef(0);
+  const startRenderRef  = useRef<(() => void) | null>(null);
 
   const isMuxLegacy = localUrl?.startsWith('mux:') ?? false;
   const muxId       = isMuxLegacy ? localUrl!.slice(4) : null;
@@ -116,6 +120,19 @@ export function MuxReelPlayer({
         isRenderingRef.current = false;
         setIsRendering(false);
         setRenderError('El render falló. Inténtalo de nuevo.');
+      } else if (data.render_status === 'not_rendered') {
+        // The server found the render dead (trigger lost or stale) and reset the
+        // row — polling it further would never finish. Start a fresh render,
+        // once, so a persistently failing render can't loop forever.
+        isRenderingRef.current = false;
+        setIsRendering(false);
+        setProgress(0);
+        if (restartCountRef.current < 1) {
+          restartCountRef.current += 1;
+          startRenderRef.current?.();
+        } else {
+          setRenderError('El render se interrumpió. Inténtalo de nuevo.');
+        }
       } else {
         pollCountRef.current += 1;
         if (pollCountRef.current < 90) {
@@ -177,6 +194,10 @@ export function MuxReelPlayer({
       setRenderError(err instanceof Error ? err.message : 'Error desconocido');
     }
   }, [itemId, format, pollStatus, onRenderStart, onRenderDone]);
+
+  // Keeps the poller able to restart a render without a circular dependency
+  // between the two callbacks.
+  useEffect(() => { startRenderRef.current = startRender; }, [startRender]);
 
   // ── Auto-render on mount ───────────────────────────────────────────────────
   useEffect(() => {
@@ -250,29 +271,13 @@ export function MuxReelPlayer({
 
   // ── Loading / rendering ────────────────────────────────────────────────────
   return (
-    <div style={{ ...cs, background: '#0a0a0f', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-      <div style={{
-        width: 40, height: 40, borderRadius: '50%',
-        border: `3px solid ${accentColor}30`,
-        borderTop: `3px solid ${accentColor}`,
-        animation: 'spin 1s linear infinite',
-      }} />
-      <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, textAlign: 'center', margin: 0 }}>
-        {isRendering ? 'Generando video…' : 'Iniciando…'}
-      </p>
-      <div style={{ width: '80%', background: 'rgba(255,255,255,0.08)', borderRadius: 99, height: 4, overflow: 'hidden' }}>
-        <div style={{
-          height: '100%',
-          width: `${Math.round((isRendering ? Math.max(progress, 0.02) : 0.02) * 100)}%`,
-          background: accentColor,
-          borderRadius: 99,
-          transition: 'width 0.6s ease',
-        }} />
-      </div>
-      <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: 0 }}>
-        {isRendering ? `${Math.round(Math.max(progress, 0) * 100)}%` : ''}
-      </p>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div style={{ ...cs, background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <GenerationLoader
+        progress={isRendering ? Math.max(progress, 0) : 0.02}
+        label={isRendering ? 'Generando video…' : 'Iniciando…'}
+        accentColor={accentColor}
+        showPercent={isRendering}
+      />
     </div>
   );
 }

@@ -17,6 +17,11 @@ import enT from '@/locales/en/dashboard/content';
 
 const ALL_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 
+/** Only an http(s) URL is a video we can actually publish (a Mux playback id is not). */
+function isVideoUrl(url: string | null | undefined): url is string {
+  return typeof url === 'string' && /^https?:\/\//i.test(url.trim());
+}
+
 const MuxReelPlayer = dynamic(
   () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
   { ssr: false, loading: () => null },
@@ -81,6 +86,9 @@ export default function ScheduleModal({
   useEffect(() => {
     if (!open || !selectedItem) return;
     setSelectedFormat(selectedItem.content_type);
+    // Never carry a render result over to another item — it would make the
+    // publish guard believe this item already has a video.
+    setReelVideoUrl(null);
     setRenditionError(null);
     setRenditionsLoading(true);
     fetch(`/api/content/${selectedItem.id}/renditions`, { credentials: 'include' })
@@ -161,10 +169,12 @@ export default function ScheduleModal({
     try {
       // Reels always need a finished video. Stories can be image-only, so only
       // block them while a video render is actively in progress.
-      const activeVideoUrl     = isPrimaryFormat ? selectedItem.video_url        : (activeRendition?.video_url ?? null);
-      const activeMuxId        = isPrimaryFormat ? selectedItem.mux_playback_id  : (activeRendition?.mux_playback_id ?? null);
-      const activeRenderStatus = isPrimaryFormat ? selectedItem.render_status    : (activeRendition?.render_status ?? null);
-      const hasVideo  = !!activeVideoUrl || !!activeMuxId || !!reelVideoUrl;
+      // Only a real http(s) video URL counts: a legacy Mux playback id is not
+      // publishable, and letting it through made the server publish the reel
+      // *cover image* instead of the video.
+      const activeVideoUrl     = isPrimaryFormat ? selectedItem.video_url     : (activeRendition?.video_url ?? null);
+      const activeRenderStatus = isPrimaryFormat ? selectedItem.render_status : (activeRendition?.render_status ?? null);
+      const hasVideo  = isVideoUrl(activeVideoUrl) || isVideoUrl(reelVideoUrl);
       const reelReady = selectedFormat === 'reel' ? hasVideo
         : selectedFormat === 'story' ? activeRenderStatus !== 'rendering'
         : true;
@@ -256,7 +266,11 @@ export default function ScheduleModal({
                 primaryFormat={selectedItem.content_type}
                 renditions={renditions}
                 loading={renditionsLoading}
-                onSelect={setSelectedFormat}
+                onSelect={(f) => {
+                  // A render result belongs to the format it was rendered for.
+                  if (f !== selectedFormat) setReelVideoUrl(null);
+                  setSelectedFormat(f);
+                }}
               />
 
               {selectedFormat && (
@@ -270,6 +284,9 @@ export default function ScheduleModal({
                   lang={lang}
                   onGenerate={() => handleGenerateRendition(selectedFormat)}
                   onReelRenderDone={(_id, url) => {
+                    // MuxReelPlayer reports a Mux playback id for legacy items —
+                    // that is not a publishable video URL, so ignore it here.
+                    if (!isVideoUrl(url)) return;
                     setReelVideoUrl(url);
                     if (!isPrimaryFormat) {
                       setRenditions((prev) => prev.map((r) =>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
 import type { ContentType } from '@/types/content';
 
 const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
@@ -112,7 +113,7 @@ export async function POST(req: NextRequest) {
   // Verify ownership of content item
   const { data: item } = await db
     .from('kefy_content_items')
-    .select('id, body, image_url, hashtags, channel, status, content_type, slides, video_url')
+    .select('id, body, image_url, hashtags, channel, status, content_type, slides, video_url, mux_playback_id')
     .eq('id', input.content_item_id)
     .eq('org_id', auth.orgId)
     .maybeSingle();
@@ -121,19 +122,16 @@ export async function POST(req: NextRequest) {
 
   const format = (input.format as ContentType | undefined) ?? (item.content_type as ContentType);
 
-  let scheduleSource: {
-    body: string | null;
-    image_url: string | null;
-    slides: unknown;
-    video_url: string | null;
-    hashtags: string[];
-  };
+  let scheduleSource: PublishMediaSource;
   if (format === item.content_type) {
-    scheduleSource = { body: item.body, image_url: item.image_url, slides: item.slides, video_url: item.video_url, hashtags: item.hashtags ?? [] };
+    scheduleSource = {
+      body: item.body, image_url: item.image_url, slides: item.slides,
+      video_url: item.video_url, mux_playback_id: item.mux_playback_id, hashtags: item.hashtags ?? [],
+    };
   } else {
     const { data: rendition } = await db
       .from('kefy_content_renditions')
-      .select('body, image_url, slides, video_url, hashtags, status')
+      .select('body, image_url, slides, video_url, mux_playback_id, hashtags, status')
       .eq('content_item_id', item.id)
       .eq('format', format)
       .maybeSingle();
@@ -143,7 +141,14 @@ export async function POST(req: NextRequest) {
     scheduleSource = rendition;
   }
 
-  if (!scheduleSource.body) return NextResponse.json({ error: 'Content has no body text' }, { status: 422 });
+  // Same media rules as immediate publish — a reel with no rendered video is
+  // rejected here instead of being scheduled as its cover image.
+  const resolved = resolvePublishMedia(format, scheduleSource);
+  if (!resolved.ok) {
+    console.warn(`[schedule] REJECTED itemId=${item.id} format=${format}: ${resolved.error}`);
+    return NextResponse.json({ error: resolved.error }, { status: 422 });
+  }
+  const media = resolved.media;
 
   // Fetch all requested active accounts belonging to this org
   const { data: accounts } = await db
@@ -175,38 +180,22 @@ export async function POST(req: NextRequest) {
 
   for (const account of accounts) {
     try {
-      const slides = scheduleSource.slides as Array<{ image_url?: string }> | null;
-      const mediaUrls: string[] | undefined =
-        format === 'carousel' && Array.isArray(slides)
-          ? slides.map((s) => s.image_url).filter((u): u is string => !!u)
-          : undefined;
-
-      // Same video/hashtag rules as immediate publish — see /api/social/publish
-      const isVideoFormat = (format === 'reel' || format === 'story') && !!scheduleSource.video_url;
-      const videoUrl: string | undefined = isVideoFormat ? (scheduleSource.video_url ?? undefined) : undefined;
-      const publishImageUrl = isVideoFormat ? undefined : (scheduleSource.image_url ?? undefined);
-      const hashtags = scheduleSource.hashtags ?? [];
-      let publishText = scheduleSource.body;
-      if (isVideoFormat && hashtags.length > 0) {
-        const hashtagLine = hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ');
-        publishText = `${scheduleSource.body}\n\n${hashtagLine}`;
-      }
-
       console.log(
         `[schedule] → account ${account.id} platform=${account.platform}` +
         ` zernio_account_id=${account.zernio_account_id}` +
-        ` scheduledAt=${scheduledAt.toISOString()}`,
+        ` scheduledAt=${scheduledAt.toISOString()}` +
+        ` hasImage=${!!media.image_url} mediaUrls=${media.media_urls?.length ?? 0} hasVideo=${!!media.video_url}`,
       );
 
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
         platform:     account.platform,
-        text:         publishText!,
-        image_url:    publishImageUrl,
-        media_urls:   mediaUrls,
-        video_url:    videoUrl,
+        text:         media.text,
+        image_url:    media.image_url,
+        media_urls:   media.media_urls,
+        video_url:    media.video_url,
         content_type: format,
-        hashtags:     isVideoFormat ? [] : hashtags,
+        hashtags:     media.hashtags,
         scheduled_at: scheduledAt.toISOString(),
       });
 

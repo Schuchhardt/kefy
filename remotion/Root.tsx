@@ -1,5 +1,5 @@
 import { Composition, registerRoot } from 'remotion';
-import { ReelComposition, getTotalFrames, type ReelCompositionProps } from './ReelComposition';
+import { ReelComposition, getTotalFrames, calculateReelMetadata, type ReelCompositionProps } from './ReelComposition';
 
 // Sample scenes for Remotion Studio preview
 const SAMPLE_SCENES: ReelCompositionProps['scenes'] = [
@@ -19,7 +19,10 @@ export const RemotionRoot: React.FC = () => {
         id="KefyReel"
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         component={ReelComposition as any}
+        // Only the Studio default — every render recomputes it from the real
+        // scenes via calculateMetadata below.
         durationInFrames={getTotalFrames(SAMPLE_SCENES, SAMPLE_FPS)}
+        calculateMetadata={({ props }) => calculateReelMetadata({ props }, SAMPLE_FPS)}
         fps={SAMPLE_FPS}
         width={1080}
         height={1920}

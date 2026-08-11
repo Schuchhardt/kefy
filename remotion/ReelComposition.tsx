@@ -77,6 +77,34 @@ export function getTotalFrames(scenes: ReelSceneProps[], fps = 30): number {
   return scenes.reduce((acc, s) => acc + Math.round(s.duration_seconds * fps), 0);
 }
 
+/** Fallback when a scene carries no (or an unusable) duration. */
+const DEFAULT_SCENE_SECONDS = 3;
+/** Remotion rejects a composition with 0 frames. */
+const MIN_TOTAL_FRAMES      = 1;
+
+/**
+ * Duration of the reel that is actually being rendered.
+ *
+ * Remotion resolves a composition's `durationInFrames` from the *registered*
+ * value unless the composition computes it from its input props. Without this,
+ * every render used the sample scenes' length (17 s): longer scripts were cut
+ * mid-scene and shorter ones ended with seconds of dead background.
+ */
+export function calculateReelMetadata(
+  { props }: { props: Partial<ReelCompositionProps> },
+  fps = 30,
+): { durationInFrames: number } {
+  const scenes = Array.isArray(props?.scenes) ? props.scenes : [];
+  const normalized = scenes.map((scene) => ({
+    ...scene,
+    duration_seconds:
+      typeof scene?.duration_seconds === 'number' && scene.duration_seconds > 0
+        ? scene.duration_seconds
+        : DEFAULT_SCENE_SECONDS,
+  }));
+  return { durationInFrames: Math.max(MIN_TOTAL_FRAMES, getTotalFrames(normalized, fps)) };
+}
+
 // ─── Single scene component ───────────────────────────────────────────────────
 
 function ReelScene({

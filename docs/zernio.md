@@ -274,7 +274,17 @@ Solo **Instagram**, **Facebook** y **Snapchat** tienen superficie de Stories en 
 
 > ⚠️ Las Stories no muestran texto/caption (Instagram y Facebook), no permiten link stickers vía API, y expiran a las 24h. `firstComment`, `collaborators` y `userTags` no aplican a Stories.
 
-Nota aparte: Facebook Reels también requieren `platformSpecificData: { contentType: "reel" }` explícito (Instagram puede auto-detectarlo de un vídeo vertical 9:16), pero eso no está implementado todavía — Kefy hoy publica reels enviando solo el vídeo sin ese flag.
+### Reels (`content_type = 'reel'`)
+
+Un reel es **siempre** un vídeo. Reglas implementadas:
+
+- `lib/publish-media.ts::resolvePublishMedia` exige un `video_url` http(s) renderizado. Sin él, `/api/social/publish` y `/api/social/schedule` devuelven **422** en vez de publicar. Antes caían a `image_url` (la portada del reel) y el reel se publicaba como **foto** en Instagram/Facebook/TikTok, sin error visible.
+- `lib/zernio.ts::publishPost` lanza `ZernioError` si le llega `content_type: 'reel'` sin `video_url` — red de seguridad para cualquier llamador futuro.
+- Un post de vídeo **nunca** lleva `image_url` junto al vídeo: Zernio publicaría dos media items (una foto *y* un vídeo).
+- Facebook Reels requieren `platformSpecificData: { contentType: "reel" }` explícito; Instagram lo auto-detecta de un vídeo vertical 9:16. El resto de plataformas no tienen superficie de Reels.
+- Los ítems legacy que solo tienen `mux_playback_id` (sin `video_url`) no son publicables: hay que re-renderizarlos con Remotion Lambda.
+
+Tests de regresión: `tests/unit/lib/publish-media.test.ts`, `tests/unit/api/social-publish.test.ts`, `tests/unit/components/ScheduleModal.test.tsx` y la sección de reels en `tests/unit/lib/zernio.test.ts`.
 
 ### Listar posts
 

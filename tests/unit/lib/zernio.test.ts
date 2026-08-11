@@ -163,7 +163,7 @@ describe('publishPost', () => {
     expect(body.platforms[0].platformSpecificData).toBeUndefined();
   });
 
-  it('content_type post/carousel/reel: no incluye platformSpecificData en Instagram', async () => {
+  it('content_type post/carousel: no incluye platformSpecificData en Instagram', async () => {
     mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
 
     await publishPost({
@@ -176,6 +176,75 @@ describe('publishPost', () => {
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string);
     expect(body.platforms[0].platformSpecificData).toBeUndefined();
+  });
+
+  // ── Reels ──────────────────────────────────────────────────────────────────
+  // Regresión: un reel sin video terminaba publicándose como foto (la portada).
+
+  it('content_type reel sin video: lanza ZernioError y no llama a la API', async () => {
+    await expect(
+      publishPost({
+        account_id:   'acc-1',
+        platform:     'instagram',
+        text:         'Mi reel',
+        image_url:    'https://cdn.example.com/cover.jpg',
+        content_type: 'reel',
+      }),
+    ).rejects.toBeInstanceOf(ZernioError);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('content_type reel con video: manda un único mediaItem de tipo video', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({
+      account_id:   'acc-1',
+      platform:     'instagram',
+      text:         'Mi reel',
+      video_url:    'https://s3.example.com/reel.mp4',
+      content_type: 'reel',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.mediaItems).toEqual([{ type: 'video', url: 'https://s3.example.com/reel.mp4' }]);
+    // Instagram autodetecta el reel desde un video vertical
+    expect(body.platforms[0].platformSpecificData).toBeUndefined();
+  });
+
+  it('content_type reel en Facebook: incluye platformSpecificData.contentType=reel', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({
+      account_id:   'acc-1',
+      platform:     'facebook',
+      text:         'Mi reel',
+      video_url:    'https://s3.example.com/reel.mp4',
+      content_type: 'reel',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.platforms[0].platformSpecificData).toEqual({ contentType: 'reel' });
+  });
+
+  it('content_type reel en TikTok: publica el video sin truncar el caption a 90 chars', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    const longText = 'a'.repeat(200);
+    await publishPost({
+      account_id:   'acc-1',
+      platform:     'tiktok',
+      text:         longText,
+      video_url:    'https://s3.example.com/reel.mp4',
+      content_type: 'reel',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.content).toBe(longText);
+    expect(body.mediaItems).toEqual([{ type: 'video', url: 'https://s3.example.com/reel.mp4' }]);
   });
 });
 
