@@ -161,7 +161,7 @@ export async function refreshAccountToken(zernioAccountId: string): Promise<{
 // Facebook expose `contentType: 'story'` in platformSpecificData; Snapchat's
 // contentType already defaults to 'story'. Other platforms have no Story
 // concept in Zernio, so we fall back to a regular post for them.
-const STORY_CAPABLE_PLATFORMS = new Set(['instagram', 'facebook', 'snapchat']);
+export const STORY_CAPABLE_PLATFORMS = new Set(['instagram', 'facebook', 'snapchat']);
 
 // Facebook needs an explicit `contentType: 'reel'` to publish a video as a Reel
 // instead of a plain feed video. Instagram auto-detects it from a vertical 9:16

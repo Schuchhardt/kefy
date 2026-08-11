@@ -185,3 +185,23 @@ export async function compositeTextOnImage(
 
   return result.toString('base64');
 }
+
+const STORY_CAPTION_MAX_CHARS = 150;
+
+/**
+ * Composite caption text onto a story image buffer.
+ * Truncates to ~3 visible lines to match the in-app preview clamp.
+ * Returns a JPEG buffer with text baked in.
+ */
+export async function compositeStoryText(
+  imageBuffer: Buffer,
+  caption: string,
+): Promise<Buffer> {
+  let text = caption.trim();
+  if (text.length > STORY_CAPTION_MAX_CHARS) {
+    text = text.slice(0, STORY_CAPTION_MAX_CHARS - 1).trimEnd() + '…';
+  }
+  const b64 = imageBuffer.toString('base64');
+  const result = await compositeTextOnImage(b64, '', text);
+  return Buffer.from(result, 'base64');
+}
