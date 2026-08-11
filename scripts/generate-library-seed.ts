@@ -15,7 +15,9 @@
  *
  * Env knobs (optional):
  *   DRY_RUN=1              — generate text only, skip image gen + DB insert
- *   ONLY_INDUSTRY=<slug>   — restrict to one industry (e.g. for a smoke test)
+ *   ONLY_INDUSTRY=<slugs>  — restrict to a comma-separated list of industries
+ *   TARGET_TOTAL=<n>       — items per industry instead of the default 30;
+ *                            spread round-robin over post/carousel/reel/story
  *
  * Reads ANTHROPIC_API_KEY / OPENAI_API_KEY / SUPABASE_* from .env.local.
  */
@@ -30,13 +32,18 @@ import { uploadBase64Image } from '@/lib/storage';
 
 type ContentType = 'post' | 'carousel' | 'reel' | 'story';
 
-// Sums to 30 per industry.
-const TARGET_PER_TYPE: Record<ContentType, number> = {
-  post: 8,
-  carousel: 8,
-  reel: 7,
-  story: 7,
-};
+const CONTENT_TYPES: ContentType[] = ['post', 'carousel', 'reel', 'story'];
+
+// Spread `total` items round-robin across the four content types, so
+// TARGET_TOTAL=30 gives the default 8/8/7/7 and TARGET_TOTAL=10 gives 3/3/2/2.
+function targetsFor(total: number): Record<ContentType, number> {
+  const out = { post: 0, carousel: 0, reel: 0, story: 0 };
+  for (let i = 0; i < total; i++) out[CONTENT_TYPES[i % CONTENT_TYPES.length]]++;
+  return out;
+}
+
+const TARGET_TOTAL = Math.max(1, Number(process.env.TARGET_TOTAL) || 30);
+const TARGET_PER_TYPE = targetsFor(TARGET_TOTAL);
 
 const LANGUAGE = 'es' as const;
 const DRY_RUN = process.env.DRY_RUN === '1';
@@ -59,8 +66,9 @@ async function main() {
     process.exit(1);
   }
 
-  const targetIndustries = ONLY_INDUSTRY
-    ? industries.filter((i) => i.slug === ONLY_INDUSTRY)
+  const onlySlugs = ONLY_INDUSTRY?.split(',').map((s) => s.trim()).filter(Boolean) ?? null;
+  const targetIndustries = onlySlugs
+    ? industries.filter((i) => onlySlugs.includes(i.slug))
     : industries;
 
   if (targetIndustries.length === 0) {

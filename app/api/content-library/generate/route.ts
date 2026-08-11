@@ -53,7 +53,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Cada item (texto + imagen + upload) toma ~60s, así que 7 industrias no caben
+// en los 300s de maxDuration. Cortamos antes de que Vercel mate la función para
+// poder devolver el resumen de lo que sí alcanzó a generarse.
+const SOFT_DEADLINE_MS = 250_000;
+
 async function runLibraryGeneration() {
+  const startedAt = Date.now();
   const db = createSupabaseServer();
 
   // Load all industries
@@ -67,9 +73,21 @@ async function runLibraryGeneration() {
     return NextResponse.json({ error: 'Failed to load industries' }, { status: 500 });
   }
 
+  // Procesar primero las industrias con menos contenido. Con orden fijo por
+  // sort_order, el corte por timeout dejaba a las últimas industrias siempre
+  // vacías; ordenando por carencia el catálogo se auto-nivela.
+  const withCounts = await Promise.all(industries.map(async (industry) => {
+    const { count } = await db
+      .from('kefy_content_library')
+      .select('id', { count: 'exact', head: true })
+      .eq('industry_id', industry.id);
+    return { industry, total: count ?? 0 };
+  }));
+  withCounts.sort((a, b) => a.total - b.total);
+
   type RunResult = {
     industry: string;
-    status: 'success' | 'failed';
+    status: 'success' | 'failed' | 'skipped';
     item_id?: string;
     has_image?: boolean;
     error?: string;
@@ -77,7 +95,12 @@ async function runLibraryGeneration() {
 
   const results: RunResult[] = [];
 
-  for (const industry of industries) {
+  for (const { industry } of withCounts) {
+    if (Date.now() - startedAt > SOFT_DEADLINE_MS) {
+      results.push({ industry: industry.slug, status: 'skipped', error: 'run deadline reached' });
+      continue;
+    }
+
     try {
       // Check if we already generated for this industry today
       const todayStart = new Date();
@@ -91,7 +114,7 @@ async function runLibraryGeneration() {
         .gte('created_at', todayStart.toISOString());
 
       if ((count ?? 0) > 0) {
-        results.push({ industry: industry.slug, status: 'success', error: 'already generated today' });
+        results.push({ industry: industry.slug, status: 'skipped', error: 'already generated today' });
         continue;
       }
 
@@ -174,8 +197,9 @@ async function runLibraryGeneration() {
 
   const generated = results.filter((r) => r.status === 'success' && r.item_id).length;
   const failed    = results.filter((r) => r.status === 'failed').length;
+  const skipped   = results.filter((r) => r.status === 'skipped').length;
 
-  return NextResponse.json({ generated, failed, results }, {
+  return NextResponse.json({ generated, failed, skipped, results }, {
     status: failed > 0 && generated === 0 ? 502 : 200,
   });
 }

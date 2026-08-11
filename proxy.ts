@@ -12,7 +12,11 @@ const PUBLIC_API_PATHS = [
   '/api/auth/refresh',
   '/api/waitlist',
   '/api/webhooks/',
+  // Vercel Cron endpoints: no llevan cookie de sesión, se autentican solos
+  // contra CRON_SECRET / AUTOPILOT_CRON_SECRET dentro del route handler.
   '/api/autopilot/run',
+  '/api/content-library/generate',
+  '/api/content/reel/reconcile',
 ];
 
 async function verifyToken(token: string) {
