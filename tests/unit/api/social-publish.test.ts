@@ -18,10 +18,20 @@ vi.mock('@/lib/auth', async (importOriginal) => {
 });
 
 const mockPublishPost = vi.fn();
-vi.mock('@/lib/zernio', () => ({ publishPost: mockPublishPost }));
+vi.mock('@/lib/zernio', () => ({
+  publishPost: mockPublishPost,
+  STORY_CAPABLE_PLATFORMS: new Set(['instagram', 'facebook', 'snapchat']),
+}));
 
-vi.mock('@/lib/image-processor', () => ({ resizeForFormat: vi.fn() }));
-vi.mock('@/lib/storage', () => ({ uploadBase64Image: vi.fn() }));
+const mockResizeForFormat = vi.fn();
+const mockCompositeStoryText = vi.fn();
+vi.mock('@/lib/image-processor', () => ({
+  resizeForFormat: mockResizeForFormat,
+  compositeStoryText: mockCompositeStoryText,
+}));
+
+const mockUploadBase64Image = vi.fn();
+vi.mock('@/lib/storage', () => ({ uploadBase64Image: mockUploadBase64Image }));
 
 import { getAuthFromRequest } from '@/lib/auth';
 
@@ -207,7 +217,7 @@ describe('POST /api/social/publish — reel', () => {
 });
 
 describe('POST /api/social/publish — otros formatos', () => {
-  it('story sin video: sigue publicando la imagen', async () => {
+  it('story sin video: sigue publicando la imagen (fallback si el fetch falla)', async () => {
     const { POST } = await import('@/app/api/social/publish/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     stubDb({
@@ -221,6 +231,51 @@ describe('POST /api/social/publish — otros formatos', () => {
     const [payload] = mockPublishPost.mock.calls[0];
     expect(payload.image_url).toBe('https://cdn.example.com/cover.jpg');
     expect(payload.video_url).toBeUndefined();
+  });
+
+  it('story sin video en Instagram: compone el texto sobre la imagen', async () => {
+    const { POST } = await import('@/app/api/social/publish/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+
+    const fakeImageBuf = new ArrayBuffer(100);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, arrayBuffer: () => Promise.resolve(fakeImageBuf) }));
+    mockResizeForFormat.mockResolvedValue(Buffer.from('resized'));
+    mockCompositeStoryText.mockResolvedValue(Buffer.from('composited'));
+    mockUploadBase64Image.mockResolvedValue('https://cdn.example.com/composited.jpeg');
+
+    stubDb({
+      kefy_content_items:   reelItem({ content_type: 'story', slides: null }),
+      kefy_social_accounts: [ACCOUNTS[0]],
+    });
+
+    const res = await POST(publishReq({ content_item_id: 'item-1', social_account_ids: ['sa-ig'] }));
+
+    expect(res.status).toBe(200);
+    expect(mockCompositeStoryText).toHaveBeenCalledWith(Buffer.from('resized'), 'Mi reel');
+    const [payload] = mockPublishPost.mock.calls[0];
+    expect(payload.image_url).toBe('https://cdn.example.com/composited.jpeg');
+  });
+
+  it('story sin video en TikTok: NO compone texto (no es story-capable)', async () => {
+    const { POST } = await import('@/app/api/social/publish/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+
+    const fakeImageBuf = new ArrayBuffer(100);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, arrayBuffer: () => Promise.resolve(fakeImageBuf) }));
+    mockResizeForFormat.mockResolvedValue(Buffer.from('resized'));
+    mockUploadBase64Image.mockResolvedValue('https://cdn.example.com/resized.jpeg');
+
+    stubDb({
+      kefy_content_items:   reelItem({ content_type: 'story', slides: null }),
+      kefy_social_accounts: [ACCOUNTS[2]], // TikTok
+    });
+
+    const res = await POST(publishReq({ content_item_id: 'item-1', social_account_ids: ['sa-tt'] }));
+
+    expect(res.status).toBe(200);
+    expect(mockCompositeStoryText).not.toHaveBeenCalled();
+    const [payload] = mockPublishPost.mock.calls[0];
+    expect(payload.image_url).toBe('https://cdn.example.com/resized.jpeg');
   });
 
   it('carousel: manda las slides sin duplicar la portada', async () => {
@@ -265,6 +320,36 @@ describe('POST /api/social/schedule — reel', () => {
     expect(res.status).toBe(422);
     expect(mockPublishPost).not.toHaveBeenCalled();
     expect(calls.some((c) => c.table === 'kefy_scheduled_posts' && c.method === 'insert')).toBe(false);
+  });
+
+  it('story sin video: compone texto sobre la imagen para Instagram', async () => {
+    const { POST } = await import('@/app/api/social/schedule/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    mockPublishPost.mockResolvedValue({
+      post_id: 'z-post-1', platform_post_id: null, status: 'scheduled',
+      published_at: null, scheduled_at: FUTURE,
+    });
+
+    const fakeImageBuf = new ArrayBuffer(100);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, arrayBuffer: () => Promise.resolve(fakeImageBuf) }));
+    mockResizeForFormat.mockResolvedValue(Buffer.from('resized'));
+    mockCompositeStoryText.mockResolvedValue(Buffer.from('composited'));
+    mockUploadBase64Image.mockResolvedValue('https://cdn.example.com/composited.jpeg');
+
+    stubDb({
+      kefy_content_items:   reelItem({ content_type: 'story', slides: null }),
+      kefy_social_accounts: [ACCOUNTS[0]],
+      kefy_scheduled_posts: { id: 'sp-1' },
+    });
+
+    const res = await POST(scheduleReq({
+      content_item_id: 'item-1', social_account_ids: ['sa-ig'], scheduled_at: FUTURE,
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockCompositeStoryText).toHaveBeenCalled();
+    const [payload] = mockPublishPost.mock.calls[0];
+    expect(payload.image_url).toBe('https://cdn.example.com/composited.jpeg');
   });
 
   it('reel con video: programa el video sin imagen', async () => {

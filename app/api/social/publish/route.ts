@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { resizeForFormat } from '@/lib/image-processor';
+import { resizeForFormat, compositeStoryText } from '@/lib/image-processor';
 import { uploadBase64Image } from '@/lib/storage';
 import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
 import type { ContentChannel } from '@/types/ai';
@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No active social accounts found for the given IDs' }, { status: 404 });
   }
 
-  const { publishPost } = await import('@/lib/zernio');
+  const { publishPost, STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
 
   console.log(
     `[publish] START itemId=${item.id} format=${format} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
@@ -146,11 +146,22 @@ export async function POST(req: NextRequest) {
       let platformImageUrl = media.image_url;
       if (sourceImageBuffer) {
         try {
-          const resizedBuf = await resizeForFormat(
+          let resizedBuf = await resizeForFormat(
             sourceImageBuffer,
             (account.platform ?? 'generic') as ContentChannel,
             format,
           );
+
+          // Bake caption into the image for story-capable platforms — Instagram,
+          // Facebook and Snapchat don't display text captions on stories.
+          if (format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)) {
+            try {
+              resizedBuf = await compositeStoryText(resizedBuf, media.text);
+            } catch (compositeErr) {
+              console.warn(`Story text composite failed for ${account.platform}, using plain image:`, compositeErr);
+            }
+          }
+
           const b64 = resizedBuf.toString('base64');
           platformImageUrl = await uploadBase64Image(
             b64,

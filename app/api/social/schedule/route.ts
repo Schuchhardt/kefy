@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
+import { resizeForFormat, compositeStoryText } from '@/lib/image-processor';
+import { uploadBase64Image } from '@/lib/storage';
 import type { ContentType } from '@/types/content';
+import type { ContentChannel } from '@/types/ai';
 
 const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 
@@ -162,7 +165,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No active social accounts found for the given IDs' }, { status: 404 });
   }
 
-  const { publishPost } = await import('@/lib/zernio');
+  const { publishPost, STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
+
+  // Pre-composite caption text onto the story image for platforms that don't
+  // display captions on stories (Instagram, Facebook, Snapchat).
+  let storyCompositeImageUrl: string | undefined;
+  if (format === 'story' && !media.is_video && media.image_url) {
+    try {
+      const resp = await fetch(media.image_url);
+      if (resp.ok) {
+        const ab = await resp.arrayBuffer();
+        const srcBuf = Buffer.from(ab);
+        const resized = await resizeForFormat(srcBuf, 'generic' as ContentChannel, 'story');
+        const composited = await compositeStoryText(resized, media.text);
+        storyCompositeImageUrl = await uploadBase64Image(
+          composited.toString('base64'),
+          auth.orgId,
+          `story-composite-${Date.now()}.jpeg`,
+        );
+      }
+    } catch (err) {
+      console.warn('[schedule] Story text composite failed, using original image:', err);
+    }
+  }
 
   console.log(
     `[schedule] START itemId=${item.id} format=${format}` +
@@ -187,11 +212,15 @@ export async function POST(req: NextRequest) {
         ` hasImage=${!!media.image_url} mediaUrls=${media.media_urls?.length ?? 0} hasVideo=${!!media.video_url}`,
       );
 
+      const imageForAccount = (storyCompositeImageUrl && STORY_CAPABLE_PLATFORMS.has(account.platform))
+        ? storyCompositeImageUrl
+        : media.image_url;
+
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
         platform:     account.platform,
         text:         media.text,
-        image_url:    media.image_url,
+        image_url:    imageForAccount,
         media_urls:   media.media_urls,
         video_url:    media.video_url,
         content_type: format,
