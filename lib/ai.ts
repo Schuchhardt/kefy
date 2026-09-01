@@ -21,6 +21,7 @@ import type {
   RecommendBrandContext,
   GenerateRecommendationsResult,
 } from '@/types/ai';
+import { withSourceBlock } from '@/lib/content-source';
 
 // ─── Client singletons ────────────────────────────────────────────────────────
 
@@ -103,7 +104,9 @@ function buildSystemPrompt(opts: GenerateTextOptions): string {
     .filter(Boolean)
     .join(' ');
 
-  return loadPrompt('post', {
+  // El bloque de origen se antepone al prompt final: la plantilla de
+  // `prompts/post.prompt.md` no lo conoce, así que no puede perderse ahí.
+  return withSourceBlock(loadPrompt('post', {
     channel:         opts.channel,
     language:        lang,
     tone,
@@ -111,7 +114,7 @@ function buildSystemPrompt(opts: GenerateTextOptions): string {
     hashtagCount:    String(limit.hashtagCount),
     brandCtx:        brandCtx,
     extraCtx:        opts.extraCtx ?? '',
-  }, inlinePrompt);
+  }, inlinePrompt), opts.source);
 }
 
 // ─── Extract hashtags from generated text ────────────────────────────────────
@@ -149,7 +152,9 @@ export async function generateContentText(
   opts: GenerateTextOptions,
 ): Promise<GenerateTextResult> {
   const systemPrompt = buildSystemPrompt(opts);
-  const userMessage  = `Write a ${opts.channel} post about: ${opts.topic}`;
+  const userMessage  = opts.source
+    ? `Rewrite the SOURCE CONTENT above as a ${opts.channel} post. Topic: ${opts.topic}`
+    : `Write a ${opts.channel} post about: ${opts.topic}`;
   const maxChars     = CHANNEL_LIMITS[opts.channel].maxChars;
 
   const result = await (!opts.model || opts.model === 'claude'
@@ -357,7 +362,7 @@ export async function generateCarouselSlides(
     'description: one caption for the whole post with hashtags appended. title/body: text that will appear ON each slide image. image_prompt: background only (app overlays text).',
   ].filter(Boolean).join(' ');
 
-  const system = loadPrompt('carousel', {
+  const system = withSourceBlock(loadPrompt('carousel', {
     slideCount:   String(slideCount),
     channel:      opts.channel,
     language:     lang,
@@ -366,9 +371,11 @@ export async function generateCarouselSlides(
     extraCtx:     opts.extraCtx ?? '',
     maxChars,
     hashtagCount,
-  }, inlineCarouselSystem);
+  }, inlineCarouselSystem), opts.source);
 
-  const userMessage = `Create a ${slideCount}-slide carousel about: ${opts.topic}`;
+  const userMessage = opts.source
+    ? `Turn the SOURCE CONTENT above into a ${slideCount}-slide carousel. Topic: ${opts.topic}`
+    : `Create a ${slideCount}-slide carousel about: ${opts.topic}`;
 
   const client = getAnthropic();
   const model  = 'claude-opus-4-5';
@@ -499,16 +506,18 @@ export async function generateReelScript(
     `hook: compelling ${lang} caption for the post description (max 150 chars). hashtags: 8 relevant tags.`,
   ].filter(Boolean).join(' ');
 
-  const system = loadPrompt('reel-script', {
+  const system = withSourceBlock(loadPrompt('reel-script', {
     sceneCount: String(sceneCount),
     channel:    opts.channel,
     language:   lang,
     tone,
     brandCtx:   brandCtx,
     extraCtx:   opts.extraCtx ?? '',
-  }, inlineReelSystem);
+  }, inlineReelSystem), opts.source);
 
-  const userMessage = `Create a ${sceneCount}-scene vertical reel about: ${opts.topic}`;
+  const userMessage = opts.source
+    ? `Turn the SOURCE CONTENT above into a ${sceneCount}-scene vertical reel. Topic: ${opts.topic}`
+    : `Create a ${sceneCount}-scene vertical reel about: ${opts.topic}`;
 
   const client = getAnthropic();
   const model  = 'claude-opus-4-5';

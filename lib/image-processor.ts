@@ -2,6 +2,8 @@ import sharp from 'sharp';
 import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
 import { planImageFit, type ImageFitPlan } from '@/lib/image-fit';
+import { safeBoxFor } from '@/lib/preview-layout';
+import { BAKED_TEXT_FONT_FAMILY, ensureFontsConfigured } from '@/lib/fonts';
 
 export { planImageFit, aspectLimitsFor } from '@/lib/image-fit';
 export type { ImageFitPlan } from '@/lib/image-fit';
@@ -106,7 +108,16 @@ function escapeXml(str: string): string {
     .replace(/'/g, '&apos;');
 }
 
-function wrapText(text: string, maxCharsPerLine: number): string[] {
+/**
+ * Ancho medio de un glifo de Liberation Sans respecto del tamaño de fuente.
+ * Sirve para partir las líneas sin tener que medir con la tipografía real;
+ * el valor es conservador a propósito (mejor una línea de más que texto
+ * saliéndose de la zona segura).
+ */
+const GLYPH_WIDTH_RATIO = { bold: 0.55, regular: 0.52 } as const;
+
+export function wrapText(text: string, maxCharsPerLine: number): string[] {
+  if (maxCharsPerLine < 1) return text ? [text] : [];
   const words = text.split(' ');
   const lines: string[] = [];
   let current = '';
@@ -123,78 +134,175 @@ function wrapText(text: string, maxCharsPerLine: number): string[] {
   return lines;
 }
 
+// ─── Texto quemado dentro de la imagen ───────────────────────────────────────
+
+export interface BakeTextOptions {
+  /** Titular del slide/escena. */
+  title?:    string;
+  /** Copy de apoyo bajo el titular. */
+  body?:     string;
+  /** Red destino: define qué zona de la imagen tapa la propia interfaz. */
+  platform?: ContentChannel;
+  /** Formato destino: define la zona segura junto con la plataforma. */
+  format?:   ContentType;
+  quality?:  number;
+}
+
 /**
- * Composite title and body text onto a base64 image using Sharp + SVG overlay.
- * Returns a new base64 JPEG string with text baked into the image.
+ * Escribe título y cuerpo *dentro* de la imagen.
+ *
+ * Se usa al publicar, no al generar: en la app el texto va como overlay HTML
+ * encima de la imagen limpia (así se puede editar y se ve nítido), y sólo en
+ * el momento de publicar se queman los píxeles, porque las redes no muestran
+ * texto propio sobre cada slide de un carrusel.
+ *
+ * El texto se ancla abajo **dentro de la zona segura** de la red: en TikTok,
+ * por ejemplo, la columna de like/comentarios y la franja del @usuario tapan
+ * el contenido, y antes el texto quedaba justo debajo de esos controles.
  */
-export async function compositeTextOnImage(
-  imageBase64: string,
-  title: string,
-  body: string,
-): Promise<string> {
-  const imageBuffer = Buffer.from(imageBase64, 'base64');
-  const metadata    = await sharp(imageBuffer).metadata();
-  const w           = metadata.width  ?? 1024;
-  const h           = metadata.height ?? 1024;
+export async function bakeTextOnImage(
+  input: Buffer,
+  opts:  BakeTextOptions,
+): Promise<Buffer> {
+  ensureFontsConfigured();
 
-  const pad            = Math.round(w * 0.055);
-  const titleSize      = Math.round(w * 0.054);
-  const bodySize       = Math.round(w * 0.034);
-  const titleLineH     = Math.round(titleSize * 1.28);
-  const bodyLineH      = Math.round(bodySize  * 1.45);
-  const blockGap       = Math.round(bodySize  * 0.7);
-  const strokeW        = Math.max(3, Math.round(w * 0.003));
-  const maxTitleChars  = Math.round((w - pad * 2) / (titleSize * 0.52));
-  const maxBodyChars   = Math.round((w - pad * 2) / (bodySize  * 0.52));
+  const title = (opts.title ?? '').trim();
+  const body  = (opts.body  ?? '').trim();
+  if (!title && !body) return input;
 
-  const titleLines = wrapText(title, maxTitleChars);
-  const bodyLines  = body ? wrapText(body, maxBodyChars) : [];
+  const platform = opts.platform ?? 'generic';
+  const format   = opts.format   ?? 'post';
 
-  const totalTextH =
+  const metadata = await sharp(input).metadata();
+  const w = metadata.width  ?? 1024;
+  const h = metadata.height ?? 1024;
+
+  const safe = safeBoxFor(w, h, platform, format);
+
+  // Los tamaños escalan con el ancho de la *zona segura*, no del lienzo: en un
+  // 9:16 de TikTok la columna útil es mucho más angosta y un cuerpo calculado
+  // sobre el ancho total se desbordaba.
+  const titleSize  = Math.max(14, Math.round(safe.width * 0.075));
+  const bodySize   = Math.max(11, Math.round(safe.width * 0.047));
+  const titleLineH = Math.round(titleSize * 1.28);
+  const bodyLineH  = Math.round(bodySize  * 1.45);
+  const blockGap   = Math.round(bodySize  * 0.7);
+  const strokeW    = Math.max(2, Math.round(w * 0.003));
+
+  const titleLines = title
+    ? wrapText(title, Math.round(safe.width / (titleSize * GLYPH_WIDTH_RATIO.bold)))
+    : [];
+  const bodyLines = body
+    ? wrapText(body, Math.round(safe.width / (bodySize * GLYPH_WIDTH_RATIO.regular)))
+    : [];
+
+  const textHeight =
     titleLines.length * titleLineH +
     (bodyLines.length > 0 ? blockGap + bodyLines.length * bodyLineH : 0);
 
-  const gradientStartY = Math.max(0, h - totalTextH - pad * 3.5);
+  // Ancla inferior de la zona segura; si el bloque no cabe, se sube hasta el
+  // borde superior de la zona en vez de desbordarse por arriba.
+  const safeBottom  = safe.y + safe.height;
+  const blockTop    = Math.max(safe.y, safeBottom - textHeight);
+  const titleBaseY  = blockTop + titleSize;
+  const bodyBaseY   = titleBaseY + (titleLines.length ? (titleLines.length - 1) * titleLineH + blockGap + bodyLineH : bodyLineH);
 
-  // Baseline of the first title line
-  const titleBaseY = h - pad - (bodyLines.length > 0 ? bodyLines.length * bodyLineH + blockGap : 0) - (titleLines.length - 1) * titleLineH;
-  // Baseline of the first body line
-  const bodyBaseY  = titleBaseY + titleLines.length * titleLineH + blockGap;
+  const line = (text: string, x: number, y: number, size: number, weight: number, fill: string, stroke: number) =>
+    `<text x="${x}" y="${y}" font-family="${BAKED_TEXT_FONT_FAMILY}" font-size="${size}"` +
+    ` font-weight="${weight}" fill="${fill}" paint-order="stroke" stroke="rgba(0,0,0,0.55)"` +
+    ` stroke-width="${stroke}" stroke-linejoin="round">${escapeXml(text)}</text>`;
 
-  const titleSvg = titleLines.map((line, i) =>
-    `<text x="${pad}" y="${titleBaseY + i * titleLineH}"
-      font-family="Arial, Helvetica, system-ui, sans-serif"
-      font-size="${titleSize}" font-weight="900" fill="#ffffff"
-      paint-order="stroke" stroke="rgba(0,0,0,0.55)" stroke-width="${strokeW}"
-      stroke-linejoin="round">${escapeXml(line)}</text>`,
-  ).join('\n');
+  const titleSvg = titleLines
+    .map((t, i) => line(t, safe.x, titleBaseY + i * titleLineH, titleSize, 700, '#ffffff', strokeW))
+    .join('\n');
+  const bodySvg = bodyLines
+    .map((t, i) => line(t, safe.x, bodyBaseY + i * bodyLineH, bodySize, 400, 'rgba(255,255,255,0.92)', Math.max(1, strokeW - 1)))
+    .join('\n');
 
-  const bodySvg = bodyLines.map((line, i) =>
-    `<text x="${pad}" y="${bodyBaseY + i * bodyLineH}"
-      font-family="Arial, Helvetica, system-ui, sans-serif"
-      font-size="${bodySize}" font-weight="400" fill="rgba(255,255,255,0.90)"
-      paint-order="stroke" stroke="rgba(0,0,0,0.50)" stroke-width="${Math.max(2, strokeW - 1)}"
-      stroke-linejoin="round">${escapeXml(line)}</text>`,
-  ).join('\n');
+  // El degradado sí puede pasar de la zona segura: sólo oscurece el fondo.
+  const scrimTop = Math.max(0, blockTop - Math.round(titleSize * 1.6));
 
   const svg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="overlay" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"   stop-color="rgba(0,0,0,0)"/>
       <stop offset="100%" stop-color="rgba(0,0,0,0.78)"/>
     </linearGradient>
   </defs>
-  <rect x="0" y="${gradientStartY}" width="${w}" height="${h - gradientStartY}" fill="url(#overlay)"/>
+  <rect x="0" y="${scrimTop}" width="${w}" height="${h - scrimTop}" fill="url(#scrim)"/>
   ${titleSvg}
   ${bodySvg}
 </svg>`;
 
-  const result = await sharp(imageBuffer)
+  return sharp(input)
     .composite([{ input: Buffer.from(svg), blend: 'over' }])
-    .jpeg({ quality: 90 })
+    .jpeg({ quality: opts.quality ?? 90 })
     .toBuffer();
+}
 
-  return result.toString('base64');
+// ─── Salvaguarda: nunca publicar cuadraditos ─────────────────────────────────
+
+let textRenderingHealthy: Promise<boolean> | null = null;
+
+/**
+ * ¿El entorno puede dibujar glifos de verdad?
+ *
+ * Cuando fontconfig no encuentra ninguna fuente, librsvg no falla: dibuja el
+ * glifo `.notdef` — un rectángulo vacío — para *cada* carácter. Eso es lo que
+ * llenó de cuadraditos los slides ya publicados, sin un solo error en los logs.
+ *
+ * La prueba se apoya en que, si todo son cuadraditos, dos cadenas del mismo
+ * largo con letras distintas dan exactamente los mismos píxeles. Con una
+ * fuente real, una fila de «I» y una de «W» no se parecen en nada.
+ */
+export async function canRenderBakedText(): Promise<boolean> {
+  if (!textRenderingHealthy) {
+    textRenderingHealthy = (async () => {
+      ensureFontsConfigured();
+      const probe = (text: string) => Buffer.from(
+        `<svg width="360" height="90" xmlns="http://www.w3.org/2000/svg">` +
+        `<rect width="360" height="90" fill="#fff"/>` +
+        `<text x="6" y="64" font-family="${BAKED_TEXT_FONT_FAMILY}" font-size="52" fill="#000">${text}</text>` +
+        `</svg>`,
+      );
+      try {
+        const [narrow, wide] = await Promise.all([
+          sharp(probe('IIIIII')).png().toBuffer(),
+          sharp(probe('WWWWWW')).png().toBuffer(),
+        ]);
+        return !narrow.equals(wide);
+      } catch {
+        return false;
+      }
+    })();
+  }
+  return textRenderingHealthy;
+}
+
+/** Solo para tests: fuerza a repetir la comprobación. */
+export function resetTextRenderingProbeForTests(): void {
+  textRenderingHealthy = null;
+}
+
+/**
+ * Quema el texto sólo si el entorno sabe dibujarlo. Si no, devuelve la imagen
+ * intacta: publicar la foto limpia es infinitamente mejor que publicarla con
+ * una fila de cuadraditos encima, y el texto igual viaja en el caption.
+ */
+export async function bakeTextIfSupported(
+  input: Buffer,
+  opts:  BakeTextOptions,
+): Promise<Buffer> {
+  if (!(await canRenderBakedText())) {
+    console.warn('[image-processor] fuentes no disponibles: se publica la imagen sin texto quemado');
+    return input;
+  }
+  try {
+    return await bakeTextOnImage(input, opts);
+  } catch (err) {
+    console.warn('[image-processor] no se pudo quemar el texto:', err);
+    return input;
+  }
 }
 
 const STORY_CAPTION_MAX_CHARS = 150;
@@ -207,12 +315,11 @@ const STORY_CAPTION_MAX_CHARS = 150;
 export async function compositeStoryText(
   imageBuffer: Buffer,
   caption: string,
+  platform: ContentChannel = 'generic',
 ): Promise<Buffer> {
   let text = caption.trim();
   if (text.length > STORY_CAPTION_MAX_CHARS) {
     text = text.slice(0, STORY_CAPTION_MAX_CHARS - 1).trimEnd() + '…';
   }
-  const b64 = imageBuffer.toString('base64');
-  const result = await compositeTextOnImage(b64, '', text);
-  return Buffer.from(result, 'base64');
+  return bakeTextIfSupported(imageBuffer, { body: text, platform, format: 'story' });
 }

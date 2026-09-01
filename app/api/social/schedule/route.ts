@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
-import { resizeForFormat, compositeStoryText } from '@/lib/image-processor';
-import { uploadBase64Image } from '@/lib/storage';
-import type { ContentType } from '@/types/content';
+import { prepareCarouselSlides, prepareSingleImage } from '@/lib/publish-images';
+import type { CarouselSlide, ContentType } from '@/types/content';
 import type { ContentChannel } from '@/types/ai';
 
 const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
@@ -170,6 +169,10 @@ export async function POST(req: NextRequest) {
   // Pre-download the source image once so every account gets a copy fitted to
   // its own network — same treatment as immediate publish, which used to be the
   // only path that resized (scheduled posts went out at the original size).
+  const carouselSlides: CarouselSlide[] = format === 'carousel' && Array.isArray(scheduleSource.slides)
+    ? (scheduleSource.slides as CarouselSlide[])
+    : [];
+
   let sourceImageBuffer: Buffer | null = null;
   if (media.image_url) {
     try {
@@ -206,33 +209,26 @@ export async function POST(req: NextRequest) {
         ` hasImage=${!!media.image_url} mediaUrls=${media.media_urls?.length ?? 0} hasVideo=${!!media.video_url}`,
       );
 
-      // Fit the image to this network (no crop when the source ratio is already
-      // accepted) and bake the story caption in where the network won't show it.
+      const platform = (account.platform ?? 'generic') as ContentChannel;
+
+      // Ajuste al formato de la red + texto quemado donde la red no lo muestra
+      // (caption de story, y el título/cuerpo de cada slide del carrusel).
       let imageForAccount = media.image_url;
-      if (sourceImageBuffer) {
-        try {
-          let fittedBuf = await resizeForFormat(
-            sourceImageBuffer,
-            (account.platform ?? 'generic') as ContentChannel,
-            format,
-          );
+      if (media.image_url) {
+        imageForAccount = await prepareSingleImage(
+          media.image_url, sourceImageBuffer, platform, format,
+          { orgId: auth.orgId, prefix: 'schedule' },
+          format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
+            ? media.text
+            : undefined,
+        );
+      }
 
-          if (format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)) {
-            try {
-              fittedBuf = await compositeStoryText(fittedBuf, media.text);
-            } catch (compositeErr) {
-              console.warn(`[schedule] Story text composite failed for ${account.platform}, using plain image:`, compositeErr);
-            }
-          }
-
-          imageForAccount = await uploadBase64Image(
-            fittedBuf.toString('base64'),
-            auth.orgId,
-            `schedule-${account.platform}-${Date.now()}.jpeg`,
-          );
-        } catch (resizeErr) {
-          console.warn(`[schedule] Resize failed for ${account.platform}, using original:`, resizeErr);
-        }
+      let mediaUrlsForAccount = media.media_urls;
+      if (format === 'carousel' && carouselSlides.length > 0) {
+        mediaUrlsForAccount = await prepareCarouselSlides(
+          carouselSlides, platform, { orgId: auth.orgId, prefix: 'schedule' },
+        );
       }
 
       const zernioResult = await publishPost({
@@ -240,7 +236,7 @@ export async function POST(req: NextRequest) {
         platform:     account.platform,
         text:         media.text,
         image_url:    imageForAccount,
-        media_urls:   media.media_urls,
+        media_urls:   mediaUrlsForAccount,
         video_url:    media.video_url,
         content_type: format,
         hashtags:     media.hashtags,

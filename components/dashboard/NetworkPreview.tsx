@@ -11,6 +11,8 @@ import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from './PostPreview';
 import { SlideCanvas } from './CarouselPreview';
 import { ImageGeneratingSpinner } from './ImageGeneratingSpinner';
+import { safeAreaFor } from '@/lib/preview-layout';
+import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ReelScene, ContentType } from '@/types/content';
 
 /** Networks worth showing per format. Square formats (post/carousel) map to the
@@ -45,14 +47,19 @@ interface NetworkPreviewProps {
    *  the plain text-only fallback). */
   imagePending?:  boolean;
   accentColor?:   string;
+  /** Redes a mostrar. Por defecto, las relevantes para el formato; el modal de
+   *  publicación pasa sólo las de las cuentas elegidas. */
+  networks?:      string[];
 }
 
 export function NetworkPreview({
   contentType, defaultChannel, body, imageUrl, videoUrl, hashtags,
   slides, activeSlide, onActiveSlideChange, username, logoUrl,
-  imagePending, accentColor,
+  imagePending, accentColor, networks: networksProp,
 }: NetworkPreviewProps) {
-  const networks = NETWORKS[contentType];
+  const relevant = NETWORKS[contentType];
+  const narrowed = (networksProp ?? []).filter((n) => relevant.includes(n));
+  const networks = narrowed.length > 0 ? narrowed : relevant;
   // Default to the item's own channel when it's in the relevant set.
   const initial = networks.includes(defaultChannel) ? defaultChannel : networks[0];
   const [channel, setChannel] = useState(initial);
@@ -89,7 +96,20 @@ export function NetworkPreview({
       </div>
 
       {/* ── Framed preview ───────────────────────────── */}
-      {(contentType === 'post') && (
+      {contentType === 'post' && channel === 'tiktok' && (
+        <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''}>
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+          ) : imagePending ? (
+            <ImageGeneratingSpinner accentColor={accentColor} height="100%" />
+          ) : (
+            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #080810 0%, #0d0d1c 100%)' }} />
+          )}
+        </TikTokFrame>
+      )}
+
+      {contentType === 'post' && channel !== 'tiktok' && (
         <PostPreview
           channel={channel}
           body={body}
@@ -104,61 +124,66 @@ export function NetworkPreview({
       )}
 
       {contentType === 'carousel' && (
-        total > 0 ? (
+        total === 0 ? (
+          <EmptyFrame />
+        ) : channel === 'tiktok' ? (
+          // TikTok no muestra el carrusel en un feed cuadrado: lo muestra a
+          // pantalla completa con su propia interfaz encima del contenido.
+          <>
+            <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''}>
+              <SlideCanvas slide={slide} index={idx} total={total} platform="tiktok" format="carousel" />
+            </TikTokFrame>
+            {total > 1 && <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />}
+          </>
+        ) : (
           <PostPreview
             channel={channel}
             body={body}
             hashtags={hashtags}
             username={username}
             logoUrl={logoUrl ?? undefined}
-            media={<SlideCanvas slide={slide} index={idx} total={total} />}
+            media={<SlideCanvas slide={slide} index={idx} total={total} platform={channel as ContentChannel} format="carousel" />}
             mediaFooter={
               total > 1 ? (
                 <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />
               ) : null
             }
           />
-        ) : (
-          <EmptyFrame />
         )
       )}
 
-      {contentType === 'reel' && (
-        <VerticalNetworkFrame
-          channel={channel}
-          caption={body || slide?.title || ''}
-          username={username}
-          logoUrl={logoUrl}
-        >
-          {videoUrl ? (
-            <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <ReelSceneCanvas scene={slide as ReelScene | undefined} />
-          )}
-        </VerticalNetworkFrame>
-      )}
+      {contentType === 'reel' && (() => {
+        const media = videoUrl
+          ? <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <ReelSceneCanvas scene={slide as ReelScene | undefined} channel={channel as ContentChannel} />;
+        return channel === 'tiktok' ? (
+          <TikTokFrame username={username} logoUrl={logoUrl} caption={body || slide?.title || ''}>{media}</TikTokFrame>
+        ) : (
+          <VerticalNetworkFrame channel={channel} caption={body || slide?.title || ''} username={username} logoUrl={logoUrl}>
+            {media}
+          </VerticalNetworkFrame>
+        );
+      })()}
 
       {contentType === 'reel' && total > 1 && (
         <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />
       )}
 
-      {contentType === 'story' && (
-        <VerticalNetworkFrame
-          channel={channel}
-          caption={body ?? ''}
-          username={username}
-          logoUrl={logoUrl}
-        >
-          {videoUrl ? (
-            <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : imageUrl ? (
+      {contentType === 'story' && (() => {
+        const media = videoUrl
+          ? <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : imageUrl
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
-          ) : (
-            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #a18cd1 0%, #fbc2eb 100%)' }} />
-          )}
-        </VerticalNetworkFrame>
-      )}
+            ? <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+            : <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #a18cd1 0%, #fbc2eb 100%)' }} />;
+        return channel === 'tiktok' ? (
+          <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''}>{media}</TikTokFrame>
+        ) : (
+          <VerticalNetworkFrame channel={channel} caption={body ?? ''} username={username} logoUrl={logoUrl}>
+            {media}
+          </VerticalNetworkFrame>
+        );
+      })()}
     </div>
   );
 }
@@ -179,6 +204,108 @@ function SlideDots({ total, idx, onSelect }: { total: number; idx: number; onSel
           }}
         />
       ))}
+    </div>
+  );
+}
+
+// ─── Marco de TikTok ─────────────────────────────────────────────────────────
+// TikTok dibuja su interfaz ENCIMA del contenido: la columna de avatar / me
+// gusta / comentarios / compartir a la derecha, y el @usuario con la
+// descripción y la música abajo. El preview los reproduce a escala para que se
+// vea qué parte de la imagen queda tapada — es el mismo espacio que
+// `safeAreaFor('tiktok', …)` le reserva al texto en el servidor.
+
+function TikTokAction({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+      <div style={{ color: '#fff', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))' }}>{icon}</div>
+      <span style={{ fontSize: 9, fontWeight: 600, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>{label}</span>
+    </div>
+  );
+}
+
+export function TikTokFrame({
+  username, logoUrl, caption, children,
+}: {
+  username: string;
+  logoUrl?: string | null;
+  caption:  string;
+  children: React.ReactNode;
+}) {
+  const safe = safeAreaFor('tiktok', 'carousel');
+
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '9 / 16', background: '#000' }}>
+        {children}
+
+        {/* Pestañas superiores */}
+        <div style={{
+          position: 'absolute', top: 10, left: 0, right: 0, display: 'flex',
+          justifyContent: 'center', gap: 14, fontSize: 11, fontWeight: 600,
+          color: 'rgba(255,255,255,0.65)', textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+          pointerEvents: 'none',
+        }}>
+          <span>Siguiendo</span>
+          <span style={{ color: '#fff', borderBottom: '2px solid #fff', paddingBottom: 2 }}>Para ti</span>
+        </div>
+
+        {/* Columna de acciones (derecha) */}
+        <div style={{
+          position: 'absolute', right: 0, bottom: `${safe.bottom * 100}%`,
+          width: `${safe.right * 100}%`,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+          paddingBottom: 8, pointerEvents: 'none',
+        }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: '50%', overflow: 'hidden',
+            border: '1.5px solid #fff', background: '#1a1a1a',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{username[0]?.toUpperCase()}</span>
+            )}
+          </div>
+          <TikTokAction label="12.4K" icon={
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-4.9-8-10.4A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 3.6C20 16.1 12 21 12 21z"/></svg>
+          } />
+          <TikTokAction label="318" icon={
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          } />
+          <TikTokAction label="86" icon={
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M22 2 11 13 2 9l20-7zM11 13l4 9 7-20"/></svg>
+          } />
+          <div style={{
+            width: 30, height: 30, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #333, #111)', border: '2px solid rgba(255,255,255,0.25)',
+          }} />
+        </div>
+
+        {/* Usuario + descripción + música (abajo) */}
+        <div style={{
+          position: 'absolute', left: 0, right: `${safe.right * 100}%`, bottom: 0,
+          padding: '0 10px 10px', boxSizing: 'border-box', pointerEvents: 'none',
+        }}>
+          <p style={{
+            margin: '0 0 3px', fontSize: 12, fontWeight: 800, color: '#fff',
+            textShadow: '0 1px 4px rgba(0,0,0,0.7)',
+          }}>@{username}</p>
+          {caption && (
+            <p style={{
+              margin: '0 0 4px', fontSize: 11, color: 'rgba(255,255,255,0.92)', lineHeight: 1.35,
+              textShadow: '0 1px 4px rgba(0,0,0,0.7)',
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>{caption}</p>
+          )}
+          <p style={{
+            margin: 0, fontSize: 10, color: 'rgba(255,255,255,0.85)',
+            textShadow: '0 1px 4px rgba(0,0,0,0.7)',
+          }}>♪ sonido original — {username}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -238,7 +365,8 @@ function VerticalNetworkFrame({
 }
 
 /** A single reel scene rendered full-bleed with its overlaid title/body. */
-function ReelSceneCanvas({ scene }: { scene?: ReelScene }) {
+function ReelSceneCanvas({ scene, channel = 'instagram' }: { scene?: ReelScene; channel?: ContentChannel }) {
+  const safe = safeAreaFor(channel, 'reel');
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       {scene?.image_url ? (
@@ -250,7 +378,12 @@ function ReelSceneCanvas({ scene }: { scene?: ReelScene }) {
       ) : (
         <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #080810 0%, #0d0d1c 45%, #080814 100%)' }} />
       )}
-      <div style={{ position: 'absolute', top: '38%', left: 0, right: 0, padding: '0 18px', display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'center' }}>
+      {/* El texto se mantiene dentro de la zona que la red no tapa con su UI. */}
+      <div style={{
+        position: 'absolute', top: '38%',
+        left: `${safe.left * 100}%`, right: `${safe.right * 100}%`,
+        display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'center',
+      }}>
         {scene?.title && (
           <p style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#fff', textShadow: '0 2px 10px rgba(0,0,0,0.7)' }}>{scene.title}</p>
         )}

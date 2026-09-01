@@ -98,3 +98,33 @@ si el servidor sigue devolviendo una versión que no coincide.
 `public/icon-maskable-{192,512}.png` se generaron a partir de
 `android-chrome-512x512.png` sobre fondo `#08080A`, con el logo al 60 % para
 respetar la zona segura de los iconos maskable de Android.
+
+## Notificaciones locales
+
+Generar la versión carrusel/reel/story de una pieza tarda entre medio minuto y
+un par de minutos. Con la app instalada, la gente se va a otra cosa mientras
+tanto y al volver no sabía si estaba lista, si había fallado o si seguía.
+
+**No se usa Web Push**, y no hace falta: la pestaña sigue viva con la petición en
+curso, así que al resolverse se dispara una notificación local desde el propio
+cliente (`lib/notify.ts`). Sin servidor de push, sin VAPID, sin suscripciones.
+
+| Pieza | Rol |
+|-------|-----|
+| `lib/notify.ts` | Permiso, decisión de avisar y visualización |
+| `lib/service-worker.ts` | `notificationclick`: enfoca la pestaña abierta |
+| `components/dashboard/content/ScheduleModal.tsx` | Dispara el aviso al terminar |
+
+Tres detalles que no son opcionales:
+
+- **El permiso se pide dentro del click**, no al abrir el modal: iOS ignora la
+  petición si no viene de un gesto del usuario.
+- **Muestra el service worker**, no `new Notification()`: Android y la PWA
+  instalada rechazan la vía directa. `notifyLocal()` intenta primero
+  `registration.showNotification()` y sólo cae a la otra si no hay worker.
+- **Sólo se avisa si el usuario no está mirando** (`shouldNotify()`): pestaña
+  oculta o app en modo standalone. Con el modal delante, el resultado ya se ve.
+
+En iOS las notificaciones sólo existen si la app está instalada en la pantalla
+de inicio (16.4+); en un navegador normal `notifyLocal()` devuelve `false` sin
+romper nada.

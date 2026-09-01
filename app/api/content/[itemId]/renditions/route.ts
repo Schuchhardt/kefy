@@ -8,7 +8,11 @@ import {
   generateReelScript,
 } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
-import { compositeTextOnImage } from '@/lib/image-processor';
+import {
+  buildDerivedImagePrompt,
+  buildDerivedTopic,
+  buildSourceContext,
+} from '@/lib/content-source';
 import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
 
@@ -147,9 +151,14 @@ export async function POST(
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
-  const topic = (item.title || item.body || '').slice(0, 500);
+  // La pieza original es la referencia de la conversión: su texto completo, el
+  // de sus slides y sus imágenes. Sin esto el carrusel generado a partir de un
+  // post hablaba de otra cosa y traía fotos que no tenían nada que ver.
+  const source = buildSourceContext(item);
+  const topic  = buildDerivedTopic(item);
   if (!topic) return NextResponse.json({ error: 'Item has no text to base a new format on' }, { status: 422 });
 
+  const referenceImages = source.imageUrls ?? [];
   const brandName = brandKit?.name ?? undefined;
   const tagline   = brandKit?.tagline ?? undefined;
   const tone      = brandKit?.tone ?? [];
@@ -158,46 +167,66 @@ export async function POST(
   try {
     let patch: Record<string, unknown>;
 
+    const brand = {
+      name:           brandName,
+      primaryColor:   brandKit?.primary_color   ?? undefined,
+      secondaryColor: brandKit?.secondary_color ?? undefined,
+      accentColor:    brandKit?.accent_color    ?? undefined,
+      tone,
+    };
+
     if (format === 'post') {
-      const text = await generateContentText({ channel: item.channel, topic, language: 'es', tone, brandName, tagline, extraCtx });
-      const img  = await generateContentImage({ prompt: `${topic}. ${text.body.slice(0, 200)}`, size: '1024x1024', quality: 'medium', brand: { name: brandName, primaryColor: brandKit?.primary_color ?? undefined, secondaryColor: brandKit?.secondary_color ?? undefined, accentColor: brandKit?.accent_color ?? undefined, tone } });
+      const text = await generateContentText({ channel: item.channel, topic, language: 'es', tone, brandName, tagline, extraCtx, source });
+      const img  = await generateContentImage({
+        prompt: buildDerivedImagePrompt(`${topic}. ${text.body.slice(0, 200)}`, source),
+        size: '1024x1024', quality: 'medium', brand, referenceImages,
+      });
       const imageUrl = await uploadBase64Image(img.b64, auth.orgId, `rendition-post-${Date.now()}.jpeg`);
       patch = { body: text.body, hashtags: text.hashtags, image_url: imageUrl, status: 'ready' };
 
     } else if (format === 'carousel') {
-      const generated = await generateCarouselSlides({ channel: item.channel, topic, slide_count: 5, language: 'es', tone, brandName, tagline, extraCtx });
+      const generated = await generateCarouselSlides({ channel: item.channel, topic, slide_count: 5, language: 'es', tone, brandName, tagline, extraCtx, source });
       const slides = await Promise.all(generated.slides.map(async (slide) => {
-        if (!slide.image_prompt) return { ...slide, image_url: null };
+        if (!slide.image_prompt) return { ...slide, image_url: null, text_baked: false };
         try {
-          const imgResult = await generateContentImage({ prompt: slide.image_prompt, size: '1024x1024', quality: 'medium' });
-          let finalB64 = imgResult.b64;
-          try { finalB64 = await compositeTextOnImage(imgResult.b64, slide.title, slide.body ?? ''); } catch { /* keep plain image */ }
-          const imageUrl = await uploadBase64Image(finalB64, auth.orgId, `rendition-carousel-slide-${slide.slide_order}-${Date.now()}.jpeg`);
-          return { ...slide, image_url: imageUrl };
+          // La imagen se guarda LIMPIA: el título/cuerpo se dibujan como HTML
+          // encima en la vista previa y se queman recién al publicar.
+          const imgResult = await generateContentImage({
+            prompt: buildDerivedImagePrompt(slide.image_prompt, source),
+            size: '1024x1024', quality: 'medium', brand, referenceImages,
+          });
+          const imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `rendition-carousel-slide-${slide.slide_order}-${Date.now()}.jpeg`);
+          return { ...slide, image_url: imageUrl, text_baked: false };
         } catch {
-          return { ...slide, image_url: null };
+          return { ...slide, image_url: null, text_baked: false };
         }
       }));
       patch = { body: generated.description, hashtags: generated.hashtags, slides, image_url: slides[0]?.image_url ?? null, status: 'ready' };
 
     } else if (format === 'reel') {
-      const generated = await generateReelScript({ channel: item.channel, topic, scene_count: 5, language: 'es', tone, brandName, tagline, extraCtx });
+      const generated = await generateReelScript({ channel: item.channel, topic, scene_count: 5, language: 'es', tone, brandName, tagline, extraCtx, source });
       const scenes = await Promise.all(generated.scenes.map(async (scene) => {
         try {
           const bgPrompt = `Background scene for a reel: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks. Pure cinematic background scene only.`;
-          const imgResult = await generateContentImage({ prompt: bgPrompt, size: '1024x1792', quality: 'medium', brand: { name: brandName, primaryColor: brandKit?.primary_color ?? undefined, secondaryColor: brandKit?.secondary_color ?? undefined, accentColor: brandKit?.accent_color ?? undefined, tone } });
+          const imgResult = await generateContentImage({
+            prompt: buildDerivedImagePrompt(bgPrompt, source),
+            size: '1024x1792', quality: 'medium', brand, referenceImages,
+          });
           const imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `rendition-reel-scene-${scene.scene_order}-${Date.now()}.jpeg`);
-          return { ...scene, image_url: imageUrl };
+          return { ...scene, image_url: imageUrl, text_baked: false };
         } catch {
-          return { ...scene, image_url: undefined };
+          return { ...scene, image_url: undefined, text_baked: false };
         }
       }));
       patch = { body: generated.hook, hashtags: generated.hashtags, slides: scenes, image_url: scenes.find((s) => s.image_url)?.image_url ?? null, render_status: 'not_rendered', status: 'ready' };
 
     } else {
       // story
-      const text = await generateContentText({ channel: item.channel, topic, language: 'es', tone, brandName, tagline, extraCtx });
-      const img  = await generateContentImage({ prompt: `Vertical story visual for: ${topic}. Eye-catching, mobile-first composition, no captions baked in.`, size: '1024x1536', quality: 'medium', brand: { name: brandName, primaryColor: brandKit?.primary_color ?? undefined, secondaryColor: brandKit?.secondary_color ?? undefined, accentColor: brandKit?.accent_color ?? undefined, tone } });
+      const text = await generateContentText({ channel: item.channel, topic, language: 'es', tone, brandName, tagline, extraCtx, source });
+      const img  = await generateContentImage({
+        prompt: buildDerivedImagePrompt(`Vertical story visual for: ${topic}. Eye-catching, mobile-first composition, no captions baked in.`, source),
+        size: '1024x1536', quality: 'medium', brand, referenceImages,
+      });
       const imageUrl = await uploadBase64Image(img.b64, auth.orgId, `rendition-story-${Date.now()}.jpeg`);
       patch = { body: text.body, hashtags: text.hashtags, image_url: imageUrl, render_status: 'not_rendered', status: 'ready' };
     }

@@ -251,7 +251,9 @@ describe('POST /api/social/publish — otros formatos', () => {
     const res = await POST(publishReq({ content_item_id: 'item-1', social_account_ids: ['sa-ig'] }));
 
     expect(res.status).toBe(200);
-    expect(mockCompositeStoryText).toHaveBeenCalledWith(Buffer.from('resized'), 'Mi reel');
+    // La plataforma va como tercer argumento: define la zona segura donde se
+    // escribe el caption (TikTok tapa una franja mucho mayor que Instagram).
+    expect(mockCompositeStoryText).toHaveBeenCalledWith(Buffer.from('resized'), 'Mi reel', 'instagram');
     const [payload] = mockPublishPost.mock.calls[0];
     expect(payload.image_url).toBe('https://cdn.example.com/composited.jpeg');
   });

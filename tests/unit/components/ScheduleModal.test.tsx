@@ -118,3 +118,137 @@ describe('ScheduleModal — publicar un reel', () => {
     });
   });
 });
+
+// ─── Generar otro formato desde el modal ────────────────────────────────────
+// Regresión (producción): al pulsar «Generar versión de carrusel» lo único que
+// pasaba era que el botón decía «Generando…». La petición tarda minutos: no
+// había esqueleto, ni barra, ni aviso al terminar con la PWA en segundo plano.
+
+class FakeNotification {
+  static permission: NotificationPermission = 'granted';
+  static requestPermission = vi.fn(async () => FakeNotification.permission);
+  constructor(public title: string, public options?: NotificationOptions) {}
+}
+
+function postItem(): ContentItem {
+  return {
+    id:           'item-post',
+    channel:      'generic' as ContentItem['channel'],
+    content_type: 'post',
+    status:       'approved',
+    title:        null,
+    body:         '¿Publicar todos los días es la clave del éxito? Mentira.',
+    image_url:    'https://cdn.example.com/post.jpg',
+    image_status: null,
+    hashtags:     ['marketing'],
+    slides:       null,
+    video_url:    null,
+    created_at:   new Date().toISOString(),
+  } as ContentItem;
+}
+
+/** Deja la petición de la rendición colgada para poder observar el estado de carga. */
+function stubFetchWithPendingRendition(item: ContentItem) {
+  let resolvePost: (value: Response) => void = () => {};
+  const pending = new Promise<Response>((resolve) => { resolvePost = resolve; });
+
+  const mock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/social/accounts')) return jsonResponse({ accounts: [ACCOUNT] });
+    if (url.includes('/renditions') && init?.method === 'POST') return pending;
+    if (url.includes('/renditions')) {
+      return jsonResponse({
+        renditions: [{
+          id: item.id, content_item_id: item.id, format: 'post', status: 'ready',
+          body: item.body, hashtags: item.hashtags, image_url: item.image_url, slides: null,
+          video_url: null, mux_playback_id: null, render_status: null, error_message: null, is_primary: true,
+        }],
+      });
+    }
+    return jsonResponse({});
+  });
+  vi.stubGlobal('fetch', mock);
+  return { mock, resolvePost };
+}
+
+async function startCarouselGeneration(item: ContentItem) {
+  const { resolvePost } = stubFetchWithPendingRendition(item);
+  render(<ScheduleModal open onClose={() => {}} initialItem={item} lang="es" />);
+
+  fireEvent.click(await screen.findByRole('button', { name: /Carrusel/i }));
+  fireEvent.click(await screen.findByRole('button', { name: /Generar versión de Carrusel/i }));
+  return resolvePost;
+}
+
+describe('ScheduleModal — generar otro formato', () => {
+  beforeEach(() => {
+    FakeNotification.permission = 'granted';
+    FakeNotification.requestPermission = vi.fn(async () => FakeNotification.permission);
+    vi.stubGlobal('Notification', FakeNotification as unknown as typeof Notification);
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+  });
+
+  it('mientras genera muestra el esqueleto y el paso en curso, no sólo «Generando…»', async () => {
+    await startCarouselGeneration(postItem());
+
+    const status = await screen.findByRole('status');
+    expect(status.getAttribute('aria-busy')).toBe('true');
+    expect(await screen.findByText('Escribiendo los slides…')).toBeTruthy();
+  });
+
+  it('pide permiso de notificaciones dentro del click, que es lo que exige iOS', async () => {
+    FakeNotification.permission = 'default';
+    FakeNotification.requestPermission = vi.fn(async () => 'granted' as NotificationPermission);
+
+    await startCarouselGeneration(postItem());
+    await waitFor(() => expect(FakeNotification.requestPermission).toHaveBeenCalled());
+  });
+
+  it('al terminar avisa por notificación local si la app está en segundo plano', async () => {
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { serviceWorker: { ready: Promise.resolve({ showNotification }) } });
+
+    const resolvePost = await startCarouselGeneration(postItem());
+    resolvePost(jsonResponse({
+      rendition: {
+        id: 'r1', content_item_id: 'item-post', format: 'carousel', status: 'ready',
+        body: 'desc', hashtags: [], image_url: 'https://cdn.example.com/s1.jpg',
+        slides: [{ slide_order: 1, title: 'T1', body: 'B1', image_url: 'https://cdn.example.com/s1.jpg', text_baked: false }],
+        video_url: null, render_status: null, error_message: null,
+      },
+    }, true, 201));
+
+    await waitFor(() => expect(showNotification).toHaveBeenCalled());
+    expect(showNotification.mock.calls[0][0]).toMatch(/carrusel/i);
+  });
+
+  it('si falla, la notificación lo dice en vez de dejar al usuario esperando', async () => {
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { serviceWorker: { ready: Promise.resolve({ showNotification }) } });
+
+    const resolvePost = await startCarouselGeneration(postItem());
+    resolvePost(jsonResponse({ error: 'La generación falló' }, false, 502));
+
+    await waitFor(() => expect(showNotification).toHaveBeenCalled());
+    expect(showNotification.mock.calls[0][0]).toMatch(/no se pudo generar/i);
+    expect(await screen.findByText(/La generación falló/)).toBeTruthy();
+  });
+
+  it('con la app en primer plano no interrumpe con una notificación', async () => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { serviceWorker: { ready: Promise.resolve({ showNotification }) } });
+
+    const resolvePost = await startCarouselGeneration(postItem());
+    resolvePost(jsonResponse({
+      rendition: {
+        id: 'r1', content_item_id: 'item-post', format: 'carousel', status: 'ready',
+        body: 'desc', hashtags: [], image_url: null, slides: [], video_url: null,
+        render_status: null, error_message: null,
+      },
+    }, true, 201));
+
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    expect(showNotification).not.toHaveBeenCalled();
+  });
+});
