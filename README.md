@@ -95,6 +95,7 @@ lib/
   stripe.ts             # Pagos
   i18n.ts               # Configuración de locales
   service-worker.ts     # Fuente del service worker (cache versionada)
+  build-id.ts           # Versión del build, generada automáticamente
   app-version.ts        # Versión del build inyectada en el bundle
 remotion/               # Compositor de reels (ReelComposition, Root)
 prompts/                # Prompts de IA (post, carousel, reel, recommend)
@@ -116,13 +117,17 @@ docs/
 
 ## PWA y versionado de cache
 
-La app es instalable como PWA y se actualiza sola: cada despliegue genera una
-versión de build (`NEXT_PUBLIC_APP_VERSION`) que se incrusta en `/sw.js` y nombra
-las caches (`kefy-static-<version>`, `kefy-pages-<version>`). Al detectar un
-worker nuevo, el navegador lo instala, borra las caches de la versión anterior y
-toma el control, y `components/PwaUpdater.tsx` recarga la pestaña. En paralelo el
-cliente compara su versión contra `/api/version`, lo que cubre a los navegadores
-sin service worker.
+La app es instalable como PWA y se actualiza sola. **Cada build genera su propia
+versión automáticamente** (`<commit>-<despliegue>`, p. ej. `228ec7c1-mti0f4xj`):
+no hay que configurar ni tocar nada al desplegar, y dos builds del mismo commit
+—un rollback o un redeploy— también producen versiones distintas.
+
+Esa versión se incrusta en `/sw.js` y nombra las caches (`kefy-static-<version>`,
+`kefy-pages-<version>`). Al detectar un worker nuevo, el navegador lo instala,
+borra las caches de la versión anterior y toma el control, y
+`components/PwaUpdater.tsx` recarga la pestaña. En paralelo el cliente compara su
+versión contra `/api/version`, lo que cubre a los navegadores sin service
+worker.
 
 El HTML del dashboard nunca se guarda en cache (es contenido privado) y `/api/**`
 siempre va a la red.

@@ -8,7 +8,8 @@ haga hard refresh ni de que expire una cache.
 
 | Archivo | Rol |
 |---------|-----|
-| `next.config.ts` (`resolveBuildId`) | Calcula el identificador del build y lo expone como `NEXT_PUBLIC_APP_VERSION` y `generateBuildId` |
+| `lib/build-id.ts` | Genera la versión del build |
+| `next.config.ts` | La expone como `NEXT_PUBLIC_APP_VERSION` y `generateBuildId` |
 | `lib/app-version.ts` | Exporta `APP_VERSION` (la versión incrustada en el bundle) |
 | `lib/service-worker.ts` | Genera el código del service worker con la versión incrustada |
 | `app/sw.js/route.ts` | Sirve `/sw.js` con `Cache-Control: no-cache` y `Service-Worker-Allowed: /` |
@@ -19,9 +20,28 @@ haga hard refresh ni de que expire una cache.
 
 ## Versión del build
 
-`resolveBuildId()` toma, en este orden: `NEXT_PUBLIC_APP_VERSION` → `VERCEL_GIT_COMMIT_SHA`
-→ `COMMIT_REF` (Netlify) → SHA de git local → timestamp. El valor se inyecta en
-tiempo de build, así que **cada despliegue produce una versión distinta**.
+**Se genera sola en cada build. No hay nada que configurar ni actualizar al
+desplegar.** El formato es `<commit>-<despliegue>`, por ejemplo `228ec7c1-mti0f4xj`:
+
+| Parte | De dónde sale |
+|-------|---------------|
+| commit (8 chars) | `VERCEL_GIT_COMMIT_SHA` → `COMMIT_REF` (Netlify) → `GITHUB_SHA` → `git rev-parse HEAD` → `local` |
+| despliegue (10 chars) | `VERCEL_DEPLOYMENT_ID` → `DEPLOY_ID` (Netlify) → `GITHUB_RUN_ID` → timestamp en base 36 |
+
+El commit sirve para saber qué código está desplegado; la parte de despliegue
+garantiza que **dos builds del mismo commit tengan versiones distintas**. Sin
+eso, un rollback, un redeploy o un cambio de variables de entorno reusaría la
+versión anterior y el service worker no invalidaría su cache.
+
+### Consistencia entre procesos
+
+Next lanza procesos worker durante el build que vuelven a cargar
+`next.config.ts`. Si cada uno calculara su propio timestamp, distintos chunks
+quedarían con versiones distintas. Por eso `next.config.ts` escribe el valor ya
+resuelto en `process.env.NEXT_PUBLIC_APP_VERSION`: los workers heredan el env del
+proceso padre y `resolveBuildId()` lo devuelve tal cual, así que todo el build
+comparte una única versión. Esa misma variable sirve como override manual si
+alguna vez hace falta fijar la versión a mano.
 
 ## Por qué se invalida la cache
 

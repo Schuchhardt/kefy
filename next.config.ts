@@ -1,32 +1,31 @@
 import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
+import { resolveBuildId } from "./lib/build-id";
 
-/**
- * Identificador único del build. Se usa como `generateBuildId` de Next y se
- * expone al cliente como `NEXT_PUBLIC_APP_VERSION` para versionar las caches
- * del service worker (ver `lib/service-worker.ts`).
- *
- * Orden de preferencia: variable explícita → SHA del commit del proveedor de
- * hosting (Vercel / Netlify) → git local → timestamp.
- */
-function resolveBuildId(): string {
-  const fromEnv =
-    process.env.NEXT_PUBLIC_APP_VERSION ||
-    process.env.VERCEL_GIT_COMMIT_SHA ||
-    process.env.COMMIT_REF;
-
-  if (fromEnv) return fromEnv.slice(0, 12);
-
+function gitSha(): string | null {
   try {
-    return execSync("git rev-parse --short=12 HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+    return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] })
       .toString()
       .trim();
   } catch {
-    return `t${Date.now().toString(36)}`;
+    return null;
   }
 }
 
-const buildId = resolveBuildId();
+/**
+ * Versión del build. Se genera sola en cada build (commit + identificador de
+ * despliegue), así que no hay nada que actualizar a mano al desplegar y dos
+ * builds del mismo commit tienen versiones distintas.
+ *
+ * Se usa como `generateBuildId` de Next y se expone al cliente como
+ * `NEXT_PUBLIC_APP_VERSION` para versionar las caches del service worker
+ * (ver `lib/service-worker.ts` y `docs/pwa.md`).
+ */
+const buildId = resolveBuildId(process.env, gitSha);
+
+// Next lanza procesos worker durante el build que vuelven a cargar este
+// archivo; heredan el env del padre, así que todos resuelven la misma versión.
+process.env.NEXT_PUBLIC_APP_VERSION = buildId;
 
 const nextConfig: NextConfig = {
   generateBuildId: async () => buildId,
