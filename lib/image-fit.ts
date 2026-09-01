@@ -118,5 +118,8 @@ export function planImageFit(
  */
 export function aspectLimitsFor(platform: ContentChannel): { min: number; max: number } {
   const spec = PLATFORM_SPECS[platform] ?? PLATFORM_SPECS.generic;
-  return { min: spec.minAspect, max: spec.maxAspect };
+  return {
+    min: spec.minAspect * (1 - ASPECT_TOLERANCE),
+    max: spec.maxAspect * (1 + ASPECT_TOLERANCE),
+  };
 }

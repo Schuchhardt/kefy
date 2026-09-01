@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planImageFit } from '@/lib/image-processor';
+import { aspectLimitsFor, planImageFit } from '@/lib/image-processor';
 
 // Regresión (producción): al subir una foto SIN IA ya exportada para Instagram
 // (1080×1350, 4:5) el publicador la recortaba al cuadrado canónico 1080×1080 y
@@ -7,6 +7,11 @@ import { planImageFit } from '@/lib/image-processor';
 // está fuera de lo que acepta la red, y se recorta al límite más cercano.
 
 describe('planImageFit — post', () => {
+  it('expone a la preview la tolerancia de aspecto del publicador', () => {
+    const { max } = aspectLimitsFor('instagram');
+    expect(1200 / 628).toBeLessThanOrEqual(max);
+  });
+
   it('Instagram 1080x1350 (4:5): no recorta, mantiene la imagen tal cual', () => {
     const plan = planImageFit(1080, 1350, 'instagram', 'post');
     expect(plan).toEqual({ mode: 'contain', width: 1080, height: 1350 });
