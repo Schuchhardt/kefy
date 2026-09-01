@@ -20,32 +20,42 @@ test.describe('Gestión de contenido', () => {
     });
 
     test('muestra la respuesta de generación de IA', async ({ authenticatedPage: page }) => {
-      await page.route('/api/content/generate', (route) => {
+      // Misma forma que devuelve POST /api/content/generate: el texto va en
+      // `result`, no en la raíz.
+      await page.route('**/api/content/generate', (route) => {
         route.fulfill({
-          status: 200,
+          status: 201,
           contentType: 'application/json',
           body: JSON.stringify({
-            content: {
+            itemId: 'c-gen-1',
+            result: {
               body: 'Contenido generado por IA para pruebas.',
               hashtags: ['#test', '#kefy'],
+              model: 'claude',
+              tokensUsed: 42,
             },
+            draft: null,
           }),
         });
       });
 
       await page.goto('/es/dashboard/content/create');
 
-      // Llenar el campo de tema si existe
-      const topicInput = page.getByRole('textbox', { name: /tema|topic|about|de qué/i });
-      if (await topicInput.isVisible()) {
-        await topicInput.fill('Innovación en tecnología');
-      }
+      // El locator anterior (`/generar|generate|crear/i`) coincidía con «Crear
+      // sin IA» y con «Generar con IA» a la vez, y los `if (isVisible())`
+      // convertían el test en un no-op cuando no resolvía: nunca comprobaba nada.
+      //
+      // El flujo real son dos pasos: «Generar con IA» abre el panel, y dentro
+      // está el campo de tema y el botón «Generar Post».
+      await page.getByRole('button', { name: /Generar con IA/i }).click();
+      await page.locator('#gen-topic-textarea').fill('Innovación en tecnología');
+      await page.getByRole('button', { name: /^Generar Post$/i }).click();
 
-      const generateBtn = page.getByRole('button', { name: /generar|generate|crear/i });
-      if (await generateBtn.isVisible()) {
-        await generateBtn.click();
-        await expect(page.getByText(/generado|generated|IA/i)).toBeVisible({ timeout: 10000 });
-      }
+      // Se afirma el texto devuelto por el mock, no una palabra suelta como
+      // «IA» que también aparece en el propio botón.
+      await expect(
+        page.getByText('Contenido generado por IA para pruebas.'),
+      ).toBeVisible({ timeout: 15000 });
     });
   });
 
@@ -77,7 +87,7 @@ test.describe('Gestión de contenido', () => {
     });
 
     test('muestra el item de contenido mock', async ({ authenticatedPage: page }) => {
-      await page.route('/api/content*', (route) => {
+      await page.route('**/api/content?*', (route) => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -100,7 +110,8 @@ test.describe('Gestión de contenido', () => {
       });
 
       await page.goto('/es/dashboard/content');
-      await expect(page.getByText(/Post visible en lista/)).toBeVisible({ timeout: 10000 });
+      // La tarjeta muestra `body` y sólo cae en `title` si no hay cuerpo.
+      await expect(page.getByText(/Cuerpo del post/)).toBeVisible({ timeout: 10000 });
     });
   });
 });

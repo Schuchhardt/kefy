@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Locale } from '@/types/i18n';
 import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
+import TeamPanel from '@/components/dashboard/TeamPanel';
 
 import esT from '@/locales/es/dashboard/settings';
 import enT from '@/locales/en/dashboard/settings';
@@ -58,7 +59,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function SettingsPageInner() {
-  const { user, org, plan, refresh } = useAuth();
+  const { user, org, plan, role, refresh } = useAuth();
   const { lang } = useParams<{ lang: string }>();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
   const searchParams = useSearchParams();
@@ -424,6 +425,11 @@ function SettingsPageInner() {
           locale={(lang === 'en' ? 'en' : 'es')}
           mode="settings"
         />
+      </Section>
+
+      {/* ── Equipo ── */}
+      <Section title={lang === 'en' ? 'Team' : 'Equipo'}>
+        <TeamPanel locale={lang === 'en' ? 'en' : 'es'} role={role ?? 'member'} />
       </Section>
 
       {/* ── Lead Scoring ── */}

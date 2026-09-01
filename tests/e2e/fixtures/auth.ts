@@ -1,11 +1,34 @@
 import { test as base, type Page } from '@playwright/test';
 import { API_MOCK_MAP } from './api-mocks';
 
+async function createAccessToken() {
+  const { SignJWT } = await import('jose');
+  const secret = process.env.JWT_SECRET ?? 'test-secret';
+  const key = new TextEncoder().encode(secret);
+
+  return new SignJWT({
+    userId: 'u1',
+    orgId: 'org-1',
+    role: 'owner',
+    plan: 'pro',
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('24h')
+    .sign(key);
+}
+
+
 /**
  * Configura los interceptores de red para todos los endpoints de la API.
  * Simula que el usuario está autenticado y tiene una brand activa.
  */
 async function setupApiMocks(page: Page) {
+  // El proxy verifica la firma del JWT antes de dejar entrar al dashboard, así
+  // que un token de mentira hace que el login «exitoso» rebote al login. Los
+  // mocks emiten un token real firmado con el mismo secreto que usa el servidor.
+  const accessToken = await createAccessToken();
+
   // Interceptar todas las rutas /api/*
   await page.route('/api/**', async (route) => {
     const url = new URL(route.request().url());
@@ -19,7 +42,7 @@ async function setupApiMocks(page: Page) {
         contentType: 'application/json',
         body: JSON.stringify({ user: { id: 'u1', email: 'test@kefy.com', name: 'Test' }, orgId: 'org-1' }),
         headers: {
-          'Set-Cookie': 'kefy_access=fake-token; Path=/; HttpOnly',
+          'Set-Cookie': `kefy_access=${accessToken}; Path=/; HttpOnly`,
         },
       });
     }
@@ -30,7 +53,7 @@ async function setupApiMocks(page: Page) {
         contentType: 'application/json',
         body: JSON.stringify({ user: { id: 'u2', email: 'new@kefy.com', name: 'New' }, orgId: 'org-2' }),
         headers: {
-          'Set-Cookie': 'kefy_access=fake-token; Path=/; HttpOnly',
+          'Set-Cookie': `kefy_access=${accessToken}; Path=/; HttpOnly`,
         },
       });
     }
@@ -73,23 +96,6 @@ async function setupApiMocks(page: Page) {
       body: JSON.stringify({}),
     });
   });
-}
-
-async function createAccessToken() {
-  const { SignJWT } = await import('jose');
-  const secret = process.env.JWT_SECRET ?? 'test-secret';
-  const key = new TextEncoder().encode(secret);
-
-  return new SignJWT({
-    userId: 'u1',
-    orgId: 'org-1',
-    role: 'owner',
-    plan: 'pro',
-  })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('24h')
-    .sign(key);
 }
 
 /**

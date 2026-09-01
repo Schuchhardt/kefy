@@ -1,6 +1,29 @@
-import type { CarouselSlide, ReelScene } from '@/types/content';
+import type { CarouselSlide, ContentType, ReelScene } from '@/types/content';
 
 export type { CarouselSlide, ReelScene } from '@/types/content';
+
+// ─── Contenido de origen (conversiones entre formatos) ───────────────────────
+
+/**
+ * La pieza original de la que se deriva otro formato.
+ *
+ * Cuando se genera, por ejemplo, la versión carrusel de un post, el resultado
+ * tiene que ser *ese* post contado como carrusel: mismo mensaje, mismos datos,
+ * misma imagen de referencia. Sin este contexto el generador sólo recibía un
+ * "tema" recortado y devolvía una pieza nueva sin relación con el original.
+ */
+export interface SourceContentContext {
+  /** Formato del que se parte ('post', 'carousel', 'reel' o 'story'). */
+  format:      ContentType;
+  title?:      string | null;
+  /** Texto completo de la pieza original (no un recorte). */
+  body?:       string | null;
+  hashtags?:   string[];
+  /** Título/cuerpo de cada slide o escena del original, en orden. */
+  slideTexts?: string[];
+  /** Imágenes del original, usadas como referencia visual al generar. */
+  imageUrls?:  string[];
+}
 
 // ─── Channel & model ─────────────────────────────────────────────────────────
 
@@ -26,6 +49,8 @@ export interface GenerateTextOptions {
   brandName?: string;
   tagline?:   string;
   extraCtx?:  string;
+  /** Pieza original cuando esto es una conversión de formato. */
+  source?:    SourceContentContext;
 }
 
 export interface GenerateTextResult {
@@ -71,6 +96,8 @@ export interface GenerateCarouselOptions {
   brandName?:  string;
   tagline?:    string;
   extraCtx?:   string;
+  /** Pieza original cuando esto es una conversión de formato. */
+  source?:    SourceContentContext;
 }
 
 export interface GenerateCarouselResult {
@@ -116,6 +143,8 @@ export interface GenerateReelOptions {
   brandName?:   string;
   tagline?:     string;
   extraCtx?:    string;
+  /** Pieza original cuando esto es una conversión de formato. */
+  source?:    SourceContentContext;
 }
 
 export interface GenerateReelResult {

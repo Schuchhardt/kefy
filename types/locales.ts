@@ -45,10 +45,14 @@ export interface Plan {
   launchPrice?:  string;
 }
 export interface CreditItem { ic: string; label: string; }
-export interface CreditPack { credits: string; price: string; popular?: boolean; }
 export interface CmpRow { feature: string; values: string[]; }
 export interface FaqItem { q: string; a: string; }
-export interface Testimonial { q: string; name: string; role: string; flag: string; avatar: string; }
+/**
+ * Dato verificable sobre el producto. Sustituye a los testimonios: mientras no
+ * haya clientes reales con permiso para citarlos, la sección muestra hechos
+ * comprobables en el propio producto en vez de opiniones atribuidas a personas.
+ */
+export interface ProofPoint { k: string; lbl: string; d: string; }
 export interface EngageScoreItem { type: string; pts: string; }
 export interface EngageStagePill { key: string; label: string; emoji: string; }
 
@@ -141,14 +145,13 @@ export interface KefyCopy {
     trialBadge: string; trialSub: string; trialCta: string; trialNote: string;
     plans: Plan[];
     closer: string;
-    creditTitle: string; creditItems: CreditItem[]; creditNote: string; creditPacksCta: string;
-    packTitle: string; packs: CreditPack[]; packPopular: string; packNote: string;
+    creditTitle: string; creditItems: CreditItem[]; creditNote: string;
     cmpFeature: string; cmpRows: CmpRow[];
     faqTitle: string; faq: FaqItem[];
     enterpriseTitle: string; enterpriseSub: string; enterpriseCta: string;
     betaMode?: boolean; betaCopy?: string; betaCta?: string; betaCtaNote?: string;
   };
-  testi: { tag: string; h2: string; items: Testimonial[]; placeholder?: string; };
+  testi: { tag: string; h2: string; sub: string; proof: ProofPoint[]; };
   final: { tag: string; h2: string; sub: string; cta: string; note: string; };
   footer: { tagline: string; cols: { h: string; items: FooterItem[] }[]; origin: string; copy: string; };
 }

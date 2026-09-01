@@ -11,12 +11,15 @@ test.describe('Automatizaciones', () => {
     });
 
     test('muestra el listado de reglas de autopilot', async ({ authenticatedPage: page }) => {
-      await page.route('/api/autopilot*', (route) => {
+      // La página pide `/api/autopilot/rules` y lee `{ data }`. El mock anterior
+      // usaba `/api/autopilot*` —el `*` de Playwright no cruza barras— y la
+      // clave `rules`, así que nunca interceptaba ni devolvía nada útil.
+      await page.route('**/api/autopilot/rules', (route) => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
-            rules: [
+            data: [
               { id: 'ap-1', name: 'Regla de prueba', enabled: true, trigger: 'weekly', created_at: '2024-01-01' },
             ],
           }),

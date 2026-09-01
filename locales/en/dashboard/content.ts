@@ -162,6 +162,9 @@ const en = {
     successNow: '✓ Published successfully',
     successSched: '✓ Scheduled successfully',
     back: '← Change content',
+    renditionDoneTitle: (label: string) => `Your ${label} is ready`,
+    renditionDoneBody: 'Open Kefy to review and publish it.',
+    renditionFailedTitle: (label: string) => `Could not generate the ${label}`,
   },
   // ── Content Library ──
   libraryBtn: '📚 Library',

@@ -162,6 +162,9 @@ const es = {
     successNow: '✓ Publicado correctamente',
     successSched: '✓ Programado correctamente',
     back: '← Cambiar contenido',
+    renditionDoneTitle: (label: string) => `Tu ${label} está listo`,
+    renditionDoneBody: 'Abre Kefy para revisarlo y publicarlo.',
+    renditionFailedTitle: (label: string) => `No se pudo generar el ${label}`,
   },
   // ── Content Library ──
   libraryBtn: '📚 Biblioteca',

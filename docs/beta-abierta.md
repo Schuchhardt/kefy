@@ -18,15 +18,27 @@ Al registrarse se crea la suscripción con `status: 'trialing'` y
 `current_period_end` a 30 días (`TRIAL_DAYS`). No hizo falta migrar nada: la
 tabla ya tenía ambas columnas.
 
-| Plan | Precio | Marcas | Créditos IA/mes |
-|---|---|---|---|
-| Starter | US$49/mes — **primer mes gratis** | 1 | 150 |
-| Pro | US$99/mes | 5 | 500 |
-| Business | US$199/mes | 15 | 2000 |
+| Plan | Precio | Marcas | Créditos IA/mes | Miembros |
+|---|---|---|---|---|
+| Starter | US$49/mes — **primer mes gratis** | 1 | 150 | 1 |
+| Pro | US$99/mes | 5 | 500 | 1 |
+| Business | US$199/mes | 15 | 2000 | 5 |
+
+Cada operación descuenta según su coste: texto 1 crédito, imagen 3, video 10
+(`CREDIT_COSTS` en `lib/usage.ts`).
 
 Estos números son los que anuncia la página de precios. Si cambian en
-`lib/usage.ts` o `lib/brands.ts`, hay que cambiarlos también en
-`locales/*/landing.ts` — `tests/unit/lib/usage.test.ts` lo verifica.
+`lib/usage.ts`, `lib/brands.ts` o `lib/team.ts`, hay que cambiarlos también en
+la landing — `tests/unit/lib/usage.test.ts` y `tests/unit/lib/team.test.ts` lo
+verifican.
+
+### Equipo
+
+`lib/team.ts` + `app/api/team/**`. Los miembros por plan se anunciaban en la
+tabla comparativa pero no existía forma de invitar a nadie. Ahora el dueño y los
+administradores invitan por correo (`kefy_org_invitations`, token hasheado, 7
+días de validez), y las invitaciones pendientes ocupan cupo — si no, se podrían
+emitir cien con un plan de un solo miembro y el tope se saltaría al aceptarlas.
 
 > El código decía otra cosa que la página: Pro tenía 3 marcas (se vendían 5),
 > Business ilimitadas (se vendían 15) y existía un plan Agency solo en la copy.

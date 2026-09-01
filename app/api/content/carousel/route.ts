@@ -8,7 +8,6 @@ import { consumeCredits, refundCredits } from '@/lib/usage';
 import { reportError } from '@/lib/observability';
 import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
-import { compositeTextOnImage } from '@/lib/image-processor';
 
 const VALID_CHANNELS = new Set<ContentChannel>([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
@@ -102,17 +101,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  // 2. Optionally generate one image per slide in parallel (with text composited in)
+  // 2. Optionally generate one image per slide in parallel (imagen limpia, sin texto)
   const slides = await Promise.all(
     generated.slides.map(async (slide) => {
-      if (!genImages || !slide.image_prompt) return { ...slide, image_url: null };
+      if (!genImages || !slide.image_prompt) return { ...slide, image_url: null, text_baked: false };
 
       // Cada slide es una imagen generada aparte, así que cada una consume su
       // unidad de cuota. Si se agota a mitad del carrusel, los slides restantes
       // salen sin imagen en lugar de fallar: el texto ya está generado y es
       // preferible entregarlo a perderlo entero.
       const slideCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
-      if (!slideCredits?.allowed) return { ...slide, image_url: null };
+      if (!slideCredits?.allowed) return { ...slide, image_url: null, text_baked: false };
 
       try {
         const imgResult = await generateContentImage({
@@ -121,20 +120,16 @@ export async function POST(req: NextRequest) {
           quality: imageQuality,
         });
 
-        // Composite slide title + body text onto the image
-        let finalB64 = imgResult.b64;
-        try {
-          finalB64 = await compositeTextOnImage(imgResult.b64, slide.title, slide.body ?? '');
-        } catch (compErr) {
-          console.warn(`Carousel slide ${slide.slide_order} text composite failed:`, compErr);
-        }
-
+        // La imagen se guarda LIMPIA, sin el texto quemado: en la app el
+        // título/cuerpo van como overlay HTML (nítidos y editables) y sólo se
+        // componen sobre los píxeles al publicar, ya con la zona segura de la
+        // red destino. Quemarlos acá además duplicaba el texto en la preview.
         const imageUrl = await uploadBase64Image(
-          finalB64,
+          imgResult.b64,
           auth.orgId,
           `carousel-slide-${slide.slide_order}-${Date.now()}.jpeg`,
         );
-        return { ...slide, image_url: imageUrl };
+        return { ...slide, image_url: imageUrl, text_baked: false };
       } catch (imgErr) {
         // La imagen se cobró al empezar: si no salió, se devuelve.
         await refundCredits(auth.orgId, 'image');
@@ -142,7 +137,7 @@ export async function POST(req: NextRequest) {
           route: 'POST /api/content/carousel', auth, service: 'ai',
           extra: { slide: slide.slide_order, fase: 'imagen' },
         });
-        return { ...slide, image_url: null };
+        return { ...slide, image_url: null, text_baked: false };
       }
     }),
   );

@@ -785,18 +785,16 @@ img { display: block; max-width: 100%; }
 .enterprise-title { font-family: var(--font-syne), serif; font-weight: 700; font-size: clamp(20px, 2.2vw, 28px); letter-spacing: -0.02em; margin-bottom: 10px; }
 .enterprise-sub { color: var(--muted); font-size: 16px; margin-bottom: 28px; }
 
-.marquee { position: relative; overflow: hidden; margin: 0 -24px; padding: 0 24px; mask-image: linear-gradient(90deg, transparent, black 60px, black calc(100% - 60px), transparent); -webkit-mask-image: linear-gradient(90deg, transparent, black 60px, black calc(100% - 60px), transparent); }
-.marquee-track { display: flex; gap: 18px; width: max-content; animation: marquee 60s linear infinite; }
-.marquee:hover .marquee-track { animation-play-state: paused; }
-@keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-.testi { width: 360px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px; }
-.testi-q { font-size: 15px; line-height: 1.55; color: #D6D5CE; }
-.testi-q .hl { color: var(--accent); }
-.testi-who { display: flex; align-items: center; gap: 12px; }
-.testi-avatar { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, #2a2a30, #16161A); border: 1px solid var(--border); display: grid; place-items: center; font-family: var(--font-syne), serif; font-weight: 700; font-size: 14px; color: var(--muted); }
-.testi-name { font-size: 13px; font-weight: 500; }
-.testi-role { font-size: 12px; color: var(--muted); }
-.testi-flag { margin-left: auto; font-size: 18px; }
+/* ── Prueba de producto ──────────────────────────────────
+   Sustituye al carrusel de testimonios: datos comprobables en el propio
+   producto en vez de citas atribuidas a personas. */
+.proof-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 40px; }
+.proof-item { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
+.proof-k { font-family: var(--font-syne), serif; font-weight: 800; font-size: 34px; line-height: 1; letter-spacing: -0.03em; color: var(--accent); }
+.proof-lbl { font-size: 13px; font-weight: 600; color: var(--text); }
+.proof-d { font-size: 13px; line-height: 1.6; color: var(--muted); margin: 6px 0 0; }
+@media (max-width: 900px) { .proof-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px) { .proof-grid { grid-template-columns: 1fr; } }
 
 .final { text-align: center; padding: 140px 24px; position: relative; overflow: hidden; }
 .final::before { content: ''; position: absolute; border-radius: 50%; filter: blur(100px); pointer-events: none; width: 500px; height: 500px; top: -100px; left: 50%; transform: translateX(-80%); background: radial-gradient(circle, rgba(198,255,75,0.08), transparent 70%); }
@@ -858,8 +856,6 @@ img { display: block; max-width: 100%; }
   .section-head { margin-bottom: 40px; }
   .dash-stats { grid-template-columns: repeat(2,1fr); }
   .brand-kit-applied { grid-template-columns: repeat(2,1fr); }
-  /* Voices / marquee */
-  .testi { width: 300px; }
 }
 @media (max-width: 480px) {
   :root { --pad-section: 64px; }
@@ -879,10 +875,6 @@ img { display: block; max-width: 100%; }
   .plans-4 { grid-template-columns: 1fr; }
   .packs-grid { grid-template-columns: repeat(2,1fr); }
   .hero-stat .big { font-size: 22px; }
-  /* Voices / marquee fix */
-  .marquee { margin: 0 -16px; padding: 0 16px; mask-image: linear-gradient(90deg, transparent, black 32px, black calc(100% - 32px), transparent); -webkit-mask-image: linear-gradient(90deg, transparent, black 32px, black calc(100% - 32px), transparent); }
-  .testi { width: 82vw; padding: 20px; }
-  .marquee-track { gap: 12px; }
 }
 
 /* ── Page layouts (legal, about, blog) ──────────────────── */
@@ -989,7 +981,6 @@ img { display: block; max-width: 100%; }
 }
 
 /* ── Testi placeholder ──────────────────────────────────── */
-.testi-placeholder { font-size: 16px; color: var(--muted); margin-top: 20px; font-style: italic; }
 
 /* ── Spin animation (used by refresh icons) ─────────────── */
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

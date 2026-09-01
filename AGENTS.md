@@ -19,6 +19,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 | Zernio / redes sociales | [`docs/zernio.md`](docs/zernio.md) | Antes de cualquier cambio en `lib/zernio.ts`, `app/api/social/**`, o cualquier flujo de conexión/publicación en redes sociales |
 | Render de reels / stories | [`docs/reel-render.md`](docs/reel-render.md) | Antes de tocar `app/api/content/reel/render/**`, `app/api/content/reel/reconcile/**`, `lib/reel-render.ts`, `remotion/**` o `MuxReelPlayer` |
 | Brand Kit | [`/memories/repo/brand-kit-architecture.md`](memories/repo/brand-kit-architecture.md) | Antes de cambios en `app/api/brand-kit/**` o `lib/brand-kit.ts` |
+| Formatos y conversiones de contenido | [`docs/content-formats.md`](docs/content-formats.md) | Antes de tocar `app/api/content/[itemId]/renditions/**`, `lib/content-source.ts`, `lib/preview-layout.ts`, `lib/fonts.ts`, `lib/google-fonts.ts`, `lib/publish-images.ts`, el texto quemado en las imágenes o las previews por red |
 | PWA / service worker | [`docs/pwa.md`](docs/pwa.md) | Antes de tocar `app/sw.js/**`, `lib/service-worker.ts`, `components/PwaUpdater.tsx`, `app/manifest.ts` o `scripts/generate-build-id.mjs` |
 | Formato de imagen por red | [`docs/zernio.md`](docs/zernio.md) (sección *Formato de imagen por red*) | Antes de tocar `lib/image-fit.ts`, `lib/image-processor.ts` o el recorte de imágenes en las previews |
 | Beta abierta: créditos, trial, rate limiting y Sentry | [`docs/beta-abierta.md`](docs/beta-abierta.md) | Antes de tocar `lib/rate-limit.ts`, `lib/usage.ts`, `lib/ai-guard.ts`, `lib/subscription.ts`, `lib/observability.ts`, `lib/sentry-scrub.ts`, los planes, o **al añadir cualquier ruta que gaste dinero** (IA, render, envío de correo) |
@@ -59,5 +60,11 @@ Ver [`docs/beta-abierta.md`](docs/beta-abierta.md).
 - **No hay plan gratuito.** Toda cuenta nueva entra en `starter` con el primer
   mes gratis (`kefy_subscriptions.status = 'trialing'`). El plan decide cuántos
   créditos y marcas tocan; el `status` decide si se puede crear. No confundirlos
-- Los créditos y los límites de marcas de `lib/usage.ts` y `lib/brands.ts` son
-  los que anuncia `locales/*/landing.ts`: si cambian en un sitio, cambian en el otro
+- Los créditos, las marcas y los miembros de `lib/usage.ts`, `lib/brands.ts` y
+  `lib/team.ts` son los que anuncia la landing (`locales/es|en/landing.ts`): si
+  cambian en un sitio, cambian en el otro. Lo verifican
+  `tests/unit/lib/usage.test.ts` y `tests/unit/lib/team.test.ts`
+- **La landing solo puede prometer lo que existe.** Antes anunciaba formatos que
+  el producto no genera, packs de créditos sin flujo de compra y testimonios de
+  personas inventadas. `tests/unit/locales/parity.test.ts` cubre la paridad
+  es/en y vigila que no se reintroduzcan formatos inexistentes

@@ -230,23 +230,6 @@ export default function PricingSection({ copy }: Props) {
             ))}
           </div>
           <p className="credit-note">{copy.creditNote}</p>
-          <a href="#credit-packs" className="btn btn-ghost btn-sm">{copy.creditPacksCta}</a>
-        </div>
-
-        {/* ── Credit packs ───────────────────────────────── */}
-        <div className="credit-packs reveal" id="credit-packs" style={{ animationDelay: '0.2s' }}>
-          <h3 className="h3">{copy.packTitle}</h3>
-          <div className="packs-grid">
-            {copy.packs.map((pack, i) => (
-              <div key={i} className={`pack-card${pack.popular ? ' popular' : ''}`}>
-                {pack.popular && <span className="pack-badge">{copy.packPopular}</span>}
-                <span className="pack-credits">{pack.credits}</span>
-                <span className="pack-arrow">→</span>
-                <span className="pack-price">{pack.price}</span>
-              </div>
-            ))}
-          </div>
-          <p className="pack-note">{copy.packNote}</p>
         </div>
 
         {/* ── Comparison table ───────────────────────────── */}

@@ -431,10 +431,20 @@ function ContentPageInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { itemId?: string; body?: string; hook?: string; hashtags?: string[]; slides?: unknown[]; scenes?: unknown[]; image_url?: string; error?: string };
+      // `/api/content/generate` devuelve el texto dentro de `result`, no en la
+      // raíz. Leerlo plano dejaba `genResult` en cadena vacía —falsy— y al
+      // generar un post no se mostraba ninguna confirmación, a diferencia de
+      // carrusel, reel y story. Se aceptan ambas formas por si otra ruta
+      // responde plano.
+      const data = await res.json() as {
+        itemId?: string;
+        result?: { body?: string; hashtags?: string[] };
+        body?: string; hook?: string; hashtags?: string[];
+        slides?: unknown[]; scenes?: unknown[]; image_url?: string; error?: string;
+      };
       if (!res.ok) throw new Error(data.error ?? 'Error al generar');
 
-      if (type === 'post')     setGenResult(data.body ?? '');
+      if (type === 'post')     setGenResult(data.result?.body ?? data.body ?? '');
       if (type === 'carousel') setGenResult(`Carrusel generado con ${(data.slides ?? []).length} slides ✓`);
       if (type === 'reel')     setGenResult(`Reel generado con ${(data.scenes ?? []).length} escenas ✓`);
       if (type === 'story')    setGenResult('Story generada ✓');

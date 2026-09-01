@@ -137,10 +137,11 @@ function LoginForm() {
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
+          <label htmlFor="login-email" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
             Email
           </label>
           <input
+            id="login-email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -153,7 +154,7 @@ function LoginForm() {
 
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>
+            <label htmlFor="login-password" style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>
               Contraseña
             </label>
             <Link href={`/${lang}/forgot-password`} style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500, textDecoration: 'none' }}>
@@ -161,6 +162,7 @@ function LoginForm() {
             </Link>
           </div>
           <input
+            id="login-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

@@ -3,9 +3,9 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { requireActiveSubscription } from '@/lib/subscription';
 import { checkRateLimit, publishRule, rateLimitResponse } from '@/lib/rate-limit';
-import { resizeForFormat, compositeStoryText } from '@/lib/image-processor';
-import { uploadBase64Image } from '@/lib/storage';
+import { prepareCarouselSlides, prepareSingleImage } from '@/lib/publish-images';
 import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
+import type { CarouselSlide } from '@/types/content';
 import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
 
@@ -130,6 +130,24 @@ export async function POST(req: NextRequest) {
 
   // Pre-download source image once (if any) so we can resize per platform.
   // Video posts carry no image, so nothing to download for them.
+  const carouselSlides: CarouselSlide[] = format === 'carousel' && Array.isArray(publishSource.slides)
+    ? (publishSource.slides as CarouselSlide[])
+    : [];
+
+  // El texto que se escribe dentro de la imagen usa la tipografía elegida por
+  // la marca en su Brand Kit, no una genérica.
+  const { data: brandFontsRow } = await db
+    .from('kefy_brand_kits')
+    .select('font_heading, font_body')
+    .eq('org_id', auth.orgId)
+    .maybeSingle();
+
+  const imageDeps = {
+    orgId:      auth.orgId,
+    prefix:     'publish',
+    brandFonts: { heading: brandFontsRow?.font_heading, body: brandFontsRow?.font_body },
+  };
+
   let sourceImageBuffer: Buffer | null = null;
   if (media.image_url) {
     try {
@@ -154,41 +172,32 @@ export async function POST(req: NextRequest) {
   // Publish to each account independently — don't abort on partial failure
   for (const account of accounts) {
     try {
-      // Resize image to the platform's canonical dimensions (reel/story always vertical)
+      const platform = (account.platform ?? 'generic') as ContentChannel;
+
+      // Ajuste al formato de la red + texto quemado donde la red no lo muestra
+      // (caption de story, y el título/cuerpo de cada slide del carrusel).
       let platformImageUrl = media.image_url;
-      if (sourceImageBuffer) {
-        try {
-          let resizedBuf = await resizeForFormat(
-            sourceImageBuffer,
-            (account.platform ?? 'generic') as ContentChannel,
-            format,
-          );
+      if (media.image_url) {
+        platformImageUrl = await prepareSingleImage(
+          media.image_url, sourceImageBuffer, platform, format,
+          imageDeps,
+          format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
+            ? media.text
+            : undefined,
+        );
+      }
 
-          // Bake caption into the image for story-capable platforms — Instagram,
-          // Facebook and Snapchat don't display text captions on stories.
-          if (format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)) {
-            try {
-              resizedBuf = await compositeStoryText(resizedBuf, media.text);
-            } catch (compositeErr) {
-              console.warn(`Story text composite failed for ${account.platform}, using plain image:`, compositeErr);
-            }
-          }
-
-          const b64 = resizedBuf.toString('base64');
-          platformImageUrl = await uploadBase64Image(
-            b64,
-            auth.orgId,
-            `publish-${account.platform}-${Date.now()}.jpeg`,
-          );
-        } catch (resizeErr) {
-          console.warn(`Resize failed for ${account.platform}, using original:`, resizeErr);
-        }
+      let platformMediaUrls = media.media_urls;
+      if (format === 'carousel' && carouselSlides.length > 0) {
+        platformMediaUrls = await prepareCarouselSlides(
+          carouselSlides, platform, imageDeps,
+        );
       }
 
       console.log(
         `[publish] → account ${account.id} platform=${account.platform}` +
         ` zernio_account_id=${account.zernio_account_id}` +
-        ` hasImage=${!!platformImageUrl} mediaUrls=${media.media_urls?.length ?? 0} hasVideo=${!!media.video_url}`,
+        ` hasImage=${!!platformImageUrl} mediaUrls=${platformMediaUrls?.length ?? 0} hasVideo=${!!media.video_url}`,
       );
 
       const zernioResult = await publishPost({
@@ -196,7 +205,7 @@ export async function POST(req: NextRequest) {
         platform:     account.platform,
         text:         media.text,
         image_url:    platformImageUrl,
-        media_urls:   media.media_urls,
+        media_urls:   platformMediaUrls,
         video_url:    media.video_url,
         content_type: format,
         hashtags:     media.hashtags,

@@ -1,50 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { GOOGLE_FONT_OPTIONS } from '@/lib/google-fonts';
 
-export interface GoogleFontOption {
-  value: string;
-  family: string;
-  category: string;
-  preview: string;
-}
+export type { GoogleFontOption } from '@/lib/google-fonts';
+export { GOOGLE_FONT_OPTIONS } from '@/lib/google-fonts';
 
-export const GOOGLE_FONT_OPTIONS: GoogleFontOption[] = [
-  { value: 'Syne', family: 'Syne, system-ui, sans-serif', category: 'Display', preview: 'Marca con carácter' },
-  { value: 'DM Sans', family: '"DM Sans", system-ui, sans-serif', category: 'Sans', preview: 'Texto claro y moderno' },
-  { value: 'Inter', family: 'Inter, system-ui, sans-serif', category: 'Sans', preview: 'Lectura limpia y precisa' },
-  { value: 'Lato', family: 'Lato, system-ui, sans-serif', category: 'Sans', preview: 'Equilibrada y versátil' },
-  { value: 'Poppins', family: 'Poppins, system-ui, sans-serif', category: 'Sans', preview: 'Presencia fresca y geométrica' },
-  { value: 'Montserrat', family: 'Montserrat, system-ui, sans-serif', category: 'Sans', preview: 'Impacto visual sólido' },
-  { value: 'Open Sans', family: '"Open Sans", system-ui, sans-serif', category: 'Sans', preview: 'Neutral y muy legible' },
-  { value: 'Roboto', family: 'Roboto, system-ui, sans-serif', category: 'Sans', preview: 'Familiar y funcional' },
-  { value: 'Oswald', family: 'Oswald, system-ui, sans-serif', category: 'Display', preview: 'Titulares con fuerza' },
-  { value: 'Bebas Neue', family: '"Bebas Neue", system-ui, sans-serif', category: 'Display', preview: 'Cartelera y presencia' },
-  { value: 'Space Grotesk', family: '"Space Grotesk", system-ui, sans-serif', category: 'Sans', preview: 'Digital y contemporánea' },
-  { value: 'Manrope', family: 'Manrope, system-ui, sans-serif', category: 'Sans', preview: 'Elegancia funcional' },
-  { value: 'Rubik', family: 'Rubik, system-ui, sans-serif', category: 'Sans', preview: 'Redondeada y amigable' },
-  { value: 'Outfit', family: 'Outfit, system-ui, sans-serif', category: 'Sans', preview: 'Minimal y tecnológica' },
-  { value: 'Urbanist', family: 'Urbanist, system-ui, sans-serif', category: 'Sans', preview: 'Limpia y futurista' },
-  { value: 'Work Sans', family: '"Work Sans", system-ui, sans-serif', category: 'Sans', preview: 'Editorial y neutra' },
-  { value: 'Figtree', family: 'Figtree, system-ui, sans-serif', category: 'Sans', preview: 'Suave y contemporánea' },
-  { value: 'Archivo', family: 'Archivo, system-ui, sans-serif', category: 'Sans', preview: 'Nítida y confiable' },
-  { value: 'Barlow', family: 'Barlow, system-ui, sans-serif', category: 'Sans', preview: 'Técnica y equilibrada' },
-  { value: 'Playfair Display', family: '"Playfair Display", Georgia, serif', category: 'Serif', preview: 'Editorial y sofisticada' },
-  { value: 'Lora', family: 'Lora, Georgia, serif', category: 'Serif', preview: 'Cálida y expresiva' },
-  { value: 'Merriweather', family: 'Merriweather, Georgia, serif', category: 'Serif', preview: 'Lectura clásica' },
-  { value: 'Libre Baskerville', family: '"Libre Baskerville", Georgia, serif', category: 'Serif', preview: 'Autoridad y tradición' },
-  { value: 'Cormorant Garamond', family: '"Cormorant Garamond", Georgia, serif', category: 'Serif', preview: 'Lujo y contraste' },
-  { value: 'Nunito', family: 'Nunito, system-ui, sans-serif', category: 'Sans', preview: 'Amigable y accesible' },
-  { value: 'Source Sans 3', family: '"Source Sans 3", system-ui, sans-serif', category: 'Sans', preview: 'Precisa y profesional' },
-  { value: 'PT Sans', family: '"PT Sans", system-ui, sans-serif', category: 'Sans', preview: 'Clásica y estable' },
-  { value: 'IBM Plex Sans', family: '"IBM Plex Sans", system-ui, sans-serif', category: 'Sans', preview: 'Sólida y tecnológica' },
-  { value: 'Raleway', family: 'Raleway, system-ui, sans-serif', category: 'Sans', preview: 'Ligera y elegante' },
-  { value: 'Karla', family: 'Karla, system-ui, sans-serif', category: 'Sans', preview: 'Compacta y amigable' },
-  { value: 'Mulish', family: 'Mulish, system-ui, sans-serif', category: 'Sans', preview: 'Suave y flexible' },
-  { value: 'Crimson Text', family: '"Crimson Text", Georgia, serif', category: 'Serif', preview: 'Narrativa y humana' },
-  { value: 'Fraunces', family: 'Fraunces, Georgia, serif', category: 'Serif', preview: 'Expresiva y distintiva' },
-  { value: 'Alegreya', family: 'Alegreya, Georgia, serif', category: 'Serif', preview: 'Cultura y calidez' },
-];
 
 const FONT_LINK_ID = 'kefy-google-font-options';
 

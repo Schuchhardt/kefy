@@ -4,7 +4,11 @@ export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 30_000,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Un solo worker también en local. El servidor de desarrollo compila cada
+  // ruta bajo demanda la primera vez que se pide, y con varios workers
+  // golpeándolo a la vez las compilaciones no entran en el timeout: la suite
+  // fallaba en paralelo y pasaba entera al ejecutarla en serie.
+  workers: 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: 'http://localhost:3097',

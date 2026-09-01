@@ -10,6 +10,10 @@ const PUBLIC_API_PATHS = [
   '/api/auth/forgot-password',
   '/api/auth/reset-password',
   '/api/auth/refresh',
+  // Aceptar una invitación: el GET describe la invitación sin sesión (para
+  // poder mostrar a qué organización se entra antes de registrarse) y el POST
+  // valida la sesión por su cuenta.
+  '/api/team/invitations/accept',
   // Versión del build: la consulta el cliente para detectar despliegues nuevos.
   '/api/version',
   '/api/webhooks/',

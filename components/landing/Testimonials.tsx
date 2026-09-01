@@ -4,48 +4,31 @@ interface Props {
   copy: KefyCopy['testi'];
 }
 
+/**
+ * Prueba de producto.
+ *
+ * Esta sección mostraba testimonios firmados por personas y negocios que no
+ * existen. Mientras no haya clientes de la beta que hayan dado permiso para
+ * citarlos, muestra hechos comprobables en el propio producto: cuántas redes se
+ * pueden conectar, qué formatos genera, en qué idiomas y qué incluye el mes
+ * gratis. Todos son verificables abriendo la app.
+ */
 export default function Testimonials({ copy }: Props) {
-  if (copy.items.length === 0) {
-    return (
-      <section className="section" id="testimonials">
-        <div className="container">
-          <div className="section-head reveal">
-            <span className="label">{copy.tag}</span>
-            <h2 className="h2">{copy.h2}</h2>
-            {copy.placeholder && (
-              <p className="testi-placeholder">{copy.placeholder}</p>
-            )}
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  // Duplicate for seamless marquee loop
-  const items = [...copy.items, ...copy.items];
-
   return (
-    <section className="section" id="testimonials">
+    <section className="section" id="proof">
       <div className="container">
         <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
           <h2 className="h2">{copy.h2}</h2>
+          <p className="intro">{copy.sub}</p>
         </div>
-      </div>
 
-      <div className="marquee">
-        <div className="marquee-track">
-          {items.map((t, i) => (
-            <div key={i} className="testi">
-              <p className="testi-q">{t.q}</p>
-              <div className="testi-who">
-                <div className="testi-avatar">{t.avatar}</div>
-                <div>
-                  <div className="testi-name">{t.name}</div>
-                  <div className="testi-role">{t.role}</div>
-                </div>
-                <div className="testi-flag">{t.flag}</div>
-              </div>
+        <div className="proof-grid reveal" style={{ animationDelay: '0.1s' }}>
+          {copy.proof.map((p, i) => (
+            <div key={i} className="proof-item" style={{ transitionDelay: `${i * 0.06}s` }}>
+              <span className="proof-k">{p.k}</span>
+              <span className="proof-lbl">{p.lbl}</span>
+              <p className="proof-d">{p.d}</p>
             </div>
           ))}
         </div>

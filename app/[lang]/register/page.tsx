@@ -124,8 +124,9 @@ export default function RegisterPage() {
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <label style={labelStyle}>Tu nombre</label>
+              <label htmlFor="register-name" style={labelStyle}>Tu nombre</label>
               <input
+                id="register-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -136,8 +137,9 @@ export default function RegisterPage() {
               />
             </div>
             <div>
-              <label style={labelStyle}>Nombre del negocio</label>
+              <label htmlFor="register-org" style={labelStyle}>Nombre del negocio</label>
               <input
+                id="register-org"
                 type="text"
                 value={orgName}
                 onChange={(e) => setOrgName(e.target.value)}
@@ -149,8 +151,9 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label style={labelStyle}>Email</label>
+            <label htmlFor="register-email" style={labelStyle}>Email</label>
             <input
+              id="register-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -162,8 +165,9 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label style={labelStyle}>Contraseña</label>
+            <label htmlFor="register-password" style={labelStyle}>Contraseña</label>
             <input
+              id="register-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

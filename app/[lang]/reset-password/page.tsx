@@ -73,10 +73,11 @@ function ResetPasswordForm() {
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
+        <label htmlFor="reset-password" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
           Nueva contraseña
         </label>
         <input
+          id="reset-password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -88,10 +89,11 @@ function ResetPasswordForm() {
       </div>
 
       <div>
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
+        <label htmlFor="reset-confirm" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--muted)' }}>
           Confirmar contraseña
         </label>
         <input
+          id="reset-confirm"
           type="password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
