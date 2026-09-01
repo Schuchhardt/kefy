@@ -10,9 +10,14 @@
 //
 // Qué fuente se usa: la que la marca eligió en su Brand Kit (`font_heading`
 // para los titulares, `font_body` para el cuerpo). Son Google Fonts del
-// catálogo de `lib/google-fonts.ts`, así que se descarga el TTF y se registra
-// en fontconfig. Si la marca no eligió ninguna —o la descarga falla— se usa
-// Inter, que viaja en el repo y por tanto no depende de la red.
+// catálogo de `lib/google-fonts.ts`, y **las 34 viajan en el repo** bajo
+// `assets/fonts/` — descargadas con `scripts/fetch-brand-fonts.mjs`. Así
+// componer el texto no sale a la red: ni el medio segundo de la primera vez
+// en cada lambda, ni un punto de fallo más en mitad de una publicación.
+//
+// La descarga en runtime sigue existiendo como red de seguridad para una
+// fuente que se añada al catálogo y de la que nadie haya corrido el script.
+// Si tampoco se puede, se usa Inter.
 //
 // OJO: los `.ttf` se leen del filesystem en runtime, así que tienen que viajar
 // con la función serverless — ver `outputFileTracingIncludes` en `next.config.ts`.
@@ -25,11 +30,8 @@ import { DEFAULT_BRAND_FONT, findGoogleFont, resolveBrandFontName } from '@/lib/
 /** Familia que se usa cuando no hay ninguna elegida o falla la descarga. */
 export const FALLBACK_FONT_FAMILY = DEFAULT_BRAND_FONT;
 
-/** Los archivos que viajan en el repo. Deben cubrir la fuente por defecto. */
-export const BUNDLED_FONT_FILES = ['Inter-Regular.ttf', 'Inter-Bold.ttf'] as const;
-
-/** Pesos que se descargan de cada fuente: normal para el cuerpo, bold para el titular. */
-const WEIGHTS = [400, 700] as const;
+/** Pesos de cada fuente: normal para el cuerpo, bold para el titular. */
+export const FONT_WEIGHTS = [400, 700] as const;
 
 /** Descargar una fuente no puede colgar una publicación. */
 const DOWNLOAD_TIMEOUT_MS = 6_000;
@@ -123,7 +125,7 @@ export function fontFileName(family: string, weight: number): string {
 /** URL de la hoja de estilos que lista los TTF de una familia. */
 export function googleFontCssUrl(family: string): string {
   const name = encodeURIComponent(family).replace(/%20/g, '+');
-  return `https://fonts.googleapis.com/css2?family=${name}:wght@${WEIGHTS.join(';')}`;
+  return `https://fonts.googleapis.com/css2?family=${name}:wght@${FONT_WEIGHTS.join(';')}`;
 }
 
 /** Extrae las URLs `.ttf` de la respuesta CSS, en el orden en que aparecen. */
@@ -148,7 +150,7 @@ async function downloadFamily(family: string): Promise<boolean> {
   const dir = downloadedFontsDir();
 
   // Ya descargada en un invocación anterior de esta misma lambda.
-  const cached = WEIGHTS.every((w) => fs.existsSync(path.join(dir, fontFileName(family, w))));
+  const cached = FONT_WEIGHTS.every((w) => fs.existsSync(path.join(dir, fontFileName(family, w))));
   if (cached) return true;
 
   try {
@@ -163,7 +165,7 @@ async function downloadFamily(family: string): Promise<boolean> {
     // Las URLs vienen en el mismo orden que los pesos pedidos. Si Google
     // devuelve menos caras de las pedidas (fuentes con un solo peso), se
     // reutiliza la última para los pesos que falten.
-    await Promise.all(WEIGHTS.map(async (weight, i) => {
+    await Promise.all(FONT_WEIGHTS.map(async (weight, i) => {
       const url = urls[i] ?? urls[urls.length - 1];
       const font = await fetchWithTimeout(url);
       if (!font.ok) throw new Error(`HTTP ${font.status}`);
@@ -177,17 +179,23 @@ async function downloadFamily(family: string): Promise<boolean> {
   }
 }
 
+/** ¿Están los TTF de esta familia incluidos en el repo? */
+export function isBundled(family: string): boolean {
+  const dir = bundledFontsDir();
+  return FONT_WEIGHTS.every((w) => fs.existsSync(path.join(dir, fontFileName(family, w))));
+}
+
 /**
  * Se asegura de que la familia esté disponible para fontconfig.
- * Devuelve `false` si no se pudo (sin red, familia retirada del catálogo…),
+ * Devuelve `false` si no se pudo (sin red, familia fuera del catálogo…),
  * y entonces el llamador debe usar `FALLBACK_FONT_FAMILY`.
  */
 export function ensureBrandFont(family: string): Promise<boolean> {
   ensureFontsConfigured();
 
-  // La por defecto viaja en el repo: nunca hay que ir a la red por ella.
-  if (family === FALLBACK_FONT_FAMILY) return Promise.resolve(true);
-  if (!findGoogleFont(family))         return Promise.resolve(false);
+  if (!findGoogleFont(family)) return Promise.resolve(false);
+  // Caso normal: la fuente viaja en el repo y no hay nada que hacer.
+  if (isBundled(family))       return Promise.resolve(true);
 
   let pending = downloads.get(family);
   if (!pending) {

@@ -94,19 +94,36 @@ selector, para que servidor y cliente no puedan divergir.
 
 | Situación | Qué pasa |
 |-----------|----------|
-| La marca eligió una del catálogo | Se descarga el TTF de Google Fonts y se escribe con ella |
-| No eligió ninguna | **Inter**, que viaja en `assets/fonts/` (no toca la red) |
+| La marca eligió una del catálogo | Se escribe con ella, leyéndola de `assets/fonts/` |
+| No eligió ninguna | **Inter** |
 | Eligió una fuera del catálogo | Inter. `font_heading` también lo rellena `/api/brand-kit/enrich-url` leyendo la web de la marca, y puede traer una fuente de pago, una local o basura |
-| Sin red / Google caído | Inter |
 | Sin `font_body` | Se repite la de titulares: mezclarla con otra cualquiera se ve peor que repetirla |
+
+### Las 34 viajan en el repo
+
+`assets/fonts/` trae los TTF de **todo** el catálogo en los pesos 400 y 700
+(68 archivos, ~9 MB), descargados con:
+
+```
+npm run fonts:fetch          # y --force para rebajar las existentes
+```
+
+Están en el repo para que componer el texto no salga a la red: ni el medio
+segundo de la primera vez en cada lambda, ni un punto de fallo más en mitad de
+una publicación. **Hay que correr el script al añadir o quitar fuentes del
+catálogo** — si no, `tests/unit/lib/brand-fonts.test.ts` falla señalando cuáles
+faltan.
+
+La descarga en runtime sigue en `lib/fonts.ts` como red de seguridad para una
+fuente añadida al catálogo sin correr el script, y cachea en `/tmp` por lambda.
 
 > **Se pide TTF, no woff2.** La API de Google devuelve woff2 a los navegadores
 > modernos y **fontconfig no sabe leer woff2**. Con un `User-Agent` antiguo la
 > misma URL responde con TTF y sin partir la fuente por rangos unicode.
 
-Las descargas se cachean en `/tmp` por lambda. La vista previa carga esa misma
-familia en el navegador (`ensureGoogleFontLoaded`) y la aplica con
-`brandFontStack()`, así que lo que se ve en pantalla es lo que se publica.
+La vista previa carga esa misma familia en el navegador
+(`ensureGoogleFontLoaded`) y la aplica con `brandFontStack()`, así que lo que se
+ve en pantalla es lo que se publica.
 
 [`lib/fonts.ts`](../lib/fonts.ts) escribe un `fonts.conf` en `/tmp` —con el
 directorio del repo y el de descargas por delante de los del sistema— y deja
@@ -114,7 +131,12 @@ directorio del repo y el de descargas por delante de los del sistema— y deja
 
 > **Los `.ttf` se leen del filesystem en runtime**, así que tienen que estar en
 > `outputFileTracingIncludes` (`next.config.ts`). El trazado automático de Next
-> sólo sigue los `import`. Lo mismo aplica a `prompts/`.
+> sólo sigue los `import`. Van sólo en `/api/social/publish/route` y
+> `/api/social/schedule/route`: son las dos únicas rutas que componen texto, y
+> meterlas en `/api/**` sumaría 9 MB a cada una de las ~40 funciones. El
+> patrón lleva `/route` al final porque el glob `/api/social/schedule` a secas
+> también arrastraba `/api/social/schedule/[postId]`. Lo mismo aplica a
+> `prompts/`, que sí van en todas (pesan unos KB).
 
 ### Salvaguardas
 
@@ -164,7 +186,8 @@ sube tal cual y la app la encaja), así que el preview lo muestra en 9:16 con
 | `lib/content-source.ts` | Contexto de origen de una conversión (puro) |
 | `lib/preview-layout.ts` | Marcos y zonas seguras por red (puro) |
 | `lib/google-fonts.ts` | Catálogo de tipografías (compartido cliente/servidor) |
-| `lib/fonts.ts` | Descarga de la fuente de la marca + `FONTCONFIG_PATH` |
+| `lib/fonts.ts` | Resolución de la fuente de la marca + `FONTCONFIG_PATH` |
+| `scripts/fetch-brand-fonts.mjs` | Descarga el catálogo a `assets/fonts/` (`npm run fonts:fetch`) |
 | `lib/image-processor.ts` | `bakeTextOnImage`, `canRenderBakedText`, recortes |
 | `lib/publish-images.ts` | Preparación de imágenes al publicar/programar |
 | `app/api/content/[itemId]/renditions/route.ts` | Genera el formato alternativo |

@@ -10,13 +10,14 @@ import {
   resolveBrandFontName,
 } from '@/lib/google-fonts';
 import {
-  BUNDLED_FONT_FILES,
   FALLBACK_FONT_FAMILY,
+  FONT_WEIGHTS,
   bundledFontsDir,
   downloadedFontsDir,
   ensureBrandFont,
   fontFileName,
   googleFontCssUrl,
+  isBundled,
   parseTtfUrls,
   resetFontsConfiguredForTests,
   resolveBakedFonts,
@@ -27,6 +28,9 @@ import {
 // una genérica: es parte de su identidad y es lo que se ve en la preview.
 // Son Google Fonts, así que el servidor descarga el TTF —fontconfig no sabe
 // leer woff2— y cae a la por defecto si no puede.
+
+/** Familia del catálogo con la que se ejercita la ruta de descarga. */
+const NOT_BUNDLED = 'Poppins';
 
 const CSS_TTF = `@font-face {
   font-family: 'Poppins';
@@ -46,12 +50,40 @@ describe('catálogo de Google Fonts', () => {
     expect(findGoogleFont(DEFAULT_BRAND_FONT)).toBeTruthy();
   });
 
-  it('la por defecto viaja en el repo, para no depender de la red', () => {
-    for (const file of BUNDLED_FONT_FILES) {
-      expect(file.startsWith(DEFAULT_BRAND_FONT.replace(/\s/g, ''))).toBe(true);
-      expect(fs.existsSync(path.join(bundledFontsDir(), file))).toBe(true);
+  // Guardián: si alguien añade una fuente al catálogo y no corre
+  // `node scripts/fetch-brand-fonts.mjs`, esta prueba lo caza. Si no, el fallo
+  // aparecería en producción como una descarga lenta o como texto en Inter.
+  it('TODAS las fuentes del catálogo viajan en el repo', () => {
+    const faltan = GOOGLE_FONT_OPTIONS
+      .filter((font) => !isBundled(font.value))
+      .map((font) => font.value);
+    expect(faltan, `corre: node scripts/fetch-brand-fonts.mjs — faltan: ${faltan.join(', ')}`).toEqual([]);
+  });
+
+  it('cada fuente trae los dos pesos y ninguno está vacío', () => {
+    for (const font of GOOGLE_FONT_OPTIONS) {
+      for (const weight of FONT_WEIGHTS) {
+        const file = path.join(bundledFontsDir(), fontFileName(font.value, weight));
+        expect(fs.existsSync(file), `falta ${file}`).toBe(true);
+        expect(fs.statSync(file).size, file).toBeGreaterThan(10_000);
+      }
     }
+  });
+
+  it('la por defecto es la de respaldo y está incluida', () => {
     expect(FALLBACK_FONT_FAMILY).toBe(DEFAULT_BRAND_FONT);
+    expect(isBundled(DEFAULT_BRAND_FONT)).toBe(true);
+  });
+
+  // Lo que se gana al tenerlas en el repo: componer el texto no toca la red.
+  it('ninguna fuente del catálogo sale a la red', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    for (const font of GOOGLE_FONT_OPTIONS) {
+      await expect(ensureBrandFont(font.value), font.value).resolves.toBe(true);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it('respeta la fuente elegida por la marca', () => {
@@ -83,12 +115,21 @@ describe('catálogo de Google Fonts', () => {
   });
 });
 
-describe('descarga desde Google Fonts', () => {
+describe('descarga desde Google Fonts (red de seguridad)', () => {
+  // Como ya viajan TODAS las del catálogo en el repo, para ejercitar la
+  // descarga hay que simular que no están: `bundledFontsDir()` cuelga de
+  // `process.cwd()`, así que se apunta a un directorio vacío.
   beforeEach(() => {
     resetFontsConfiguredForTests();
     fs.rmSync(downloadedFontsDir(), { recursive: true, force: true });
+    const empty = path.join(downloadedFontsDir(), '..', 'kefy-sin-fuentes');
+    fs.mkdirSync(path.join(empty, 'assets', 'fonts'), { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(empty);
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it('pide TTF, no woff2: fontconfig no sabe leer woff2', () => {
     // El truco es el User-Agent antiguo; la URL pide los dos pesos que se usan.
@@ -119,20 +160,13 @@ describe('descarga desde Google Fonts', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(ensureBrandFont('Poppins')).resolves.toBe(true);
+    await expect(ensureBrandFont(NOT_BUNDLED)).resolves.toBe(true);
 
-    for (const weight of [400, 700]) {
-      expect(fs.existsSync(path.join(downloadedFontsDir(), fontFileName('Poppins', weight)))).toBe(true);
+    for (const weight of FONT_WEIGHTS) {
+      expect(fs.existsSync(path.join(downloadedFontsDir(), fontFileName(NOT_BUNDLED, weight)))).toBe(true);
     }
     // El User-Agent antiguo es lo que hace que Google responda con TTF.
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ headers: { 'User-Agent': expect.stringContaining('Mozilla/4.0') } });
-  });
-
-  it('no vuelve a la red por la fuente por defecto: ya viaja en el repo', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    await expect(ensureBrandFont(DEFAULT_BRAND_FONT)).resolves.toBe(true);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('no pide a Google una familia que no está en el catálogo', async () => {
@@ -150,19 +184,19 @@ describe('descarga desde Google Fonts', () => {
     ));
     vi.stubGlobal('fetch', fetchMock);
 
-    await Promise.all([ensureBrandFont('Poppins'), ensureBrandFont('Poppins'), ensureBrandFont('Poppins')]);
+    await Promise.all([ensureBrandFont(NOT_BUNDLED), ensureBrandFont(NOT_BUNDLED), ensureBrandFont(NOT_BUNDLED)]);
     const cssCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes('googleapis'));
     expect(cssCalls).toHaveLength(1);
   });
 
   it('si Google no responde, no rompe: devuelve false y se usará la por defecto', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('sin red'); }));
-    await expect(ensureBrandFont('Poppins')).resolves.toBe(false);
+    await expect(ensureBrandFont(NOT_BUNDLED)).resolves.toBe(false);
   });
 
   it('un 404 de Google tampoco rompe', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404 } as Response)));
-    await expect(ensureBrandFont('Montserrat')).resolves.toBe(false);
+    await expect(ensureBrandFont(NOT_BUNDLED)).resolves.toBe(false);
   });
 });
 
@@ -172,6 +206,7 @@ describe('resolveBakedFonts', () => {
     // También el caché en disco: una fuente ya descargada por otra prueba
     // haría pasar el caso de "la descarga falla" sin llegar a la red.
     fs.rmSync(downloadedFontsDir(), { recursive: true, force: true });
+    vi.restoreAllMocks();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => (
       typeof url === 'string' && url.includes('googleapis')
         ? { ok: true, text: async () => CSS_TTF } as Response
@@ -196,7 +231,11 @@ describe('resolveBakedFonts', () => {
     });
   });
 
-  it('si la descarga falla cae a la por defecto en vez de dejar el texto sin fuente', async () => {
+  it('si la fuente no está y la descarga falla, cae a la por defecto', async () => {
+    // Sin las fuentes del repo y sin red: el único camino que queda es Inter.
+    const empty = path.join(downloadedFontsDir(), '..', 'kefy-sin-fuentes');
+    fs.mkdirSync(path.join(empty, 'assets', 'fonts'), { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(empty);
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('sin red'); }));
     await expect(resolveBakedFonts({ heading: 'Poppins', body: 'Lato' })).resolves.toEqual({
       title: DEFAULT_BRAND_FONT, body: DEFAULT_BRAND_FONT,

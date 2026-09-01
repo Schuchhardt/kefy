@@ -4,8 +4,9 @@ import path from 'path';
 import sharp from 'sharp';
 
 import {
-  BUNDLED_FONT_FILES,
   FALLBACK_FONT_FAMILY,
+  FONT_WEIGHTS,
+  fontFileName,
   buildFontConfig,
   bundledFontsDir,
   downloadedFontsDir,
@@ -41,10 +42,10 @@ describe('fuentes propias', () => {
     resetTextRenderingProbeForTests();
   });
 
-  it('las fuentes viajan en el repo, no se esperan del sistema', () => {
-    for (const file of BUNDLED_FONT_FILES) {
-      const full = path.join(bundledFontsDir(), file);
-      expect(fs.existsSync(full), `falta ${file}`).toBe(true);
+  it('la fuente por defecto viaja en el repo, no se espera del sistema', () => {
+    for (const weight of FONT_WEIGHTS) {
+      const full = path.join(bundledFontsDir(), fontFileName(FALLBACK_FONT_FAMILY, weight));
+      expect(fs.existsSync(full), `falta ${full}`).toBe(true);
       expect(fs.statSync(full).size).toBeGreaterThan(10_000);
     }
   });
