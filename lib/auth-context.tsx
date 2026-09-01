@@ -83,6 +83,9 @@ export function AuthProvider({ children, lang }: { children: ReactNode; lang: st
 
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
+    // El service worker cachea páginas públicas; al cerrar sesión se limpia
+    // todo por si quedó algo del usuario anterior.
+    navigator.serviceWorker?.controller?.postMessage({ type: 'CLEAR_CACHES' });
     setState({ user: null, org: null, role: null, plan: null, loading: false });
     router.push(`/${lang}/login`);
   }, [lang, router]);

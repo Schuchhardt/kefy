@@ -75,7 +75,11 @@ app/
     autopilot/          # Ejecución de autopilot (cron)
     billing/            # Suscripciones Stripe
     ads/ comments/ messaging/ reviews/ strategies/ webhooks/ waitlist/
+    version/            # Versión del build (la consulta la PWA)
+  manifest.ts           # Web App Manifest (/manifest.webmanifest)
+  sw.js/                # Service worker generado por build
 components/
+  PwaUpdater.tsx        # Registro del service worker y auto-actualización
   dashboard/            # Sidebar, BrandKit, PostPreview, CarouselPreview, ReelPlayer…
   landing/              # Hero, Pricing, Testimonials, ChannelsSection…
   ui/                   # Componentes reutilizables
@@ -90,6 +94,8 @@ lib/
   mux.ts                # Integración Mux
   stripe.ts             # Pagos
   i18n.ts               # Configuración de locales
+  service-worker.ts     # Fuente del service worker (cache versionada)
+  app-version.ts        # Versión del build inyectada en el bundle
 remotion/               # Compositor de reels (ReelComposition, Root)
 prompts/                # Prompts de IA (post, carousel, reel, recommend)
 locales/
@@ -105,7 +111,23 @@ emails/                 # Plantillas React Email
 docs/
   zernio.md             # Referencia de la Zernio API (leer antes de tocar lib/zernio.ts)
   i18n.md               # Convenciones de internacionalización
+  pwa.md                # PWA, service worker y versionado de cache
 ```
+
+## PWA y versionado de cache
+
+La app es instalable como PWA y se actualiza sola: cada despliegue genera una
+versión de build (`NEXT_PUBLIC_APP_VERSION`) que se incrusta en `/sw.js` y nombra
+las caches (`kefy-static-<version>`, `kefy-pages-<version>`). Al detectar un
+worker nuevo, el navegador lo instala, borra las caches de la versión anterior y
+toma el control, y `components/PwaUpdater.tsx` recarga la pestaña. En paralelo el
+cliente compara su versión contra `/api/version`, lo que cubre a los navegadores
+sin service worker.
+
+El HTML del dashboard nunca se guarda en cache (es contenido privado) y `/api/**`
+siempre va a la red.
+
+Detalle completo en [`docs/pwa.md`](docs/pwa.md).
 
 ## Variables de entorno
 

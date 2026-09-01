@@ -11,6 +11,8 @@ const PUBLIC_API_PATHS = [
   '/api/auth/reset-password',
   '/api/auth/refresh',
   '/api/waitlist',
+  // Versión del build: la consulta el cliente para detectar despliegues nuevos.
+  '/api/version',
   '/api/webhooks/',
   // Vercel Cron endpoints: no llevan cookie de sesión, se autentican solos
   // contra CRON_SECRET / AUTOPILOT_CRON_SECRET dentro del route handler.
@@ -86,5 +88,5 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|site.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)).*)',],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)).*)',],
 };
