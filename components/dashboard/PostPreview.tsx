@@ -1,6 +1,47 @@
 'use client';
 
+import { useState } from 'react';
+import { aspectLimitsFor } from '@/lib/image-fit';
+import type { ContentChannel } from '@/types/ai';
+
 // ─── Shared helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Feed image that previews exactly what will be published: the photo keeps its
+ * own aspect ratio while it is inside the network's accepted range, and is only
+ * cropped when it falls outside — the same rule `lib/image-fit.ts` applies
+ * server-side. Previously every preview was a hard `object-fit: cover` crop, so
+ * a 1080×1350 Instagram-ready photo looked cut in the app even when it wasn't.
+ */
+function FeedImage({ src, channel, radius = 0 }: {
+  src:      string;
+  channel:  ContentChannel;
+  radius?:  number;
+}) {
+  const [natural, setNatural] = useState<number | null>(null);
+  const { min, max } = aspectLimitsFor(channel);
+  const ratio = natural === null ? null : Math.min(max, Math.max(min, natural));
+
+  return (
+    <div style={{
+      position: 'relative', width: '100%',
+      aspectRatio: ratio === null ? undefined : `${ratio}`,
+      overflow: 'hidden', background: '#000',
+      borderRadius: radius || undefined,
+    }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt="post"
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          if (img.naturalWidth && img.naturalHeight) setNatural(img.naturalWidth / img.naturalHeight);
+        }}
+        style={{ width: '100%', height: ratio === null ? 'auto' : '100%', objectFit: 'cover', display: 'block' }}
+      />
+    </div>
+  );
+}
 
 interface AvatarProps {
   logoUrl?:     string | null;
@@ -81,16 +122,13 @@ function InstagramPost({ body, imageUrl, hashtags, username, logoUrl, media, med
       {/* Image / placeholder */}
       {media ? (
         <div style={{ position: 'relative', width: '100%' }}>{media}</div>
+      ) : imageUrl ? (
+        <FeedImage src={imageUrl} channel="instagram" />
       ) : (
         <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', overflow: 'hidden', background: '#000' }}>
-          {imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="post" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-          ) : (
-            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28, boxSizing: 'border-box' }}>
-              <p style={{ fontSize: 20, fontWeight: 800, color: '#fff', textAlign: 'center', lineHeight: 1.3, margin: 0, textShadow: '0 2px 10px rgba(0,0,0,0.25)' }}>{body}</p>
-            </div>
-          )}
+          <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28, boxSizing: 'border-box' }}>
+            <p style={{ fontSize: 20, fontWeight: 800, color: '#fff', textAlign: 'center', lineHeight: 1.3, margin: 0, textShadow: '0 2px 10px rgba(0,0,0,0.25)' }}>{body}</p>
+          </div>
         </div>
       )}
       {mediaFooter}
@@ -140,8 +178,7 @@ function LinkedInPost({ body, imageUrl, hashtags, username, logoUrl, media, medi
       {media ? (
         <div style={{ width: '100%' }}>{media}{mediaFooter}</div>
       ) : imageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt="post" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} />
+        <FeedImage src={imageUrl} channel="linkedin" />
       )}
       {/* Reactions */}
       <div style={{ padding: '8px 14px 4px', borderTop: '1px solid var(--border)', display: 'flex', gap: 0 }}>
@@ -175,8 +212,9 @@ function TwitterPost({ body, imageUrl, hashtags, username, logoUrl, media, media
           {media ? (
             <div style={{ width: '100%', borderRadius: 14, overflow: 'hidden', marginTop: 8 }}>{media}{mediaFooter}</div>
           ) : imageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="post" style={{ width: '100%', borderRadius: 14, display: 'block', maxHeight: 280, objectFit: 'cover', marginTop: 8 }} />
+            <div style={{ marginTop: 8 }}>
+              <FeedImage src={imageUrl} channel="twitter" radius={14} />
+            </div>
           )}
           {/* Actions */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, maxWidth: 300 }}>
@@ -214,8 +252,9 @@ function ThreadsPost({ body, imageUrl, hashtags, username, logoUrl, media, media
           {media ? (
             <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', marginTop: 8 }}>{media}{mediaFooter}</div>
           ) : imageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="post" style={{ width: '100%', borderRadius: 10, display: 'block', maxHeight: 260, objectFit: 'cover', marginTop: 8 }} />
+            <div style={{ marginTop: 8 }}>
+              <FeedImage src={imageUrl} channel="threads" radius={10} />
+            </div>
           )}
           <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
             {['♡', '↩', '⟳', '✈'].map((icon, i) => (
@@ -248,8 +287,7 @@ function FacebookPost({ body, imageUrl, hashtags, username, logoUrl, media, medi
       {media ? (
         <div style={{ width: '100%' }}>{media}{mediaFooter}</div>
       ) : imageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt="post" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} />
+        <FeedImage src={imageUrl} channel="facebook" />
       )}
       <div style={{ borderTop: '1px solid var(--border)', display: 'flex' }}>
         {['👍 Me gusta', '💬 Comentar', '↗ Compartir'].map((label) => (
@@ -307,8 +345,7 @@ function GenericPost({ body, imageUrl, hashtags, username, logoUrl, media, media
       {media ? (
         <div style={{ width: '100%' }}>{media}{mediaFooter}</div>
       ) : imageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt="post" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} />
+        <FeedImage src={imageUrl} channel="generic" />
       )}
       {fullText && (
         <div style={{ padding: '10px 14px 14px', fontSize: 14 }}>

@@ -286,6 +286,69 @@ Un reel es **siempre** un vídeo. Reglas implementadas:
 
 Tests de regresión: `tests/unit/lib/publish-media.test.ts`, `tests/unit/api/social-publish.test.ts`, `tests/unit/components/ScheduleModal.test.tsx` y la sección de reels en `tests/unit/lib/zernio.test.ts`.
 
+### Formato de imagen por red (`lib/image-processor.ts`)
+
+Zernio no reencuadra: publica el media tal como se lo mandamos. Kefy ajusta cada
+imagen antes de enviarla, en `/api/social/publish` y `/api/social/schedule`
+(ambos caminos hacen lo mismo desde el fix de la foto cortada).
+
+Cada red acepta un **rango** de relaciones de aspecto, no una sola. La regla es:
+
+1. **Reel / Story** → siempre recorte vertical 9:16 (1080×1920), da igual el origen.
+2. **Post / carrusel** → si la relación de aspecto de la foto ya está dentro del
+   rango que acepta la red, **no se recorta**: sólo se reduce si excede el
+   tamaño máximo. Se aplica un margen del 1% para exports canónicos como
+   1200×628 (1.9108:1).
+3. Si está fuera de rango, se recorta al **límite más cercano** (no al tamaño
+   canónico), para cortar lo mínimo posible.
+
+| Plataforma | Rango aceptado (ancho/alto) | Caja máxima | Recorte de respaldo* |
+|------------|-----------------------------|-------------|----------------------|
+| instagram / threads | 4:5 (0.8) – 1.91:1 | 1440×1800 | 1080×1350 |
+| facebook   | 4:5 – 1.91:1 | 1440×1800 | 1200×630 |
+| linkedin   | 4:5 – 1.91:1 | 1440×1800 | 1200×627 |
+| twitter (X)| 4:5 – 2:1    | 1600×1900 | 1600×900 |
+| tiktok     | 9:16 – 1:1   | 1080×1920 | 1080×1920 |
+| generic    | 9:16 – 1.91:1| 1440×1800 | 1200×630 |
+
+\* Sólo se usa cuando no se pueden leer las dimensiones del origen.
+
+También se aplica `sharp().rotate()` (auto-orientación EXIF) antes de medir y
+recortar: las fotos de móvil vienen guardadas en horizontal con un tag de
+orientación, y sin esto el recorte se calculaba sobre el eje equivocado.
+
+> **Regresión cubierta:** una foto subida *sin IA* ya exportada a 1080×1350
+> (formato recomendado de Instagram) se recortaba al canónico 1080×1080 y salía
+> cortada arriba y abajo. Tests: `tests/unit/lib/image-processor.test.ts`.
+
+Pendiente conocido: las slides de un carrusel (`media_urls`) todavía se envían
+sin ajustar. Instagram exige que todas las slides compartan relación de aspecto,
+así que un carrusel manual con fotos de distintas proporciones puede salir
+recortado por la propia red.
+
+### X/Twitter: media marcado como sensible
+
+Síntoma: la imagen se publica con el encuadre correcto, pero X la muestra tras un
+aviso de contenido sensible/adulto y hay que hacer clic para verla.
+
+**No es algo que Kefy o Zernio puedan cambiar.** La API de Zernio
+(`POST /v1/posts`) no expone ningún flag de sensibilidad — el único
+`platformSpecificData` de Twitter son `threadItems` y `geoRestriction`
+(verificado en `docs.zernio.com/guides/platform-settings`). X marca el media
+según la configuración **de la propia cuenta**:
+
+> X → Configuración y privacidad → Privacidad y seguridad → **Tus publicaciones**
+> → desmarcar *"Marcar el contenido multimedia que publicas como material que
+> puede ser sensible"*.
+
+Mientras esa casilla esté activa, **todas** las imágenes de esa cuenta
+(publicadas a mano o por API) salen detrás del aviso. Si la casilla ya está
+desmarcada y el aviso persiste, es una clasificación automática de X sobre esa
+imagen concreta y se apela desde el centro de ayuda de X.
+
+Kefy muestra este aviso bajo las cuentas de X conectadas
+(`components/dashboard/SocialConnectionPanel.tsx`).
+
 ### Listar posts
 
 ```
@@ -611,3 +674,5 @@ Envía un mensaje en una conversación de inbox. Es el endpoint correcto para re
 | `ZodError: description invalid_type` | Campo `description: null` enviado en POST /profiles | Omitir el campo si no tiene valor |
 | `[object Object]` en error | `errBody.message` es un objeto, no string | `zernioFetch` ya lo maneja con `JSON.stringify` |
 | `402 PAYMENT_REQUIRED` | X/Twitter supera el límite gratuito | Añadir método de pago en el dashboard de Zernio |
+| Imagen cortada al publicar | Recorte forzado al tamaño canónico de la red | Corregido: ver *Formato de imagen por red* |
+| Imagen en X detrás de aviso de contenido sensible | Ajuste de la cuenta de X, no de la API | Ver *X/Twitter: media marcado como sensible* |

@@ -167,25 +167,19 @@ export async function POST(req: NextRequest) {
 
   const { publishPost, STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
 
-  // Pre-composite caption text onto the story image for platforms that don't
-  // display captions on stories (Instagram, Facebook, Snapchat).
-  let storyCompositeImageUrl: string | undefined;
-  if (format === 'story' && !media.is_video && media.image_url) {
+  // Pre-download the source image once so every account gets a copy fitted to
+  // its own network — same treatment as immediate publish, which used to be the
+  // only path that resized (scheduled posts went out at the original size).
+  let sourceImageBuffer: Buffer | null = null;
+  if (media.image_url) {
     try {
       const resp = await fetch(media.image_url);
       if (resp.ok) {
         const ab = await resp.arrayBuffer();
-        const srcBuf = Buffer.from(ab);
-        const resized = await resizeForFormat(srcBuf, 'generic' as ContentChannel, 'story');
-        const composited = await compositeStoryText(resized, media.text);
-        storyCompositeImageUrl = await uploadBase64Image(
-          composited.toString('base64'),
-          auth.orgId,
-          `story-composite-${Date.now()}.jpeg`,
-        );
+        sourceImageBuffer = Buffer.from(ab);
       }
-    } catch (err) {
-      console.warn('[schedule] Story text composite failed, using original image:', err);
+    } catch {
+      console.warn('[schedule] Could not fetch source image for resize, using original URL');
     }
   }
 
@@ -212,9 +206,34 @@ export async function POST(req: NextRequest) {
         ` hasImage=${!!media.image_url} mediaUrls=${media.media_urls?.length ?? 0} hasVideo=${!!media.video_url}`,
       );
 
-      const imageForAccount = (storyCompositeImageUrl && STORY_CAPABLE_PLATFORMS.has(account.platform))
-        ? storyCompositeImageUrl
-        : media.image_url;
+      // Fit the image to this network (no crop when the source ratio is already
+      // accepted) and bake the story caption in where the network won't show it.
+      let imageForAccount = media.image_url;
+      if (sourceImageBuffer) {
+        try {
+          let fittedBuf = await resizeForFormat(
+            sourceImageBuffer,
+            (account.platform ?? 'generic') as ContentChannel,
+            format,
+          );
+
+          if (format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)) {
+            try {
+              fittedBuf = await compositeStoryText(fittedBuf, media.text);
+            } catch (compositeErr) {
+              console.warn(`[schedule] Story text composite failed for ${account.platform}, using plain image:`, compositeErr);
+            }
+          }
+
+          imageForAccount = await uploadBase64Image(
+            fittedBuf.toString('base64'),
+            auth.orgId,
+            `schedule-${account.platform}-${Date.now()}.jpeg`,
+          );
+        } catch (resizeErr) {
+          console.warn(`[schedule] Resize failed for ${account.platform}, using original:`, resizeErr);
+        }
+      }
 
       const zernioResult = await publishPost({
         account_id:   account.zernio_account_id!,
