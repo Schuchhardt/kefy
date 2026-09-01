@@ -381,21 +381,19 @@ export default function EditContentModal({
       const prompt = feedback.trim()
         ? `${context ? context + '. ' : ''}${feedback.trim()}`
         : context || (lang === 'en' ? 'image for slide' : 'imagen para slide');
-      // Carousel slides are infographic-style: bake the slide's title/body
-      // back onto the regenerated image (reel scene backgrounds must stay
-      // clean — Remotion overlays that text dynamically at render time).
-      const compositePayload = item!.content_type !== 'reel'
-        ? { compositeTitle: slide.title ?? '', compositeBody: slide.body ?? '' }
-        : {};
+      // La imagen se regenera limpia, sin texto quemado: el título/cuerpo se
+      // dibujan encima como HTML en la vista previa y se componen sobre los
+      // píxeles al publicar (los reels ni siquiera eso: Remotion pinta el
+      // texto al renderizar el video).
       const res = await fetch('/api/content/image', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium', ...compositePayload }),
+        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: '1024x1024', quality: 'medium' }),
       });
       const d = await res.json() as { image?: { url: string }; error?: string };
       if (!res.ok) throw new Error(d.error ?? 'Error');
       if (d.image?.url) {
-        updateSlide(idx, { image_url: d.image.url });
+        updateSlide(idx, { image_url: d.image.url, text_baked: false });
       }
     } finally {
       setRegenSlideImageLoadingIdx(null);
@@ -469,6 +467,7 @@ export default function EditContentModal({
               logoUrl={brandKit?.logo_url ?? undefined}
               imagePending={item.image_status === 'generating'}
               accentColor={brandKit?.accent_color ?? undefined}
+              brandFont={brandKit?.font_heading}
             />
           </div>
         </div>

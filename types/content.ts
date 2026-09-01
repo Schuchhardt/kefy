@@ -15,6 +15,11 @@ export interface CarouselSlide {
   body:         string;
   image_prompt?: string;
   image_url?:   string | null;
+  /** `true` cuando el título/cuerpo ya están quemados en los píxeles de
+   *  `image_url`. Las piezas nuevas guardan la imagen limpia (`false`) y el
+   *  texto se compone al publicar; las anteriores a ese cambio no traen el
+   *  campo y se tratan como ya quemadas para no escribirlo dos veces. */
+  text_baked?:  boolean;
 }
 
 /** Canonical reel scene (text overlay + duration + optional generated image). */
@@ -25,6 +30,9 @@ export interface ReelScene {
   duration_seconds: number;
   image_prompt?:    string;
   image_url?:       string | null;
+  /** Ver `CarouselSlide.text_baked`. Las escenas de reel nunca se queman:
+   *  Remotion dibuja el texto en el video. */
+  text_baked?:      boolean;
 }
 
 // ─── Content item (canonical superset) ───────────────────────────────────────

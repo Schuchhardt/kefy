@@ -19,6 +19,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 | Zernio / redes sociales | [`docs/zernio.md`](docs/zernio.md) | Antes de cualquier cambio en `lib/zernio.ts`, `app/api/social/**`, o cualquier flujo de conexión/publicación en redes sociales |
 | Render de reels / stories | [`docs/reel-render.md`](docs/reel-render.md) | Antes de tocar `app/api/content/reel/render/**`, `app/api/content/reel/reconcile/**`, `lib/reel-render.ts`, `remotion/**` o `MuxReelPlayer` |
 | Brand Kit | [`/memories/repo/brand-kit-architecture.md`](memories/repo/brand-kit-architecture.md) | Antes de cambios en `app/api/brand-kit/**` o `lib/brand-kit.ts` |
+| Formatos y conversiones de contenido | [`docs/content-formats.md`](docs/content-formats.md) | Antes de tocar `app/api/content/[itemId]/renditions/**`, `lib/content-source.ts`, `lib/preview-layout.ts`, `lib/fonts.ts`, `lib/google-fonts.ts`, `lib/publish-images.ts`, el texto quemado en las imágenes o las previews por red |
 | PWA / service worker | [`docs/pwa.md`](docs/pwa.md) | Antes de tocar `app/sw.js/**`, `lib/service-worker.ts`, `components/PwaUpdater.tsx`, `app/manifest.ts` o `scripts/generate-build-id.mjs` |
 | Formato de imagen por red | [`docs/zernio.md`](docs/zernio.md) (sección *Formato de imagen por red*) | Antes de tocar `lib/image-fit.ts`, `lib/image-processor.ts` o el recorte de imágenes en las previews |
 

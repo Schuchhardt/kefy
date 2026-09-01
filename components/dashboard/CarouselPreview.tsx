@@ -1,7 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import type { CarouselSlide, ReelScene } from '@/types/content';
+import { useEffect, useState } from 'react';
+import { networkFrame, safeAreaCss } from '@/lib/preview-layout';
+import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
+import type { ContentChannel } from '@/types/ai';
+import type { CarouselSlide, ContentType, ReelScene } from '@/types/content';
 
 // Gradient palette for slides without images
 const GRADIENTS = [
@@ -17,23 +20,39 @@ const GRADIENTS = [
   'linear-gradient(135deg, #96fbc4 0%, #f9f586 100%)',
 ];
 
-/** The 1:1 media area of a carousel slide: the generated image with its text
+/** The media area of a carousel slide: the generated image with its text
  *  overlay, or a gradient card with the slide copy when there's no image yet.
  *  Extracted so channel-specific chrome (Instagram, LinkedIn, TikTok…) can
- *  reuse the exact same slide rendering. */
+ *  reuse the exact same slide rendering.
+ *
+ *  El texto va SIEMPRE como HTML encima de la imagen limpia — no quemado en los
+ *  píxeles. Se posiciona dentro de la zona segura de la red (`lib/preview-layout`),
+ *  la misma que usa el servidor al componerlo de verdad en la publicación, así
+ *  que lo que se ve acá es donde va a quedar. */
 export function SlideCanvas({
-  slide, index, total, showCounter = true,
+  slide, index, total, showCounter = true, platform = 'instagram', format = 'carousel', brandFont,
 }: {
   slide:        CarouselSlide | ReelScene;
   index:        number;
   total:        number;
   showCounter?: boolean;
+  platform?:    ContentChannel;
+  format?:      ContentType;
+  /** Tipografía del Brand Kit (`font_heading`), la misma con la que el
+   *  servidor escribirá este texto dentro de la imagen al publicar. */
+  brandFont?:   string | null;
 }) {
+  const frame = networkFrame(platform, format);
+  const safe  = safeAreaCss(platform, format);
+  const font  = brandFontStack(brandFont);
+
+  useEffect(() => { ensureGoogleFontLoaded(brandFont); }, [brandFont]);
+
   return (
     <div
       style={{
         position: 'relative', width: '100%',
-        aspectRatio: '1 / 1', overflow: 'hidden', background: '#000',
+        aspectRatio: frame.css, overflow: 'hidden', background: '#000',
       }}
     >
       {slide.image_url ? (
@@ -42,29 +61,36 @@ export function SlideCanvas({
           <img
             src={slide.image_url}
             alt={slide.title}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            style={{ width: '100%', height: '100%', objectFit: frame.fit, display: 'block' }}
           />
-          {/* Text overlay: title + body baked into stored image; shown here for slides without compositing */}
+          {/* Degradado de legibilidad, debajo del texto. */}
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%',
+            background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 100%)',
+            pointerEvents: 'none',
+          }} />
+          {/* Overlay HTML: el mismo texto que el servidor quema al publicar,
+              acotado a la zona que la interfaz de la red no tapa. */}
           <div
             style={{
-              position: 'absolute', bottom: 0, left: 0, right: 0,
-              background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 100%)',
-              padding: '48px 18px 18px',
+              position: 'absolute', inset: 0,
+              display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
               boxSizing: 'border-box',
               pointerEvents: 'none',
+              ...safe,
             }}
           >
             <p style={{
               margin: '0 0 5px', fontSize: 17, fontWeight: 800,
-              color: '#fff', lineHeight: 1.25,
-              textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+              color: '#fff', lineHeight: 1.25, fontFamily: font,
+              textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 18px rgba(0,0,0,0.6)',
             }}>
               {slide.title}
             </p>
             {slide.body && (
               <p style={{
-                margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.88)',
-                lineHeight: 1.45, textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+                margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.92)', fontFamily: font,
+                lineHeight: 1.45, textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 14px rgba(0,0,0,0.6)',
               }}>
                 {slide.body}
               </p>
@@ -92,7 +118,7 @@ export function SlideCanvas({
           </span>
           <p
             style={{
-              fontSize: index === 0 ? 26 : 22, fontWeight: 800, color: '#fff',
+              fontSize: index === 0 ? 26 : 22, fontWeight: 800, color: '#fff', fontFamily: font,
               textAlign: 'center', lineHeight: 1.25,
               margin: '0 0 16px', textShadow: '0 2px 10px rgba(0,0,0,0.25)',
             }}
@@ -101,7 +127,7 @@ export function SlideCanvas({
           </p>
           <p
             style={{
-              fontSize: 15, color: 'rgba(255,255,255,0.85)',
+              fontSize: 15, color: 'rgba(255,255,255,0.85)', fontFamily: font,
               textAlign: 'center', lineHeight: 1.55, margin: 0, maxWidth: 260,
             }}
           >

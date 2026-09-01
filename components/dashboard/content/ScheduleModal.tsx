@@ -5,12 +5,11 @@ import dynamic from 'next/dynamic';
 import Modal from './Modal';
 import DateTimePicker from './DateTimePicker';
 import ChannelIcon from '@/components/ui/ChannelIcon';
-import { PostPreview } from '@/components/dashboard/PostPreview';
-import { ImageGeneratingSpinner } from '@/components/dashboard/ImageGeneratingSpinner';
-import { CarouselPreview } from '@/components/dashboard/CarouselPreview';
-import { StoryPreview } from '@/components/dashboard/StoryPreview';
+import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
 import FormatExample from './FormatExample';
-import type { ContentItem, BrandKitInfo, CarouselSlide, ContentType, ContentRendition } from '@/types/content';
+import { RenditionGenerating } from './RenditionGenerating';
+import { notifyLocal, requestNotificationPermission, shouldNotify } from '@/lib/notify';
+import type { ContentItem, BrandKitInfo, CarouselSlide, ContentType, ContentRendition, ReelScene } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
@@ -107,6 +106,22 @@ export default function ScheduleModal({
     if (!selectedItem) return;
     setRenditionGenerating(true);
     setRenditionError(null);
+
+    // El permiso se pide dentro del click: iOS ignora la petición fuera de un
+    // gesto del usuario, y con la PWA instalada esta es la única vía de avisar
+    // cuando la generación termina con la app en segundo plano.
+    const canNotify = await requestNotificationPermission();
+
+    const notify = (title: string, body: string) => {
+      if (!canNotify || !shouldNotify()) return;
+      void notifyLocal({
+        title,
+        body,
+        tag: `rendition-${selectedItem.id}-${format}`,
+        url: `/${lang}/dashboard/content`,
+      });
+    };
+
     try {
       const res = await fetch(`/api/content/${selectedItem.id}/renditions`, {
         method: 'POST', credentials: 'include',
@@ -116,8 +131,11 @@ export default function ScheduleModal({
       const d = await res.json() as { rendition?: ContentRendition; error?: string };
       if (!res.ok || !d.rendition) throw new Error(d.error ?? 'Error');
       setRenditions((prev) => [...prev.filter((r) => r.format !== format), d.rendition as ContentRendition]);
+      notify(t.renditionDoneTitle(FORMAT_LABELS[lang][format]), t.renditionDoneBody);
     } catch (err) {
-      setRenditionError(err instanceof Error ? err.message : 'Error');
+      const msg = err instanceof Error ? err.message : 'Error';
+      setRenditionError(msg);
+      notify(t.renditionFailedTitle(FORMAT_LABELS[lang][format]), msg);
     } finally {
       setRenditionGenerating(false);
     }
@@ -149,6 +167,16 @@ export default function ScheduleModal({
   const activeAccounts = useMemo(
     () => accounts.filter((a) => a.status === 'active'),
     [accounts],
+  );
+
+  // La vista previa se ciñe a las redes elegidas: cada una recorta y tapa el
+  // contenido a su manera, así que mostrar sólo las que aplican evita aprobar
+  // algo que en el destino real se ve distinto.
+  const selectedPlatforms = useMemo(
+    () => Array.from(new Set(
+      activeAccounts.filter((a) => selectedAccountIds.includes(a.id)).map((a) => a.platform),
+    )),
+    [activeAccounts, selectedAccountIds],
   );
 
   const isPrimaryFormat = !!selectedItem && selectedFormat === selectedItem.content_type;
@@ -282,6 +310,7 @@ export default function ScheduleModal({
                   generating={renditionGenerating}
                   error={renditionError}
                   lang={lang}
+                  networks={selectedPlatforms}
                   onGenerate={() => handleGenerateRendition(selectedFormat)}
                   onReelRenderDone={(_id, url) => {
                     // MuxReelPlayer reports a Mux playback id for legacy items —
@@ -544,7 +573,7 @@ function FormatPicker({
 // "generate this format" prompt when that rendition doesn't exist yet.
 
 function FormatPreview({
-  item, format, rendition, brandKit, generating, error, lang, onGenerate, onReelRenderDone,
+  item, format, rendition, brandKit, generating, error, lang, networks, onGenerate, onReelRenderDone,
 }: {
   item:       ContentItem;
   format:     ContentType;
@@ -553,10 +582,13 @@ function FormatPreview({
   generating: boolean;
   error:      string | null;
   lang:       'es' | 'en';
+  /** Plataformas de las cuentas elegidas; vacío = todas las del formato. */
+  networks:   string[];
   onGenerate: () => void;
   onReelRenderDone?: (itemId: string, url: string) => void;
 }) {
   const isPrimary = format === item.content_type;
+  const [activeSlide, setActiveSlide] = useState(0);
 
   const body     = isPrimary ? item.body           : rendition?.body ?? null;
   const imageUrl = isPrimary ? item.image_url       : rendition?.image_url ?? null;
@@ -564,6 +596,18 @@ function FormatPreview({
   const videoUrl = isPrimary ? item.video_url       : rendition?.video_url ?? null;
   const muxId    = (isPrimary ? item.mux_playback_id : rendition?.mux_playback_id) ?? null;
   const hashtags = isPrimary ? item.hashtags        : rendition?.hashtags ?? [];
+
+  // Mientras se genera manda el esqueleto: la petición tarda minutos y el
+  // usuario necesita ver que está pasando algo, no un botón deshabilitado.
+  if (generating) {
+    return (
+      <RenditionGenerating
+        format={format}
+        lang={lang}
+        accentColor={brandKit?.accent_color ?? undefined}
+      />
+    );
+  }
 
   const needsGeneration = !isPrimary && (!rendition || rendition.status === 'error');
 
@@ -577,36 +621,29 @@ function FormatPreview({
     );
   }
 
-  if (format === 'post') {
-    const imageGenerating = isPrimary && !imageUrl && item.image_status === 'generating';
-    return (
-      <PostPreview
-        channel={item.channel}
-        body={body}
-        imageUrl={imageUrl}
-        hashtags={hashtags}
-        username={brandKit?.name ?? 'tu_marca'}
-        logoUrl={brandKit?.logo_url ?? undefined}
-        media={imageGenerating ? (
-          <ImageGeneratingSpinner
-            label={lang === 'en' ? 'Generating image…' : 'Generando imagen…'}
-            accentColor={brandKit?.accent_color ?? undefined}
-          />
-        ) : undefined}
-      />
-    );
-  }
+  const previewSlides = (Array.isArray(slides) ? slides : []) as Array<CarouselSlide | ReelScene>;
 
-  if (format === 'carousel') {
-    if (!Array.isArray(slides) || slides.length === 0) {
+  if (format === 'post' || format === 'carousel' || format === 'story') {
+    if (format === 'carousel' && previewSlides.length === 0) {
       return <GenerateFormatPrompt format={format} lang={lang} generating={generating} error={error} onGenerate={onGenerate} />;
     }
     return (
-      <CarouselPreview
-        slides={slides as CarouselSlide[]}
-        username={brandKit?.name ?? undefined}
+      <NetworkPreview
+        contentType={format}
+        defaultChannel={item.channel}
+        networks={networks}
+        body={body}
+        imageUrl={imageUrl}
+        videoUrl={format === 'story' ? videoUrl : null}
+        hashtags={hashtags}
+        slides={previewSlides}
+        activeSlide={activeSlide}
+        onActiveSlideChange={setActiveSlide}
+        username={brandKit?.name ?? 'tu_marca'}
         logoUrl={brandKit?.logo_url ?? undefined}
-        description={body ?? undefined}
+        imagePending={isPrimary && !imageUrl && item.image_status === 'generating'}
+        accentColor={brandKit?.accent_color ?? undefined}
+        brandFont={brandKit?.font_heading}
       />
     );
   }
@@ -627,17 +664,7 @@ function FormatPreview({
     );
   }
 
-  // story
-  return (
-    <StoryPreview
-      imageUrl={imageUrl}
-      videoUrl={videoUrl}
-      caption={body}
-      username={brandKit?.name ?? 'tu_marca'}
-      logoUrl={brandKit?.logo_url ?? undefined}
-      height={420}
-    />
-  );
+  return null;
 }
 
 const GENERATE_PROMPT_T = {

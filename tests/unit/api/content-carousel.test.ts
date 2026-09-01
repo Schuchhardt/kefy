@@ -29,15 +29,10 @@ vi.mock('@/lib/storage', () => ({
   uploadBase64Image: vi.fn(),
 }));
 
-vi.mock('@/lib/image-processor', () => ({
-  compositeTextOnImage: vi.fn(),
-}));
-
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
 import { generateCarouselSlides, generateContentImage } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
-import { compositeTextOnImage } from '@/lib/image-processor';
 
 const mockAuth  = { userId: 'u1', orgId: 'org-1', role: 'owner', plan: 'pro' };
 const mockBrand = { id: 'brand-1', org_id: 'org-1', name: 'Marca', slug: 'marca', avatar_url: null, archived: false, created_at: '', updated_at: '' };
@@ -162,7 +157,6 @@ describe('POST /api/content/carousel', () => {
       slides: makeSlides(3), description: 'desc', hashtags: ['#x'], model: 'claude-opus-4-5', tokensUsed: 1,
     });
     vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
-    vi.mocked(compositeTextOnImage).mockResolvedValue('ZmFrZQ==');
     vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/slide.jpg');
 
     const res = await POST(makeReq({ topic: 'Producto', save: false }));
@@ -191,7 +185,6 @@ describe('POST /api/content/carousel', () => {
       slides: makeSlides(4), description: 'desc', hashtags: ['#producto'], model: 'claude-opus-4-5', tokensUsed: 30,
     });
     vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
-    vi.mocked(compositeTextOnImage).mockResolvedValue('ZmFrZQ==');
     vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/slide.jpg');
 
     const res = await POST(makeReq({ channel: 'instagram', topic: 'Producto nuevo' }));
@@ -223,7 +216,6 @@ describe('POST /api/content/carousel', () => {
       slides: makeSlides(3), description: 'desc', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1,
     });
     vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
-    vi.mocked(compositeTextOnImage).mockResolvedValue('ZmFrZQ==');
     vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/slide.jpg');
 
     const res = await POST(makeReq({ topic: 'Producto' }));
