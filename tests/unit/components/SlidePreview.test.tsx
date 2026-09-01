@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { SlideCanvas } from '@/components/dashboard/CarouselPreview';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
 import { safeAreaFor } from '@/lib/preview-layout';
+import { DEFAULT_BRAND_FONT, brandFontStack } from '@/lib/google-fonts';
 import type { CarouselSlide } from '@/types/content';
 
 // Regresión (producción): la imagen guardada del slide traía el texto quemado
@@ -21,6 +22,19 @@ const slide: CarouselSlide = {
 function styleOf(el: Element | null | undefined) {
   return (el as HTMLElement | null)?.style;
 }
+
+/** Hojas de estilo de Google Fonts que la preview ha pedido cargar. */
+function googleFontHrefs(): string[] {
+  return Array.from(document.querySelectorAll('link[href*="fonts.googleapis.com"]'))
+    .map((l) => l.getAttribute('href') ?? '');
+}
+
+beforeEach(() => {
+  // El `<link>` de la fuente es real: se corta la red para no salir a Google
+  // en cada test, y se limpia lo que dejaron los anteriores.
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('sin red en tests'); }));
+  document.querySelectorAll('link[href*="fonts.googleapis.com"]').forEach((l) => l.remove());
+});
 
 describe('<SlideCanvas />', () => {
   it('el texto del slide se dibuja como HTML sobre la imagen', () => {
@@ -62,6 +76,38 @@ describe('<SlideCanvas />', () => {
     expect(styleOf(overlay)?.paddingBottom).toBe(`${(safe.bottom * 100).toFixed(2)}%`);
     // Y ese margen es de verdad grande, no el margen tipográfico de un feed.
     expect(safe.right).toBeGreaterThan(safeAreaFor('instagram', 'carousel').right * 2);
+  });
+
+  // El servidor escribe el texto con `font_heading` del Brand Kit al publicar;
+  // si la preview usara otra, lo aprobado no sería lo publicado.
+  it('escribe con la tipografía elegida por la marca', () => {
+    const { container } = render(<SlideCanvas slide={slide} index={0} total={3} brandFont="Playfair Display" />);
+    const title = Array.from(container.querySelectorAll('p'))
+      .find((p) => p.textContent === 'Publicar más no es mejor');
+    expect(styleOf(title)?.fontFamily).toBe(brandFontStack('Playfair Display'));
+  });
+
+  it('sin fuente de marca usa la por defecto, no la del sistema', () => {
+    const { container } = render(<SlideCanvas slide={slide} index={0} total={3} />);
+    const title = Array.from(container.querySelectorAll('p'))
+      .find((p) => p.textContent === 'Publicar más no es mejor');
+    expect(styleOf(title)?.fontFamily).toBe(brandFontStack(DEFAULT_BRAND_FONT));
+  });
+
+  it('carga esa Google Font en el navegador para poder dibujarla', () => {
+    render(<SlideCanvas slide={slide} index={0} total={3} brandFont="Poppins" />);
+    expect(googleFontHrefs().some((h) => h.includes('family=Poppins'))).toBe(true);
+  });
+
+  it('no vuelve a inyectar el mismo <link> en cada render', () => {
+    render(<SlideCanvas slide={slide} index={0} total={3} brandFont="Poppins" />);
+    render(<SlideCanvas slide={slide} index={1} total={3} brandFont="Poppins" />);
+    expect(googleFontHrefs().filter((h) => h.includes('family=Poppins'))).toHaveLength(1);
+  });
+
+  it('una fuente fuera del catálogo no acaba en una petición a Google', () => {
+    render(<SlideCanvas slide={slide} index={0} total={3} brandFont="Helvetica Neue LT Pro" />);
+    expect(googleFontHrefs().some((h) => h.includes('Helvetica'))).toBe(false);
   });
 
   it('sin imagen cae en la tarjeta de degradado con el texto legible', () => {

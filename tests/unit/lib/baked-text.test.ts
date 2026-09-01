@@ -4,10 +4,11 @@ import path from 'path';
 import sharp from 'sharp';
 
 import {
-  BAKED_TEXT_FONT_FAMILY,
   BUNDLED_FONT_FILES,
+  FALLBACK_FONT_FAMILY,
   buildFontConfig,
   bundledFontsDir,
+  downloadedFontsDir,
   ensureFontsConfigured,
   resetFontsConfiguredForTests,
 } from '@/lib/fonts';
@@ -15,6 +16,7 @@ import {
   bakeTextIfSupported,
   bakeTextOnImage,
   canRenderBakedText,
+  canRenderFamily,
   resetTextRenderingProbeForTests,
   wrapText,
 } from '@/lib/image-processor';
@@ -54,15 +56,22 @@ describe('fuentes propias', () => {
 
     const conf = fs.readFileSync(path.join(confDir!, 'fonts.conf'), 'utf-8');
     expect(conf).toContain(bundledFontsDir());
-    expect(conf).toContain(BAKED_TEXT_FONT_FAMILY);
+    expect(conf).toContain(downloadedFontsDir());
+    expect(conf).toContain(FALLBACK_FONT_FAMILY);
   });
 
-  it('el fonts.conf declara primero el directorio propio', () => {
-    const conf = buildFontConfig('/app/assets/fonts', '/tmp/cache');
-    const own    = conf.indexOf('/app/assets/fonts');
-    const system = conf.indexOf('/usr/share/fonts');
+  it('el fonts.conf declara antes los directorios propios que los del sistema', () => {
+    const conf = buildFontConfig('/app/assets/fonts', '/tmp/kefy-fonts', '/tmp/cache');
+    const own       = conf.indexOf('/app/assets/fonts');
+    const downloads = conf.indexOf('/tmp/kefy-fonts');
+    const system    = conf.indexOf('/usr/share/fonts');
     expect(own).toBeGreaterThan(-1);
-    expect(own).toBeLessThan(system);
+    expect(own).toBeLessThan(downloads);
+    expect(downloads).toBeLessThan(system);
+  });
+
+  it('la fuente por defecto viaja en el repo, así que no depende de la red', async () => {
+    await expect(canRenderFamily(FALLBACK_FONT_FAMILY)).resolves.toBe(true);
   });
 
   it('es idempotente: no reescribe la config en cada llamada', () => {

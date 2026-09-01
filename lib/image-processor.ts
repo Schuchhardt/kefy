@@ -3,7 +3,13 @@ import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
 import { planImageFit, type ImageFitPlan } from '@/lib/image-fit';
 import { safeBoxFor } from '@/lib/preview-layout';
-import { BAKED_TEXT_FONT_FAMILY, ensureFontsConfigured } from '@/lib/fonts';
+import {
+  FALLBACK_FONT_FAMILY,
+  ensureFontsConfigured,
+  resolveBakedFonts,
+  type BakedFonts,
+  type BrandFonts,
+} from '@/lib/fonts';
 
 export { planImageFit, aspectLimitsFor } from '@/lib/image-fit';
 export type { ImageFitPlan } from '@/lib/image-fit';
@@ -109,10 +115,10 @@ function escapeXml(str: string): string {
 }
 
 /**
- * Ancho medio de un glifo de Liberation Sans respecto del tamaño de fuente.
- * Sirve para partir las líneas sin tener que medir con la tipografía real;
- * el valor es conservador a propósito (mejor una línea de más que texto
- * saliéndose de la zona segura).
+ * Ancho medio de un glifo respecto del tamaño de fuente. Sirve para partir las
+ * líneas sin medir con la tipografía real, que cambia según la marca. El valor
+ * es conservador a propósito: mejor una línea de más que texto saliéndose de
+ * la zona segura.
  */
 const GLYPH_WIDTH_RATIO = { bold: 0.55, regular: 0.52 } as const;
 
@@ -145,6 +151,8 @@ export interface BakeTextOptions {
   platform?: ContentChannel;
   /** Formato destino: define la zona segura junto con la plataforma. */
   format?:   ContentType;
+  /** Tipografías del Brand Kit. Sin esto se escribe con la por defecto. */
+  brandFonts?: BrandFonts;
   quality?:  number;
 }
 
@@ -169,6 +177,10 @@ export async function bakeTextOnImage(
   const title = (opts.title ?? '').trim();
   const body  = (opts.body  ?? '').trim();
   if (!title && !body) return input;
+
+  // La marca escribe con SU tipografía: se descarga de Google Fonts si hace
+  // falta y se comprueba que fontconfig la resuelva antes de usarla.
+  const fonts = await usableFonts(opts.brandFonts);
 
   const platform = opts.platform ?? 'generic';
   const format   = opts.format   ?? 'post';
@@ -207,16 +219,16 @@ export async function bakeTextOnImage(
   const titleBaseY  = blockTop + titleSize;
   const bodyBaseY   = titleBaseY + (titleLines.length ? (titleLines.length - 1) * titleLineH + blockGap + bodyLineH : bodyLineH);
 
-  const line = (text: string, x: number, y: number, size: number, weight: number, fill: string, stroke: number) =>
-    `<text x="${x}" y="${y}" font-family="${BAKED_TEXT_FONT_FAMILY}" font-size="${size}"` +
+  const line = (text: string, x: number, y: number, size: number, weight: number, family: string, fill: string, stroke: number) =>
+    `<text x="${x}" y="${y}" font-family="${escapeXml(family)}" font-size="${size}"` +
     ` font-weight="${weight}" fill="${fill}" paint-order="stroke" stroke="rgba(0,0,0,0.55)"` +
     ` stroke-width="${stroke}" stroke-linejoin="round">${escapeXml(text)}</text>`;
 
   const titleSvg = titleLines
-    .map((t, i) => line(t, safe.x, titleBaseY + i * titleLineH, titleSize, 700, '#ffffff', strokeW))
+    .map((t, i) => line(t, safe.x, titleBaseY + i * titleLineH, titleSize, 700, fonts.title, '#ffffff', strokeW))
     .join('\n');
   const bodySvg = bodyLines
-    .map((t, i) => line(t, safe.x, bodyBaseY + i * bodyLineH, bodySize, 400, 'rgba(255,255,255,0.92)', Math.max(1, strokeW - 1)))
+    .map((t, i) => line(t, safe.x, bodyBaseY + i * bodyLineH, bodySize, 400, fonts.body, 'rgba(255,255,255,0.92)', Math.max(1, strokeW - 1)))
     .join('\n');
 
   // El degradado sí puede pasar de la zona segura: sólo oscurece el fondo.
@@ -242,7 +254,7 @@ export async function bakeTextOnImage(
 
 // ─── Salvaguarda: nunca publicar cuadraditos ─────────────────────────────────
 
-let textRenderingHealthy: Promise<boolean> | null = null;
+const familyProbes = new Map<string, Promise<boolean>>();
 
 /**
  * ¿El entorno puede dibujar glifos de verdad?
@@ -255,33 +267,61 @@ let textRenderingHealthy: Promise<boolean> | null = null;
  * largo con letras distintas dan exactamente los mismos píxeles. Con una
  * fuente real, una fila de «I» y una de «W» no se parecen en nada.
  */
-export async function canRenderBakedText(): Promise<boolean> {
-  if (!textRenderingHealthy) {
-    textRenderingHealthy = (async () => {
+export function canRenderFamily(family: string): Promise<boolean> {
+  let probe = familyProbes.get(family);
+  if (!probe) {
+    probe = (async () => {
       ensureFontsConfigured();
-      const probe = (text: string) => Buffer.from(
+      const svg = (text: string) => Buffer.from(
         `<svg width="360" height="90" xmlns="http://www.w3.org/2000/svg">` +
         `<rect width="360" height="90" fill="#fff"/>` +
-        `<text x="6" y="64" font-family="${BAKED_TEXT_FONT_FAMILY}" font-size="52" fill="#000">${text}</text>` +
+        `<text x="6" y="64" font-family="${escapeXml(family)}" font-size="52" fill="#000">${text}</text>` +
         `</svg>`,
       );
       try {
         const [narrow, wide] = await Promise.all([
-          sharp(probe('IIIIII')).png().toBuffer(),
-          sharp(probe('WWWWWW')).png().toBuffer(),
+          sharp(svg('IIIIII')).png().toBuffer(),
+          sharp(svg('WWWWWW')).png().toBuffer(),
         ]);
         return !narrow.equals(wide);
       } catch {
         return false;
       }
     })();
+    familyProbes.set(family, probe);
   }
-  return textRenderingHealthy;
+  return probe;
 }
 
-/** Solo para tests: fuerza a repetir la comprobación. */
+/** ¿Se puede escribir con la fuente por defecto? */
+export function canRenderBakedText(): Promise<boolean> {
+  return canRenderFamily(FALLBACK_FONT_FAMILY);
+}
+
+/**
+ * Familias realmente utilizables para esta marca.
+ *
+ * `resolveBakedFonts` ya descarga lo que falta, pero fontconfig inicializa su
+ * índice una vez por proceso: una fuente descargada *después* de ese momento
+ * puede no llegar a verse en esa invocación. Por eso se comprueba cada familia
+ * antes de usarla y se cae a la por defecto en vez de arriesgar cuadraditos.
+ */
+async function usableFonts(brand?: BrandFonts): Promise<BakedFonts> {
+  const wanted = await resolveBakedFonts(brand);
+  const [titleOk, bodyOk] = await Promise.all([
+    canRenderFamily(wanted.title),
+    canRenderFamily(wanted.body),
+  ]);
+  if (!titleOk) console.warn(`[image-processor] "${wanted.title}" no resuelve; se usa ${FALLBACK_FONT_FAMILY}`);
+  return {
+    title: titleOk ? wanted.title : FALLBACK_FONT_FAMILY,
+    body:  bodyOk  ? wanted.body  : FALLBACK_FONT_FAMILY,
+  };
+}
+
+/** Solo para tests: fuerza a repetir las comprobaciones. */
 export function resetTextRenderingProbeForTests(): void {
-  textRenderingHealthy = null;
+  familyProbes.clear();
 }
 
 /**
@@ -316,10 +356,11 @@ export async function compositeStoryText(
   imageBuffer: Buffer,
   caption: string,
   platform: ContentChannel = 'generic',
+  brandFonts?: BrandFonts,
 ): Promise<Buffer> {
   let text = caption.trim();
   if (text.length > STORY_CAPTION_MAX_CHARS) {
     text = text.slice(0, STORY_CAPTION_MAX_CHARS - 1).trimEnd() + '…';
   }
-  return bakeTextIfSupported(imageBuffer, { body: text, platform, format: 'story' });
+  return bakeTextIfSupported(imageBuffer, { body: text, platform, format: 'story', brandFonts });
 }

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { networkFrame, safeAreaCss } from '@/lib/preview-layout';
+import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
 import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ContentType, ReelScene } from '@/types/content';
 
@@ -29,7 +30,7 @@ const GRADIENTS = [
  *  la misma que usa el servidor al componerlo de verdad en la publicación, así
  *  que lo que se ve acá es donde va a quedar. */
 export function SlideCanvas({
-  slide, index, total, showCounter = true, platform = 'instagram', format = 'carousel',
+  slide, index, total, showCounter = true, platform = 'instagram', format = 'carousel', brandFont,
 }: {
   slide:        CarouselSlide | ReelScene;
   index:        number;
@@ -37,9 +38,15 @@ export function SlideCanvas({
   showCounter?: boolean;
   platform?:    ContentChannel;
   format?:      ContentType;
+  /** Tipografía del Brand Kit (`font_heading`), la misma con la que el
+   *  servidor escribirá este texto dentro de la imagen al publicar. */
+  brandFont?:   string | null;
 }) {
   const frame = networkFrame(platform, format);
   const safe  = safeAreaCss(platform, format);
+  const font  = brandFontStack(brandFont);
+
+  useEffect(() => { ensureGoogleFontLoaded(brandFont); }, [brandFont]);
 
   return (
     <div
@@ -75,14 +82,14 @@ export function SlideCanvas({
           >
             <p style={{
               margin: '0 0 5px', fontSize: 17, fontWeight: 800,
-              color: '#fff', lineHeight: 1.25,
+              color: '#fff', lineHeight: 1.25, fontFamily: font,
               textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 18px rgba(0,0,0,0.6)',
             }}>
               {slide.title}
             </p>
             {slide.body && (
               <p style={{
-                margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.92)',
+                margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.92)', fontFamily: font,
                 lineHeight: 1.45, textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 14px rgba(0,0,0,0.6)',
               }}>
                 {slide.body}
@@ -111,7 +118,7 @@ export function SlideCanvas({
           </span>
           <p
             style={{
-              fontSize: index === 0 ? 26 : 22, fontWeight: 800, color: '#fff',
+              fontSize: index === 0 ? 26 : 22, fontWeight: 800, color: '#fff', fontFamily: font,
               textAlign: 'center', lineHeight: 1.25,
               margin: '0 0 16px', textShadow: '0 2px 10px rgba(0,0,0,0.25)',
             }}
@@ -120,7 +127,7 @@ export function SlideCanvas({
           </p>
           <p
             style={{
-              fontSize: 15, color: 'rgba(255,255,255,0.85)',
+              fontSize: 15, color: 'rgba(255,255,255,0.85)', fontFamily: font,
               textAlign: 'center', lineHeight: 1.55, margin: 0, maxWidth: 260,
             }}
           >

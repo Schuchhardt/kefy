@@ -643,6 +643,7 @@ function FormatPreview({
         logoUrl={brandKit?.logo_url ?? undefined}
         imagePending={isPrimary && !imageUrl && item.image_status === 'generating'}
         accentColor={brandKit?.accent_color ?? undefined}
+        brandFont={brandKit?.font_heading}
       />
     );
   }

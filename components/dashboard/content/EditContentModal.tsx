@@ -467,6 +467,7 @@ export default function EditContentModal({
               logoUrl={brandKit?.logo_url ?? undefined}
               imagePending={item.image_status === 'generating'}
               accentColor={brandKit?.accent_color ?? undefined}
+              brandFont={brandKit?.font_heading}
             />
           </div>
         </div>

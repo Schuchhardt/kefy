@@ -6,12 +6,13 @@
 // carousels/reels the active slide/scene is driven from the parent so that
 // clicking a slide in the editor updates this preview.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from './PostPreview';
 import { SlideCanvas } from './CarouselPreview';
 import { ImageGeneratingSpinner } from './ImageGeneratingSpinner';
 import { safeAreaFor } from '@/lib/preview-layout';
+import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
 import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ReelScene, ContentType } from '@/types/content';
 
@@ -50,13 +51,17 @@ interface NetworkPreviewProps {
   /** Redes a mostrar. Por defecto, las relevantes para el formato; el modal de
    *  publicación pasa sólo las de las cuentas elegidas. */
   networks?:      string[];
+  /** Tipografía del Brand Kit: la preview escribe con la misma fuente que el
+   *  servidor usará al componer el texto dentro de la imagen. */
+  brandFont?:     string | null;
 }
 
 export function NetworkPreview({
   contentType, defaultChannel, body, imageUrl, videoUrl, hashtags,
   slides, activeSlide, onActiveSlideChange, username, logoUrl,
-  imagePending, accentColor, networks: networksProp,
+  imagePending, accentColor, networks: networksProp, brandFont,
 }: NetworkPreviewProps) {
+  useEffect(() => { ensureGoogleFontLoaded(brandFont); }, [brandFont]);
   const relevant = NETWORKS[contentType];
   const narrowed = (networksProp ?? []).filter((n) => relevant.includes(n));
   const networks = narrowed.length > 0 ? narrowed : relevant;
@@ -131,7 +136,7 @@ export function NetworkPreview({
           // pantalla completa con su propia interfaz encima del contenido.
           <>
             <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''}>
-              <SlideCanvas slide={slide} index={idx} total={total} platform="tiktok" format="carousel" />
+              <SlideCanvas slide={slide} index={idx} total={total} platform="tiktok" format="carousel" brandFont={brandFont} />
             </TikTokFrame>
             {total > 1 && <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />}
           </>
@@ -142,7 +147,7 @@ export function NetworkPreview({
             hashtags={hashtags}
             username={username}
             logoUrl={logoUrl ?? undefined}
-            media={<SlideCanvas slide={slide} index={idx} total={total} platform={channel as ContentChannel} format="carousel" />}
+            media={<SlideCanvas slide={slide} index={idx} total={total} platform={channel as ContentChannel} format="carousel" brandFont={brandFont} />}
             mediaFooter={
               total > 1 ? (
                 <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />
@@ -155,7 +160,7 @@ export function NetworkPreview({
       {contentType === 'reel' && (() => {
         const media = videoUrl
           ? <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <ReelSceneCanvas scene={slide as ReelScene | undefined} channel={channel as ContentChannel} />;
+          : <ReelSceneCanvas scene={slide as ReelScene | undefined} channel={channel as ContentChannel} brandFont={brandFont} />;
         return channel === 'tiktok' ? (
           <TikTokFrame username={username} logoUrl={logoUrl} caption={body || slide?.title || ''}>{media}</TikTokFrame>
         ) : (
@@ -365,8 +370,9 @@ function VerticalNetworkFrame({
 }
 
 /** A single reel scene rendered full-bleed with its overlaid title/body. */
-function ReelSceneCanvas({ scene, channel = 'instagram' }: { scene?: ReelScene; channel?: ContentChannel }) {
+function ReelSceneCanvas({ scene, channel = 'instagram', brandFont }: { scene?: ReelScene; channel?: ContentChannel; brandFont?: string | null }) {
   const safe = safeAreaFor(channel, 'reel');
+  const font = brandFontStack(brandFont);
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       {scene?.image_url ? (
@@ -385,10 +391,10 @@ function ReelSceneCanvas({ scene, channel = 'instagram' }: { scene?: ReelScene; 
         display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'center',
       }}>
         {scene?.title && (
-          <p style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#fff', textShadow: '0 2px 10px rgba(0,0,0,0.7)' }}>{scene.title}</p>
+          <p style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#fff', fontFamily: font, textShadow: '0 2px 10px rgba(0,0,0,0.7)' }}>{scene.title}</p>
         )}
         {scene?.body && (
-          <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.88)', textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>{scene.body}</p>
+          <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.88)', fontFamily: font, textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>{scene.body}</p>
         )}
       </div>
     </div>

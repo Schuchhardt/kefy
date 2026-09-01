@@ -15,6 +15,7 @@
 
 import { resizeForFormat, bakeTextIfSupported, compositeStoryText } from '@/lib/image-processor';
 import { uploadBase64Image } from '@/lib/storage';
+import type { BrandFonts } from '@/lib/fonts';
 import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ContentType } from '@/types/content';
 
@@ -38,6 +39,8 @@ export interface PreparedImageDeps {
   orgId:  string;
   /** Prefijo del nombre del archivo subido ('publish' | 'schedule'). */
   prefix: string;
+  /** Tipografías del Brand Kit, para escribir con la fuente de la marca. */
+  brandFonts?: BrandFonts;
 }
 
 /**
@@ -59,7 +62,7 @@ export async function prepareSingleImage(
   try {
     let out = await resizeForFormat(buffer, platform, format);
     if (bakeStoryCaption) {
-      out = await compositeStoryText(out, bakeStoryCaption, platform);
+      out = await compositeStoryText(out, bakeStoryCaption, platform, deps.brandFonts);
     }
     return await uploadBase64Image(
       out.toString('base64'),
@@ -95,10 +98,11 @@ export async function prepareCarouselSlides(
       let out = await resizeForFormat(buffer, platform, 'carousel');
       if (needsTextBake(slide)) {
         out = await bakeTextIfSupported(out, {
-          title:    slide.title,
-          body:     slide.body,
+          title:      slide.title,
+          body:       slide.body,
           platform,
-          format:   'carousel',
+          format:     'carousel',
+          brandFonts: deps.brandFonts,
         });
       }
       return await uploadBase64Image(

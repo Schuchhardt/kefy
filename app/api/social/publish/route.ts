@@ -122,6 +122,20 @@ export async function POST(req: NextRequest) {
     ? (publishSource.slides as CarouselSlide[])
     : [];
 
+  // El texto que se escribe dentro de la imagen usa la tipografía elegida por
+  // la marca en su Brand Kit, no una genérica.
+  const { data: brandFontsRow } = await db
+    .from('kefy_brand_kits')
+    .select('font_heading, font_body')
+    .eq('org_id', auth.orgId)
+    .maybeSingle();
+
+  const imageDeps = {
+    orgId:      auth.orgId,
+    prefix:     'publish',
+    brandFonts: { heading: brandFontsRow?.font_heading, body: brandFontsRow?.font_body },
+  };
+
   let sourceImageBuffer: Buffer | null = null;
   if (media.image_url) {
     try {
@@ -154,7 +168,7 @@ export async function POST(req: NextRequest) {
       if (media.image_url) {
         platformImageUrl = await prepareSingleImage(
           media.image_url, sourceImageBuffer, platform, format,
-          { orgId: auth.orgId, prefix: 'publish' },
+          imageDeps,
           format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
             ? media.text
             : undefined,
@@ -164,7 +178,7 @@ export async function POST(req: NextRequest) {
       let platformMediaUrls = media.media_urls;
       if (format === 'carousel' && carouselSlides.length > 0) {
         platformMediaUrls = await prepareCarouselSlides(
-          carouselSlides, platform, { orgId: auth.orgId, prefix: 'publish' },
+          carouselSlides, platform, imageDeps,
         );
       }
 

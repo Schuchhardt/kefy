@@ -75,7 +75,9 @@ Esa última fila es la que evita destrozar los carruseles antiguos. Está en
 
 ---
 
-## 3. Fuentes propias: por qué salían cuadraditos
+## 3. Tipografía: la de la marca, y por qué salían cuadraditos
+
+### El bug
 
 `sharp` compone el texto vía librsvg/pango, que resuelve las familias
 tipográficas con **fontconfig**. En el runtime de Vercel no hay ninguna fuente
@@ -83,22 +85,51 @@ instalada: pedir `Arial, Helvetica, sans-serif` no resolvía a nada y cada
 carácter se dibujaba con el glifo `.notdef` — un rectángulo vacío. Sin errores,
 sin logs, sin nada.
 
-La app trae sus propias fuentes en `assets/fonts/` (Liberation Sans, SIL OFL
-1.1). [`lib/fonts.ts`](../lib/fonts.ts) escribe un `fonts.conf` en `/tmp` y deja
+### Qué fuente se usa
+
+**La que la marca eligió en su Brand Kit**: `font_heading` para los titulares y
+`font_body` para el cuerpo. Son Google Fonts del catálogo de
+[`lib/google-fonts.ts`](../lib/google-fonts.ts) — el mismo que alimenta el
+selector, para que servidor y cliente no puedan divergir.
+
+| Situación | Qué pasa |
+|-----------|----------|
+| La marca eligió una del catálogo | Se descarga el TTF de Google Fonts y se escribe con ella |
+| No eligió ninguna | **Inter**, que viaja en `assets/fonts/` (no toca la red) |
+| Eligió una fuera del catálogo | Inter. `font_heading` también lo rellena `/api/brand-kit/enrich-url` leyendo la web de la marca, y puede traer una fuente de pago, una local o basura |
+| Sin red / Google caído | Inter |
+| Sin `font_body` | Se repite la de titulares: mezclarla con otra cualquiera se ve peor que repetirla |
+
+> **Se pide TTF, no woff2.** La API de Google devuelve woff2 a los navegadores
+> modernos y **fontconfig no sabe leer woff2**. Con un `User-Agent` antiguo la
+> misma URL responde con TTF y sin partir la fuente por rangos unicode.
+
+Las descargas se cachean en `/tmp` por lambda. La vista previa carga esa misma
+familia en el navegador (`ensureGoogleFontLoaded`) y la aplica con
+`brandFontStack()`, así que lo que se ve en pantalla es lo que se publica.
+
+[`lib/fonts.ts`](../lib/fonts.ts) escribe un `fonts.conf` en `/tmp` —con el
+directorio del repo y el de descargas por delante de los del sistema— y deja
 `FONTCONFIG_PATH` apuntando ahí antes de que sharp toque texto.
 
 > **Los `.ttf` se leen del filesystem en runtime**, así que tienen que estar en
 > `outputFileTracingIncludes` (`next.config.ts`). El trazado automático de Next
 > sólo sigue los `import`. Lo mismo aplica a `prompts/`.
 
-Además hay una salvaguarda: `bakeTextIfSupported()` comprueba primero
-`canRenderBakedText()` y, si el entorno no sabe dibujar glifos, publica la
-imagen **sin** texto en vez de publicarla con cuadraditos. El texto igual viaja
-en el caption.
+### Salvaguardas
 
-La comprobación se apoya en que, si todo son rectángulos iguales, dos cadenas
-del mismo largo dan píxeles idénticos: una fila de «I» y una de «W» tienen que
-salir distintas.
+`canRenderFamily(familia)` comprueba que fontconfig resuelva de verdad esa
+familia **antes** de escribir con ella, y si no, se cae a Inter. Hace falta
+porque fontconfig construye su índice una vez por proceso: una fuente
+descargada después de ese momento puede no llegar a verse en esa invocación.
+
+Y `bakeTextIfSupported()` publica la imagen **sin** texto si ni siquiera la
+fuente por defecto renderiza. El texto igual viaja en el caption; una foto
+limpia siempre es mejor que una con cuadraditos.
+
+Las dos comprobaciones se apoyan en la misma idea: si todo son rectángulos
+iguales, dos cadenas del mismo largo dan píxeles idénticos. Una fila de «I» y
+una de «W» tienen que salir distintas.
 
 ---
 
@@ -132,7 +163,8 @@ sube tal cual y la app la encaja), así que el preview lo muestra en 9:16 con
 |---------|-----|
 | `lib/content-source.ts` | Contexto de origen de una conversión (puro) |
 | `lib/preview-layout.ts` | Marcos y zonas seguras por red (puro) |
-| `lib/fonts.ts` | Fuentes propias + `FONTCONFIG_PATH` |
+| `lib/google-fonts.ts` | Catálogo de tipografías (compartido cliente/servidor) |
+| `lib/fonts.ts` | Descarga de la fuente de la marca + `FONTCONFIG_PATH` |
 | `lib/image-processor.ts` | `bakeTextOnImage`, `canRenderBakedText`, recortes |
 | `lib/publish-images.ts` | Preparación de imágenes al publicar/programar |
 | `app/api/content/[itemId]/renditions/route.ts` | Genera el formato alternativo |

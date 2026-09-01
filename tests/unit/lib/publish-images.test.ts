@@ -75,8 +75,19 @@ describe('prepareCarouselSlides', () => {
       body:  'La frecuencia sin estrategia no vende',
       platform: 'instagram',
       format: 'carousel',
+      brandFonts: undefined,
     });
     expect(urls).toEqual(['https://cdn.example.com/final.jpeg']);
+  });
+
+  it('escribe los slides con la tipografía elegida por la marca', async () => {
+    await prepareCarouselSlides(
+      [slide({ text_baked: false })], 'instagram',
+      { ...deps, brandFonts: { heading: 'Poppins', body: 'Lato' } },
+    );
+    expect(mockBake).toHaveBeenCalledWith(expect.any(Buffer), expect.objectContaining({
+      brandFonts: { heading: 'Poppins', body: 'Lato' },
+    }));
   });
 
   it('cada red recibe su propia zona segura', async () => {
@@ -146,7 +157,18 @@ describe('prepareSingleImage', () => {
     await prepareSingleImage(
       'https://cdn.example.com/orig.jpeg', Buffer.from('src'), 'tiktok', 'story', deps, 'Mi caption',
     );
-    expect(mockStory).toHaveBeenCalledWith(Buffer.from('resized'), 'Mi caption', 'tiktok');
+    expect(mockStory).toHaveBeenCalledWith(Buffer.from('resized'), 'Mi caption', 'tiktok', undefined);
+  });
+
+  // La identidad de la marca también manda en el texto que se quema.
+  it('propaga las tipografías del Brand Kit al caption de la story', async () => {
+    await prepareSingleImage(
+      'https://cdn.example.com/orig.jpeg', Buffer.from('src'), 'instagram', 'story',
+      { ...deps, brandFonts: { heading: 'Poppins', body: 'Lato' } }, 'Mi caption',
+    );
+    expect(mockStory).toHaveBeenCalledWith(
+      Buffer.from('resized'), 'Mi caption', 'instagram', { heading: 'Poppins', body: 'Lato' },
+    );
   });
 
   it('sin buffer descargado se publica la URL original', async () => {
