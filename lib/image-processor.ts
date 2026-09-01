@@ -1,23 +1,47 @@
 import sharp from 'sharp';
 import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
+import { planImageFit, type ImageFitPlan } from '@/lib/image-fit';
 
-// ─── Platform-specific image dimensions ───────────────────────────────────────
-// Width × Height in pixels for the primary/recommended crop per network.
-
-const PLATFORM_SIZES: Record<ContentChannel, { width: number; height: number }> = {
-  linkedin:  { width: 1200, height: 627  },
-  instagram: { width: 1080, height: 1080 },
-  facebook:  { width: 1200, height: 630  },
-  twitter:   { width: 1200, height: 675  },
-  tiktok:    { width: 1080, height: 1920 },
-  threads:   { width: 1080, height: 1080 },
-  generic:   { width: 1200, height: 630  },
-};
+export { planImageFit, aspectLimitsFor } from '@/lib/image-fit';
+export type { ImageFitPlan } from '@/lib/image-fit';
 
 /**
- * Resize (cover-fit + center-crop) an image buffer to the canonical size
- * for the given platform. Returns a JPEG buffer.
+ * Read the source dimensions as they will be *displayed*, i.e. after EXIF
+ * orientation is applied. Phone photos are often stored landscape with an
+ * orientation tag; ignoring it made us plan the crop against the wrong axis.
+ * Returns zeroes when the buffer can't be parsed.
+ */
+async function readOrientedDims(input: Buffer): Promise<{ width: number; height: number }> {
+  try {
+    const meta = await sharp(input).metadata();
+    const width  = meta.width  ?? 0;
+    const height = meta.height ?? 0;
+    // Orientations 5-8 mean the image is rotated 90°/270° on display.
+    return (meta.orientation ?? 1) >= 5
+      ? { width: height, height: width }
+      : { width, height };
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
+async function applyPlan(input: Buffer, plan: ImageFitPlan, quality: number): Promise<Buffer> {
+  const pipeline = sharp(input).rotate(); // .rotate() with no args = auto-orient from EXIF
+
+  if (plan.mode === 'contain') {
+    pipeline.resize(plan.width, plan.height, { fit: 'inside', withoutEnlargement: true });
+  } else {
+    pipeline.resize(plan.width, plan.height, { fit: 'cover', position: 'centre' });
+  }
+
+  return pipeline.jpeg({ quality, mozjpeg: true }).toBuffer();
+}
+
+/**
+ * Fit an image buffer for the given platform's feed post. Images already within
+ * the platform's accepted aspect range are only downscaled — never cropped.
+ * Returns a JPEG buffer.
  *
  * @param input    - Source image as Buffer (JPEG/PNG/WebP/etc.)
  * @param platform - Target social channel
@@ -28,22 +52,14 @@ export async function resizeForPlatform(
   platform: ContentChannel,
   quality = 88,
 ): Promise<Buffer> {
-  const { width, height } = PLATFORM_SIZES[platform] ?? PLATFORM_SIZES.generic;
-
-  return sharp(input)
-    .resize(width, height, { fit: 'cover', position: 'centre' })
-    .jpeg({ quality, mozjpeg: true })
-    .toBuffer();
+  return resizeForFormat(input, platform, 'post', quality);
 }
 
-// Reels and Stories are always vertical 9:16 regardless of destination
-// network — unlike posts, which follow each platform's canonical crop.
-const VERTICAL_SIZE = { width: 1080, height: 1920 };
-
 /**
- * Resize (cover-fit + center-crop) an image buffer for the given (platform, format)
- * pair. Reel/Story formats always use the vertical 9:16 crop; other formats fall
- * back to the platform's canonical size.
+ * Fit an image buffer for the given (platform, format) pair. Reel/Story formats
+ * always use the vertical 9:16 crop; other formats keep the source aspect ratio
+ * whenever the platform accepts it, and otherwise crop to the nearest accepted
+ * ratio so as little as possible is cut off.
  */
 export async function resizeForFormat(
   input: Buffer,
@@ -51,14 +67,9 @@ export async function resizeForFormat(
   format: ContentType,
   quality = 88,
 ): Promise<Buffer> {
-  const { width, height } = (format === 'reel' || format === 'story')
-    ? VERTICAL_SIZE
-    : (PLATFORM_SIZES[platform] ?? PLATFORM_SIZES.generic);
-
-  return sharp(input)
-    .resize(width, height, { fit: 'cover', position: 'centre' })
-    .jpeg({ quality, mozjpeg: true })
-    .toBuffer();
+  const { width, height } = await readOrientedDims(input);
+  const plan = planImageFit(width, height, platform, format);
+  return applyPlan(input, plan, quality);
 }
 
 /**

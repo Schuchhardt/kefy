@@ -352,6 +352,36 @@ describe('POST /api/social/schedule — reel', () => {
     expect(payload.image_url).toBe('https://cdn.example.com/composited.jpeg');
   });
 
+  it('post con imagen: ahora la ajusta por red antes de programar (antes iba sin tocar)', async () => {
+    const { POST } = await import('@/app/api/social/schedule/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    mockPublishPost.mockResolvedValue({
+      post_id: 'z-post-1', platform_post_id: null, status: 'scheduled',
+      published_at: null, scheduled_at: FUTURE,
+    });
+
+    const fakeImageBuf = new ArrayBuffer(100);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, arrayBuffer: () => Promise.resolve(fakeImageBuf) }));
+    mockResizeForFormat.mockResolvedValue(Buffer.from('fitted'));
+    mockUploadBase64Image.mockResolvedValue('https://cdn.example.com/fitted.jpeg');
+
+    stubDb({
+      kefy_content_items:   reelItem({ content_type: 'post', slides: null, image_url: 'https://cdn.example.com/foto.jpg' }),
+      kefy_social_accounts: [ACCOUNTS[0]],
+      kefy_scheduled_posts: { id: 'sp-1' },
+    });
+
+    const res = await POST(scheduleReq({
+      content_item_id: 'item-1', social_account_ids: ['sa-ig'], scheduled_at: FUTURE,
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockResizeForFormat).toHaveBeenCalledWith(expect.any(Buffer), 'instagram', 'post');
+    expect(mockCompositeStoryText).not.toHaveBeenCalled();
+    const [payload] = mockPublishPost.mock.calls[0];
+    expect(payload.image_url).toBe('https://cdn.example.com/fitted.jpeg');
+  });
+
   it('reel con video: programa el video sin imagen', async () => {
     const { POST } = await import('@/app/api/social/schedule/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);

@@ -50,6 +50,8 @@ export default function SocialConnectionPanel({
       ctaTitle: 'Perfecto, ahora crea tu primer contenido',
       ctaDesc: 'Tu red social ya está conectada y lista para publicar.',
       ctaButton: 'Crear primer contenido',
+      xSensitiveHint: 'Si tus imágenes salen en X detrás de un aviso de contenido sensible, desmarca «Marcar el contenido multimedia que publicas como material que puede ser sensible» en X → Configuración y privacidad → Privacidad y seguridad → Tus publicaciones. Es un ajuste de tu cuenta de X; Kefy no puede cambiarlo al publicar.',
+      xSensitiveLink: 'Abrir ajustes de X',
     },
     en: {
       connectError: 'Failed to connect account',
@@ -66,6 +68,8 @@ export default function SocialConnectionPanel({
       ctaTitle: 'Great, now create your first content',
       ctaDesc: 'Your social account is connected and ready to publish.',
       ctaButton: 'Create first content',
+      xSensitiveHint: 'If your images show up on X behind a sensitive-content warning, untick “Mark media you post as having material that may be sensitive” in X → Settings and privacy → Privacy and safety → Your posts. It’s a setting on your X account; Kefy can’t override it when publishing.',
+      xSensitiveLink: 'Open X settings',
     },
   }[locale];
 
@@ -216,32 +220,49 @@ export default function SocialConnectionPanel({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {accounts.map((acc) => (
                   <div key={acc.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
                     background: 'var(--bg)', border: '1px solid var(--border)',
                     borderRadius: 8, padding: '10px 14px',
                   }}>
-                    <span style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <ChannelIcon name={acc.platform} size={18} />
-                    </span>
-                    <div style={{ flex: 1 }}>
-                      <p style={{ fontWeight: 600, fontSize: 14 }}>{acc.username}</p>
-                      <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
-                        {acc.platform} · {acc.status}
-                        {acc.token_expires_at && (
-                          <> · {t.expires} {new Date(acc.token_expires_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}</>
-                        )}
-                      </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <ChannelIcon name={acc.platform} size={18} />
+                      </span>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontWeight: 600, fontSize: 14 }}>{acc.username}</p>
+                        <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
+                          {acc.platform} · {acc.status}
+                          {acc.token_expires_at && (
+                            <> · {t.expires} {new Date(acc.token_expires_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}</>
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleDisconnect(acc.id)}
+                        style={{
+                          background: 'none', border: '1px solid var(--border)', borderRadius: 8,
+                          padding: '5px 12px', fontSize: 12, cursor: 'pointer', color: '#ff6b6b',
+                        }}
+                      >
+                        {t.disconnect}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleDisconnect(acc.id)}
-                      style={{
-                        background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-                        padding: '5px 12px', fontSize: 12, cursor: 'pointer', color: '#ff6b6b',
-                      }}
-                    >
-                      {t.disconnect}
-                    </button>
+                    {/* Zernio's API has no sensitivity flag — X decides from the
+                        account's own "may be sensitive" setting, so point the
+                        user at it instead of leaving them stuck. */}
+                    {acc.platform === 'twitter' && (
+                      <p style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--muted)', marginTop: 8 }}>
+                        {t.xSensitiveHint}{' '}
+                        <a
+                          href="https://x.com/settings/safety"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: 'var(--accent)' }}
+                        >
+                          {t.xSensitiveLink}
+                        </a>
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
