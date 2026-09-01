@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/generate-build-id.mjs",
     "dev": "next dev -p 3099",
+    "prebuild": "node scripts/generate-build-id.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -11,7 +13,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test:prompts": "promptfoo eval"
+    "test:prompts": "promptfoo eval",
+    "postinstall": "node scripts/generate-build-id.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",

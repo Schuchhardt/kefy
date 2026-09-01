@@ -95,8 +95,9 @@ lib/
   stripe.ts             # Pagos
   i18n.ts               # Configuración de locales
   service-worker.ts     # Fuente del service worker (cache versionada)
-  build-id.ts           # Versión del build, generada automáticamente
-  app-version.ts        # Versión del build inyectada en el bundle
+  app-version.ts        # Versión del build (generada en lib/generated/)
+scripts/
+  generate-build-id.mjs # Genera la versión del build antes de compilar
 remotion/               # Compositor de reels (ReelComposition, Root)
 prompts/                # Prompts de IA (post, carousel, reel, recommend)
 locales/
@@ -118,8 +119,10 @@ docs/
 ## PWA y versionado de cache
 
 La app es instalable como PWA y se actualiza sola. **Cada build genera su propia
-versión automáticamente** (`<commit>-<despliegue>`, p. ej. `228ec7c1-mti0f4xj`):
-no hay que configurar ni tocar nada al desplegar, y dos builds del mismo commit
+versión automáticamente**, sin depender de ninguna variable de entorno:
+`scripts/generate-build-id.mjs` corre antes de compilar (`prebuild`) y escribe
+`<commit>-<timestamp>` —p. ej. `239ddfee-mti15ne6`— en `lib/generated/build-id.ts`.
+No hay que configurar ni tocar nada al desplegar, y dos builds del mismo commit
 —un rollback o un redeploy— también producen versiones distintas.
 
 Esa versión se incrusta en `/sw.js` y nombra las caches (`kefy-static-<version>`,

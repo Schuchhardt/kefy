@@ -8,9 +8,9 @@ haga hard refresh ni de que expire una cache.
 
 | Archivo | Rol |
 |---------|-----|
-| `lib/build-id.ts` | Genera la versión del build |
-| `next.config.ts` | La expone como `NEXT_PUBLIC_APP_VERSION` y `generateBuildId` |
-| `lib/app-version.ts` | Exporta `APP_VERSION` (la versión incrustada en el bundle) |
+| `scripts/generate-build-id.mjs` | Genera la versión del build antes de compilar |
+| `lib/generated/build-id.ts` | Archivo generado con la versión (ignorado por git) |
+| `lib/app-version.ts` | Reexporta `APP_VERSION` para el resto de la app |
 | `lib/service-worker.ts` | Genera el código del service worker con la versión incrustada |
 | `app/sw.js/route.ts` | Sirve `/sw.js` con `Cache-Control: no-cache` y `Service-Worker-Allowed: /` |
 | `app/api/version/route.ts` | Devuelve la versión que corre el servidor (público, sin cache) |
@@ -20,28 +20,40 @@ haga hard refresh ni de que expire una cache.
 
 ## Versión del build
 
-**Se genera sola en cada build. No hay nada que configurar ni actualizar al
-desplegar.** El formato es `<commit>-<despliegue>`, por ejemplo `228ec7c1-mti0f4xj`:
+**Se genera sola en cada build y no depende de ninguna variable de entorno.** El
+formato es `<commit>-<timestamp>`, por ejemplo `239ddfee-mti15ne6`; si el build no
+tiene el repo git a mano (algunos proveedores no lo dejan), queda solo el
+timestamp.
 
-| Parte | De dónde sale |
-|-------|---------------|
-| commit (8 chars) | `VERCEL_GIT_COMMIT_SHA` → `COMMIT_REF` (Netlify) → `GITHUB_SHA` → `git rev-parse HEAD` → `local` |
-| despliegue (10 chars) | `VERCEL_DEPLOYMENT_ID` → `DEPLOY_ID` (Netlify) → `GITHUB_RUN_ID` → timestamp en base 36 |
+El commit sirve para saber qué código está desplegado; el timestamp garantiza que
+**dos builds del mismo commit tengan versiones distintas**. Sin eso, un rollback o
+un redeploy reusaría la versión anterior y el service worker no invalidaría su
+cache.
 
-El commit sirve para saber qué código está desplegado; la parte de despliegue
-garantiza que **dos builds del mismo commit tengan versiones distintas**. Sin
-eso, un rollback, un redeploy o un cambio de variables de entorno reusaría la
-versión anterior y el service worker no invalidaría su cache.
+### Por qué un archivo generado y no `next.config.ts`
 
-### Consistencia entre procesos
+`next.config.ts` **se evalúa más de una vez por build**, en contextos aislados: la
+primera evaluación alimenta cosas como `generateBuildId` y la segunda el inlining
+de `env`. Calcular ahí un timestamp deja distintos chunks del mismo build con
+versiones distintas. `globalThis` no sirve como canal entre evaluaciones (Next
+las corre en contextos aislados) y `process.env` sí funcionaría, pero es
+exactamente la dependencia de variables de entorno que queremos evitar.
 
-Next lanza procesos worker durante el build que vuelven a cargar
-`next.config.ts`. Si cada uno calculara su propio timestamp, distintos chunks
-quedarían con versiones distintas. Por eso `next.config.ts` escribe el valor ya
-resuelto en `process.env.NEXT_PUBLIC_APP_VERSION`: los workers heredan el env del
-proceso padre y `resolveBuildId()` lo devuelve tal cual, así que todo el build
-comparte una única versión. Esa misma variable sirve como override manual si
-alguna vez hace falta fijar la versión a mano.
+Por eso la versión la calcula `scripts/generate-build-id.mjs` **una sola vez,
+antes de compilar**, y la escribe en `lib/generated/build-id.ts`. Al ser un módulo
+normal se compila una vez y toda la app —cliente, servidor y service worker—
+comparte exactamente el mismo valor.
+
+El script corre solo, vía scripts de npm:
+
+| Script | Cuándo |
+|--------|--------|
+| `prebuild` | antes de cada `npm run build` |
+| `predev` | antes de `npm run dev` |
+| `postinstall` | tras `npm install` / `npm ci`, para que lint, typecheck y tests tengan el archivo |
+
+> `vercel.json` usa `buildCommand: npm run build` (no `next build`) justamente
+> para que `prebuild` corra en cada despliegue.
 
 ## Por qué se invalida la cache
 
