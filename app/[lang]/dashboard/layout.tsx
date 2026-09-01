@@ -3,6 +3,7 @@ import { BrandProvider } from '@/lib/brand-context';
 import DashboardSidebar from '@/components/dashboard/Sidebar';
 import BottomNav from '@/components/dashboard/BottomNav';
 import UserAvatar from '@/components/dashboard/UserAvatar';
+import MobileBrandSwitcher from '@/components/dashboard/MobileBrandSwitcher';
 import { ReactNode } from 'react';
 
 export default async function DashboardLayout({
@@ -23,6 +24,7 @@ export default async function DashboardLayout({
             {children}
           </main>
         </div>
+        <MobileBrandSwitcher lang={lang} />
         <UserAvatar lang={lang} />
         <BottomNav lang={lang} />
       </BrandProvider>

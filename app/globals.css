@@ -96,12 +96,19 @@ img { display: block; max-width: 100%; }
 /* ─── Dashboard responsive ─────────────────────────────────────── */
 .bottom-nav { display: none; }
 .user-avatar-settings-mobile { display: none; }
+/* El selector de marca vive en el sidebar; en móvil el sidebar se oculta y
+   este toma su lugar, anclado arriba a la izquierda. */
+.brand-switcher-mobile { display: none; }
 
 @media (max-width: 767px) {
   .dashboard-sidebar { display: none !important; }
   .bottom-nav { display: flex; }
-  .dashboard-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  /* El selector de marca y el avatar de usuario son elementos fijos en la
+     franja superior; sin este hueco el contenido de la página les queda
+     debajo y el primer encabezado sale tapado. */
+  .dashboard-main { padding-top: 56px; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   .user-avatar-settings-mobile { display: flex; }
+  .brand-switcher-mobile { display: block; }
 }
 
 .dashboard-main button { font-family: var(--font-syne), sans-serif !important; }

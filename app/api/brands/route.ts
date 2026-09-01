@@ -25,13 +25,31 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch brands' }, { status: 500 });
   }
 
+  const rows = brands ?? [];
+
+  // Logo del Brand Kit de cada marca, para que el selector pueda usarlo cuando
+  // la marca no tiene una imagen propia. Cada marca ya subió su logo al definir
+  // su identidad: pedir la misma imagen otra vez solo para el selector sería
+  // trabajo repetido para el usuario.
+  const kitLogos = new Map<string, string>();
+  if (rows.length > 0) {
+    const { data: kits } = await db
+      .from('kefy_brand_kits')
+      .select('brand_id, logo_url')
+      .in('brand_id', rows.map((b) => b.id));
+
+    for (const kit of (kits ?? []) as Array<{ brand_id: string | null; logo_url: string | null }>) {
+      if (kit.brand_id && kit.logo_url) kitLogos.set(kit.brand_id, kit.logo_url);
+    }
+  }
+
   const limit = BRAND_LIMITS[auth.plan] ?? 1;
 
   return NextResponse.json({
-    brands: brands ?? [],
-    count: (brands ?? []).length,
+    brands: rows.map((b) => ({ ...b, kit_logo_url: kitLogos.get(b.id) ?? null })),
+    count: rows.length,
     limit,
-    canCreate: (brands ?? []).length < limit,
+    canCreate: rows.length < limit,
   });
 }
 

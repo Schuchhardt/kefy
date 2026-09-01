@@ -1,5 +1,7 @@
 'use client';
 
+import BrandImageField from '@/components/dashboard/BrandImageField';
+
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import type { BrandKit, BrandTone } from '@/types/brand-kit';
@@ -368,6 +370,16 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
           <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.subtitle}</p>
         </div>
 
+
+      {/* La imagen de la marca identifica a la marca dentro de la app (el
+          selector), no en el contenido generado — eso lo hace el logo del
+          Brand Kit, más abajo. Va fuera del <form> porque se guarda sola al
+          subirla, sin esperar a que se envíe el formulario. */}
+      <div style={{ marginBottom: 28 }}>
+        <SectionCard title={locale === 'es' ? 'Imagen de la marca' : 'Brand image'}>
+          <BrandImageField locale={locale} />
+        </SectionCard>
+      </div>
 
       <form onSubmit={handleSave}>
           <div style={{ marginBottom: 12 }}>

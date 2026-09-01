@@ -24,16 +24,17 @@ test.describe('Dashboard principal', () => {
     }
   });
 
-  // El BrandSwitcher vive dentro del sidebar, y en móvil el sidebar está oculto
-  // por CSS (`.dashboard-sidebar { display: none !important }`): allí la
-  // navegación es el BottomNav, que no incluye el selector de marca. La
-  // comprobación solo tiene sentido en escritorio.
-  test('el BrandSwitcher está presente', async ({ authenticatedPage: page, isMobile }) => {
-    test.skip(!!isMobile, 'El sidebar, y con él el BrandSwitcher, no se muestra en móvil');
-
+  // Cubierto en las dos vistas: en escritorio lo trae el sidebar y en móvil la
+  // barra superior (ver brand-switcher.spec.ts).
+  test('el BrandSwitcher está presente', async ({ authenticatedPage: page }) => {
     await page.goto('/es/dashboard');
-    // El brand switcher debe mostrar el nombre de la marca mock
-    await expect(page.getByText(/Test Brand|brand/i).first()).toBeVisible({ timeout: 10000 });
+
+    // Se busca una instancia *visible*: el nombre de la marca está en el
+    // sidebar y en la barra móvil, y en cada vista una de las dos está oculta
+    // por CSS. Sin el filtro, `.first()` cae en la del sidebar y falla en móvil.
+    await expect(
+      page.locator(':visible').filter({ hasText: /^Test Brand$/ }).first(),
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('navega a /es/dashboard/content al hacer clic en Contenido', async ({ authenticatedPage: page }) => {

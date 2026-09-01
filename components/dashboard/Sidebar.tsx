@@ -281,7 +281,7 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
 
       {/* ── Brand switcher ── */}
       <div style={{ borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <BrandSwitcher collapsed={collapsed} />
+        <BrandSwitcher collapsed={collapsed} lang={lang === 'en' ? 'en' : 'es'} />
       </div>
 
       {/* ── Main nav ── */}

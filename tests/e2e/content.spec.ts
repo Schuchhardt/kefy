@@ -12,11 +12,16 @@ test.describe('Gestión de contenido', () => {
 
     test('muestra el formulario de generación de contenido', async ({ authenticatedPage: page }) => {
       await page.goto('/es/dashboard/content/create');
-      // Debe haber al menos un selector de canal o tipo
-      const selects = page.getByRole('combobox');
-      const inputs = page.getByRole('textbox');
-      const total = (await selects.count()) + (await inputs.count());
-      expect(total).toBeGreaterThan(0);
+
+      // Antes contaba los controles justo después de `goto`, sin esperar a que
+      // React hidratara: bajo carga el conteo salía 0 y el test fallaba de
+      // forma intermitente. Se espera a un control estable, que además es el
+      // que abre el panel de generación.
+      await expect(page.getByRole('button', { name: /Generar con IA/i }))
+        .toBeVisible({ timeout: 15000 });
+
+      await page.getByRole('button', { name: /Generar con IA/i }).click();
+      await expect(page.locator('#gen-topic-textarea')).toBeVisible();
     });
 
     test('muestra la respuesta de generación de IA', async ({ authenticatedPage: page }) => {
