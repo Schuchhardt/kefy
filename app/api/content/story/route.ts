@@ -3,6 +3,9 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
 import { generateContentText, generateContentImage, generateReelScript } from '@/lib/ai';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { consumeCredits, refundCredits } from '@/lib/usage';
+import { reportError } from '@/lib/observability';
 import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
@@ -67,6 +70,11 @@ export async function POST(req: NextRequest) {
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'text', route: 'POST /api/content/story', language,
+  });
+  if (guard.blocked) return guard.blocked;
+
   // 1. Short caption — same copywriter used for posts.
   let text;
   try {
@@ -80,14 +88,19 @@ export async function POST(req: NextRequest) {
       extraCtx:  brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
     });
   } catch (err) {
+    await guard.refund();
+    reportError(err, { route: 'POST /api/content/story', auth, service: 'ai' });
     const msg = err instanceof Error ? err.message : 'Story text generation failed';
-    console.error('story generate error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
   // 2. One vertical (9:16) image for the story.
+  // La imagen ya es opcional en este flujo (si falla, la story se guarda solo
+  // con texto), así que quedarse sin cuota de imagen se trata igual.
+  const imageCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
   let imageUrl: string | null = null;
   try {
+    if (!imageCredits?.allowed) throw new Error('Cuota de imágenes agotada');
     const imgResult = await generateContentImage({
       prompt: `Vertical story visual for: ${topic}. Eye-catching, mobile-first composition, no captions baked in.`,
       size:    '1024x1536',
@@ -102,7 +115,12 @@ export async function POST(req: NextRequest) {
     });
     imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `story-${Date.now()}.jpeg`);
   } catch (imgErr) {
-    console.warn('Story image generation failed:', imgErr);
+    // Solo hay que devolver la cuota si llegó a consumirse: cuando ya estaba
+    // agotada, el `throw` de arriba entra aquí sin haber cobrado nada.
+    if (imageCredits?.allowed) {
+      await refundCredits(auth.orgId, 'image');
+      reportError(imgErr, { route: 'POST /api/content/story', auth, service: 'ai', extra: { fase: 'imagen' } });
+    }
   }
 
   if (input.save === false) {
@@ -197,6 +215,11 @@ export async function PATCH(req: NextRequest) {
   const topic = (item.title || item.body || '').slice(0, 500);
   if (!topic) return NextResponse.json({ error: 'Story has no text to base the video on' }, { status: 422 });
 
+  const videoGuard = await guardAiRequest(req, {
+    auth, operation: 'text', route: 'PATCH /api/content/story',
+  });
+  if (videoGuard.blocked) return videoGuard.blocked;
+
   let generated;
   try {
     generated = await generateReelScript({
@@ -210,13 +233,17 @@ export async function PATCH(req: NextRequest) {
       extraCtx:    brandKit?.industry ? `Industry: ${brandKit.industry}. Keep it short — this is a Story, not a full Reel.` : 'Keep it short — this is a Story, not a full Reel.',
     });
   } catch (err) {
+    await videoGuard.refund();
+    reportError(err, { route: 'PATCH /api/content/story', auth, service: 'ai', extra: { itemId } });
     const msg = err instanceof Error ? err.message : 'Story video script generation failed';
-    console.error('story video script error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
   const scenes = await Promise.all(
     generated.scenes.map(async (scene) => {
+      const sceneCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
+      if (!sceneCredits?.allowed) return { ...scene, image_url: undefined };
+
       try {
         const bgPrompt = `Background scene for a vertical story: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks. Pure cinematic background scene only.`;
         const imgResult = await generateContentImage({
@@ -238,7 +265,11 @@ export async function PATCH(req: NextRequest) {
         );
         return { ...scene, image_url: imageUrl };
       } catch (imgErr) {
-        console.warn(`Story scene ${scene.scene_order} image failed:`, imgErr);
+        await refundCredits(auth.orgId, 'image');
+        reportError(imgErr, {
+          route: 'PATCH /api/content/story', auth, service: 'ai',
+          extra: { escena: scene.scene_order, fase: 'imagen' },
+        });
         return { ...scene, image_url: undefined };
       }
     }),

@@ -31,7 +31,7 @@ export async function generateStaticParams() {
   return locales.map((lang) => ({ lang }));
 }
 
-const BASE_URL = 'https://kefy.app';
+const BASE_URL = 'https://www.kefy.app';
 
 export async function generateMetadata({
   params,

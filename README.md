@@ -16,7 +16,7 @@
 - **Adaptación automática** — cada borrador se ajusta al formato de cada canal (límites de texto, hashtags, dimensiones de imagen)
 
 ### Gestión de marcas y Brand Kit
-- **Multi-marca** — hasta 3 marcas en Pro, ilimitadas en Business
+- **Multi-marca** — 1 marca en Starter, 5 en Pro, 15 en Business
 - **Brand Kit** — define identidad visual: colores, fuentes, tono de voz, industria y logo
 - **Contexto de IA** — la generación usa automáticamente el nombre, tagline y tono de cada marca
 
@@ -29,10 +29,28 @@
 - Reglas de engagement automático y generación de leads
 - Autopilot con ejecución programada vía cron seguro
 
+### Planes y límites
+La beta es abierta: cualquiera puede registrarse y entra en **Starter con el
+primer mes gratis**. No hay plan gratuito permanente.
+
+| Plan | Precio | Marcas | Créditos IA/mes |
+|---|---|---|---|
+| Starter | US$49/mes — **primer mes gratis** | 1 | 150 |
+| Pro | US$99/mes | 5 | 500 |
+| Business | US$199/mes | 15 | 2000 |
+
+Cada operación descuenta según lo que cuesta: texto 1 crédito, imagen 3, video 10.
+Al terminar el mes gratis sin pagar, la cuenta deja de poder generar y publicar,
+pero conserva el acceso a todo lo que creó.
+
+Detalles en [`docs/beta-abierta.md`](docs/beta-abierta.md).
+
 ### Infraestructura
 - **Autenticación JWT personalizada** — tokens en cookies HttpOnly (`kefy_access` / `kefy_refresh`)
 - **Multi-tenant** — usuarios agrupados por organización (`org_id`) con RLS en Supabase
 - **i18n completa** — rutas `/es/` y `/en/` en todas las páginas de usuario y landing
+- **Rate limiting y créditos** — respaldados en Postgres, no en memoria: en serverless un contador en proceso no limita nada
+- **Reporte de errores** — Sentry en cliente, servidor y edge, con saneamiento de datos sensibles antes de enviar
 
 ## Stack
 
@@ -49,6 +67,7 @@
 | Pagos | Stripe |
 | Emails | Resend + React Email |
 | Despliegue | Vercel (cron jobs nativos) |
+| Observabilidad | Sentry (errores + trazas + session replay) |
 
 ## Estructura del proyecto
 
@@ -74,7 +93,7 @@ app/
     automations/        # Engagement y leads
     autopilot/          # Ejecución de autopilot (cron)
     billing/            # Suscripciones Stripe
-    ads/ comments/ messaging/ reviews/ strategies/ webhooks/ waitlist/
+    ads/ comments/ messaging/ reviews/ strategies/ webhooks/
     version/            # Versión del build (la consulta la PWA)
   manifest.ts           # Web App Manifest (/manifest.webmanifest)
   sw.js/                # Service worker generado por build
@@ -85,6 +104,12 @@ components/
   ui/                   # Componentes reutilizables
 lib/
   ai.ts                 # Generación de contenido (Claude / GPT-4o)
+  ai-guard.ts           # Suscripción + rate limit + créditos, para toda ruta que gaste dinero
+  rate-limit.ts         # Límites por ventana, respaldados en Postgres
+  subscription.ts       # Mes gratis y estado de suscripción (quién puede crear)
+  usage.ts              # Créditos de IA mensuales por plan
+  observability.ts      # reportError / reportWarning con contexto de sesión
+  sentry-scrub.ts       # Saneamiento de eventos antes de enviarlos a Sentry
   zernio.ts             # Cliente Zernio (publicación social)
   auth.ts               # Helpers JWT
   brand-kit.ts          # Lógica de identidad visual

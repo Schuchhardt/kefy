@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { generateContentImage } from '@/lib/ai';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { reportError } from '@/lib/observability';
 import type { BrandImageContext } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 import { compositeTextOnImage } from '@/lib/image-processor';
@@ -106,6 +108,18 @@ export async function POST(req: NextRequest) {
     logoMimeType,
   } : undefined;
 
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'image', route: 'POST /api/content/image',
+  });
+  if (guard.blocked) {
+    // El item queda marcado para que la UI no siga esperando una imagen que no
+    // va a llegar.
+    if (itemId) {
+      await db.from('kefy_content_items').update({ image_status: 'error' }).eq('id', itemId).eq('org_id', auth.orgId);
+    }
+    return guard.blocked;
+  }
+
   let result;
   try {
     result = await generateContentImage({
@@ -116,8 +130,9 @@ export async function POST(req: NextRequest) {
       referenceImages,
     });
   } catch (err) {
+    await guard.refund();
+    reportError(err, { route: 'POST /api/content/image', auth, service: 'ai' });
     const msg = err instanceof Error ? err.message : 'Image generation failed';
-    console.error('image generate error:', msg);
     if (itemId) {
       await db.from('kefy_content_items').update({ image_status: 'error' }).eq('id', itemId).eq('org_id', auth.orgId);
     }

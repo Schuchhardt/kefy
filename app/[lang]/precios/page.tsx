@@ -1,5 +1,5 @@
 import { KEFY_COPY } from '@/lib/content';
-import { WaitlistProvider } from '@/components/ui/WaitlistContext';
+import { SignupProvider } from '@/components/ui/SignupContext';
 import Nav from '@/components/landing/Nav';
 import PricingSection from '@/components/landing/PricingSection';
 import Footer from '@/components/landing/Footer';
@@ -34,7 +34,7 @@ export default async function PricingPage({
   const copy = KEFY_COPY[lang] ?? KEFY_COPY['es'];
 
   return (
-    <WaitlistProvider copy={copy.waitlist}>
+    <SignupProvider lang={lang}>
       <div data-theme="dark">
         <Nav lang={lang} copy={copy.nav} />
         <main style={{ paddingTop: '5rem' }}>
@@ -44,6 +44,6 @@ export default async function PricingPage({
         </main>
         <Footer copy={copy.footer} lang={lang} />
       </div>
-    </WaitlistProvider>
+    </SignupProvider>
   );
 }

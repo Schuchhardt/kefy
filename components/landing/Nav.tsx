@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useScrolled } from '@/hooks/useScrolled';
-import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
+import { useSignup } from '@/components/ui/SignupContext';
 import type { KefyCopy } from '@/types/locales';
 
 interface NavProps {
@@ -16,7 +16,7 @@ export default function Nav({ lang, copy }: NavProps) {
   const scrolled = useScrolled(40);
   const [langOpen, setLangOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const openWaitlist = useWaitlistOpen();
+  const goToRegister = useSignup();
 
   const closeMenu = () => setMenuOpen(false);
 
@@ -71,7 +71,7 @@ export default function Nav({ lang, copy }: NavProps) {
             </div>
           </div>
 
-          <button className="btn btn-primary nav-cta-desktop" onClick={openWaitlist}>{copy.primary}</button>
+          <button className="btn btn-primary nav-cta-desktop" onClick={goToRegister}>{copy.primary}</button>
 
           <button
             className="nav-burger"
@@ -99,7 +99,7 @@ export default function Nav({ lang, copy }: NavProps) {
         <button
           className="btn btn-primary"
           style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }}
-          onClick={() => { openWaitlist(); closeMenu(); }}
+          onClick={() => { goToRegister(); closeMenu(); }}
         >
           {copy.primary}
         </button>

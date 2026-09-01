@@ -3,6 +3,9 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
 import { generateReelScript, generateContentImage } from '@/lib/ai';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { consumeCredits, refundCredits } from '@/lib/usage';
+import { reportError } from '@/lib/observability';
 import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
@@ -80,6 +83,13 @@ export async function POST(req: NextRequest) {
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
+  const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
+
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'text', route: 'POST /api/content/reel', language,
+  });
+  if (guard.blocked) return guard.blocked;
+
   // 1. Generate reel script with Claude
   let generated;
   try {
@@ -87,15 +97,16 @@ export async function POST(req: NextRequest) {
       channel,
       topic:       (input.topic as string).trim().slice(0, 500),
       scene_count: sceneCount,
-      language:    input.language === 'en' ? 'en' : 'es',
+      language,
       tone:        brandKit?.tone ?? [],
       brandName:   brandKit?.name    ?? undefined,
       tagline:     brandKit?.tagline ?? undefined,
       extraCtx:    brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
     });
   } catch (err) {
+    await guard.refund();
+    reportError(err, { route: 'POST /api/content/reel', auth, service: 'ai', extra: { sceneCount } });
     const msg = err instanceof Error ? err.message : 'Reel script generation failed';
-    console.error('reel generate error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
@@ -103,6 +114,12 @@ export async function POST(req: NextRequest) {
   const scenes = await Promise.all(
     generated.scenes.map(async (scene) => {
       if (!genImages) return { ...scene, image_url: undefined };
+
+      // Una imagen de fondo por escena: cada una consume cuota. Agotada la
+      // cuota, la escena se queda sin fondo generado y Remotion usa el gradiente
+      // de la marca — el reel sigue saliendo.
+      const sceneCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
+      if (!sceneCredits?.allowed) return { ...scene, image_url: undefined };
 
       try {
         // For reel backgrounds: do NOT pass logo (it's overlaid by Remotion, not baked in).
@@ -128,7 +145,11 @@ export async function POST(req: NextRequest) {
         );
         return { ...scene, image_url: imageUrl };
       } catch (imgErr) {
-        console.warn(`Reel scene ${scene.scene_order} image failed:`, imgErr);
+        await refundCredits(auth.orgId, 'image');
+        reportError(imgErr, {
+          route: 'POST /api/content/reel', auth, service: 'ai',
+          extra: { escena: scene.scene_order, fase: 'imagen' },
+        });
         return { ...scene, image_url: undefined };
       }
     }),

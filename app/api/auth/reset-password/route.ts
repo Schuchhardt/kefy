@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { createSupabaseServer } from '@/lib/supabase';
+import { checkRateLimit, clientIp, resetPasswordRule, rateLimitResponse } from '@/lib/rate-limit';
+import { reportError } from '@/lib/observability';
 import { hashToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
+  // El token de recuperación se compara contra la base: sin freno, este endpoint
+  // permite sondear tokens a ciegas.
+  const limit = await checkRateLimit(resetPasswordRule(clientIp(req)));
+  if (!limit.allowed) {
+    return rateLimitResponse(limit, 'Demasiados intentos. Intenta de nuevo más tarde.');
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -50,6 +59,10 @@ export async function POST(req: NextRequest) {
     .eq('id', record.user_id);
 
   if (updateError) {
+    reportError(new Error(updateError.message), {
+      route: 'POST /api/auth/reset-password',
+      service: 'supabase',
+    });
     return NextResponse.json({ error: 'Error al actualizar la contraseña' }, { status: 500 });
   }
 

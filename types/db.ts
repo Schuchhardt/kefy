@@ -558,6 +558,11 @@ export interface BlogPostRow {
   published_at: ISODate;
 }
 
+/**
+ * Lista de espera de la beta cerrada. Ya no se escribe: los CTA de la landing
+ * llevan directo al registro. La tabla se conserva porque guarda las
+ * solicitudes reales que se recibieron mientras la beta estuvo cerrada.
+ */
 export interface WaitlistRow {
   id:         string;
   email:      string;

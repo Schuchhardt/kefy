@@ -1,6 +1,6 @@
 'use client';
 
-import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
+import { useSignup } from '@/components/ui/SignupContext';
 import type { KefyCopy } from '@/types/locales';
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
 }
 
 export default function FinalCTA({ copy }: Props) {
-  const openWaitlist = useWaitlistOpen();
+  const goToRegister = useSignup();
 
   return (
     <section
@@ -18,7 +18,7 @@ export default function FinalCTA({ copy }: Props) {
       <span className="label">{copy.tag}</span>
       <h2 className="h2">{copy.h2}</h2>
       <p>{copy.sub}</p>
-      <button className="btn btn-primary btn-lg" onClick={openWaitlist}>{copy.cta}</button>
+      <button className="btn btn-primary btn-lg" onClick={goToRegister}>{copy.cta}</button>
       <div className="final-note">
         <span className="pulse" />
         {copy.note}

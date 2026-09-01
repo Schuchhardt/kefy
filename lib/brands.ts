@@ -6,10 +6,12 @@ import type { Brand } from '@/types/brands';
 
 // ─── Plan limits ──────────────────────────────────────────────────────────────
 
+// Los topes son los que anuncia la página de precios. Antes el código decía
+// otra cosa (pro: 3, business: ilimitado) y vendíamos 5 y 15.
 export const BRAND_LIMITS: Record<string, number> = {
   starter:  1,
-  pro:      3,
-  business: Infinity,
+  pro:      5,
+  business: 15,
 };
 
 // ─── Slug helper ──────────────────────────────────────────────────────────────

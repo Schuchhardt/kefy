@@ -1,10 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { fakeRpc, resetQuotaState, resetSubscriptionState } from '../helpers/quota';
 
 // El cron que termina los renders que se quedaron a medias porque el navegador
 // del usuario se cerró antes de que el poller guardara el video_url.
 
-const mockSupabaseClient = { from: vi.fn() };
+const mockSupabaseClient = { from: vi.fn(), rpc: fakeRpc };
+// `guardAiRequest` y `requireActiveSubscription` consultan la suscripción antes
+// de gastar nada. Se controla desde `subscriptionState` (helpers/quota).
+vi.mock('@/lib/subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/subscription')>();
+  const { fakeEntitlement } = await import('../helpers/quota');
+  return {
+    ...actual,
+    getEntitlement: async () => fakeEntitlement(),
+    requireActiveSubscription: async (_orgId: string, language: 'es' | 'en' = 'es') => {
+      const e = fakeEntitlement();
+      if (e.canCreate) return null;
+      const reason = e.reason ?? 'canceled';
+      const { NextResponse } = await import('next/server');
+      return NextResponse.json(
+        { error: actual.blockMessage(reason, language), subscriptionRequired: true, reason, status: e.status },
+        { status: 402 },
+      );
+    },
+  };
+});
+
 vi.mock('@/lib/supabase', () => ({ createSupabaseServer: () => mockSupabaseClient }));
 
 vi.mock('@/lib/auth', async (importOriginal) => {
@@ -51,6 +73,7 @@ function req(headers: Record<string, string> = {}, method = 'GET') {
 }
 
 beforeEach(() => {
+    resetQuotaState(); resetSubscriptionState();
   vi.clearAllMocks();
   process.env.CRON_SECRET = 'secreto';
   mockReconcile.mockResolvedValue({ status: 'ready', video_url: 'https://s3.example.com/out.mp4' });

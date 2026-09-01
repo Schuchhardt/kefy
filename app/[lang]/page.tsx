@@ -1,5 +1,5 @@
 import { KEFY_COPY } from '@/lib/content';
-import { WaitlistProvider } from '@/components/ui/WaitlistContext';
+import { SignupProvider } from '@/components/ui/SignupContext';
 import Nav from '@/components/landing/Nav';
 import Hero from '@/components/landing/Hero';
 import ProblemSection from '@/components/landing/ProblemSection';
@@ -16,7 +16,7 @@ import Testimonials from '@/components/landing/Testimonials';
 import FinalCTA from '@/components/landing/FinalCTA';
 import Footer from '@/components/landing/Footer';
 
-const BASE_URL = 'https://kefy.app';
+const BASE_URL = 'https://www.kefy.app';
 
 export default async function LandingPage({
   params,
@@ -65,7 +65,7 @@ export default async function LandingPage({
   };
 
   return (
-    <WaitlistProvider copy={copy.waitlist}>
+    <SignupProvider lang={lang}>
       {/* Force dark theme for the landing page regardless of user preference */}
       <div data-theme="dark">
       {/* JSON-LD structured data */}
@@ -108,6 +108,6 @@ export default async function LandingPage({
 
       <Footer copy={copy.footer} lang={lang} />
       </div>
-    </WaitlistProvider>
+    </SignupProvider>
   );
 }

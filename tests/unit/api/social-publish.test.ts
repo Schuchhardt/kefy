@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { fakeRpc, resetQuotaState, resetSubscriptionState } from '../helpers/quota';
 
 // Regresión (producción): al publicar un reel en Facebook/Instagram/TikTok se
 // publicaba la PORTADA como imagen en vez del video, sin ningún error.
@@ -8,7 +9,28 @@ import { NextRequest } from 'next/server';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockSupabaseClient = { from: vi.fn() };
+const mockSupabaseClient = { from: vi.fn(), rpc: fakeRpc };
+
+// `guardAiRequest` y `requireActiveSubscription` consultan la suscripción antes
+// de gastar nada. Se controla desde `subscriptionState` (helpers/quota).
+vi.mock('@/lib/subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/subscription')>();
+  const { fakeEntitlement } = await import('../helpers/quota');
+  return {
+    ...actual,
+    getEntitlement: async () => fakeEntitlement(),
+    requireActiveSubscription: async (_orgId: string, language: 'es' | 'en' = 'es') => {
+      const e = fakeEntitlement();
+      if (e.canCreate) return null;
+      const reason = e.reason ?? 'canceled';
+      const { NextResponse } = await import('next/server');
+      return NextResponse.json(
+        { error: actual.blockMessage(reason, language), subscriptionRequired: true, reason, status: e.status },
+        { status: 402 },
+      );
+    },
+  };
+});
 
 vi.mock('@/lib/supabase', () => ({ createSupabaseServer: () => mockSupabaseClient }));
 
@@ -111,6 +133,7 @@ function scheduleReq(body: unknown) {
 const FUTURE = new Date(Date.now() + 3_600_000).toISOString();
 
 beforeEach(() => {
+    resetQuotaState(); resetSubscriptionState();
   vi.clearAllMocks();
   mockPublishPost.mockResolvedValue({
     post_id: 'z-post-1', platform_post_id: 'pp-1', status: 'published',

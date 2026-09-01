@@ -10,7 +10,6 @@ const PUBLIC_API_PATHS = [
   '/api/auth/forgot-password',
   '/api/auth/reset-password',
   '/api/auth/refresh',
-  '/api/waitlist',
   // Versión del build: la consulta el cliente para detectar despliegues nuevos.
   '/api/version',
   '/api/webhooks/',
@@ -71,7 +70,17 @@ export async function proxy(req: NextRequest) {
 
   // ── i18n locale redirect ────────────────────────────────────────────────────
   // Skip API routes and static assets
-  if (pathname.startsWith('/api/') || pathname.startsWith('/_next') || pathname.includes('.')) {
+  //
+  // `/monitoring` es el túnel de Sentry (`tunnelRoute` en next.config.ts): por
+  // ahí pasan los eventos de error del navegador. Sin esta excepción caería en
+  // el redirect de idioma de abajo y acabaría en `/es/monitoring`, que no
+  // existe: los errores del cliente nunca llegarían a Sentry.
+  if (
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/monitoring') ||
+    pathname.includes('.')
+  ) {
     return NextResponse.next();
   }
 

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getUsage } from '@/lib/usage';
+import { getEntitlement } from '@/lib/subscription';
+import { reportError } from '@/lib/observability';
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -27,11 +30,32 @@ export async function GET(req: NextRequest) {
     .eq('id', auth.orgId)
     .maybeSingle();
 
+  // El plan efectivo sale de la organización y no del JWT: el token puede ser
+  // anterior a un cambio de plan.
+  const effectivePlan = (org?.plan as string | undefined) ?? auth.plan;
+
+  // Créditos y estado de suscripción, para que la UI avise antes de que el
+  // usuario se choque con un 429 o un 402. Ambos son informativos aquí: si no
+  // se pueden leer, el resto de la respuesta sigue sirviendo y la UI
+  // simplemente no muestra el aviso. El bloqueo real lo hace `guardAiRequest`.
+  const [usage, subscription] = await Promise.all([
+    getUsage(auth.orgId, effectivePlan).catch((err) => {
+      reportError(err, { route: 'GET /api/auth/me', auth, extra: { fase: 'créditos' } });
+      return null;
+    }),
+    getEntitlement(auth.orgId).catch((err) => {
+      reportError(err, { route: 'GET /api/auth/me', auth, extra: { fase: 'suscripción' } });
+      return null;
+    }),
+  ]);
+
   return NextResponse.json({
     user,
     org,
     role: auth.role,
     plan: auth.plan,
+    usage,
+    subscription,
   });
 }
 

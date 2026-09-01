@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
+import { useSignup } from '@/components/ui/SignupContext';
 import type { KefyCopy, PlanFeature } from '@/types/locales';
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
 
 export default function PricingSection({ copy }: Props) {
   const [annual, setAnnual] = useState(false);
-  const openWaitlist = useWaitlistOpen();
+  const goToRegister = useSignup();
 
   /* ── Beta closed mode ─────────────────────────────────── */
   if (copy.betaMode) {
@@ -62,7 +62,7 @@ export default function PricingSection({ copy }: Props) {
                 <button
                   className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} btn-lg`}
                   style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={openWaitlist}
+                  onClick={goToRegister}
                 >
                   {plan.cta}
                 </button>
@@ -98,7 +98,7 @@ export default function PricingSection({ copy }: Props) {
 
           {/* ── Single beta CTA ────────────────────────────── */}
           <div className="beta-pricing-cta reveal" style={{ animationDelay: '0.2s' }}>
-            <button className="btn btn-primary btn-lg" onClick={openWaitlist}>
+            <button className="btn btn-primary btn-lg" onClick={goToRegister}>
               {copy.betaCta}
             </button>
             {copy.betaCtaNote && (
@@ -123,7 +123,7 @@ export default function PricingSection({ copy }: Props) {
           <div className="enterprise-cta reveal" style={{ animationDelay: '0.3s' }}>
             <p className="enterprise-title">{copy.enterpriseTitle}</p>
             <p className="enterprise-sub">{copy.enterpriseSub}</p>
-            <button className="btn btn-secondary btn-lg" onClick={openWaitlist}>
+            <button className="btn btn-secondary btn-lg" onClick={goToRegister}>
               {copy.enterpriseCta}
             </button>
           </div>
@@ -152,7 +152,7 @@ export default function PricingSection({ copy }: Props) {
             <p className="trial-sub">{copy.trialSub}</p>
           </div>
           <div className="trial-action">
-            <button className="btn btn-primary btn-lg" onClick={openWaitlist}>
+            <button className="btn btn-primary btn-lg" onClick={goToRegister}>
               {copy.trialCta}
             </button>
             <p className="trial-note">{copy.trialNote}</p>
@@ -208,7 +208,7 @@ export default function PricingSection({ copy }: Props) {
               <button
                 className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} btn-lg`}
                 style={{ width: '100%', justifyContent: 'center' }}
-                onClick={openWaitlist}
+                onClick={goToRegister}
               >
                 {plan.cta}
               </button>
@@ -292,7 +292,7 @@ export default function PricingSection({ copy }: Props) {
         <div className="enterprise-cta reveal" style={{ animationDelay: '0.35s' }}>
           <p className="enterprise-title">{copy.enterpriseTitle}</p>
           <p className="enterprise-sub">{copy.enterpriseSub}</p>
-          <button className="btn btn-secondary btn-lg" onClick={openWaitlist}>
+          <button className="btn btn-secondary btn-lg" onClick={goToRegister}>
             {copy.enterpriseCta}
           </button>
         </div>

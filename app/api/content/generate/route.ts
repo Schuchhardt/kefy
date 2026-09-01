@@ -3,6 +3,8 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
 import { generateContentText } from '@/lib/ai';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { reportError } from '@/lib/observability';
 import type { ContentChannel, AIModel } from '@/types/ai';
 
 export const runtime = 'nodejs';
@@ -70,6 +72,15 @@ export async function POST(req: NextRequest) {
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
+  const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
+
+  // Rate limit + cuota mensual. Va después de validar el cuerpo para que una
+  // petición malformada no gaste cuota del usuario.
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'text', route: 'POST /api/content/generate', language,
+  });
+  if (guard.blocked) return guard.blocked;
+
   // Run generation
   let result;
   try {
@@ -77,15 +88,17 @@ export async function POST(req: NextRequest) {
       channel,
       topic:     (input.topic as string).trim().slice(0, 500),
       model:     (input.model as AIModel | undefined) ?? 'claude',
-      language:  input.language === 'en' ? 'en' : 'es',
+      language,
       tone:      brandKit?.tone ?? [],
       brandName: brandKit?.name  ?? undefined,
       tagline:   brandKit?.tagline ?? undefined,
       extraCtx:  brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
     });
   } catch (err) {
+    // El fallo es nuestro o del proveedor: se devuelve la cuota consumida.
+    await guard.refund();
+    reportError(err, { route: 'POST /api/content/generate', auth, service: 'ai', extra: { channel } });
     const msg = err instanceof Error ? err.message : 'AI generation failed';
-    console.error('generate error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 

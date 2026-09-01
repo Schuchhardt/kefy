@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getAuthFromRequest } from '@/lib/auth';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { reportError } from '@/lib/observability';
 import type { BrandKit } from '@/types/brand-kit';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -103,6 +105,12 @@ export async function POST(req: NextRequest) {
   const language = lang ?? context?.language ?? 'es';
   const prompt = promptFn(context ?? {}, language);
 
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'text', route: 'POST /api/brand-kit/ai-suggest',
+    language: language === 'en' ? 'en' : 'es',
+  });
+  if (guard.blocked) return guard.blocked;
+
   try {
     const message = await anthropic.messages.create({
       model: 'claude-opus-4-5',
@@ -129,7 +137,8 @@ export async function POST(req: NextRequest) {
     const suggestions: string[] = JSON.parse(match[0]);
     return NextResponse.json({ suggestions: suggestions.slice(0, 6) });
   } catch (err) {
-    console.error('ai-suggest error:', err);
+    await guard.refund();
+    reportError(err, { route: 'POST /api/brand-kit/ai-suggest', auth, service: 'anthropic', extra: { field } });
     return NextResponse.json({ error: 'AI suggestion failed' }, { status: 500 });
   }
 }

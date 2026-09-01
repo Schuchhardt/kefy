@@ -3,6 +3,9 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
 import { generateCarouselSlides, generateContentImage } from '@/lib/ai';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { consumeCredits, refundCredits } from '@/lib/usage';
+import { reportError } from '@/lib/observability';
 import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 import { compositeTextOnImage } from '@/lib/image-processor';
@@ -72,6 +75,13 @@ export async function POST(req: NextRequest) {
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
+  const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
+
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'text', route: 'POST /api/content/carousel', language,
+  });
+  if (guard.blocked) return guard.blocked;
+
   // 1. Generate slide copy with Claude
   let generated;
   try {
@@ -79,15 +89,16 @@ export async function POST(req: NextRequest) {
       channel,
       topic:       (input.topic as string).trim().slice(0, 500),
       slide_count: slideCount,
-      language:    input.language === 'en' ? 'en' : 'es',
+      language,
       tone:        brandKit?.tone ?? [],
       brandName:   brandKit?.name    ?? undefined,
       tagline:     brandKit?.tagline ?? undefined,
       extraCtx:    brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
     });
   } catch (err) {
+    await guard.refund();
+    reportError(err, { route: 'POST /api/content/carousel', auth, service: 'ai', extra: { slideCount } });
     const msg = err instanceof Error ? err.message : 'Carousel text generation failed';
-    console.error('carousel generate error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
@@ -95,6 +106,13 @@ export async function POST(req: NextRequest) {
   const slides = await Promise.all(
     generated.slides.map(async (slide) => {
       if (!genImages || !slide.image_prompt) return { ...slide, image_url: null };
+
+      // Cada slide es una imagen generada aparte, así que cada una consume su
+      // unidad de cuota. Si se agota a mitad del carrusel, los slides restantes
+      // salen sin imagen en lugar de fallar: el texto ya está generado y es
+      // preferible entregarlo a perderlo entero.
+      const slideCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
+      if (!slideCredits?.allowed) return { ...slide, image_url: null };
 
       try {
         const imgResult = await generateContentImage({
@@ -118,7 +136,12 @@ export async function POST(req: NextRequest) {
         );
         return { ...slide, image_url: imageUrl };
       } catch (imgErr) {
-        console.warn(`Carousel slide ${slide.slide_order} image failed:`, imgErr);
+        // La imagen se cobró al empezar: si no salió, se devuelve.
+        await refundCredits(auth.orgId, 'image');
+        reportError(imgErr, {
+          route: 'POST /api/content/carousel', auth, service: 'ai',
+          extra: { slide: slide.slide_order, fase: 'imagen' },
+        });
         return { ...slide, image_url: null };
       }
     }),

@@ -21,6 +21,14 @@ export default function RegisterPage() {
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
 
+  // La landing manda el email escrito en el hero como `?email=`. Se lee desde
+  // `window.location` en vez de `useSearchParams` para no obligar a envolver la
+  // página en un <Suspense>, que es lo que exige el App Router al prerenderizar.
+  useEffect(() => {
+    const fromLanding = new URLSearchParams(window.location.search).get('email');
+    if (fromLanding) setEmail(fromLanding);
+  }, []);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
@@ -40,6 +48,10 @@ export default function RegisterPage() {
 
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 429) {
+          setError(data.error ?? 'Demasiados intentos. Espera unos minutos e intenta de nuevo.');
+          return;
+        }
         setError(data.error ?? 'Error al crear la cuenta');
         return;
       }

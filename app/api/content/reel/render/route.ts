@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { reportError } from '@/lib/observability';
 import { renderMediaOnLambda } from '@remotion/lambda/client';
 import { reconcileRenderTarget, type RenderTarget } from '@/lib/reel-render';
 
@@ -201,6 +203,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No scenes found to render' }, { status: 422 });
   }
 
+  // Cuota de video. Va aquí y no antes porque todos los cortocircuitos de
+  // arriba (video ya listo, render en curso, item sin escenas) devuelven sin
+  // disparar Lambda: no gastan nada y no deben descontar cuota.
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'video', route: 'POST /api/content/reel/render',
+  });
+  if (guard.blocked) return guard.blocked;
+
   // ── Fetch brand kit for composition props ───────────────────────────────────
   const { data: brand } = await db
     .from('kefy_brand_kits')
@@ -266,8 +276,14 @@ export async function POST(req: NextRequest) {
     );
 
   } catch (err) {
+    // El render no llegó a arrancar en Lambda, así que no costó nada: se
+    // devuelve la cuota.
+    await guard.refund();
+    reportError(err, {
+      route: 'POST /api/content/reel/render', auth, service: 'remotion-lambda',
+      extra: { itemId, format: effectiveFormat },
+    });
     const msg = err instanceof Error ? err.message : 'Render failed';
-    console.error('[reel/render POST] error:', msg);
 
     await db
       .from(target.table)

@@ -17,6 +17,7 @@ const LOGIN_ERROR_MESSAGES = {
     passwordRequired: 'La contraseña es obligatoria',
     invalidBody: 'Solicitud inválida',
     noOrganization: 'No se encontró una organización para esta cuenta',
+    rateLimited: 'Demasiados intentos. Espera unos minutos antes de volver a intentarlo.',
     generic: 'Error al iniciar sesión',
     network: 'Error de red, intenta de nuevo',
   },
@@ -26,14 +27,19 @@ const LOGIN_ERROR_MESSAGES = {
     passwordRequired: 'Password is required',
     invalidBody: 'Invalid request',
     noOrganization: 'No organization found for this account',
+    rateLimited: 'Too many attempts. Wait a few minutes before trying again.',
     generic: 'Error signing in',
     network: 'Network error, please try again',
   },
 } as const;
 
-function resolveLoginError(error: unknown, lang: string): string {
+function resolveLoginError(error: unknown, lang: string, status?: number): string {
   const locale = lang === 'en' ? 'en' : 'es';
   const messages = LOGIN_ERROR_MESSAGES[locale];
+
+  // El rate limiter responde 429 con un texto fijo en español; se traduce por
+  // código de estado para no depender de esa cadena.
+  if (status === 429) return messages.rateLimited;
 
   if (typeof error !== 'string' || !error.trim()) {
     return messages.generic;
@@ -102,7 +108,7 @@ function LoginForm() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(resolveLoginError(data?.error, lang));
+        setError(resolveLoginError(data?.error, lang, res.status));
         return;
       }
 

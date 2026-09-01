@@ -1,6 +1,6 @@
 'use client';
 
-import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
+import { useSignup } from '@/components/ui/SignupContext';
 import type { KefyCopy } from '@/types/locales';
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
 }
 
 export default function StrategySection({ copy }: Props) {
-  const openWaitlist = useWaitlistOpen();
+  const goToRegister = useSignup();
 
   return (
     <section
@@ -228,7 +228,7 @@ export default function StrategySection({ copy }: Props) {
       {/* ── CTA ── */}
       <div style={{ textAlign: 'center' }}>
         <button
-          onClick={openWaitlist}
+          onClick={goToRegister}
           style={{
             background:   'var(--accent)',
             color:        '#000',

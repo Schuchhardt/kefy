@@ -12,28 +12,6 @@ export interface FooterItem {
   href:  string;
 }
 
-export interface WaitlistInterest {
-  value: string;
-  label: string;
-}
-
-export interface WaitlistCopy {
-  title:               string;
-  subtitle:            string;
-  nameLbl:             string;
-  namePlaceholder:     string;
-  emailLbl:            string;
-  emailPlaceholder:    string;
-  interestLbl:         string;
-  interestPlaceholder: string;
-  interestOptions:     WaitlistInterest[];
-  submit:              string;
-  submitting:          string;
-  successTitle:        string;
-  successSub:          string;
-  errorGeneric:        string;
-  errorDuplicate:      string;
-}
 
 export interface HeroStat   { big: string; lbl: string; }
 export interface DemoOutput { channel: string; meta: string; body: string; }
@@ -76,7 +54,6 @@ export interface EngageStagePill { key: string; label: string; emoji: string; }
 
 export interface KefyCopy {
   nav: { links: NavLink[]; primary: string; };
-  waitlist: WaitlistCopy;
   hero: { tag: string; h1: string[]; h1em: string; sub: string; cta1: string; cta2: string; ctaNote?: string; emailPlaceholder?: string; stats: HeroStat[]; };
   demo: {
     contextLbl: string; contextProduct: string; contextDesc: string;

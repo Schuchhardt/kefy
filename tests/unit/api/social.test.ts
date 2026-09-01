@@ -1,11 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { fakeRpc, resetQuotaState, resetSubscriptionState } from '../helpers/quota';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockSupabaseClient = {
   from: vi.fn(),
+  rpc: fakeRpc,
 };
+
+// `guardAiRequest` y `requireActiveSubscription` consultan la suscripción antes
+// de gastar nada. Se controla desde `subscriptionState` (helpers/quota).
+vi.mock('@/lib/subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/subscription')>();
+  const { fakeEntitlement } = await import('../helpers/quota');
+  return {
+    ...actual,
+    getEntitlement: async () => fakeEntitlement(),
+    requireActiveSubscription: async (_orgId: string, language: 'es' | 'en' = 'es') => {
+      const e = fakeEntitlement();
+      if (e.canCreate) return null;
+      const reason = e.reason ?? 'canceled';
+      const { NextResponse } = await import('next/server');
+      return NextResponse.json(
+        { error: actual.blockMessage(reason, language), subscriptionRequired: true, reason, status: e.status },
+        { status: 402 },
+      );
+    },
+  };
+});
 
 vi.mock('@/lib/supabase', () => ({
   createSupabaseServer: () => mockSupabaseClient,
@@ -48,7 +71,7 @@ function makeReq(method = 'GET', body?: unknown, url = 'http://localhost:3097/ap
 // ─── GET /api/social/accounts ─────────────────────────────────────────────────
 
 describe('GET /api/social/accounts', () => {
-  beforeEach(() => { vi.resetAllMocks(); });
+  beforeEach(() => { vi.resetAllMocks(); resetQuotaState(); resetSubscriptionState(); });
 
   it('devuelve 401 sin auth', async () => {
     const { GET } = await import('@/app/api/social/accounts/route');
@@ -90,7 +113,7 @@ describe('GET /api/social/accounts', () => {
 // ─── POST /api/social/accounts ────────────────────────────────────────────────
 
 describe('POST /api/social/accounts', () => {
-  beforeEach(() => { vi.resetAllMocks(); });
+  beforeEach(() => { vi.resetAllMocks(); resetQuotaState(); resetSubscriptionState(); });
 
   it('devuelve 401 sin auth', async () => {
     const { POST } = await import('@/app/api/social/accounts/route');

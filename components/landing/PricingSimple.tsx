@@ -1,6 +1,6 @@
 'use client';
 
-import { useWaitlistOpen } from '@/components/ui/WaitlistContext';
+import { useSignup } from '@/components/ui/SignupContext';
 import type { KefyCopy } from '@/types/locales';
 
 interface Props {
@@ -9,7 +9,7 @@ interface Props {
 }
 
 export default function PricingSimple({ copy, lang }: Props) {
-  const openWaitlist = useWaitlistOpen();
+  const goToRegister = useSignup();
   const pricingHref = `/${lang}/precios`;
 
   return (
@@ -30,7 +30,7 @@ export default function PricingSimple({ copy, lang }: Props) {
             <p className="trial-sub">{copy.trialSub}</p>
           </div>
           <div className="trial-action">
-            <button className="btn btn-primary btn-lg" onClick={openWaitlist}>
+            <button className="btn btn-primary btn-lg" onClick={goToRegister}>
               {copy.trialCta}
             </button>
             <p className="trial-note">{copy.trialNote}</p>
@@ -47,7 +47,7 @@ export default function PricingSimple({ copy, lang }: Props) {
               <p className="pricing-simple-tagline">{plan.tagline}</p>
               <button
                 className={`btn ${plan.featured ? 'btn-primary' : 'btn-ghost'} btn-sm`}
-                onClick={openWaitlist}
+                onClick={goToRegister}
               >
                 {plan.cta}
               </button>

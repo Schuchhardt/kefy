@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
 import { createSupabaseServer } from '@/lib/supabase';
 import stripe, { getPriceId } from '@/lib/stripe';
+import { appUrl } from '@/lib/app-url';
 import type { BillingPlan } from '@/types/billing';
 import { z } from 'zod';
 
@@ -60,11 +61,10 @@ export async function POST(req: NextRequest) {
     .eq('id', auth.userId)
     .maybeSingle();
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3097';
 
   // Determine success/cancel URLs — lang not stored in JWT, default to 'es'
-  const successUrl = `${appUrl}/es/dashboard/settings?billing=success`;
-  const cancelUrl  = `${appUrl}/es/dashboard/settings?billing=canceled`;
+  const successUrl = `${appUrl()}/es/dashboard/settings?billing=success`;
+  const cancelUrl  = `${appUrl()}/es/dashboard/settings?billing=canceled`;
 
   let customerId = org.stripe_customer_id ?? undefined;
 

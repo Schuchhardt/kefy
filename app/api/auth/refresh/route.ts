@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
+import type { JWTPayload } from '@/types/auth';
 import {
   signAccessToken,
   generateRefreshToken,
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
   }
 
   const org = membership.kefy_organizations as unknown as { plan: string } | null;
-  const plan = (org?.plan ?? 'starter') as 'starter' | 'pro' | 'business';
+  const plan = (org?.plan ?? 'starter') as JWTPayload['plan'];
   const role = membership.role as 'owner' | 'admin' | 'member';
 
   const newAccessToken = await signAccessToken({

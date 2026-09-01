@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { createSupabaseServer } from '@/lib/supabase';
+import type { JWTPayload } from '@/types/auth';
+import { checkRateLimit, clientIp, loginRule, rateLimitResponse } from '@/lib/rate-limit';
 import {
   signAccessToken,
   generateRefreshToken,
@@ -15,6 +17,13 @@ function isValidEmail(email: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // Antes de tocar la base de datos: la fuerza bruta no debe costarnos consultas
+  // ni comparaciones de bcrypt, que son deliberadamente lentas.
+  const limit = await checkRateLimit(loginRule(clientIp(req)));
+  if (!limit.allowed) {
+    return rateLimitResponse(limit, 'Demasiados intentos de inicio de sesión. Espera unos minutos.');
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -66,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   const org = membership.kefy_organizations as unknown as { plan: string } | null;
-  const plan = (org?.plan ?? 'starter') as 'starter' | 'pro' | 'business';
+  const plan = (org?.plan ?? 'starter') as JWTPayload['plan'];
   const role = membership.role as 'owner' | 'admin' | 'member';
 
   const accessToken = await signAccessToken({

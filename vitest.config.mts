@@ -19,6 +19,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
+      // El SDK real de Sentry carga plugins de bundler que no funcionan fuera
+      // del build de Next. Ver tests/unit/mocks/sentry.ts.
+      '@sentry/nextjs': path.resolve(__dirname, 'tests/unit/mocks/sentry.ts'),
     },
   },
 });

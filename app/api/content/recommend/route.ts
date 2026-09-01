@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { checkRateLimit, aiRule, rateLimitResponse } from '@/lib/rate-limit';
+import { reportError } from '@/lib/observability';
 import { generateContentRecommendations } from '@/lib/ai';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -79,6 +81,20 @@ export async function GET(req: NextRequest) {
   const offset   = Math.max(0, Number(searchParams.get('offset') ?? '0') || 0);
   const langRaw  = searchParams.get('lang');
   const lang: 'es' | 'en' = langRaw === 'en' ? 'en' : 'es';
+
+  // Solo rate limit, sin cuota mensual: recomendar es una lectura que dispara
+  // la UI, y descontarla de la cuota de creación castigaría al usuario por
+  // navegar. El límite por minuto basta para frenar el «recomendar otro» en bucle.
+  const limit = await checkRateLimit(aiRule(auth.orgId));
+  if (!limit.allowed) {
+    return rateLimitResponse(
+      limit,
+      lang === 'en'
+        ? 'Too many requests. Wait a moment.'
+        : 'Demasiadas peticiones. Espera un momento.',
+    );
+  }
+
   const hint     = (searchParams.get('hint') ?? '').trim().slice(0, 500);
 
   const db = createSupabaseServer();
@@ -286,8 +302,8 @@ async function runAiRecommendations(opts: AiRunOpts): Promise<NextResponse> {
         : null,
     });
   } catch (err) {
+    reportError(err, { route: 'GET /api/content/recommend', service: 'ai' });
     const msg = err instanceof Error ? err.message : 'AI recommendation failed';
-    console.error('[api/content/recommend] AI error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 }

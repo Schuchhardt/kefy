@@ -1,23 +1,22 @@
 'use client';
 
 import Nav from '@/components/landing/Nav';
-import WaitlistModal from '@/components/ui/WaitlistModal';
-import { useWaitlist } from '@/hooks/useWaitlist';
+import { SignupProvider } from '@/components/ui/SignupContext';
 import type { KefyCopy } from '@/types/locales';
 
 interface BlogNavProps {
   lang: string;
   nav: KefyCopy['nav'];
-  waitlist: KefyCopy['waitlist'];
 }
 
-export default function BlogNav({ lang, nav, waitlist }: BlogNavProps) {
-  const { isOpen, close } = useWaitlist();
-
+/**
+ * La navegación del blog reutiliza la de la landing, y sus CTA piden el
+ * contexto de registro: sin el provider, los botones no harían nada.
+ */
+export default function BlogNav({ lang, nav }: BlogNavProps) {
   return (
-    <>
+    <SignupProvider lang={lang}>
       <Nav lang={lang} copy={nav} />
-      <WaitlistModal isOpen={isOpen} onClose={close} copy={waitlist} />
-    </>
+    </SignupProvider>
   );
 }

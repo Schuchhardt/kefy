@@ -67,7 +67,7 @@ export default async function BlogPostPage({
 
   return (
     <>
-      <BlogNav lang={lang} nav={copy.nav} waitlist={copy.waitlist} />
+      <BlogNav lang={lang} nav={copy.nav} />
       <div className="page-layout">
       <div className="container">
         <Link href={`/${lang}/blog`} className="back-link">

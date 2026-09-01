@@ -90,8 +90,10 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
     ? new Date(subscription.items.data[0].current_period_end * 1000).toISOString()
     : null;
 
-  const effectivePlan: BillingPlan = (status === 'canceled' || status === 'unpaid') ? 'starter' : plan;
-
+  // El plan se guarda siempre tal cual, también al cancelar o impagar: no hay
+  // plan gratuito al que caer. Lo que corta la creación de contenido es el
+  // `status`, no el plan — así el usuario conserva el acceso a lo que ya creó y
+  // basta con reactivar el pago para que todo vuelva (ver lib/subscription.ts).
   const db = createSupabaseServer();
 
   await db
@@ -100,7 +102,7 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
       {
         org_id:                 orgId,
         stripe_subscription_id: subscription.id,
-        plan:                   effectivePlan,
+        plan,
         status,
         current_period_start:   periodStart,
         current_period_end:     periodEnd,
@@ -110,7 +112,7 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
 
   await db
     .from('kefy_organizations')
-    .update({ plan: effectivePlan })
+    .update({ plan })
     .eq('id', orgId);
 }
 

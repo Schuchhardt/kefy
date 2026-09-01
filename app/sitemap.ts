@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 
-const BASE_URL = 'https://kefy.app';
+const BASE_URL = 'https://www.kefy.app';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const langs = ['es', 'en'];

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { reportError } from '@/lib/observability';
 import { generateSlideText } from '@/lib/ai';
 import type { ContentChannel } from '@/types/ai';
 
@@ -53,6 +55,13 @@ export async function POST(req: NextRequest) {
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
+  const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
+
+  const guard = await guardAiRequest(req, {
+    auth, operation: 'text', route: 'POST /api/content/slide-text', language,
+  });
+  if (guard.blocked) return guard.blocked;
+
   try {
     const result = await generateSlideText({
       kind,
@@ -60,15 +69,16 @@ export async function POST(req: NextRequest) {
       title:     typeof input.title === 'string' ? input.title.slice(0, 200) : undefined,
       body:      typeof input.body === 'string' ? input.body.slice(0, 400) : undefined,
       feedback:  typeof input.feedback === 'string' ? input.feedback.slice(0, 300) : undefined,
-      language:  input.language === 'en' ? 'en' : 'es',
+      language,
       tone:      brandKit?.tone ?? [],
       brandName: brandKit?.name    ?? undefined,
       tagline:   brandKit?.tagline ?? undefined,
     });
     return NextResponse.json({ title: result.title, body: result.body });
   } catch (err) {
+    await guard.refund();
+    reportError(err, { route: 'POST /api/content/slide-text', auth, service: 'ai' });
     const msg = err instanceof Error ? err.message : 'Slide text generation failed';
-    console.error('slide-text generate error:', msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 }

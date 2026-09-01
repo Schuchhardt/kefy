@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { createSupabaseServer } from '@/lib/supabase';
+import { checkRateLimit, clientIp, registerRule, rateLimitResponse } from '@/lib/rate-limit';
+import { reportError } from '@/lib/observability';
+import { trialEndsAt, TRIAL_DAYS } from '@/lib/subscription';
 import {
   signAccessToken,
   generateRefreshToken,
@@ -25,6 +28,13 @@ function slugify(text: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  // Beta abierta: sin este freno, un script puede crear cuentas sin fin y cada
+  // una arrastra su cuota de generación con IA.
+  const limit = await checkRateLimit(registerRule(clientIp(req)));
+  if (!limit.allowed) {
+    return rateLimitResponse(limit, 'Demasiadas cuentas creadas desde esta conexión. Intenta más tarde.');
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -70,6 +80,40 @@ export async function POST(req: NextRequest) {
 
   const passwordHash = await bcrypt.hash(password, 12);
 
+  // El alta toca cinco tablas y Supabase no expone transacciones desde el
+  // cliente REST. Si un paso intermedio falla y se deja lo ya creado, queda una
+  // cuenta a medias: el usuario existe, puede autenticarse, pero el login
+  // responde 500 «No organization found» para siempre y ni siquiera puede
+  // volver a registrarse porque su email ya figura como tomado.
+  // Por eso cada fallo deshace lo anterior en orden inverso.
+  const rollback: Array<() => Promise<void>> = [];
+
+  async function undoAll(): Promise<void> {
+    for (const step of [...rollback].reverse()) {
+      try {
+        await step();
+      } catch (err) {
+        // Si la limpieza falla queda un registro huérfano, pero el usuario ya
+        // recibe su error: solo hay que dejar constancia para poder repararlo.
+        reportError(err, {
+          route: 'POST /api/auth/register',
+          extra: { fase: 'rollback', email: sanitizedEmail },
+        });
+      }
+    }
+  }
+
+  async function fail(step: string, error: { message?: string } | null, message: string) {
+    // Los errores de Supabase son objetos planos, no instancias de Error: sin
+    // envolverlos, tanto el log como Sentry reciben «[object Object]».
+    reportError(new Error(error?.message ?? message), {
+      route: 'POST /api/auth/register',
+      extra: { fase: step },
+    });
+    await undoAll();
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   // Create user
   const { data: user, error: userError } = await db
     .from('kefy_users')
@@ -78,9 +122,9 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (userError || !user) {
-    console.error('User creation error:', userError?.message);
-    return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
+    return fail('crear usuario', userError, 'Failed to create account');
   }
+  rollback.push(async () => { await db.from('kefy_users').delete().eq('id', user.id); });
 
   // Create org with unique slug
   const baseSlug = slugify(sanitizedOrgName) || 'org';
@@ -93,9 +137,9 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (orgError || !org) {
-    console.error('Org creation error:', orgError?.message);
-    return NextResponse.json({ error: 'Failed to create organization' }, { status: 500 });
+    return fail('crear organización', orgError, 'Failed to create organization');
   }
+  rollback.push(async () => { await db.from('kefy_organizations').delete().eq('id', org.id); });
 
   // Create initial brand for the new org so brand-scoped flows work immediately
   const { data: brand, error: brandError } = await db
@@ -105,22 +149,45 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (brandError || !brand) {
-    console.error('Brand creation error:', brandError?.message);
-    return NextResponse.json({ error: 'Failed to initialize brand' }, { status: 500 });
+    return fail('crear marca', brandError, 'Failed to initialize brand');
   }
+  rollback.push(async () => { await db.from('kefy_brands').delete().eq('id', brand.id); });
 
-  // Create membership (owner)
-  await db.from('kefy_org_memberships').insert({
+  // Create membership (owner).
+  // Sin membresía el login no encuentra organización, así que su fallo es tan
+  // terminal como el de los pasos anteriores y hay que tratarlo igual.
+  const { error: membershipError } = await db.from('kefy_org_memberships').insert({
     org_id: org.id,
     user_id: user.id,
     role: 'owner',
   });
 
-  // Create starter subscription
-  await db.from('kefy_subscriptions').insert({
+  if (membershipError) {
+    return fail('crear membresía', membershipError, 'Failed to create account');
+  }
+  rollback.push(async () => {
+    await db.from('kefy_org_memberships').delete().eq('org_id', org.id).eq('user_id', user.id);
+  });
+
+  // Suscripción en prueba: Starter gratis el primer mes.
+  // `current_period_end` marca el fin del mes gratis; a partir de ahí la cuenta
+  // deja de poder generar, pero conserva todo lo que creó (ver lib/subscription).
+  //
+  // Su fallo sí es terminal: sin fila de suscripción la cuenta no puede crear
+  // nada desde el primer día, que es peor que no haberla creado.
+  const { error: subscriptionError } = await db.from('kefy_subscriptions').insert({
     org_id: org.id,
     plan: 'starter',
-    status: 'active',
+    status: 'trialing',
+    current_period_start: new Date().toISOString(),
+    current_period_end: trialEndsAt().toISOString(),
+  });
+
+  if (subscriptionError) {
+    return fail('crear suscripción', subscriptionError, 'Failed to create account');
+  }
+  rollback.push(async () => {
+    await db.from('kefy_subscriptions').delete().eq('org_id', org.id);
   });
 
   // Issue tokens
@@ -140,7 +207,11 @@ export async function POST(req: NextRequest) {
   });
 
   const res = NextResponse.json(
-    { user: { id: user.id, email: sanitizedEmail, name: sanitizedName }, orgId: org.id },
+    {
+      user: { id: user.id, email: sanitizedEmail, name: sanitizedName },
+      orgId: org.id,
+      trial: { days: TRIAL_DAYS, endsAt: trialEndsAt().toISOString() },
+    },
     { status: 201 }
   );
   res.cookies.set(ACCESS_COOKIE, accessToken, accessCookieOptions());

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { requireActiveSubscription } from '@/lib/subscription';
+import { checkRateLimit, publishRule, rateLimitResponse } from '@/lib/rate-limit';
 import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
 import { resizeForFormat, compositeStoryText } from '@/lib/image-processor';
 import { uploadBase64Image } from '@/lib/storage';
@@ -65,6 +67,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Publicar es «crear»: se corta con el trial vencido o el pago fallido, igual
+  // que la generación. Leer y exportar lo ya creado sigue funcionando.
+  const blocked = await requireActiveSubscription(auth.orgId);
+  if (blocked) return blocked;
+
+  const limit = await checkRateLimit(publishRule(auth.orgId));
+  if (!limit.allowed) {
+    return rateLimitResponse(limit, 'Demasiadas publicaciones en poco tiempo. Espera un momento.');
+  }
 
   let body: unknown;
   try { body = await req.json(); } catch {

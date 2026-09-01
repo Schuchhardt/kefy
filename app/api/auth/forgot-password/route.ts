@@ -3,20 +3,29 @@ import { Resend } from 'resend';
 import { render } from '@react-email/render';
 import { randomBytes } from 'crypto';
 import { createSupabaseServer } from '@/lib/supabase';
+import { checkRateLimit, clientIp, forgotPasswordRule, rateLimitResponse } from '@/lib/rate-limit';
+import { reportError } from '@/lib/observability';
 import { hashToken } from '@/lib/auth';
+import { appUrl } from '@/lib/app-url';
 import PasswordReset from '@/emails/PasswordReset';
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 const resendApiKey = process.env.RESEND_API_KEY;
 const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'Kefy <no-reply@email.kefy.app>';
-const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3097';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 export async function POST(req: NextRequest) {
+  // Cada solicitud válida dispara un correo. Sin freno, este endpoint es un
+  // ariete para inundar la bandeja de cualquier usuario y quemar la cuota de Resend.
+  const limit = await checkRateLimit(forgotPasswordRule(clientIp(req)));
+  if (!limit.allowed) {
+    return rateLimitResponse(limit, 'Demasiadas solicitudes. Intenta de nuevo más tarde.');
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -64,7 +73,7 @@ export async function POST(req: NextRequest) {
 
     if (!insertError && resendApiKey) {
       try {
-        const resetUrl = `${appUrl}/${emailLang}/reset-password?token=${raw}`;
+        const resetUrl = `${appUrl()}/${emailLang}/reset-password?token=${raw}`;
         const resend = new Resend(resendApiKey);
         const html = await render(
           PasswordReset({ name: user.name, email: user.email, resetUrl, lang: emailLang })
@@ -76,7 +85,10 @@ export async function POST(req: NextRequest) {
 
         await resend.emails.send({ from: fromEmail, to: user.email, subject, html });
       } catch (emailError) {
-        console.error('Password reset email error:', emailError);
+        reportError(emailError, {
+          route: 'POST /api/auth/forgot-password',
+          service: 'resend',
+        });
       }
     }
   }

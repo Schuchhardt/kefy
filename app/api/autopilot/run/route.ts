@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
+import { collectExpiredWindows } from '@/lib/rate-limit';
 import { getAuthFromRequest } from '@/lib/auth';
 import { generateContentText } from '@/lib/ai';
 import { publishPost } from '@/lib/zernio';
@@ -67,6 +68,11 @@ async function runAutopilot(opts: { orgId: string | null; ruleIds: string[] | nu
   const { orgId, ruleIds } = opts;
   const db = createSupabaseServer();
   const now = new Date();
+
+  // Mantenimiento: la tabla de rate limits acumula una fila por ventana y nada
+  // la vacía sola. Este cron ya corre cada 5 minutos, así que es el sitio
+  // natural para la limpieza. No se espera el resultado ni bloquea nada.
+  void collectExpiredWindows();
 
   // Build rules query — skip next_run_at filter for manual runs (explicit rule_ids)
   let rulesQuery = db

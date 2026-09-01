@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
 import { createSupabaseServer } from '@/lib/supabase';
+import { appUrl } from '@/lib/app-url';
 import stripe from '@/lib/stripe';
 
 // ─── POST /api/billing/portal ─────────────────────────────────────────────────
@@ -30,8 +31,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3097';
-  const returnUrl = `${appUrl}/es/dashboard/settings`;
+  const returnUrl = `${appUrl()}/es/dashboard/settings`;
 
   const portalSession = await stripe.billingPortal.sessions.create({
     customer:   org.stripe_customer_id,

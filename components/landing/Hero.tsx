@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useWaitlistOpenWithEmail } from '@/components/ui/WaitlistContext';
+import { useSignupWithEmail } from '@/components/ui/SignupContext';
 import HeroDemo from './HeroDemo';
 import type { KefyCopy } from '@/types/locales';
 
@@ -16,13 +16,13 @@ interface HeroProps {
 }
 
 export default function Hero({ lang: _lang, copy, demoCopy }: HeroProps) {
-  const openWithEmail = useWaitlistOpenWithEmail();
+  const goToRegisterWithEmail = useSignupWithEmail();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [heroEmail, setHeroEmail] = useState('');
 
   function handleHeroSubmit(e: React.FormEvent) {
     e.preventDefault();
-    openWithEmail(heroEmail.trim());
+    goToRegisterWithEmail(heroEmail.trim());
   }
 
   useEffect(() => {

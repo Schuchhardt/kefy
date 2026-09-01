@@ -35,7 +35,17 @@ const T = {
     actionContent: 'Crear contenido', actionContentDesc: 'Genera posts con IA',
     actionConv: 'Conversaciones', actionConvDesc: 'Revisa DMs y comentarios',
     actionAuto: 'Automatizaciones', actionAutoDesc: 'Configura reglas de engagement',
-    freePlan: 'Estás en el plan gratuito', freePlanDesc: 'Actualiza para desbloquear más funciones',
+    trialActive: 'Te quedan {n} días de prueba',
+    trialActiveDesc: 'Estás usando Starter gratis. Elige un plan antes de que termine para no interrumpir tu contenido.',
+    trialLastDay: 'Tu prueba termina hoy',
+    trialEnded: 'Tu mes gratis terminó',
+    trialEndedDesc: 'Todo lo que creaste sigue aquí. Elige un plan para volver a generar y publicar.',
+    paymentFailed: 'No pudimos procesar tu pago',
+    paymentFailedDesc: 'Actualiza tu método de pago para seguir creando contenido.',
+    creditsLow: 'Te quedan {n} de {total} créditos IA',
+    creditsLowDesc: 'Cuando se acaben, la generación se pausa hasta tu próximo ciclo.',
+    creditsOut: 'Usaste tus {total} créditos IA del mes',
+    creditsOutDesc: 'Mejora tu plan para seguir generando contenido este mes.',
     viewPlans: 'Ver planes',
     noAccounts: 'Conecta redes sociales', noAccountsDesc: 'Ve a Ajustes para conectar tus cuentas y ver métricas.',
     goSettings: 'Ir a Ajustes',
@@ -58,7 +68,17 @@ const T = {
     actionContent: 'Create content', actionContentDesc: 'Generate posts with AI',
     actionConv: 'Conversations', actionConvDesc: 'Check DMs and comments',
     actionAuto: 'Automations', actionAutoDesc: 'Set up engagement rules',
-    freePlan: "You're on the free plan", freePlanDesc: 'Upgrade to unlock more features',
+    trialActive: '{n} days left in your trial',
+    trialActiveDesc: "You're on Starter for free. Pick a plan before it ends so your content doesn't stop.",
+    trialLastDay: 'Your trial ends today',
+    trialEnded: 'Your free month has ended',
+    trialEndedDesc: 'Everything you made is still here. Pick a plan to generate and publish again.',
+    paymentFailed: "We couldn't process your payment",
+    paymentFailedDesc: 'Update your payment method to keep creating.',
+    creditsLow: '{n} of {total} AI credits left',
+    creditsLowDesc: 'When they run out, generation pauses until your next cycle.',
+    creditsOut: "You've used all {total} AI credits this month",
+    creditsOutDesc: 'Upgrade your plan to keep generating this month.',
     viewPlans: 'View plans',
     noAccounts: 'Connect social networks', noAccountsDesc: 'Go to Settings to connect your accounts and view metrics.',
     goSettings: 'Go to Settings',
@@ -70,7 +90,7 @@ const T = {
 function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, org, plan, loading: authLoading } = useAuth();
+  const { user, org, subscription, usage, loading: authLoading } = useAuth();
   const { lang } = useParams<{ lang: string }>();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
 
@@ -225,6 +245,50 @@ function DashboardPageInner() {
         : 'Enlaza Instagram, LinkedIn, TikTok y más para publicar directamente.',
     },
   ];
+
+  // ── Aviso de plan ──
+  // Se elige un único mensaje, por urgencia descendente: primero lo que impide
+  // trabajar (suscripción bloqueada), luego lo que está por impedirlo
+  // (créditos agotados o casi), y por último el trial que aún corre.
+  const planNotice: { title: string; desc: string; urgent: boolean } | null = (() => {
+    if (subscription && !subscription.canCreate) {
+      if (subscription.reason === 'payment_failed') {
+        return { title: t.paymentFailed, desc: t.paymentFailedDesc, urgent: true };
+      }
+      return { title: t.trialEnded, desc: t.trialEndedDesc, urgent: true };
+    }
+
+    if (usage && usage.remaining <= 0) {
+      return {
+        title: t.creditsOut.replace('{total}', String(usage.limit)),
+        desc: t.creditsOutDesc,
+        urgent: true,
+      };
+    }
+
+    // Umbral del 20 %: suficiente margen para reaccionar sin que el aviso salga
+    // el primer día del mes.
+    if (usage && usage.remaining <= usage.limit * 0.2) {
+      return {
+        title: t.creditsLow
+          .replace('{n}', String(usage.remaining))
+          .replace('{total}', String(usage.limit)),
+        desc: t.creditsLowDesc,
+        urgent: false,
+      };
+    }
+
+    if (subscription?.isTrialing) {
+      const dias = subscription.trialDaysLeft ?? 0;
+      return {
+        title: dias <= 1 ? t.trialLastDay : t.trialActive.replace('{n}', String(dias)),
+        desc: dias <= 1 ? t.trialEndedDesc : t.trialActiveDesc,
+        urgent: dias <= 3,
+      };
+    }
+
+    return null;
+  })();
 
   return (
     <div style={{ padding: '40px 48px', maxWidth: 960, fontFamily: 'var(--font-syne), system-ui, sans-serif' }}>
@@ -513,16 +577,22 @@ function DashboardPageInner() {
         </div>
       </section>
 
-      {/* ── Plan banner ── */}
-      {plan === 'starter' && (
+      {/* ── Aviso de plan ──
+          Un solo banner, con el aviso más urgente primero: no poder crear pesa
+          más que quedarse sin créditos, y eso más que un trial que aún corre.
+          Sin nada que avisar no se muestra nada. */}
+      {planNotice && (
         <div style={{
-          background: 'linear-gradient(135deg, rgba(198,255,75,0.06) 0%, rgba(255,140,66,0.06) 100%)',
-          border: '1px solid var(--border)', borderRadius: 12, padding: '20px 24px',
+          background: planNotice.urgent
+            ? 'linear-gradient(135deg, rgba(255,140,66,0.10) 0%, rgba(255,90,90,0.08) 100%)'
+            : 'linear-gradient(135deg, rgba(198,255,75,0.06) 0%, rgba(255,140,66,0.06) 100%)',
+          border: `1px solid ${planNotice.urgent ? 'rgba(255,140,66,0.35)' : 'var(--border)'}`,
+          borderRadius: 12, padding: '20px 24px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
         }}>
           <div>
-            <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{t.freePlan}</p>
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.freePlanDesc}</p>
+            <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{planNotice.title}</p>
+            <p style={{ color: 'var(--muted)', fontSize: 13 }}>{planNotice.desc}</p>
           </div>
           <Link href={`/${lang}/dashboard/settings`} style={{
             background: 'var(--accent)', color: 'var(--bg)', fontWeight: 700,

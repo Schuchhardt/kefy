@@ -16,11 +16,35 @@ interface Org {
   plan: 'starter' | 'pro' | 'business';
 }
 
+/**
+ * Estado de la suscripción tal como lo devuelve `/api/auth/me`.
+ * Ver `lib/subscription.ts` — Kefy no tiene plan gratuito: toda cuenta empieza
+ * en Starter con el primer mes gratis (`status: 'trialing'`).
+ */
+interface Subscription {
+  canCreate: boolean;
+  status: 'active' | 'trialing' | 'past_due' | 'canceled' | 'unpaid';
+  isTrialing: boolean;
+  periodEnd: string | null;
+  trialDaysLeft: number | null;
+  reason: 'trial_expired' | 'payment_failed' | 'canceled' | 'no_subscription' | null;
+}
+
+/** Créditos de IA consumidos en el mes en curso. */
+interface Usage {
+  used: number;
+  limit: number;
+  remaining: number;
+  period: string;
+}
+
 interface AuthState {
   user: User | null;
   org: Org | null;
   role: string | null;
   plan: string | null;
+  subscription: Subscription | null;
+  usage: Usage | null;
   loading: boolean;
 }
 
@@ -34,7 +58,8 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children, lang }: { children: ReactNode; lang: string }) {
   const router = useRouter();
   const [state, setState] = useState<AuthState>({
-    user: null, org: null, role: null, plan: null, loading: true,
+    user: null, org: null, role: null, plan: null,
+    subscription: null, usage: null, loading: true,
   });
 
   const refresh = useCallback(async () => {
@@ -42,7 +67,10 @@ export function AuthProvider({ children, lang }: { children: ReactNode; lang: st
       const res = await fetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        setState({ user: data.user, org: data.org, role: data.role, plan: data.plan, loading: false });
+        setState({
+          user: data.user, org: data.org, role: data.role, plan: data.plan,
+          subscription: data.subscription ?? null, usage: data.usage ?? null, loading: false,
+        });
       } else if (res.status === 401) {
         // Try to refresh the access token
         const refreshRes = await fetch('/api/auth/refresh', { method: 'POST' });
@@ -50,14 +78,23 @@ export function AuthProvider({ children, lang }: { children: ReactNode; lang: st
           const meRes = await fetch('/api/auth/me');
           if (meRes.ok) {
             const data = await meRes.json();
-            setState({ user: data.user, org: data.org, role: data.role, plan: data.plan, loading: false });
+            setState({
+              user: data.user, org: data.org, role: data.role, plan: data.plan,
+              subscription: data.subscription ?? null, usage: data.usage ?? null, loading: false,
+            });
             return;
           }
         }
-        setState({ user: null, org: null, role: null, plan: null, loading: false });
+        setState({
+          user: null, org: null, role: null, plan: null,
+          subscription: null, usage: null, loading: false,
+        });
         router.push(`/${lang}/login`);
       } else {
-        setState({ user: null, org: null, role: null, plan: null, loading: false });
+        setState({
+          user: null, org: null, role: null, plan: null,
+          subscription: null, usage: null, loading: false,
+        });
       }
     } catch {
       setState((s) => ({ ...s, loading: false }));
@@ -75,7 +112,10 @@ export function AuthProvider({ children, lang }: { children: ReactNode; lang: st
       const res = await fetch('/api/auth/refresh', { method: 'POST' });
       if (!res.ok) {
         // Si el refresh falla, actualizar estado (sesión expirada)
-        setState({ user: null, org: null, role: null, plan: null, loading: false });
+        setState({
+          user: null, org: null, role: null, plan: null,
+          subscription: null, usage: null, loading: false,
+        });
       }
     }, ms);
     return () => clearInterval(id);
@@ -86,7 +126,10 @@ export function AuthProvider({ children, lang }: { children: ReactNode; lang: st
     // El service worker cachea páginas públicas; al cerrar sesión se limpia
     // todo por si quedó algo del usuario anterior.
     navigator.serviceWorker?.controller?.postMessage({ type: 'CLEAR_CACHES' });
-    setState({ user: null, org: null, role: null, plan: null, loading: false });
+    setState({
+      user: null, org: null, role: null, plan: null,
+      subscription: null, usage: null, loading: false,
+    });
     router.push(`/${lang}/login`);
   }, [lang, router]);
 
