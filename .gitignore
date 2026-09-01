@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# versión del build (la genera scripts/generate-build-id.mjs)
+/lib/generated/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
