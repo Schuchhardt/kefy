@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import es from '@/locales/es/landing';
 import en from '@/locales/en/landing';
+import esAssistant from '@/locales/es/dashboard/assistant';
+import enAssistant from '@/locales/en/dashboard/assistant';
+import esSettings from '@/locales/es/dashboard/settings';
+import enSettings from '@/locales/en/dashboard/settings';
+import { ASSISTANT_TOOL_NAMES, summarizeTool } from '@/lib/assistant/summaries';
+import { ensureToolsRegistered } from '@/lib/assistant/tools';
+import { allToolNames } from '@/lib/assistant/registry';
 
 // La copy de la landing vive duplicada en dos idiomas. Cuando alguien añade un
 // plan, una fila de la tabla comparativa o una pregunta del FAQ en un idioma y
@@ -116,5 +123,88 @@ describe('paridad es / en de la landing', () => {
         expect(encontrado, `[${idioma}] se anuncia "${termino}", que el producto no genera`).toEqual([]);
       }
     }
+  });
+});
+
+// ─── Dashboard: asistente y ajustes ──────────────────────────────────────────
+
+/** Rutas que están en un idioma y no en el otro, en las dos direcciones. */
+function diferencias(a: unknown, b: unknown) {
+  const rutasA = rutas(a).sort();
+  const rutasB = rutas(b).sort();
+  return {
+    soloEs: rutasA.filter((r) => !rutasB.includes(r)),
+    soloEn: rutasB.filter((r) => !rutasA.includes(r)),
+  };
+}
+
+describe('paridad es / en del asistente', () => {
+  it('ambos idiomas tienen exactamente la misma estructura', () => {
+    expect(diferencias(esAssistant, enAssistant)).toEqual({ soloEs: [], soloEn: [] });
+  });
+
+  // El `satisfies` de los locales obliga a tener una entrada por nombre de
+  // ASSISTANT_TOOL_NAMES; esto comprueba que esa lista sea la del registro real.
+  // Si se añade una herramienta al registro y no a la lista, el widget mostraría
+  // su nombre técnico y la tarjeta de confirmación no tendría resumen.
+  it('ASSISTANT_TOOL_NAMES coincide con las herramientas registradas', () => {
+    ensureToolsRegistered();
+    expect([...ASSISTANT_TOOL_NAMES].sort()).toEqual(allToolNames());
+  });
+
+  it('cada herramienta tiene etiqueta y resumen en ambos idiomas', () => {
+    for (const [idioma, copy] of [['es', esAssistant], ['en', enAssistant]] as const) {
+      const etiquetas = copy.toolLabels as Record<string, string>;
+      const resumenes = copy.toolSummaries as Record<string, unknown>;
+      for (const nombre of ASSISTANT_TOOL_NAMES) {
+        expect(etiquetas[nombre]?.trim(), `[${idioma}] falta la etiqueta de ${nombre}`).toBeTruthy();
+        expect(typeof resumenes[nombre], `[${idioma}] falta el resumen de ${nombre}`).toBe('function');
+      }
+    }
+  });
+
+  // El servidor llama a los resúmenes con la entrada del modelo y la vista
+  // previa de la herramienta, que pueden venir incompletas. Un resumen que
+  // revienta cae al título genérico y la persona confirma sin saber qué.
+  it('los resúmenes devuelven texto aunque la entrada y la vista previa vengan vacías', () => {
+    for (const [idioma, copy] of [['es', esAssistant], ['en', enAssistant]] as const) {
+      const resumenes = copy.toolSummaries as Record<string, (i: unknown, p: unknown) => string>;
+      for (const nombre of ASSISTANT_TOOL_NAMES) {
+        let texto: unknown;
+        expect(() => { texto = resumenes[nombre]({}, {}); }, `[${idioma}] ${nombre}`).not.toThrow();
+        expect(typeof texto === 'string' && texto.trim().length > 0, `[${idioma}] ${nombre} devolvió «${String(texto)}»`).toBe(true);
+      }
+    }
+  });
+
+  it('los resúmenes no dejan pasar las etiquetas <untrusted_content>', () => {
+    const recipient = '<untrusted_content source="comment">Juan</untrusted_content>';
+    for (const idioma of ['es', 'en'] as const) {
+      const texto = summarizeTool('reply_to_comment', idioma, {}, { account: '@kefy', recipient });
+      expect(texto).toContain('Juan');
+      expect(texto).not.toContain('untrusted_content');
+    }
+  });
+
+  it('ningún texto del asistente está vacío en un idioma y lleno en el otro', () => {
+    const desalineados: string[] = [];
+    for (const ruta of rutas(esAssistant)) {
+      if (ruta.includes('[] (')) continue;
+      const valorEs = leer(esAssistant, ruta);
+      const valorEn = leer(enAssistant, ruta);
+      if (typeof valorEs !== 'string' || typeof valorEn !== 'string') continue;
+      if ((valorEs.trim() === '') !== (valorEn.trim() === '')) desalineados.push(ruta);
+    }
+    expect(desalineados, desalineados.join(', ')).toEqual([]);
+  });
+});
+
+describe('paridad es / en de los ajustes', () => {
+  it('ambos idiomas tienen exactamente la misma estructura', () => {
+    expect(diferencias(esSettings, enSettings)).toEqual({ soloEs: [], soloEn: [] });
+  });
+
+  it('la sección de API keys tiene las mismas claves en ambos idiomas', () => {
+    expect(diferencias(esSettings.apiKeys, enSettings.apiKeys)).toEqual({ soloEs: [], soloEn: [] });
   });
 });

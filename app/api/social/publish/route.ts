@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { requireActiveSubscription } from '@/lib/subscription';
 import { checkRateLimit, publishRule, rateLimitResponse } from '@/lib/rate-limit';
-import { prepareCarouselSlides, prepareSingleImage } from '@/lib/publish-images';
-import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
-import type { CarouselSlide } from '@/types/content';
-import type { ContentChannel } from '@/types/ai';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { publishContent } from '@/lib/services/publish';
 import type { ContentType } from '@/types/content';
 
 const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
@@ -66,208 +64,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'social_account_ids must contain valid IDs' }, { status: 422 });
   }
 
-  const db = createSupabaseServer();
+  // La ruta es de toda la organización (brandScope 'org'): el servicio exige
+  // que las cuentas sean de la marca del contenido.
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
 
-  // Verify content item
-  const { data: item } = await db
-    .from('kefy_content_items')
-    .select('id, body, image_url, hashtags, channel, content_type, slides, video_url, mux_playback_id')
-    .eq('id', input.content_item_id)
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  if (!item) return NextResponse.json({ error: 'Content item not found' }, { status: 404 });
-
-  const format = (input.format as ContentType | undefined) ?? (item.content_type as ContentType);
-
-  // Resolve the media/text to publish: the item's own columns for its primary
-  // format, or the matching rendition row for an alternate format.
-  let publishSource: PublishMediaSource;
-  if (format === item.content_type) {
-    publishSource = {
-      body: item.body, image_url: item.image_url, slides: item.slides,
-      video_url: item.video_url, mux_playback_id: item.mux_playback_id, hashtags: item.hashtags ?? [],
-    };
-  } else {
-    const { data: rendition } = await db
-      .from('kefy_content_renditions')
-      .select('body, image_url, slides, video_url, mux_playback_id, hashtags, status')
-      .eq('content_item_id', item.id)
-      .eq('format', format)
-      .maybeSingle();
-    if (!rendition || rendition.status !== 'ready') {
-      return NextResponse.json({ error: `The ${format} version of this content hasn't been generated yet` }, { status: 422 });
-    }
-    publishSource = rendition;
+  try {
+    const out = await publishContent(ctx, {
+      itemId:     input.content_item_id,
+      accountIds,
+      format:     input.format as ContentType | undefined,
+      mode:       'now',
+    });
+    return NextResponse.json(out.body, { status: out.status });
+  } catch (err) {
+    return serviceErrorResponse(err, { route: '/api/social/publish', auth });
   }
-
-  // Decide the media payload once, before touching Zernio. A reel without a
-  // rendered video fails here instead of being published as its cover image.
-  const resolved = resolvePublishMedia(format, publishSource);
-  if (!resolved.ok) {
-    console.warn(`[publish] REJECTED itemId=${item.id} format=${format}: ${resolved.error}`);
-    return NextResponse.json({ error: resolved.error }, { status: 422 });
-  }
-  const media = resolved.media;
-
-  // Fetch requested accounts (only active + belonging to this org)
-  const { data: accounts } = await db
-    .from('kefy_social_accounts')
-    .select('id, zernio_account_id, status, platform')
-    .in('id', accountIds)
-    .eq('org_id', auth.orgId)
-    .eq('status', 'active');
-
-  if (!accounts || accounts.length === 0) {
-    return NextResponse.json({ error: 'No active social accounts found for the given IDs' }, { status: 404 });
-  }
-
-  const { publishPost, STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
-
-  console.log(
-    `[publish] START itemId=${item.id} format=${format} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
-  );
-
-  // Pre-download source image once (if any) so we can resize per platform.
-  // Video posts carry no image, so nothing to download for them.
-  const carouselSlides: CarouselSlide[] = format === 'carousel' && Array.isArray(publishSource.slides)
-    ? (publishSource.slides as CarouselSlide[])
-    : [];
-
-  // El texto que se escribe dentro de la imagen usa la tipografía elegida por
-  // la marca en su Brand Kit, no una genérica.
-  const { data: brandFontsRow } = await db
-    .from('kefy_brand_kits')
-    .select('font_heading, font_body')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  const imageDeps = {
-    orgId:      auth.orgId,
-    prefix:     'publish',
-    brandFonts: { heading: brandFontsRow?.font_heading, body: brandFontsRow?.font_body },
-  };
-
-  let sourceImageBuffer: Buffer | null = null;
-  if (media.image_url) {
-    try {
-      const resp = await fetch(media.image_url);
-      if (resp.ok) {
-        const ab = await resp.arrayBuffer();
-        sourceImageBuffer = Buffer.from(ab);
-      }
-    } catch {
-      console.warn('Could not fetch source image for resize, using original URL');
-    }
-  }
-
-  const results: Array<{
-    social_account_id: string;
-    platform: string;
-    status: 'published' | 'failed';
-    zernio_post_id?: string;
-    error?: string;
-  }> = [];
-
-  // Publish to each account independently — don't abort on partial failure
-  for (const account of accounts) {
-    try {
-      const platform = (account.platform ?? 'generic') as ContentChannel;
-
-      // Ajuste al formato de la red + texto quemado donde la red no lo muestra
-      // (caption de story, y el título/cuerpo de cada slide del carrusel).
-      let platformImageUrl = media.image_url;
-      if (media.image_url) {
-        platformImageUrl = await prepareSingleImage(
-          media.image_url, sourceImageBuffer, platform, format,
-          imageDeps,
-          format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
-            ? media.text
-            : undefined,
-        );
-      }
-
-      let platformMediaUrls = media.media_urls;
-      if (format === 'carousel' && carouselSlides.length > 0) {
-        platformMediaUrls = await prepareCarouselSlides(
-          carouselSlides, platform, imageDeps,
-        );
-      }
-
-      console.log(
-        `[publish] → account ${account.id} platform=${account.platform}` +
-        ` zernio_account_id=${account.zernio_account_id}` +
-        ` hasImage=${!!platformImageUrl} mediaUrls=${platformMediaUrls?.length ?? 0} hasVideo=${!!media.video_url}`,
-      );
-
-      const zernioResult = await publishPost({
-        account_id:   account.zernio_account_id!,
-        platform:     account.platform,
-        text:         media.text,
-        image_url:    platformImageUrl,
-        media_urls:   platformMediaUrls,
-        video_url:    media.video_url,
-        content_type: format,
-        hashtags:     media.hashtags,
-        // No scheduled_at → immediate
-      });
-
-      console.log(
-        `[publish] ✓ account ${account.id} zernio_post_id=${zernioResult.post_id}` +
-        ` status=${zernioResult.status} platform_post_id=${zernioResult.platform_post_id}`,
-      );
-
-      await db.from('kefy_scheduled_posts').insert({
-        org_id:             auth.orgId,
-        content_item_id:    item.id,
-        social_account_id:  account.id,
-        zernio_post_id:     zernioResult.post_id,
-        platform_post_id:   zernioResult.platform_post_id ?? null,
-        published_at:       new Date().toISOString(),
-        status:             'published',
-        format,
-        created_by:         auth.userId,
-      });
-
-      results.push({
-        social_account_id: account.id,
-        platform:          account.platform,
-        status:            'published',
-        zernio_post_id:    zernioResult.post_id,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Publish failed';
-      console.error(`[publish] ✗ account ${account.id} platform=${account.platform} error:`, msg);
-      if (err instanceof Error && err.stack) console.error('[publish] stack:', err.stack);
-
-      await db.from('kefy_scheduled_posts').insert({
-        org_id:            auth.orgId,
-        content_item_id:   item.id,
-        social_account_id: account.id,
-        status:            'failed',
-        error_message:     msg,
-        format,
-        created_by:        auth.userId,
-      });
-
-      results.push({
-        social_account_id: account.id,
-        platform:          account.platform,
-        status:            'failed',
-        error:             msg,
-      });
-    }
-  }
-
-  // Update content item status based on overall result
-  const allFailed    = results.every((r) => r.status === 'failed');
-  const anyPublished = results.some((r)  => r.status === 'published');
-
-  await db
-    .from('kefy_content_items')
-    .update({ status: allFailed ? 'approved' : 'published' })
-    .eq('id', item.id);
-
-  const httpStatus = allFailed ? 502 : anyPublished ? 200 : 207;
-  return NextResponse.json({ results }, { status: httpStatus });
 }

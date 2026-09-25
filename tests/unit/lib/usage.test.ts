@@ -11,9 +11,18 @@ import {
   creditsFor,
   costOf,
   creditsExhaustedResponse,
+  creditsExhaustedBody,
   PLAN_CREDITS,
   CREDIT_COSTS,
+  PLAN_ASSISTANT_MESSAGES,
+  assistantMessagesFor,
+  consumeAssistantMessage,
+  refundAssistantMessage,
+  getAssistantUsage,
+  assistantQuotaExhaustedBody,
 } from '@/lib/usage';
+import es from '@/locales/es/landing';
+import en from '@/locales/en/landing';
 
 describe('usagePeriod', () => {
   it('devuelve el mes en UTC con dos dígitos', () => {
@@ -200,5 +209,187 @@ describe('costOf', () => {
   it('expone el peso de cada operación', () => {
     expect(costOf('text')).toBe(CREDIT_COSTS.text);
     expect(costOf('video')).toBe(CREDIT_COSTS.video);
+  });
+});
+
+describe('creditsExhaustedBody', () => {
+  const agotado = {
+    allowed: false, used: 150, limit: 150, remaining: 0,
+    cost: CREDIT_COSTS.image, operation: 'image' as const,
+  };
+
+  // Las herramientas del asistente devuelven este cuerpo tal cual: tiene que
+  // ser exactamente el de la respuesta HTTP.
+  it('es exactamente el cuerpo de creditsExhaustedResponse', async () => {
+    for (const lang of ['es', 'en'] as const) {
+      expect(creditsExhaustedBody(agotado, lang)).toEqual(await creditsExhaustedResponse(agotado, lang).json());
+    }
+  });
+});
+
+// ─── Cuota del asistente ──────────────────────────────────────────────────────
+
+/** Formato de miles de la landing: 1500 → '1,500'. */
+function formatoLanding(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+describe('PLAN_ASSISTANT_MESSAGES', () => {
+  // Estos números los anuncia la página de precios en la lista de cada plan.
+  // Si dejan de coincidir, la landing vuelve a prometer algo que no existe.
+  it('coincide con lo que anuncia la lista de cada plan, en ambos idiomas', () => {
+    const planes = ['starter', 'pro', 'business'] as const;
+    for (const [idioma, copy] of [['es', es], ['en', en]] as const) {
+      const patron = idioma === 'es' ? /^Asistente IA: ([\d,]+) mensajes \/ mes$/ : /^AI assistant: ([\d,]+) messages \/ month$/;
+      copy.pricing.plans.forEach((plan, i) => {
+        const lineas = plan.features
+          .map((f) => (typeof f === 'string' ? f : f.t))
+          .filter((t) => patron.test(t));
+        expect(lineas, `[${idioma}] ${plan.name}: falta la línea del asistente`).toHaveLength(1);
+        const numero = lineas[0].match(patron)![1];
+        expect(numero, `[${idioma}] ${plan.name}`).toBe(formatoLanding(PLAN_ASSISTANT_MESSAGES[planes[i]]));
+      });
+    }
+  });
+
+  it('coincide con lo acordado', () => {
+    expect(PLAN_ASSISTANT_MESSAGES).toEqual({ starter: 300, pro: 1500, business: 5000 });
+  });
+
+  it('los mensajes crecen con el plan', () => {
+    expect(PLAN_ASSISTANT_MESSAGES.starter).toBeLessThan(PLAN_ASSISTANT_MESSAGES.pro);
+    expect(PLAN_ASSISTANT_MESSAGES.pro).toBeLessThan(PLAN_ASSISTANT_MESSAGES.business);
+  });
+
+  it('la landing aclara que chatear no gasta créditos', () => {
+    expect(es.pricing.creditNote).toMatch(/asistente/i);
+    expect(en.pricing.creditNote).toMatch(/assistant/i);
+  });
+});
+
+describe('assistantMessagesFor', () => {
+  it('devuelve los mensajes del plan', () => {
+    expect(assistantMessagesFor('business')).toBe(PLAN_ASSISTANT_MESSAGES.business);
+  });
+
+  it('un plan desconocido cae en el tramo más bajo', () => {
+    expect(assistantMessagesFor('inventado')).toBe(PLAN_ASSISTANT_MESSAGES.starter);
+  });
+});
+
+describe('consumeAssistantMessage', () => {
+  beforeEach(() => { vi.resetAllMocks(); });
+
+  it('descuenta un mensaje contra el tope del plan', async () => {
+    mockSupabaseClient.rpc.mockResolvedValue({ data: 7, error: null });
+
+    const res = await consumeAssistantMessage('org-1', 'pro', new Date('2026-09-15T00:00:00Z'));
+
+    expect(mockSupabaseClient.rpc).toHaveBeenCalledWith('kefy_assistant_consume', {
+      p_org_id: 'org-1',
+      p_period: '2026-09',
+      p_limit: PLAN_ASSISTANT_MESSAGES.pro,
+    });
+    expect(res).toEqual({
+      allowed: true, used: 7, limit: PLAN_ASSISTANT_MESSAGES.pro,
+      remaining: PLAN_ASSISTANT_MESSAGES.pro - 7,
+    });
+  });
+
+  it('no toca los créditos de IA', async () => {
+    mockSupabaseClient.rpc.mockResolvedValue({ data: 1, error: null });
+
+    await consumeAssistantMessage('org-1', 'starter');
+
+    const fns = mockSupabaseClient.rpc.mock.calls.map((c) => c[0]);
+    expect(fns).not.toContain('kefy_credits_consume');
+  });
+
+  it('bloquea cuando la función devuelve -1', async () => {
+    mockSupabaseClient.rpc.mockResolvedValue({ data: -1, error: null });
+
+    const res = await consumeAssistantMessage('org-1', 'starter');
+
+    expect(res.allowed).toBe(false);
+    expect(res.remaining).toBe(0);
+    expect(res.used).toBe(PLAN_ASSISTANT_MESSAGES.starter);
+  });
+
+  it('falla cerrado si la base de datos falla', async () => {
+    mockSupabaseClient.rpc.mockResolvedValue({ data: null, error: { message: 'timeout' } });
+
+    await expect(consumeAssistantMessage('org-1', 'starter')).rejects.toThrow(/asistente/i);
+  });
+});
+
+describe('refundAssistantMessage', () => {
+  beforeEach(() => { vi.resetAllMocks(); });
+
+  it('devuelve un mensaje del período', async () => {
+    mockSupabaseClient.rpc.mockResolvedValue({ data: null, error: null });
+
+    await refundAssistantMessage('org-1', new Date('2026-09-15T00:00:00Z'));
+
+    expect(mockSupabaseClient.rpc).toHaveBeenCalledWith('kefy_assistant_refund', {
+      p_org_id: 'org-1',
+      p_period: '2026-09',
+    });
+  });
+
+  it('no lanza si el reembolso falla', async () => {
+    mockSupabaseClient.rpc.mockRejectedValue(new Error('boom'));
+
+    await expect(refundAssistantMessage('org-1')).resolves.toBeUndefined();
+  });
+});
+
+describe('getAssistantUsage', () => {
+  beforeEach(() => { vi.resetAllMocks(); });
+
+  function mockCounter(row: Record<string, number> | null) {
+    const chain: Record<string, unknown> = {};
+    chain.select = vi.fn(() => chain);
+    chain.eq = vi.fn(() => chain);
+    chain.maybeSingle = vi.fn(async () => ({ data: row, error: null }));
+    mockSupabaseClient.from.mockReturnValue(chain);
+    return chain;
+  }
+
+  it('lee la columna de mensajes, no la de créditos', async () => {
+    const chain = mockCounter({ assistant_messages: 40, credits: 120 });
+
+    const usage = await getAssistantUsage('org-1', 'starter');
+
+    expect(chain.select).toHaveBeenCalledWith('assistant_messages');
+    expect(usage.used).toBe(40);
+    expect(usage.limit).toBe(PLAN_ASSISTANT_MESSAGES.starter);
+    expect(usage.remaining).toBe(PLAN_ASSISTANT_MESSAGES.starter - 40);
+  });
+
+  it('un mes sin mensajes cuenta como cero', async () => {
+    mockCounter(null);
+
+    const usage = await getAssistantUsage('org-1', 'business');
+
+    expect(usage.used).toBe(0);
+    expect(usage.remaining).toBe(PLAN_ASSISTANT_MESSAGES.business);
+  });
+});
+
+describe('assistantQuotaExhaustedBody', () => {
+  // El widget usa el flag para distinguirlo de los créditos agotados y del
+  // rate limit, y ofrecer mejorar el plan.
+  it('marca assistantQuotaExhausted y no creditsExhausted', () => {
+    const body = assistantQuotaExhaustedBody({ limit: 300, used: 300 });
+
+    expect(body.assistantQuotaExhausted).toBe(true);
+    expect(body).not.toHaveProperty('creditsExhausted');
+    expect(body.limit).toBe(300);
+    expect(body.used).toBe(300);
+  });
+
+  it('traduce el mensaje al idioma pedido', () => {
+    expect(assistantQuotaExhaustedBody({ limit: 300, used: 300 }, 'en').error).toMatch(/assistant messages/i);
+    expect(assistantQuotaExhaustedBody({ limit: 300, used: 300 }, 'es').error).toMatch(/mensajes del asistente/i);
   });
 });

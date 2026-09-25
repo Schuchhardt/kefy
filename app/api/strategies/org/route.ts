@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { getOrgStrategy, setOrgStrategy, type OrgStrategyPatch } from '@/lib/services/strategy';
+
+// La estrategia es de la organización: estas rutas no resuelven la marca
+// activa, así que el contexto va sin brandId (brandScope 'org' no lo usa).
 
 // GET /api/strategies/org
 // Returns the current org's saved strategy selection
@@ -10,28 +15,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const supabase = createSupabaseServer();
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
 
-  const { data, error } = await supabase
-    .from('kefy_org_strategies')
-    .select(
-      `id, org_id, objective_id, industry_id, strategy_id, custom_notes, updated_at`,
-    )
-    .eq('org_id', auth.orgId)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    // PGRST116 = "no rows found" — that is expected for new orgs
-    console.error('[api/strategies/org] GET error:', error.message);
-    return NextResponse.json({ error: 'Failed to load strategy selection' }, { status: 500 });
+  try {
+    const { selection } = await getOrgStrategy(ctx, { withNames: false });
+    return NextResponse.json({ selection });
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/strategies/org', auth });
   }
-
-  return NextResponse.json({ selection: data ?? null });
 }
 
 // PATCH /api/strategies/org
 // Upserts the org's strategy selection
-// Body: { objective_id, industry_id, strategy_id, custom_notes? }
+// Body: { objective_id, industry_id, strategy_id, custom_strategy_id?, custom_notes? }
+// custom_strategy_id activa una estrategia propia (null vuelve al catálogo).
 export async function PATCH(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) {
@@ -42,12 +39,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  let body: {
-    objective_id?: string;
-    industry_id?: string;
-    strategy_id?: string;
-    custom_notes?: string;
-  };
+  let body: OrgStrategyPatch;
 
   try {
     body = await req.json();
@@ -55,43 +47,17 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { objective_id, industry_id, strategy_id, custom_notes } = body;
+  // Un cuerpo JSON que no es un objeto (null, número…) no trae ningún campo.
+  const input: OrgStrategyPatch = body && typeof body === 'object' ? body : {};
+  const { objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes } = input;
 
-  if (!objective_id && !industry_id && !strategy_id && custom_notes === undefined) {
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
+
+  try {
     return NextResponse.json(
-      { error: 'At least one field is required' },
-      { status: 400 },
+      await setOrgStrategy(ctx, { objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes }),
     );
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'PATCH /api/strategies/org', auth });
   }
-
-  const supabase = createSupabaseServer();
-
-  // Fetch existing selection to merge (partial update support)
-  const { data: existing } = await supabase
-    .from('kefy_org_strategies')
-    .select('objective_id, industry_id, strategy_id, custom_notes')
-    .eq('org_id', auth.orgId)
-    .single();
-
-  const merged = {
-    org_id:       auth.orgId,
-    objective_id: objective_id  ?? existing?.objective_id  ?? null,
-    industry_id:  industry_id   ?? existing?.industry_id   ?? null,
-    strategy_id:  strategy_id   !== undefined ? (strategy_id ?? null)   : (existing?.strategy_id  ?? null),
-    custom_notes: custom_notes  !== undefined ? (custom_notes ?? null)  : (existing?.custom_notes ?? null),
-    updated_at:   new Date().toISOString(),
-  };
-
-  const { data, error } = await supabase
-    .from('kefy_org_strategies')
-    .upsert(merged, { onConflict: 'org_id' })
-    .select('id, org_id, objective_id, industry_id, strategy_id, custom_notes, updated_at')
-    .single();
-
-  if (error) {
-    console.error('[api/strategies/org] PATCH error:', error.message);
-    return NextResponse.json({ error: 'Failed to save strategy selection' }, { status: 500 });
-  }
-
-  return NextResponse.json({ selection: data });
 }

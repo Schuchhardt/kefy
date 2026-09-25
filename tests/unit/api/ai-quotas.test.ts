@@ -420,3 +420,74 @@ describe('cada operación descuenta lo que cuesta', () => {
     expect(creditsSpent()).toBe(CREDIT_COSTS.text + 3 * CREDIT_COSTS.image);
   });
 });
+
+// ─── Asistente: cuota de mensajes, no créditos ───────────────────────────────
+//
+// El chat del asistente también pasa por guardAiRequest (regla de AGENTS.md),
+// con operation 'assistant_message': suscripción → rate limit del asistente →
+// cuota mensual de mensajes. Chatear nunca descuenta créditos de IA.
+
+describe('POST /api/assistant/chat — guardia del asistente', () => {
+  const chatBody = { message: 'hola', language: 'es' };
+
+  it('cuota de mensajes agotada → 429 assistantQuotaExhausted, sin tocar los créditos', async () => {
+    quotaState.assistantQuotaAllowed = false;
+    const { POST } = await import('@/app/api/assistant/chat/route');
+
+    const res = await POST(postReq('/api/assistant/chat', chatBody));
+
+    expect(res.status).toBe(429);
+    const json = await res.json();
+    expect(json.assistantQuotaExhausted).toBe(true);
+    expect(json.creditsExhausted).toBeUndefined();
+    expect(quotaState.calls.some((c) => c.fn === 'kefy_assistant_consume')).toBe(true);
+    expect(quotaState.calls.some((c) => c.fn === 'kefy_credits_consume')).toBe(false);
+  });
+
+  it('rate limit del asistente → 429 con retryAfter, sin consumir mensajes', async () => {
+    quotaState.rateLimited = true;
+    const { POST } = await import('@/app/api/assistant/chat/route');
+
+    const res = await POST(postReq('/api/assistant/chat', chatBody));
+
+    expect(res.status).toBe(429);
+    expect((await res.json()).retryAfter).toBeGreaterThan(0);
+    expect(quotaState.calls.some((c) => c.fn === 'kefy_assistant_consume')).toBe(false);
+  });
+
+  it('mes gratis vencido → 402, sin consumir mensajes', async () => {
+    subscriptionState.daysLeft = -1;
+    const { POST } = await import('@/app/api/assistant/chat/route');
+
+    const res = await POST(postReq('/api/assistant/chat', chatBody));
+
+    expect(res.status).toBe(402);
+    expect((await res.json()).subscriptionRequired).toBe(true);
+    expect(quotaState.calls.some((c) => c.fn === 'kefy_assistant_consume')).toBe(false);
+  });
+
+  it('sin sesión no toca ninguna cuota', async () => {
+    vi.mocked(getAuthFromRequest).mockResolvedValue(null);
+    const { POST } = await import('@/app/api/assistant/chat/route');
+
+    const res = await POST(postReq('/api/assistant/chat', chatBody));
+
+    expect(res.status).toBe(401);
+    expect(quotaState.calls).toHaveLength(0);
+  });
+
+  // Decidir una acción no abre un turno nuevo: no pasa por la guardia ni gasta
+  // mensajes (la reanudación sale del presupuesto del turno original). El caso
+  // de confirmar con reanudación está en assistant-actions.test.ts.
+  it('POST /api/assistant/actions/[id] no consume la cuota del asistente', async () => {
+    const { POST } = await import('@/app/api/assistant/actions/[actionId]/route');
+
+    const res = await POST(
+      postReq('/api/assistant/actions/00000000-0000-4000-8000-000000000001', { decision: 'reject' }),
+      { params: Promise.resolve({ actionId: '00000000-0000-4000-8000-000000000001' }) },
+    );
+
+    expect(res.status).toBe(409);
+    expect(quotaState.calls.some((c) => c.fn === 'kefy_assistant_consume')).toBe(false);
+  });
+});

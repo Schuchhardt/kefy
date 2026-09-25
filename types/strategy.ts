@@ -65,7 +65,44 @@ export interface OrgSelection {
   objective_id: string | null;
   industry_id:  string | null;
   strategy_id:  string | null;
+  /** Estrategia propia activa. Si no es null, manda sobre `strategy_id`. */
+  custom_strategy_id?: string | null;
   custom_notes: string | null;
+}
+
+// ─── Estrategias propias (cliente) ───────────────────────────────────────────
+// Espejo de `CustomStrategy` en lib/services/custom-strategy.ts, que no se
+// puede importar desde el navegador (carga Supabase).
+
+export type CustomStrategyFormat = 'post' | 'carousel' | 'reel' | 'story';
+export type CustomStrategyOrigin = 'ui' | 'chat' | 'api' | 'mcp';
+
+export interface CustomCalendarItem {
+  week:    number;
+  format:  CustomStrategyFormat;
+  /** 'general' o un canal orgánico. */
+  channel: string;
+  topic:   string;
+  angle?:  string | null;
+  goal?:   string | null;
+}
+
+export interface CustomStrategy {
+  id:                   string;
+  org_id:               string;
+  name:                 string;
+  description:          string | null;
+  objective_id:         string | null;
+  based_on_strategy_id: string | null;
+  kpi_primary:          string | null;
+  kpi_secondary:        string | null;
+  cta_mechanic:         string | null;
+  calendar:             CustomCalendarItem[];
+  created_by:           string | null;
+  created_via:          CustomStrategyOrigin;
+  updated_via:          CustomStrategyOrigin;
+  created_at:           string;
+  updated_at:           string;
 }
 
 // ─── Recommendation block (strategy → content/create page) ───────────────────

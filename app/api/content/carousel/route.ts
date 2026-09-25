@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateCarouselSlides, generateContentImage } from '@/lib/ai';
-import { guardAiRequest } from '@/lib/ai-guard';
-import { consumeCredits, refundCredits } from '@/lib/usage';
-import { reportError } from '@/lib/observability';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { generateCarousel } from '@/lib/services/content';
 import type { ContentChannel } from '@/types/ai';
-import { uploadBase64Image } from '@/lib/storage';
 
 const VALID_CHANNELS = new Set<ContentChannel>([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
@@ -56,141 +53,49 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'topic is required' }, { status: 422 });
   }
 
-  const rawCount    = typeof input.slide_count === 'number' ? input.slide_count : 5;
-  const slideCount  = Math.min(10, Math.max(3, Math.floor(rawCount)));
-  // Images now default to TRUE (always-on policy for AI-recommended content)
-  const genImages   = input.generate_images !== false;
-  const imageQuality = (['low', 'medium', 'high'] as const)
-    .includes(input.image_quality as 'low' | 'medium' | 'high')
-    ? (input.image_quality as 'low' | 'medium' | 'high')
-    : 'medium';
-
-  const db = createSupabaseServer();
-
-  // Fetch brand kit context
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select('id, name, tagline, tone, industry')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
   const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
-
-  const guard = await guardAiRequest(req, {
-    auth, operation: 'text', route: 'POST /api/content/carousel', language,
-  });
-  if (guard.blocked) return guard.blocked;
-
-  // 1. Generate slide copy with Claude
-  let generated;
-  try {
-    generated = await generateCarouselSlides({
-      channel,
-      topic:       (input.topic as string).trim().slice(0, 500),
-      slide_count: slideCount,
-      language,
-      tone:        brandKit?.tone ?? [],
-      brandName:   brandKit?.name    ?? undefined,
-      tagline:     brandKit?.tagline ?? undefined,
-      extraCtx:    brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
-    });
-  } catch (err) {
-    await guard.refund();
-    reportError(err, { route: 'POST /api/content/carousel', auth, service: 'ai', extra: { slideCount } });
-    const msg = err instanceof Error ? err.message : 'Carousel text generation failed';
-    return NextResponse.json({ error: msg }, { status: 502 });
-  }
-
-  // 2. Optionally generate one image per slide in parallel (imagen limpia, sin texto)
-  const slides = await Promise.all(
-    generated.slides.map(async (slide) => {
-      if (!genImages || !slide.image_prompt) return { ...slide, image_url: null, text_baked: false };
-
-      // Cada slide es una imagen generada aparte, así que cada una consume su
-      // unidad de cuota. Si se agota a mitad del carrusel, los slides restantes
-      // salen sin imagen en lugar de fallar: el texto ya está generado y es
-      // preferible entregarlo a perderlo entero.
-      const slideCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
-      if (!slideCredits?.allowed) return { ...slide, image_url: null, text_baked: false };
-
-      try {
-        const imgResult = await generateContentImage({
-          prompt:  slide.image_prompt,
-          size:    '1024x1024',
-          quality: imageQuality,
-        });
-
-        // La imagen se guarda LIMPIA, sin el texto quemado: en la app el
-        // título/cuerpo van como overlay HTML (nítidos y editables) y sólo se
-        // componen sobre los píxeles al publicar, ya con la zona segura de la
-        // red destino. Quemarlos acá además duplicaba el texto en la preview.
-        const imageUrl = await uploadBase64Image(
-          imgResult.b64,
-          auth.orgId,
-          `carousel-slide-${slide.slide_order}-${Date.now()}.jpeg`,
-        );
-        return { ...slide, image_url: imageUrl, text_baked: false };
-      } catch (imgErr) {
-        // La imagen se cobró al empezar: si no salió, se devuelve.
-        await refundCredits(auth.orgId, 'image');
-        reportError(imgErr, {
-          route: 'POST /api/content/carousel', auth, service: 'ai',
-          extra: { slide: slide.slide_order, fase: 'imagen' },
-        });
-        return { ...slide, image_url: null, text_baked: false };
-      }
-    }),
-  );
-
   const shouldSave = input.save !== false;
-  if (!shouldSave) {
-    return NextResponse.json({
-      slides,
-      description: generated.description,
-      hashtags:    generated.hashtags,
-      model:       generated.model,
-      tokensUsed:  generated.tokensUsed,
-    });
-  }
 
-  // 3. Persist as a content item with content_type='carousel'
-  const firstSlide = slides[0];
-  const { data: item, error: itemError } = await db
-    .from('kefy_content_items')
-    .insert({
-      org_id:       auth.orgId,
-      brand_id:     brand?.id ?? null,
-      brand_kit_id: brandKit?.id ?? null,
-      created_by:   auth.userId,
+  // Texto (1 crédito, con la guardia de gasto) e imágenes por slide (cada una
+  // cobrada aparte con consumeCredits/refundCredits): generateCarousel.
+  const ctx = serviceContext(auth, brand?.id ?? '', language, { brandScope: 'org', source: 'route' });
+  try {
+    const out = await generateCarousel(ctx, {
+      topic:          input.topic as string,
       channel,
-      content_type: 'carousel',
-      title:        firstSlide?.title ?? null,
-      body:         generated.description,
-      image_url:    firstSlide?.image_url ?? null,
-      slides:       slides,
-      hashtags:     generated.hashtags,
-      status:       'draft',
-      metadata:     { slide_count: slides.length, model: generated.model },
-    })
-    .select('id, content_type, channel, status, created_at')
-    .single();
+      slideCount:     typeof input.slide_count === 'number' ? input.slide_count : undefined,
+      // Images now default to TRUE (always-on policy for AI-recommended content)
+      generateImages: input.generate_images !== false,
+      imageQuality:   (['low', 'medium', 'high'] as const).includes(input.image_quality as 'low' | 'medium' | 'high')
+        ? (input.image_quality as 'low' | 'medium' | 'high')
+        : 'medium',
+      save:           shouldSave,
+    });
 
-  if (itemError || !item) {
-    console.error('carousel item insert error:', itemError?.message);
-    return NextResponse.json({ error: 'Failed to save carousel' }, { status: 500 });
+    if (!shouldSave) {
+      return NextResponse.json({
+        slides:      out.slides,
+        description: out.description,
+        hashtags:    out.hashtags,
+        model:       out.model,
+        tokensUsed:  out.tokensUsed,
+      });
+    }
+
+    const res = NextResponse.json(
+      {
+        itemId:      out.itemId,
+        slides:      out.slides,
+        description: out.description,
+        hashtags:    out.hashtags,
+        model:       out.model,
+        tokensUsed:  out.tokensUsed,
+      },
+      { status: 201 },
+    );
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (e) {
+    return serviceErrorResponse(e, { route: 'POST /api/content/carousel', auth });
   }
-
-  const res = NextResponse.json(
-    {
-      itemId:      item.id,
-      slides,
-      description: generated.description,
-      hashtags:    generated.hashtags,
-      model:       generated.model,
-      tokensUsed:  generated.tokensUsed,
-    },
-    { status: 201 },
-  );
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
 }

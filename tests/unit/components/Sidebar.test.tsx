@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 // Mocks de módulos que usan APIs del browser o de Next.js
 vi.mock('next/navigation', () => ({
@@ -78,5 +78,15 @@ describe('DashboardSidebar', () => {
   it('renderiza el BrandSwitcher', () => {
     render(<DashboardSidebar lang="es" />);
     expect(screen.getByTestId('brand-switcher')).toBeInTheDocument();
+  });
+
+  it('publica su ancho en --dashboard-sidebar-w (para el asistente anclado a la izquierda)', () => {
+    const root = document.documentElement;
+    const { unmount } = render(<DashboardSidebar lang="es" />);
+    expect(root.style.getPropertyValue('--dashboard-sidebar-w')).toBe('220px');
+    fireEvent.click(screen.getByTitle('Colapsar'));
+    expect(root.style.getPropertyValue('--dashboard-sidebar-w')).toBe('64px');
+    unmount();
+    expect(root.style.getPropertyValue('--dashboard-sidebar-w')).toBe('');
   });
 });

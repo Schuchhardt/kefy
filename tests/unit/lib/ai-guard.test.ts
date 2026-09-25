@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import {
   fakeRpc, resetQuotaState, quotaState, creditsSpent, refundCount,
   resetSubscriptionState, subscriptionState, fakeEntitlement,
+  assistantConsumedCount, assistantRefundCount,
 } from '../helpers/quota';
 
 const mockSupabaseClient = { rpc: fakeRpc, from: vi.fn() };
@@ -13,8 +14,9 @@ vi.mock('@/lib/subscription', async (importOriginal) => {
   return { ...actual, getEntitlement: async () => fakeEntitlement() };
 });
 
-import { guardAiRequest } from '@/lib/ai-guard';
-import { PLAN_CREDITS, CREDIT_COSTS } from '@/lib/usage';
+import { guardAiRequest, checkAiSpend } from '@/lib/ai-guard';
+import { PLAN_CREDITS, CREDIT_COSTS, PLAN_ASSISTANT_MESSAGES } from '@/lib/usage';
+import { assistantRule } from '@/lib/rate-limit';
 import type { JWTPayload } from '@/types/auth';
 
 const auth: JWTPayload = { userId: 'user-1', orgId: 'org-1', role: 'owner', plan: 'starter' };
@@ -180,5 +182,121 @@ describe('guardAiRequest', () => {
     });
 
     expect((await guard.blocked!.json()).error).toMatch(/too many/i);
+  });
+});
+
+// ─── Mensajes al asistente ('assistant_message') ──────────────────────────────
+//
+// Chatear con el asistente no gasta créditos de IA: cada mensaje descuenta de
+// una cuota mensual aparte. La guardia sigue siendo la misma (suscripción →
+// rate limit → cuota), solo cambia el paso 3.
+
+describe('guardAiRequest con assistant_message', () => {
+  beforeEach(() => {
+    resetQuotaState();
+    resetSubscriptionState();
+    vi.resetAllMocks();
+  });
+
+  const opts = { auth, operation: 'assistant_message' as const, route: 'test', rateRule: assistantRule(auth.orgId) };
+
+  it('descuenta un mensaje de la cuota del asistente y ningún crédito', async () => {
+    const guard = await guardAiRequest(req(), opts);
+
+    expect(guard.blocked).toBeNull();
+    expect(assistantConsumedCount()).toBe(1);
+    expect(quotaState.calls.some((c) => c.fn === 'kefy_credits_consume')).toBe(false);
+  });
+
+  it('usa el tope de mensajes del plan', async () => {
+    await guardAiRequest(req(), { ...opts, auth: { ...auth, plan: 'business' } });
+
+    const consume = quotaState.calls.find((c) => c.fn === 'kefy_assistant_consume');
+    expect(consume?.args.p_limit).toBe(PLAN_ASSISTANT_MESSAGES.business);
+    expect(consume?.args.p_org_id).toBe(auth.orgId);
+  });
+
+  it('usa la regla de rate limit del asistente, no la de generación', async () => {
+    await guardAiRequest(req(), opts);
+
+    const hit = quotaState.calls.find((c) => c.fn === 'kefy_rate_limit_hit');
+    expect(hit?.args.p_bucket).toBe(`assistant:org:${auth.orgId}`);
+  });
+
+  it('429 con assistantQuotaExhausted (no creditsExhausted) al agotar la cuota', async () => {
+    quotaState.assistantQuotaAllowed = false;
+
+    const guard = await guardAiRequest(req(), opts);
+
+    expect(guard.blocked?.status).toBe(429);
+    const body = await guard.blocked!.json();
+    expect(body.assistantQuotaExhausted).toBe(true);
+    expect(body.creditsExhausted).toBeUndefined();
+    expect(body.retryAfter).toBeUndefined();
+    expect(body.limit).toBe(PLAN_ASSISTANT_MESSAGES.starter);
+  });
+
+  it('una cuenta sin suscripción no consume mensajes', async () => {
+    subscriptionState.daysLeft = -1;
+
+    const guard = await guardAiRequest(req(), opts);
+
+    expect(guard.blocked?.status).toBe(402);
+    expect(assistantConsumedCount()).toBe(0);
+  });
+
+  it('un rate limit no consume mensajes, y su mensaje habla de mensajes', async () => {
+    quotaState.rateLimited = true;
+
+    const guard = await guardAiRequest(req(), { ...opts, language: 'en' });
+
+    expect(guard.blocked?.status).toBe(429);
+    expect((await guard.blocked!.json()).error).toMatch(/messages/i);
+    expect(assistantConsumedCount()).toBe(0);
+  });
+
+  it('503 si la cuota no se puede verificar (falla cerrado)', async () => {
+    quotaState.dbError = true;
+
+    const guard = await guardAiRequest(req(), opts);
+
+    expect(guard.blocked?.status).toBe(503);
+  });
+
+  it('el refund devuelve el mensaje, no créditos', async () => {
+    const guard = await guardAiRequest(req(), opts);
+    await guard.refund();
+
+    expect(assistantRefundCount()).toBe(1);
+    expect(refundCount()).toBe(0);
+    expect(quotaState.assistantUsed).toBe(0);
+  });
+});
+
+describe('checkAiSpend', () => {
+  beforeEach(() => {
+    resetQuotaState();
+    resetSubscriptionState();
+    vi.resetAllMocks();
+  });
+
+  it('devuelve el cuerpo y las cabeceras del rate limit sin construir un Response', async () => {
+    quotaState.rateLimited = true;
+
+    const r = await checkAiSpend(auth, { operation: 'text', route: 'test' });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.status).toBe(429);
+    expect(r.body.retryAfter).toBeGreaterThan(0);
+    expect(r.headers?.['Retry-After']).toBeDefined();
+  });
+
+  it('para las operaciones de créditos sigue cobrando créditos', async () => {
+    const r = await checkAiSpend(auth, { operation: 'image', route: 'test' });
+
+    expect(r.ok).toBe(true);
+    expect(creditsSpent()).toBe(CREDIT_COSTS.image);
+    expect(assistantConsumedCount()).toBe(0);
   });
 });

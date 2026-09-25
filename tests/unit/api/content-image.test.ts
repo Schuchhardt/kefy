@@ -126,6 +126,33 @@ describe('POST /api/content/image', () => {
     expect(body.url).toBeUndefined();
   });
 
+  // La página de creación ofrece como referencia imágenes de posts anteriores y
+  // de la biblioteca: viven en kefy-content-images y tienen que aceptarse.
+  it('acepta como referencia la imagen de un post anterior (kefy-content-images)', async () => {
+    const { POST } = await import('@/app/api/content/image/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    mockDb(makeItemsChain());
+    vi.mocked(generateContentImage).mockResolvedValueOnce({ b64: 'AAAA', revisedPrompt: null } as never);
+    vi.mocked(uploadBase64Image).mockResolvedValueOnce('https://cdn.example.com/generated.jpeg');
+    const previous = 'https://test.supabase.co/storage/v1/object/public/kefy-content-images/org-1/prev.jpeg';
+
+    const res = await POST(makeReq({ prompt: 'un gato', reference_image_urls: [previous] }));
+
+    expect(res.status).toBe(201);
+    expect(vi.mocked(generateContentImage).mock.calls[0][0]).toMatchObject({ referenceImages: [previous] });
+  });
+
+  it('rechaza con 422 una referencia fuera del Storage de Kefy', async () => {
+    const { POST } = await import('@/app/api/content/image/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    mockDb(makeItemsChain());
+
+    const res = await POST(makeReq({ prompt: 'un gato', reference_image_urls: ['https://evil.example/a.png'] }));
+
+    expect(res.status).toBe(422);
+    expect(generateContentImage).not.toHaveBeenCalled();
+  });
+
   it('con itemId: marca generating al entrar y ready con la URL al terminar', async () => {
     const { POST } = await import('@/app/api/content/image/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);

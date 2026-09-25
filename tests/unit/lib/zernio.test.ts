@@ -246,6 +246,35 @@ describe('publishPost', () => {
     expect(body.content).toBe(longText);
     expect(body.mediaItems).toEqual([{ type: 'video', url: 'https://s3.example.com/reel.mp4' }]);
   });
+
+  it('request_id: se envía tal cual como x-request-id', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({
+      account_id: 'acc-1',
+      platform:   'instagram',
+      text:       'Con request id',
+      request_id: 'action-123:acc-1',
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)['x-request-id']).toBe('action-123:acc-1');
+  });
+
+  it('sin request_id: genera uno distinto en cada llamada', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+    mockOk({ post: { _id: 'post-2', status: 'published', platforms: [] } });
+
+    await publishPost({ account_id: 'acc-1', platform: 'instagram', text: 'Uno' });
+    await publishPost({ account_id: 'acc-1', platform: 'instagram', text: 'Dos' });
+
+    const ids = mockFetch.mock.calls.map(
+      ([, init]) => ((init as RequestInit).headers as Record<string, string>)['x-request-id'],
+    );
+    expect(ids[0]).toBeTruthy();
+    expect(ids[1]).toBeTruthy();
+    expect(ids[0]).not.toBe(ids[1]);
+  });
 });
 
 // ─── createProfile ────────────────────────────────────────────────────────────

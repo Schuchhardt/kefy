@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
+import { useDataChanged } from '@/lib/data-events';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 
 import esT from '@/locales/es/dashboard/calendar';
@@ -73,6 +74,9 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // El asistente publicó, programó o canceló: se recarga el calendario.
+  useDataChanged(['scheduled', 'content'], () => { void fetchData(); });
 
   const postsByDay = useMemo(() => {
     const map: Record<string, ScheduledPost[]> = {};

@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { requireActiveSubscription } from '@/lib/subscription';
 import { checkRateLimit, publishRule, rateLimitResponse } from '@/lib/rate-limit';
-import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
-import { prepareCarouselSlides, prepareSingleImage } from '@/lib/publish-images';
-import type { CarouselSlide, ContentType } from '@/types/content';
-import type { ContentChannel } from '@/types/ai';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { listScheduledPosts, publishContent } from '@/lib/services/publish';
+import type { ContentType } from '@/types/content';
 
 const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 
@@ -23,32 +22,13 @@ export async function GET(req: NextRequest) {
   const limit  = Math.min(parseInt(searchParams.get('limit') ?? '20', 10), 100);
   const offset = Math.max(parseInt(searchParams.get('offset') ?? '0', 10), 0);
 
-  const VALID_STATUSES = new Set(['pending', 'scheduled', 'published', 'failed', 'cancelled']);
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
 
-  const db = createSupabaseServer();
-
-  let query = db
-    .from('kefy_scheduled_posts')
-    .select(`
-      id, status, scheduled_at, published_at, error_message,
-      zernio_post_id, platform_post_id, created_at,
-      kefy_content_items ( id, channel, title, body, image_url ),
-      kefy_social_accounts ( id, platform, username, avatar_url )
-    `)
-    .eq('org_id', auth.orgId)
-    .order('scheduled_at', { ascending: true, nullsFirst: false })
-    .range(offset, offset + limit - 1);
-
-  if (status && VALID_STATUSES.has(status)) query = query.eq('status', status);
-
-  const { data, error } = await query;
-
-  if (error) {
-    console.error('schedule GET error:', error.message);
-    return NextResponse.json({ error: 'Failed to fetch schedule' }, { status: 500 });
+  try {
+    return NextResponse.json(await listScheduledPosts(ctx, { status, limit, offset }));
+  } catch (err) {
+    return serviceErrorResponse(err, { route: '/api/social/schedule', auth });
   }
-
-  return NextResponse.json({ posts: data ?? [] });
 }
 
 // ─── POST /api/social/schedule ────────────────────────────────────────────────
@@ -121,200 +101,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const accountIds = [...accountIdSet];
-  const db = createSupabaseServer();
+  // La ruta es de toda la organización (brandScope 'org'): el servicio exige
+  // que las cuentas sean de la marca del contenido.
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
 
-  // Verify ownership of content item
-  const { data: item } = await db
-    .from('kefy_content_items')
-    .select('id, body, image_url, hashtags, channel, status, content_type, slides, video_url, mux_playback_id')
-    .eq('id', input.content_item_id)
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  if (!item) return NextResponse.json({ error: 'Content item not found' }, { status: 404 });
-
-  const format = (input.format as ContentType | undefined) ?? (item.content_type as ContentType);
-
-  let scheduleSource: PublishMediaSource;
-  if (format === item.content_type) {
-    scheduleSource = {
-      body: item.body, image_url: item.image_url, slides: item.slides,
-      video_url: item.video_url, mux_playback_id: item.mux_playback_id, hashtags: item.hashtags ?? [],
-    };
-  } else {
-    const { data: rendition } = await db
-      .from('kefy_content_renditions')
-      .select('body, image_url, slides, video_url, mux_playback_id, hashtags, status')
-      .eq('content_item_id', item.id)
-      .eq('format', format)
-      .maybeSingle();
-    if (!rendition || rendition.status !== 'ready') {
-      return NextResponse.json({ error: `The ${format} version of this content hasn't been generated yet` }, { status: 422 });
-    }
-    scheduleSource = rendition;
+  try {
+    const out = await publishContent(ctx, {
+      itemId:      input.content_item_id,
+      accountIds:  [...accountIdSet],
+      format:      input.format as ContentType | undefined,
+      mode:        'schedule',
+      scheduledAt: scheduledAt.toISOString(),
+    });
+    return NextResponse.json(out.body, { status: out.status });
+  } catch (err) {
+    return serviceErrorResponse(err, { route: '/api/social/schedule', auth });
   }
-
-  // Same media rules as immediate publish — a reel with no rendered video is
-  // rejected here instead of being scheduled as its cover image.
-  const resolved = resolvePublishMedia(format, scheduleSource);
-  if (!resolved.ok) {
-    console.warn(`[schedule] REJECTED itemId=${item.id} format=${format}: ${resolved.error}`);
-    return NextResponse.json({ error: resolved.error }, { status: 422 });
-  }
-  const media = resolved.media;
-
-  // Fetch all requested active accounts belonging to this org
-  const { data: accounts } = await db
-    .from('kefy_social_accounts')
-    .select('id, zernio_account_id, status, platform')
-    .in('id', accountIds)
-    .eq('org_id', auth.orgId)
-    .eq('status', 'active');
-
-  if (!accounts || accounts.length === 0) {
-    return NextResponse.json({ error: 'No active social accounts found for the given IDs' }, { status: 404 });
-  }
-
-  const { publishPost, STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
-
-  // Pre-download the source image once so every account gets a copy fitted to
-  // its own network — same treatment as immediate publish, which used to be the
-  // only path that resized (scheduled posts went out at the original size).
-  const carouselSlides: CarouselSlide[] = format === 'carousel' && Array.isArray(scheduleSource.slides)
-    ? (scheduleSource.slides as CarouselSlide[])
-    : [];
-
-  // El texto que se escribe dentro de la imagen usa la tipografía elegida por
-  // la marca en su Brand Kit, no una genérica.
-  const { data: brandFontsRow } = await db
-    .from('kefy_brand_kits')
-    .select('font_heading, font_body')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  const imageDeps = {
-    orgId:      auth.orgId,
-    prefix:     'schedule',
-    brandFonts: { heading: brandFontsRow?.font_heading, body: brandFontsRow?.font_body },
-  };
-
-  let sourceImageBuffer: Buffer | null = null;
-  if (media.image_url) {
-    try {
-      const resp = await fetch(media.image_url);
-      if (resp.ok) {
-        const ab = await resp.arrayBuffer();
-        sourceImageBuffer = Buffer.from(ab);
-      }
-    } catch {
-      console.warn('[schedule] Could not fetch source image for resize, using original URL');
-    }
-  }
-
-  console.log(
-    `[schedule] START itemId=${item.id} format=${format}` +
-    ` scheduledAt=${scheduledAt.toISOString()} accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
-  );
-
-  const results: Array<{
-    social_account_id: string;
-    platform: string;
-    status: 'scheduled' | 'failed';
-    post_id?: string;
-    scheduled_post_id?: string;
-    error?: string;
-  }> = [];
-
-  for (const account of accounts) {
-    try {
-      console.log(
-        `[schedule] → account ${account.id} platform=${account.platform}` +
-        ` zernio_account_id=${account.zernio_account_id}` +
-        ` scheduledAt=${scheduledAt.toISOString()}` +
-        ` hasImage=${!!media.image_url} mediaUrls=${media.media_urls?.length ?? 0} hasVideo=${!!media.video_url}`,
-      );
-
-      const platform = (account.platform ?? 'generic') as ContentChannel;
-
-      // Ajuste al formato de la red + texto quemado donde la red no lo muestra
-      // (caption de story, y el título/cuerpo de cada slide del carrusel).
-      let imageForAccount = media.image_url;
-      if (media.image_url) {
-        imageForAccount = await prepareSingleImage(
-          media.image_url, sourceImageBuffer, platform, format,
-          imageDeps,
-          format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
-            ? media.text
-            : undefined,
-        );
-      }
-
-      let mediaUrlsForAccount = media.media_urls;
-      if (format === 'carousel' && carouselSlides.length > 0) {
-        mediaUrlsForAccount = await prepareCarouselSlides(
-          carouselSlides, platform, imageDeps,
-        );
-      }
-
-      const zernioResult = await publishPost({
-        account_id:   account.zernio_account_id!,
-        platform:     account.platform,
-        text:         media.text,
-        image_url:    imageForAccount,
-        media_urls:   mediaUrlsForAccount,
-        video_url:    media.video_url,
-        content_type: format,
-        hashtags:     media.hashtags,
-        scheduled_at: scheduledAt.toISOString(),
-      });
-
-      console.log(
-        `[schedule] ✓ account ${account.id} zernio_post_id=${zernioResult.post_id}` +
-        ` status=${zernioResult.status} scheduledAt=${zernioResult.scheduled_at}`,
-      );
-
-      const { data: post, error: dbError } = await db
-        .from('kefy_scheduled_posts')
-        .insert({
-          org_id:            auth.orgId,
-          content_item_id:   item.id,
-          social_account_id: account.id,
-          scheduled_at:      scheduledAt.toISOString(),
-          zernio_post_id:    zernioResult.post_id,
-          status:            'scheduled',
-          format,
-          created_by:        auth.userId,
-        })
-        .select('id')
-        .single();
-
-      if (dbError) console.error('schedule insert error:', dbError.message);
-
-      results.push({
-        social_account_id: account.id,
-        platform:          account.platform,
-        status:            'scheduled',
-        post_id:           zernioResult.post_id,
-        scheduled_post_id: post?.id,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Zernio scheduling failed';
-      console.error(`[schedule] ✗ account ${account.id} platform=${account.platform} error:`, msg);
-      if (err instanceof Error && err.stack) console.error('[schedule] stack:', err.stack);
-      results.push({ social_account_id: account.id, platform: account.platform, status: 'failed', error: msg });
-    }
-  }
-
-  const allFailed = results.every((r) => r.status === 'failed');
-  const httpStatus = allFailed ? 502 : 201;
-
-  if (!allFailed) {
-    await db
-      .from('kefy_content_items')
-      .update({ status: 'scheduled' })
-      .eq('id', item.id);
-  }
-
-  return NextResponse.json({ results }, { status: httpStatus });
 }

@@ -4,7 +4,8 @@ import DashboardSidebar from '@/components/dashboard/Sidebar';
 import BottomNav from '@/components/dashboard/BottomNav';
 import UserAvatar from '@/components/dashboard/UserAvatar';
 import MobileBrandSwitcher from '@/components/dashboard/MobileBrandSwitcher';
-import { ReactNode } from 'react';
+import AssistantWidget from '@/components/assistant/AssistantWidget';
+import { ReactNode, Suspense } from 'react';
 
 export default async function DashboardLayout({
   children,
@@ -27,6 +28,10 @@ export default async function DashboardLayout({
         <MobileBrandSwitcher lang={lang} />
         <UserAvatar lang={lang} />
         <BottomNav lang={lang} />
+        {/* useSearchParams exige Suspense en un layout renderizado en el servidor. */}
+        <Suspense fallback={null}>
+          <AssistantWidget lang={lang} />
+        </Suspense>
       </BrandProvider>
     </AuthProvider>
   );

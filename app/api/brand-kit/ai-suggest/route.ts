@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getAnthropic, MODELS } from '@/lib/ai';
 import { guardAiRequest } from '@/lib/ai-guard';
 import { reportError } from '@/lib/observability';
 import type { BrandKit } from '@/types/brand-kit';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Field-specific prompt templates
 const FIELD_PROMPTS: Record<string, (ctx: Partial<BrandKit>, lang: string) => string> = {
@@ -112,8 +110,10 @@ export async function POST(req: NextRequest) {
   if (guard.blocked) return guard.blocked;
 
   try {
+    // Dentro del try: sin ANTHROPIC_API_KEY lanza aquí, y se reembolsa.
+    const anthropic = getAnthropic();
     const message = await anthropic.messages.create({
-      model: 'claude-opus-4-5',
+      model: MODELS.content,
       max_tokens: 512,
       messages: [
         {

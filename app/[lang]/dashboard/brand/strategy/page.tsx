@@ -1,9 +1,13 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useEffect, useRef, useState, useCallback } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useDataChanged } from '@/lib/data-events';
+import { useAuth } from '@/lib/auth-context';
 import type { Locale } from '@/types/i18n';
-import type { Objective, Industry, Strategy, Template, OrgSelection } from '@/types/strategy';
+import type { Objective, Industry, Strategy, Template, OrgSelection, CustomCalendarItem } from '@/types/strategy';
+import CustomStrategyPanel, { activeBadgeStyle } from '@/components/dashboard/strategy/CustomStrategyPanel';
+import { draftFromCatalog, generateParams, type CustomDraft } from '@/components/dashboard/strategy/custom-strategy-model';
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -37,13 +41,47 @@ import esT from '@/locales/es/dashboard/strategy';
 import enT from '@/locales/en/dashboard/strategy';
 
 const T = { es: esT, en: enT } as const;
+
+const tabStyle = (selected: boolean): React.CSSProperties => ({
+  display: 'inline-flex', alignItems: 'center', gap: 8,
+  padding: '9px 16px', borderRadius: 100, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+  border: `1.5px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+  background: selected ? 'rgba(198,255,75,0.08)' : 'var(--surface)',
+  color: selected ? 'var(--text)' : 'var(--muted)',
+});
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
+//
+// Dos modos: «Recomendadas» (objetivo × industria del catálogo) y
+// «Personalizadas» (estrategias propias de la org). Los enlaces del asistente
+// abren esta página con ?objective=&industry= (previsualiza ese par) o
+// ?custom=<id> (abre esa estrategia propia).
 
 export default function StrategyPage() {
+  // useSearchParams necesita un Suspense para el prerender.
+  return (
+    <Suspense>
+      <StrategyPageInner />
+    </Suspense>
+  );
+}
+
+function StrategyPageInner() {
   const { lang } = useParams<{ lang: string }>();
   const router   = useRouter();
+  const searchParams = useSearchParams();
+  const { role } = useAuth();
   const locale   = (lang === 'en' ? 'en' : 'es') as Locale;
   const t        = T[locale];
+  // Solo owner/admin escriben la estrategia. Sin rol conocido todavía se deja
+  // intentar: el servidor responde 403 y se explica.
+  const canEdit  = !role || role === 'owner' || role === 'admin';
+
+  const [mode, setMode] = useState<'catalog' | 'custom'>('catalog');
+  const [selectedCustomId, setSelectedCustomId] = useState<string | null>(null);
+  const [customReload, setCustomReload] = useState(0);
+  const [prefill, setPrefill] = useState<{ id: number; draft: CustomDraft } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Catalog
   const [objectives,  setObjectives]  = useState<Objective[]>([]);
@@ -92,35 +130,85 @@ export default function StrategyPage() {
   const [installingPack, setInstallingPack] = useState<string | null>(null);
 
   // ── Load catalog + saved selection on mount ──────────────────────────────
-  useEffect(() => {
-    async function init() {
-      setCatalogLoading(true);
-      try {
-        const [catRes, orgRes] = await Promise.all([
-          fetch('/api/strategies',     { credentials: 'include' }),
-          fetch('/api/strategies/org', { credentials: 'include' }),
-        ]);
+  // `initial`: la primera carga muestra el estado de carga; las recargas (el
+  // asistente cambió la estrategia) son silenciosas para no desmontar la página.
+  const loadStrategy = useCallback(async (initial = true): Promise<OrgSelection | null> => {
+    if (initial) setCatalogLoading(true);
+    let loaded: OrgSelection | null = null;
+    try {
+      const [catRes, orgRes] = await Promise.all([
+        fetch('/api/strategies',     { credentials: 'include' }),
+        fetch('/api/strategies/org', { credentials: 'include' }),
+      ]);
 
-        if (catRes.ok) {
-          const { objectives: objs, industries: inds } = await catRes.json();
-          setObjectives(objs ?? []);
-          setIndustries(inds ?? []);
-        }
-
-        if (orgRes.ok) {
-          const { selection } = await orgRes.json();
-          if (selection) {
-            setSavedSelection(selection);
-            setSelectedObjective(selection.objective_id);
-            setSelectedIndustry(selection.industry_id);
-          }
-        }
-      } finally {
-        setCatalogLoading(false);
+      if (catRes.ok) {
+        const { objectives: objs, industries: inds } = await catRes.json();
+        setObjectives(objs ?? []);
+        setIndustries(inds ?? []);
       }
+
+      if (orgRes.ok) {
+        const { selection } = await orgRes.json();
+        if (selection) {
+          loaded = selection;
+          setSavedSelection(selection);
+          setSelectedObjective(selection.objective_id);
+          setSelectedIndustry(selection.industry_id);
+        }
+      }
+    } finally {
+      setCatalogLoading(false);
     }
-    init();
+    return loaded;
   }, []);
+
+  useEffect(() => { void loadStrategy(); }, [loadStrategy]);
+
+  // El asistente activó, creó o editó una estrategia: se recargan la selección
+  // guardada y las propias. Si activó otra propia, se muestra esa.
+  const activeCustomId = savedSelection?.custom_strategy_id ?? null;
+  useDataChanged(['strategy'], () => {
+    const before = activeCustomId;
+    setCustomReload((n) => n + 1);
+    void loadStrategy(false).then((sel) => {
+      const after = sel?.custom_strategy_id ?? null;
+      if (after && after !== before) {
+        setMode('custom');
+        setSelectedCustomId(after);
+      }
+    });
+  });
+
+  // ── Parámetros de la URL (enlaces del asistente) ─────────────────────────
+  // Se aplican una vez por combinación, cuando ya está la selección guardada:
+  // ?objective=&industry= previsualiza ese par (guardarlo es decisión del
+  // usuario), ?custom=<id> abre esa propia. Sin parámetros se abre la pestaña
+  // de la estrategia activa.
+  const paramObjective = searchParams?.get('objective') ?? null;
+  const paramIndustry  = searchParams?.get('industry') ?? null;
+  const paramCustom    = searchParams?.get('custom') ?? null;
+  const paramsKey = `${paramObjective ?? ''}|${paramIndustry ?? ''}|${paramCustom ?? ''}`;
+  const appliedParams = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (catalogLoading || appliedParams.current === paramsKey) return;
+    appliedParams.current = paramsKey;
+    if (paramCustom) {
+      setMode('custom');
+      setSelectedCustomId(paramCustom);
+      return;
+    }
+    if (paramObjective || paramIndustry) {
+      setMode('catalog');
+      if (paramObjective) setSelectedObjective(paramObjective);
+      if (paramIndustry) setSelectedIndustry(paramIndustry);
+      return;
+    }
+    if (activeCustomId) {
+      setMode('custom');
+      setSelectedCustomId(activeCustomId);
+    }
+  }, [catalogLoading, paramsKey, paramCustom, paramObjective, paramIndustry, activeCustomId]);
 
 
   // ── Fetch recommendation whenever both selectors are filled ──────────────
@@ -188,6 +276,7 @@ export default function StrategyPage() {
     if (!selectedObjective || !selectedIndustry) return;
     setSaving(true);
     setSaveOk(false);
+    setSaveError(null);
     try {
       const res = await fetch('/api/strategies/org', {
         method:  'PATCH',
@@ -204,7 +293,11 @@ export default function StrategyPage() {
         setSavedSelection(selection);
         setSaveOk(true);
         setTimeout(() => setSaveOk(false), 3000);
+      } else {
+        setSaveError(res.status === 403 ? t.forbidden : t.genericError);
       }
+    } catch {
+      setSaveError(t.genericError);
     } finally {
       setSaving(false);
     }
@@ -221,6 +314,31 @@ export default function StrategyPage() {
     });
     router.push(`/${lang}/dashboard/content?${params}`);
   }
+
+  function handleGenerateCustom(item: CustomCalendarItem) {
+    router.push(`/${lang}/dashboard/content?${generateParams(item)}`);
+  }
+
+  // «Personalizar esta estrategia»: abre el editor de propias con la del
+  // catálogo ya copiada.
+  function startFromRecommended() {
+    if (!strategy) return;
+    const draft = draftFromCatalog(strategy, templates, {
+      locale,
+      objectiveId: selectedObjective,
+      suffix: t.customSuffix,
+    });
+    setPrefill((prev) => ({ id: (prev?.id ?? 0) + 1, draft }));
+    setMode('custom');
+    window.scrollTo?.({ top: 0, behavior: 'smooth' });
+  }
+
+  const onSelectionSaved = useCallback((selection: OrgSelection) => {
+    setSavedSelection(selection);
+  }, []);
+  const onSelectionStale = useCallback(() => {
+    setSavedSelection((prev) => (prev ? { ...prev, custom_strategy_id: null } : prev));
+  }, []);
 
   // ── Group templates by week ───────────────────────────────────────────────
   const weeks = templates.reduce<Record<number, Template[]>>((acc, t) => {
@@ -243,9 +361,12 @@ export default function StrategyPage() {
     );
   }
 
+  // La del catálogo está activa si coincide el par guardado y no manda una propia.
   const isSelectionSaved =
     savedSelection?.objective_id === selectedObjective &&
-    savedSelection?.industry_id === selectedIndustry;
+    savedSelection?.industry_id === selectedIndustry &&
+    !activeCustomId;
+  const catalogActive = !!savedSelection?.strategy_id && !activeCustomId;
 
   return (
     <div style={{ padding: '32px', maxWidth: 900, fontFamily: 'var(--font-geist-sans)' }}>
@@ -260,6 +381,60 @@ export default function StrategyPage() {
           {t.headingDesc}
         </p>
       </div>
+
+      {/* ── Modos ── */}
+      <div role="tablist" aria-label={t.modesLabel} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 32 }}>
+        <button
+          type="button"
+          role="tab"
+          id="strategy-tab-catalog"
+          aria-selected={mode === 'catalog'}
+          aria-controls="strategy-panel"
+          onClick={() => setMode('catalog')}
+          style={tabStyle(mode === 'catalog')}
+        >
+          {t.modeCatalog}
+          {catalogActive && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="strategy-tab-custom"
+          aria-selected={mode === 'custom'}
+          aria-controls="strategy-panel"
+          onClick={() => setMode('custom')}
+          style={tabStyle(mode === 'custom')}
+        >
+          {t.modeCustom}
+          {activeCustomId && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
+        </button>
+      </div>
+
+      <div role="tabpanel" id="strategy-panel" aria-labelledby={mode === 'catalog' ? 'strategy-tab-catalog' : 'strategy-tab-custom'}>
+      {mode === 'custom' ? (
+        <CustomStrategyPanel
+          lang={locale}
+          objectives={objectives}
+          activeCustomId={activeCustomId}
+          canEdit={canEdit}
+          selectedId={selectedCustomId}
+          onSelectedIdChange={setSelectedCustomId}
+          onSelectionSaved={onSelectionSaved}
+          onSelectionStale={onSelectionStale}
+          reloadToken={customReload}
+          prefill={prefill}
+          onGenerate={handleGenerateCustom}
+        />
+      ) : (
+      <>
+      {activeCustomId && (
+        <div role="status" style={{
+          background: 'rgba(198,255,75,0.07)', border: '1px solid rgba(198,255,75,0.25)',
+          borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text)', lineHeight: 1.5, marginBottom: 24,
+        }}>
+          {t.customActiveElsewhere}
+        </div>
+      )}
 
       {/* ── Step 1: Objective ── */}
       <div style={{ marginBottom: 40 }}>
@@ -391,8 +566,11 @@ export default function StrategyPage() {
                     padding: '24px 28px',
                   }}
                 >
-                  <div style={{ fontFamily: 'var(--font-syne)', fontSize: 20, fontWeight: 700, marginBottom: 8, color: 'var(--text)' }}>
-                    {locale === 'en' ? strategy.framework_name_en : strategy.framework_name_es}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <div style={{ fontFamily: 'var(--font-syne)', fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>
+                      {locale === 'en' ? strategy.framework_name_en : strategy.framework_name_es}
+                    </div>
+                    {isSelectionSaved && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
                   </div>
                   <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 20 }}>
                     {locale === 'en' ? strategy.framework_desc_en : strategy.framework_desc_es}
@@ -648,7 +826,15 @@ export default function StrategyPage() {
               )}
 
               {/* ── Save button ── */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              {saveError && (
+                <div role="alert" style={{
+                  background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.35)',
+                  borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text)', marginBottom: 16,
+                }}>
+                  {saveError}
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                 <button
                   onClick={handleSave}
                   disabled={saving || isSelectionSaved}
@@ -666,6 +852,18 @@ export default function StrategyPage() {
                 >
                   {saving ? t.saving : isSelectionSaved ? t.strategySaved : t.saveStrategy}
                 </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={startFromRecommended}
+                    style={{
+                      background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)',
+                      borderRadius: 10, padding: '12px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    {t.startFromRecommended}
+                  </button>
+                )}
                 {saveOk && (
                   <span style={{ fontSize: 13, color: 'var(--accent)' }}>{t.savedOk}</span>
                 )}
@@ -674,6 +872,9 @@ export default function StrategyPage() {
           )}
         </>
       )}
+      </>
+      )}
+      </div>
     </div>
   );
 }

@@ -23,9 +23,21 @@ import type {
 } from '@/types/ai';
 import { withSourceBlock } from '@/lib/content-source';
 
+// ─── Modelos ──────────────────────────────────────────────────────────────────
+//
+// `content` es el modelo de todas las generaciones existentes (posts,
+// carruseles, reels, recomendaciones, sugerencias del brand kit): centralizarlo
+// aquí no cambia su valor. `assistant` es el del chat del dashboard y se puede
+// cambiar sin tocar código con ASSISTANT_MODEL.
+
+export const MODELS = {
+  assistant: process.env.ASSISTANT_MODEL ?? 'claude-sonnet-5',
+  content: 'claude-opus-4-5',
+} as const;
+
 // ─── Client singletons ────────────────────────────────────────────────────────
 
-function getAnthropic(): Anthropic {
+export function getAnthropic(): Anthropic {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error('Missing ANTHROPIC_API_KEY env var');
   return new Anthropic({ apiKey: key });
@@ -44,7 +56,7 @@ function getOpenAI(): OpenAI {
  * Falls back to the provided inline string if the file is missing.
  * Supports simple `{{variable}}` template substitution.
  */
-function loadPrompt(name: string, vars: Record<string, string> = {}, fallback = ''): string {
+export function loadPrompt(name: string, vars: Record<string, string> = {}, fallback = ''): string {
   try {
     const filePath = path.join(process.cwd(), 'prompts', `${name}.prompt.md`);
     let template   = fs.readFileSync(filePath, 'utf-8');
@@ -169,7 +181,7 @@ async function generateWithClaude(
   message: string,
 ): Promise<GenerateTextResult> {
   const client = getAnthropic();
-  const model  = 'claude-opus-4-5';
+  const model  = MODELS.content;
 
   const response = await client.messages.create({
     model,
@@ -378,7 +390,7 @@ export async function generateCarouselSlides(
     : `Create a ${slideCount}-slide carousel about: ${opts.topic}`;
 
   const client = getAnthropic();
-  const model  = 'claude-opus-4-5';
+  const model  = MODELS.content;
 
   const response = await client.messages.create({
     model,
@@ -453,7 +465,7 @@ export async function generateSlideText(
     || `Write an engaging ${unit}.`;
 
   const client = getAnthropic();
-  const model  = 'claude-opus-4-5';
+  const model  = MODELS.content;
 
   const response = await client.messages.create({
     model,
@@ -520,7 +532,7 @@ export async function generateReelScript(
     : `Create a ${sceneCount}-scene vertical reel about: ${opts.topic}`;
 
   const client = getAnthropic();
-  const model  = 'claude-opus-4-5';
+  const model  = MODELS.content;
 
   const response = await client.messages.create({
     model,
@@ -617,7 +629,7 @@ export async function generateContentRecommendations(
   }, inlineSystem);
 
   const client = getAnthropic();
-  const model  = 'claude-opus-4-5';
+  const model  = MODELS.content;
 
   const response = await client.messages.create({
     model,
@@ -690,7 +702,7 @@ export async function generateLibraryContent(
   const client = getAnthropic();
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-5',
+    model: MODELS.content,
     max_tokens: 1024,
     system,
     messages: [{ role: 'user', content: `Generate a ${opts.contentType} for the ${opts.industryName} industry.` }],

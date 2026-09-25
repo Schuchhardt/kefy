@@ -124,19 +124,26 @@ export function clientIp(req: NextRequest): string {
   return req.headers.get('x-real-ip')?.trim() || 'desconocida';
 }
 
+/** Cuerpo del 429 estándar. Separado para reutilizarlo fuera de un Response (MCP, chat). */
+export function rateLimitBody(result: RateLimitResult, message: string): { error: string; retryAfter: number } {
+  return { error: message, retryAfter: result.retryAfter };
+}
+
+/** Cabeceras del 429 estándar, las que esperan los clientes HTTP. */
+export function rateLimitHeaders(result: RateLimitResult): Record<string, string> {
+  return {
+    'Retry-After': String(result.retryAfter),
+    'X-RateLimit-Limit': String(result.limit),
+    'X-RateLimit-Remaining': '0',
+  };
+}
+
 /** Respuesta 429 estándar, con las cabeceras que esperan los clientes HTTP. */
 export function rateLimitResponse(result: RateLimitResult, message: string): NextResponse {
-  return NextResponse.json(
-    { error: message, retryAfter: result.retryAfter },
-    {
-      status: 429,
-      headers: {
-        'Retry-After': String(result.retryAfter),
-        'X-RateLimit-Limit': String(result.limit),
-        'X-RateLimit-Remaining': '0',
-      },
-    },
-  );
+  return NextResponse.json(rateLimitBody(result, message), {
+    status: 429,
+    headers: rateLimitHeaders(result),
+  });
 }
 
 // ─── Reglas de la aplicación ──────────────────────────────────────────────────
@@ -156,6 +163,12 @@ export const RATE_LIMITS = {
   aiGeneration:   { limit: 20, windowSeconds: 60 },
   /** Publicación en redes por organización. */
   publish:        { limit: 30, windowSeconds: 60 },
+  /** Mensajes al asistente por organización: frena un cliente en bucle. */
+  assistant:      { limit: 30, windowSeconds: 60 },
+  /** Llamadas a /api/v1 y /api/mcp por API key. */
+  apiKey:         { limit: 120, windowSeconds: 60 },
+  /** Sincronizaciones con Zernio (analytics, DMs, comentarios) por organización. */
+  sync:           { limit: 6,  windowSeconds: 300 },
 } as const;
 
 /** Regla de login para una IP. */
@@ -182,4 +195,18 @@ export function aiRule(orgId: string): RateLimitRule {
 
 export function publishRule(orgId: string): RateLimitRule {
   return { bucket: `publish:org:${orgId}`, ...RATE_LIMITS.publish };
+}
+
+/** Regla de mensajes al asistente para una organización. */
+export function assistantRule(orgId: string): RateLimitRule {
+  return { bucket: `assistant:org:${orgId}`, ...RATE_LIMITS.assistant };
+}
+
+/** Regla de una API key (MCP y /api/v1). */
+export function apiKeyRule(keyId: string): RateLimitRule {
+  return { bucket: `apikey:${keyId}`, ...RATE_LIMITS.apiKey };
+}
+
+export function syncRule(orgId: string): RateLimitRule {
+  return { bucket: `sync:org:${orgId}`, ...RATE_LIMITS.sync };
 }

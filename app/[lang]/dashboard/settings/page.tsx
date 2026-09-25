@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import type { Locale } from '@/types/i18n';
 import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
 import TeamPanel from '@/components/dashboard/TeamPanel';
+import ApiKeysSection from '@/components/dashboard/settings/ApiKeysSection';
 
 import esT from '@/locales/es/dashboard/settings';
 import enT from '@/locales/en/dashboard/settings';
@@ -424,6 +425,7 @@ function SettingsPageInner() {
         <SocialConnectionPanel
           locale={(lang === 'en' ? 'en' : 'es')}
           mode="settings"
+          autoConnectFromQuery
         />
       </Section>
 
@@ -431,6 +433,14 @@ function SettingsPageInner() {
       <Section title={lang === 'en' ? 'Team' : 'Equipo'}>
         <TeamPanel locale={lang === 'en' ? 'en' : 'es'} role={role ?? 'member'} />
       </Section>
+
+      {/* ── API y MCP ── Solo dueño y administradores: /api/api-keys responde 403
+          al resto, así que a los miembros no se les muestra la sección. */}
+      {(role === 'owner' || role === 'admin') && (
+        <Section title={t.apiKeys.sectionTitle}>
+          <ApiKeysSection lang={lang === 'en' ? 'en' : 'es'} />
+        </Section>
+      )}
 
       {/* ── Lead Scoring ── */}
       <Section title={lang === 'en' ? 'Lead Scoring' : 'Scoring de Leads'}>

@@ -159,6 +159,46 @@ export function blockMessage(
   return BLOCK_MESSAGES[reason][language];
 }
 
+export type SubscriptionCheck =
+  | { ok: true }
+  | { ok: false; status: 402 | 503; body: Record<string, unknown> };
+
+/**
+ * Núcleo de la guardia de suscripción, sin HTTP: devuelve el estado y el cuerpo
+ * a responder. Lo usan `requireActiveSubscription` y el registro de acciones
+ * del asistente (chat, MCP y API), que no siempre responden con un Response.
+ */
+export async function checkSubscription(
+  orgId: string,
+  language: 'es' | 'en' = 'es',
+  now = new Date(),
+): Promise<SubscriptionCheck> {
+  let entitlement: Entitlement;
+  try {
+    entitlement = await getEntitlement(orgId, now);
+  } catch {
+    // getEntitlement ya reportó a Sentry. Falla cerrado, como los créditos.
+    const message = language === 'en'
+      ? 'Could not verify your subscription. Try again in a moment.'
+      : 'No pudimos verificar tu suscripción. Reintenta en un momento.';
+    return { ok: false, status: 503, body: { error: message } };
+  }
+
+  if (entitlement.canCreate) return { ok: true };
+
+  const reason = entitlement.reason ?? 'canceled';
+  return {
+    ok: false,
+    status: 402,
+    body: {
+      error: blockMessage(reason, language),
+      subscriptionRequired: true,
+      reason,
+      status: entitlement.status,
+    },
+  };
+}
+
 /**
  * Guardia de suscripción para las rutas que no gastan créditos pero sí son
  * «crear»: publicar y programar. Devuelve la respuesta a retornar, o `null` si
@@ -172,27 +212,6 @@ export async function requireActiveSubscription(
   language: 'es' | 'en' = 'es',
   now = new Date(),
 ): Promise<NextResponse | null> {
-  let entitlement: Entitlement;
-  try {
-    entitlement = await getEntitlement(orgId, now);
-  } catch {
-    // getEntitlement ya reportó a Sentry. Falla cerrado, como los créditos.
-    const message = language === 'en'
-      ? 'Could not verify your subscription. Try again in a moment.'
-      : 'No pudimos verificar tu suscripción. Reintenta en un momento.';
-    return NextResponse.json({ error: message }, { status: 503 });
-  }
-
-  if (entitlement.canCreate) return null;
-
-  const reason = entitlement.reason ?? 'canceled';
-  return NextResponse.json(
-    {
-      error: blockMessage(reason, language),
-      subscriptionRequired: true,
-      reason,
-      status: entitlement.status,
-    },
-    { status: 402 },
-  );
+  const r = await checkSubscription(orgId, language, now);
+  return r.ok ? null : NextResponse.json(r.body, { status: r.status });
 }

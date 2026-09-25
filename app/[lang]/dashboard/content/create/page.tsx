@@ -16,6 +16,7 @@ import type { Channel } from '@/types/channels';
 import type { Locale } from '@/types/i18n';
 import type { RecSource, Recommendation, StrategyMeta } from '@/types/strategy';
 import { CHANNELS as ALL_CHANNELS } from '@/lib/channels';
+import { useDataChanged } from '@/lib/data-events';
 
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
@@ -378,6 +379,37 @@ function ContentPageInner() {
   }, [filterChannel, filterStatus, setItems, setLoading]);
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
+
+  // El asistente creó o editó contenido: se recarga la lista.
+  useDataChanged(['content'], () => { void fetchItems(); });
+
+  // Enlace profundo ?item=<id> (lo generan los enlaces del asistente): abre el
+  // contenido en el modal de edición.
+  const deepItemId = searchParams?.get('item') ?? null;
+  useEffect(() => {
+    if (!deepItemId) return;
+    let cancelled = false;
+    fetch(`/api/content/${encodeURIComponent(deepItemId)}`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json() as { item?: ContentItem };
+        if (!cancelled && data.item) setEditItem(data.item);
+      })
+      .catch(() => {/* non-critical */});
+    return () => { cancelled = true; };
+  }, [deepItemId]);
+
+  const closeEditItem = useCallback(() => {
+    setEditItem(null);
+    // Se quita ?item= para que el modal no se reabra al recargar. Next
+    // sincroniza history.replaceState con useSearchParams.
+    if (searchParams?.get('item')) {
+      const rest = new URLSearchParams(searchParams.toString());
+      rest.delete('item');
+      const qs = rest.toString();
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     fetch('/api/brand-kit', { credentials: 'include' })
@@ -1357,7 +1389,7 @@ function ContentPageInner() {
 
       <EditContentModal
         open={!!editItem}
-        onClose={() => setEditItem(null)}
+        onClose={closeEditItem}
         item={editItem as ContentItem | null}
         brandKit={brandKit ? {
           name: brandKit.name ?? null,

@@ -130,6 +130,38 @@ export async function validateBrandAccess(
   return (brand as Brand | null) ?? null;
 }
 
+// ─── getActiveBrandById / listActiveBrands ────────────────────────────────────
+// Para el asistente, MCP y la API: a diferencia de validateBrandAccess, excluyen
+// las marcas archivadas. Nunca se actúa sobre una marca archivada.
+
+export async function getActiveBrandById(
+  brandId: string,
+  orgId: string,
+): Promise<Brand | null> {
+  const db = createSupabaseServer();
+  const { data: brand } = await db
+    .from('kefy_brands')
+    .select('*')
+    .eq('id', brandId)
+    .eq('org_id', orgId)
+    .eq('archived', false)
+    .maybeSingle();
+  return (brand as Brand | null) ?? null;
+}
+
+export async function listActiveBrands(
+  orgId: string,
+): Promise<Pick<Brand, 'id' | 'name' | 'avatar_url'>[]> {
+  const db = createSupabaseServer();
+  const { data } = await db
+    .from('kefy_brands')
+    .select('id, name, avatar_url')
+    .eq('org_id', orgId)
+    .eq('archived', false)
+    .order('created_at', { ascending: true });
+  return (data as Pick<Brand, 'id' | 'name' | 'avatar_url'>[] | null) ?? [];
+}
+
 // ─── withBrand ────────────────────────────────────────────────────────────────
 // Convenience wrapper: resolves brand and forwards the Set-Cookie header if
 // the fallback brand was used. Returns 404 if no brand exists for the org.

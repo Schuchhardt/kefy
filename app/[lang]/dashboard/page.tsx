@@ -4,6 +4,8 @@ import { useEffect, useState, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useDataChanged } from '@/lib/data-events';
+import { setOnboardingVisible } from '@/lib/onboarding-visibility';
 import type { Locale } from '@/types/i18n';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
 import ChannelIcon    from '@/components/ui/ChannelIcon';
@@ -102,6 +104,34 @@ function DashboardPageInner() {
   const [syncing, setSyncing]         = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
 
+  function fetchRecentContent() {
+    fetch('/api/content?limit=5', { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = await res.json() as { items?: RecentContentItem[]; content?: RecentContentItem[] };
+        setContent(json.items ?? json.content ?? []);
+      })
+      .catch(() => {});
+  }
+
+  function fetchTotals() {
+    const to   = new Date();
+    const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    return fetch(`/api/analytics?from=${from.toISOString()}&to=${to.toISOString()}`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = await res.json() as { totals: Totals };
+        setTotals(json.totals ?? null);
+      })
+      .catch(() => {});
+  }
+
+  // El asistente creó contenido o sincronizó métricas: se recargan.
+  useDataChanged(['analytics', 'content'], () => {
+    fetchRecentContent();
+    if (hasAccounts) void fetchTotals();
+  });
+
   async function fetchAccounts() {
     const res = await fetch('/api/social/accounts', { credentials: 'include' });
     if (!res.ok) {
@@ -129,13 +159,7 @@ function DashboardPageInner() {
       .catch(() => setBrandKitHasData(false));
 
     // Fetch content (all statuses to detect drafts, scheduled, published)
-    fetch('/api/content?limit=5', { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const json = await res.json() as { items?: RecentContentItem[]; content?: RecentContentItem[] };
-        setContent(json.items ?? json.content ?? []);
-      })
-      .catch(() => {});
+    fetchRecentContent();
   }, []);
 
   useEffect(() => {
@@ -147,16 +171,7 @@ function DashboardPageInner() {
   useEffect(() => {
     if (hasAccounts === null) return;
     if (!hasAccounts) { setMLoading(false); return; }
-    const to   = new Date();
-    const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    fetch(`/api/analytics?from=${from.toISOString()}&to=${to.toISOString()}`, { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const json = await res.json() as { totals: Totals };
-        setTotals(json.totals ?? null);
-      })
-      .catch(() => {})
-      .finally(() => setMLoading(false));
+    fetchTotals().finally(() => setMLoading(false));
   }, [hasAccounts]);
 
   const isNewAccount = hasAccounts === false && brandKitHasData === false && content.length === 0;
@@ -165,6 +180,13 @@ function DashboardPageInner() {
   useEffect(() => {
     if (isNewAccount) setOnboardingOpen(true);
   }, [isNewAccount]);
+
+  // El asistente flotante se esconde mientras el onboarding está abierto,
+  // también cuando se abrió solo (cuenta nueva) sin ?onboarding=1.
+  useEffect(() => {
+    setOnboardingVisible(onboardingOpen);
+  }, [onboardingOpen]);
+  useEffect(() => () => setOnboardingVisible(false), []);
 
   async function handleSync() {
     setSyncing(true);

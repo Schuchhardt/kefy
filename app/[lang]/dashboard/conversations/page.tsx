@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useEffect, useState, useRef, useCallback, useMemo, Suspense } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
+import { useDataChanged } from '@/lib/data-events';
 
 import esInbox from '@/locales/es/dashboard/inbox';
 import enInbox from '@/locales/en/dashboard/inbox';
@@ -80,8 +81,9 @@ function ReplyBox({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function ConversationsPage() {
+function ConversationsPageInner() {
   const { lang } = useParams<{ lang: string }>();
+  const searchParams = useSearchParams();
   const locale: Locale = (lang as Locale) === 'en' ? 'en' : 'es';
   const ti = TI[locale];
   const te = TE[locale];
@@ -111,7 +113,11 @@ export default function ConversationsPage() {
   }
 
   // ── Global filters ──
-  const [filterType, setFilterType] = useState<FilterType>('dms');
+  // ?tab=dms|comments, ?thread y ?account: enlaces profundos del asistente.
+  const deepTab     = searchParams?.get('tab');
+  const deepThread  = searchParams?.get('thread') ?? null;
+  const deepAccount = searchParams?.get('account') ?? null;
+  const [filterType, setFilterType] = useState<FilterType>(() => (deepTab === 'comments' ? 'comments' : 'dms'));
   const [platformFilter, setPlatformFilter] = useState<MessagingPlatform | 'all'>('all');
 
   // ── DMs state ──
@@ -178,6 +184,44 @@ export default function ConversationsPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterType, fetchThreads, fetchComments]);
+
+  // Si el enlace cambia con la página ya abierta (el asistente navega a otra
+  // conversación), se sigue la pestaña pedida.
+  useEffect(() => {
+    if (deepTab === 'dms' || deepTab === 'comments') setFilterType(deepTab);
+  }, [deepTab]);
+
+  // Con ?thread y ?account, al cargar los hilos se abre esa conversación (una
+  // vez por enlace).
+  const openedDeepLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deepThread || !deepAccount || filterType !== 'dms') return;
+    const key = `${deepAccount}:${deepThread}`;
+    if (openedDeepLink.current === key) return;
+    const match = threads.find((th) =>
+      th.platform_thread_id === deepThread && th.kefy_social_accounts?.id === deepAccount,
+    );
+    if (!match) return;
+    openedDeepLink.current = key;
+    openThread(match);
+  }, [threads, deepThread, deepAccount, filterType]);
+
+  // El asistente respondió o sincronizó: se recargan la lista y el hilo abierto.
+  useDataChanged(['inbox'], () => {
+    if (filterType === 'dms') fetchThreads();
+    else fetchComments();
+    if (activeThread) {
+      const accountId = activeThread.kefy_social_accounts.id;
+      fetch(`/api/messaging/${encodeURIComponent(activeThread.platform_thread_id)}?account_id=${accountId}`,
+        { credentials: 'include' })
+        .then(async (res) => {
+          if (!res.ok) return;
+          const json = await res.json() as { messages: Message[] };
+          setMessages(json.messages ?? []);
+        })
+        .catch(() => { /* ignore */ });
+    }
+  });
 
   // ── DM actions ──
   async function handleSync() {
@@ -825,4 +869,13 @@ export default function ConversationsPage() {
     );
   }
 
+}
+
+export default function ConversationsPage() {
+  // useSearchParams (enlaces profundos) necesita un límite de Suspense.
+  return (
+    <Suspense fallback={null}>
+      <ConversationsPageInner />
+    </Suspense>
+  );
 }
