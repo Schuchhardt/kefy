@@ -3,4 +3,6 @@ export interface JWTPayload {
   orgId:  string;
   role:   'owner' | 'admin' | 'member';
   plan:   'starter' | 'pro' | 'business';
+  /** Claim estándar del JWT (segundos desde epoch), la pone `jose` automáticamente. */
+  iat?:   number;
 }

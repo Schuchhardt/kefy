@@ -15,6 +15,13 @@ const ALLOWED_MIME_TYPES = new Set([
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_ARRAY_ITEMS = 10;
 
+/** Prefija `https://` a una URL sin esquema (ej. "tuempresa.com") para que no haga falta escribirlo a mano. */
+export function normalizeWebsiteUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed || /^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
 export function validateBrandKitUpdate(input: Record<string, unknown>): string | null {
   const {
     name, tone, primary_color, secondary_color, accent_color,

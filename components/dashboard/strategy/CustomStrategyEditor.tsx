@@ -51,7 +51,10 @@ const labelStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8,
-  border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
+  // Borde en longhand: invalidInput cambia solo borderColor (mezclar el
+  // shorthand con borderColor hace que React avise al quitar el error).
+  borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--border)',
+  background: 'var(--bg)', color: 'var(--text)',
   fontSize: 14, fontFamily: 'inherit',
 };
 

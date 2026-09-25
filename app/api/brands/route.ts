@@ -5,6 +5,8 @@ import { BRAND_LIMITS, slugifyBrand } from '@/lib/brands';
 import { serviceContext } from '@/lib/services/context';
 import { serviceErrorResponse } from '@/lib/services/errors';
 import { listBrands } from '@/lib/services/brands';
+import { reportError } from '@/lib/observability';
+import type { Brand } from '@/types/brands';
 
 // ─── GET /api/brands ──────────────────────────────────────────────────────────
 // List all non-archived brands for the auth'd org.
@@ -55,35 +57,42 @@ export async function POST(req: NextRequest) {
 
   const db = createSupabaseServer();
 
-  // Check plan limit
-  const { count: existing } = await db
-    .from('kefy_brands')
-    .select('id', { count: 'exact', head: true })
-    .eq('org_id', auth.orgId)
-    .eq('archived', false);
+  // El plan sale de la organización, no del JWT: el token puede tener hasta
+  // 23h de vida (ver lib/auth-context.tsx) y quedar desactualizado si el plan
+  // cambió — por Stripe o, como aquí, a mano en la base para una cuenta de
+  // cortesía. Confiar en el JWT dejaba el tope viejo vigente durante ese rato.
+  const { data: org } = await db
+    .from('kefy_organizations')
+    .select('plan')
+    .eq('id', auth.orgId)
+    .maybeSingle();
 
-  const limit = BRAND_LIMITS[auth.plan] ?? 1;
-
-  if ((existing ?? 0) >= limit) {
-    return NextResponse.json(
-      { error: `Your plan allows up to ${limit === Infinity ? 'unlimited' : limit} brand(s). Upgrade to add more.` },
-      { status: 403 },
-    );
-  }
+  const limit = BRAND_LIMITS[(org?.plan as string | undefined) ?? auth.plan] ?? 1;
 
   // Generate unique slug
   const baseSlug = slugifyBrand(name);
   const uniqueSuffix = Math.random().toString(36).slice(2, 7);
   const slug = `${baseSlug}-${uniqueSuffix}`;
 
-  const { data: brand, error: brandError } = await db
-    .from('kefy_brands')
-    .insert({ org_id: auth.orgId, name, slug })
-    .select('*')
+  // El chequeo del tope y el INSERT van en la misma función SQL (bloquea la
+  // fila de la organización mientras dura): dos altas simultáneas al borde del
+  // límite no pueden colar las dos, igual que kefy_credits_consume evita el
+  // mismo problema con los créditos.
+  const { data: rpcData, error: brandError } = await db
+    .rpc('kefy_brand_create', { p_org_id: auth.orgId, p_name: name, p_slug: slug, p_limit: limit })
     .single();
+  const brand = rpcData as unknown as Brand | null;
 
   if (brandError || !brand) {
-    console.error('brands POST error:', brandError?.message);
+    if (brandError?.message?.includes('BRAND_LIMIT_REACHED')) {
+      return NextResponse.json(
+        { error: `Your plan allows up to ${limit} brand(s). Upgrade to add more.` },
+        { status: 403 },
+      );
+    }
+    reportError(brandError ?? new Error('kefy_brand_create returned no row'), {
+      route: 'POST /api/brands', auth, service: 'supabase',
+    });
     return NextResponse.json({ error: 'Failed to create brand' }, { status: 500 });
   }
 

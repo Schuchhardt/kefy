@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { createSupabaseServer } from '@/lib/supabase';
-import { getAuthFromRequest } from '@/lib/auth';
+import { getAuthFromRequest, ACCESS_COOKIE, REFRESH_COOKIE, clearCookieOptions } from '@/lib/auth';
 import { getUsage } from '@/lib/usage';
 import { getEntitlement } from '@/lib/subscription';
 import { reportError } from '@/lib/observability';
@@ -26,9 +26,25 @@ export async function GET(req: NextRequest) {
 
   const { data: org } = await db
     .from('kefy_organizations')
-    .select('id, name, slug, plan')
+    .select('id, name, slug, plan, session_invalidated_at')
     .eq('id', auth.orgId)
     .maybeSingle();
+
+  // Sesiones canceladas a propósito (scripts/grant-comp-plan.ts): el access
+  // token no tiene forma de invalidarse solo (es un JWT sin estado, vive hasta
+  // 24h), así que este es el único punto donde se corta. Cualquier token
+  // emitido antes de la marca se trata como si hubiera expirado — el cliente
+  // ya sabe reaccionar a un 401 acá: intenta refrescar, el refresh token
+  // también fue revocado, y termina mandando al login.
+  if (org?.session_invalidated_at && auth.iat) {
+    const invalidatedAt = new Date(org.session_invalidated_at).getTime() / 1000;
+    if (auth.iat < invalidatedAt) {
+      const res = NextResponse.json({ error: 'Session invalidated' }, { status: 401 });
+      res.cookies.set(ACCESS_COOKIE, '', clearCookieOptions());
+      res.cookies.set(REFRESH_COOKIE, '', clearCookieOptions('/api/auth/refresh'));
+      return res;
+    }
+  }
 
   // El plan efectivo sale de la organización y no del JWT: el token puede ser
   // anterior a un cambio de plan.
@@ -53,7 +69,7 @@ export async function GET(req: NextRequest) {
     user,
     org,
     role: auth.role,
-    plan: auth.plan,
+    plan: effectivePlan,
     usage,
     subscription,
   });

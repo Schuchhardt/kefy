@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import FirecrawlApp from '@mendable/firecrawl-js';
 import { z } from 'zod';
 import { getAuthFromRequest } from '@/lib/auth';
+import { normalizeWebsiteUrl } from '@/lib/brand-kit';
 import type { BrandKit } from '@/types/brand-kit';
 
 const brandSchema = z.object({
@@ -50,11 +51,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { url, lang } = body as { url: string; lang?: string };
-  if (!url || typeof url !== 'string') {
+  const { url: rawUrl, lang } = body as { url: string; lang?: string };
+  if (!rawUrl || typeof rawUrl !== 'string') {
     return NextResponse.json({ error: 'url is required' }, { status: 400 });
   }
 
+  const url = normalizeWebsiteUrl(rawUrl);
   try {
     new URL(url);
   } catch {

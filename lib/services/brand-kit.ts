@@ -8,7 +8,7 @@
 // (varias filas) y deja la generación sin contexto de marca.
 
 import { createSupabaseServer } from '@/lib/supabase';
-import { validateBrandKitUpdate } from '@/lib/brand-kit';
+import { normalizeWebsiteUrl, validateBrandKitUpdate } from '@/lib/brand-kit';
 import { getActiveBrandById } from '@/lib/brands';
 import { reportError } from '@/lib/observability';
 import type { BrandKit, BrandKitUpdateInput } from '@/types/brand-kit';
@@ -108,6 +108,10 @@ const NOT_NULL_FIELDS = new Set<string>([
  * valide.
  */
 export function buildBrandKitUpdate(input: Record<string, unknown>): Record<string, unknown> {
+  if (typeof input.website_url === 'string') {
+    input.website_url = normalizeWebsiteUrl(input.website_url);
+  }
+
   const validationError = validateBrandKitUpdate(input);
   if (validationError) throw new ServiceError('invalid_input', 422, validationError);
 

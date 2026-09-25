@@ -50,6 +50,17 @@ export async function listBrands(
 
   const rows = (brands ?? []) as Omit<BrandListItem, 'kit_logo_url'>[];
 
+  // El plan sale de la organización y no de ctx.auth: el JWT puede tener hasta
+  // 23h de vida (lib/auth-context.tsx) y quedar desactualizado si el plan
+  // cambió — por Stripe o a mano en la base. Con el JWT viejo, canCreate podía
+  // decir que no se podía crear (o al revés) aunque el plan ya hubiera cambiado.
+  const { data: org } = await db
+    .from('kefy_organizations')
+    .select('plan')
+    .eq('id', ctx.auth.orgId)
+    .maybeSingle();
+  const plan = (org?.plan as string | undefined) ?? ctx.auth.plan;
+
   // Logo del Brand Kit de cada marca, para que el selector pueda usarlo cuando
   // la marca no tiene una imagen propia. Cada marca ya subió su logo al definir
   // su identidad: pedir la misma imagen otra vez solo para el selector sería
@@ -66,7 +77,7 @@ export async function listBrands(
     }
   }
 
-  const limit = BRAND_LIMITS[ctx.auth.plan] ?? 1;
+  const limit = BRAND_LIMITS[plan] ?? 1;
 
   return {
     brands: rows.map((b) => ({ ...b, kit_logo_url: kitLogos.get(b.id) ?? null })),

@@ -1,5 +1,33 @@
 import { describe, it, expect } from 'vitest';
-import { validateBrandKitUpdate, validateAssetUpload } from '@/lib/brand-kit';
+import { validateBrandKitUpdate, validateAssetUpload, normalizeWebsiteUrl } from '@/lib/brand-kit';
+
+// ─── normalizeWebsiteUrl ───────────────────────────────────────────────────────
+
+describe('normalizeWebsiteUrl', () => {
+  it('agrega https:// a un dominio sin esquema', () => {
+    expect(normalizeWebsiteUrl('tuempresa.com')).toBe('https://tuempresa.com');
+  });
+
+  it('agrega https:// a un dominio con www sin esquema', () => {
+    expect(normalizeWebsiteUrl('www.tuempresa.com')).toBe('https://www.tuempresa.com');
+  });
+
+  it('deja intacta una URL que ya tiene https://', () => {
+    expect(normalizeWebsiteUrl('https://tuempresa.com')).toBe('https://tuempresa.com');
+  });
+
+  it('deja intacta una URL que ya tiene http://', () => {
+    expect(normalizeWebsiteUrl('http://tuempresa.com')).toBe('http://tuempresa.com');
+  });
+
+  it('recorta espacios antes de normalizar', () => {
+    expect(normalizeWebsiteUrl('  tuempresa.com  ')).toBe('https://tuempresa.com');
+  });
+
+  it('devuelve string vacío para input vacío', () => {
+    expect(normalizeWebsiteUrl('   ')).toBe('');
+  });
+});
 
 // ─── validateBrandKitUpdate ───────────────────────────────────────────────────
 
