@@ -178,6 +178,36 @@ export async function getUsage(
 }
 
 /**
+ * Cuerpo del 429 cuando se agotan los créditos del mes. Separado de la
+ * respuesta para reutilizarlo fuera de un route handler (herramientas del
+ * asistente, MCP, API).
+ */
+export function creditsExhaustedBody(
+  result: CreditsResult,
+  language: 'es' | 'en' = 'es',
+): {
+  error: string;
+  creditsExhausted: true;
+  operation: CreditOperation;
+  cost: number;
+  limit: number;
+  used: number;
+} {
+  const message = language === 'en'
+    ? `You've used all ${result.limit} AI credits for this month. Upgrade your plan to keep creating.`
+    : `Usaste tus ${result.limit} créditos de IA de este mes. Mejora tu plan para seguir creando.`;
+
+  return {
+    error: message,
+    creditsExhausted: true,
+    operation: result.operation,
+    cost: result.cost,
+    limit: result.limit,
+    used: result.used,
+  };
+}
+
+/**
  * Respuesta 429 cuando se agotan los créditos del mes. Va con
  * `creditsExhausted: true` para que el cliente lo distinga del rate limiting y
  * ofrezca mejorar el plan en lugar de pedir que se reintente.
@@ -186,19 +216,146 @@ export function creditsExhaustedResponse(
   result: CreditsResult,
   language: 'es' | 'en' = 'es',
 ): NextResponse {
-  const message = language === 'en'
-    ? `You've used all ${result.limit} AI credits for this month. Upgrade your plan to keep creating.`
-    : `Usaste tus ${result.limit} créditos de IA de este mes. Mejora tu plan para seguir creando.`;
+  return NextResponse.json(creditsExhaustedBody(result, language), { status: 429 });
+}
 
-  return NextResponse.json(
-    {
-      error: message,
-      creditsExhausted: true,
-      operation: result.operation,
-      cost: result.cost,
-      limit: result.limit,
-      used: result.used,
-    },
-    { status: 429 },
-  );
+// ─── Cuota del asistente ──────────────────────────────────────────────────────
+//
+// Chatear con el asistente NO gasta créditos de IA: cada plan trae un tope de
+// mensajes al mes, aparte. Lo que el asistente genera (un post, una imagen, un
+// carrusel) sí cobra créditos, igual que desde la UI.
+//
+// Un mensaje del usuario = 1 mensaje de la cuota, aunque el asistente haga
+// varias llamadas al modelo para contestarlo (las acota kefy_assistant_turns).
+//
+// Mismo contador por organización y mes que los créditos (kefy_usage_counters,
+// columna assistant_messages), con consumo atómico en `kefy_assistant_consume`.
+
+/**
+ * Mensajes al asistente por mes y plan. Son los que anuncia la página de
+ * precios: si cambian aquí, hay que cambiar locales/{es,en}/landing.ts también.
+ */
+export const PLAN_ASSISTANT_MESSAGES: Record<BillingPlan, number> = {
+  starter:   300,
+  pro:      1500,
+  business: 5000,
+};
+
+export function assistantMessagesFor(plan: string): number {
+  // Ante un plan desconocido se aplica el tramo más bajo, como con los créditos.
+  return PLAN_ASSISTANT_MESSAGES[plan as BillingPlan] ?? PLAN_ASSISTANT_MESSAGES.starter;
+}
+
+export interface AssistantQuotaResult {
+  allowed: boolean;
+  /** Mensajes consumidos en el período tras este. */
+  used: number;
+  limit: number;
+  remaining: number;
+}
+
+/**
+ * Descuenta un mensaje de la cuota del asistente. Devuelve `allowed: false` si
+ * ya no quedan, sin descontar nada.
+ *
+ * **Falla cerrado**, igual que `consumeCredits`: cada mensaje dispara llamadas
+ * al modelo, y sin poder verificar la cuota no se autoriza ese gasto.
+ */
+export async function consumeAssistantMessage(
+  orgId: string,
+  plan: string,
+  now = new Date(),
+): Promise<AssistantQuotaResult> {
+  const limit = assistantMessagesFor(plan);
+  const period = usagePeriod(now);
+
+  const db = createSupabaseServer();
+  const { data, error } = await db.rpc('kefy_assistant_consume', {
+    p_org_id: orgId,
+    p_period: period,
+    p_limit: limit,
+  });
+
+  if (error) {
+    reportError(new Error(error.message), {
+      route: 'lib/usage', service: 'supabase',
+      extra: { orgId, plan, operation: 'assistant_message', period },
+    });
+    throw new Error('No se pudo verificar tu cuota de mensajes del asistente');
+  }
+
+  const used = typeof data === 'number' ? data : Number(data);
+
+  // -1 es la señal de la función SQL: no quedaban mensajes este mes.
+  if (used === -1) {
+    return { allowed: false, used: limit, limit, remaining: 0 };
+  }
+
+  return { allowed: true, used, limit, remaining: Math.max(0, limit - used) };
+}
+
+/**
+ * Devuelve un mensaje a la cuota del asistente (el turno falló antes de poder
+ * responder). No lanza — best-effort, como `refundCredits`.
+ */
+export async function refundAssistantMessage(
+  orgId: string,
+  now = new Date(),
+): Promise<void> {
+  try {
+    const db = createSupabaseServer();
+    const { error } = await db.rpc('kefy_assistant_refund', {
+      p_org_id: orgId,
+      p_period: usagePeriod(now),
+    });
+    if (error) throw new Error(error.message);
+  } catch (err) {
+    reportError(err, {
+      route: 'lib/usage', service: 'supabase',
+      extra: { orgId, operation: 'assistant_message', operacion: 'refund' },
+    });
+  }
+}
+
+/** Mensajes al asistente usados y restantes en el mes en curso. */
+export async function getAssistantUsage(
+  orgId: string,
+  plan: string,
+  now = new Date(),
+): Promise<UsageSummary> {
+  const period = usagePeriod(now);
+  const limit = assistantMessagesFor(plan);
+  const db = createSupabaseServer();
+
+  const { data } = await db
+    .from('kefy_usage_counters')
+    .select('assistant_messages')
+    .eq('org_id', orgId)
+    .eq('period', period)
+    .maybeSingle();
+
+  const used = (data as { assistant_messages?: number } | null)?.assistant_messages ?? 0;
+
+  return { used, limit, remaining: Math.max(0, limit - used), period };
+}
+
+/**
+ * Cuerpo del 429 cuando se acaban los mensajes del asistente del mes. Va con
+ * `assistantQuotaExhausted: true` para que el widget lo distinga de los
+ * créditos agotados y del rate limiting.
+ */
+export function assistantQuotaExhaustedBody(
+  result: Pick<AssistantQuotaResult, 'limit' | 'used'>,
+  language: 'es' | 'en' = 'es',
+): { error: string; assistantQuotaExhausted: true; limit: number; used: number } {
+  const message = language === 'en'
+    ? `You've used all ${result.limit} assistant messages for this month. Upgrade your plan to keep chatting.`
+    : `Usaste tus ${result.limit} mensajes del asistente de este mes. Mejora tu plan para seguir conversando.`;
+
+  return {
+    error: message,
+    assistantQuotaExhausted: true,
+    limit: result.limit,
+    used: result.used,
+  };
 }

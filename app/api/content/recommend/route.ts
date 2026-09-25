@@ -5,59 +5,16 @@ import { checkRateLimit, aiRule, rateLimitResponse } from '@/lib/rate-limit';
 import { reportError } from '@/lib/observability';
 import { generateContentRecommendations } from '@/lib/ai';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type RecommendedContentType = 'post' | 'carousel' | 'reel' | 'story';
-type RecommendSource = 'strategy' | 'industry_fallback' | 'ai_only';
-
-interface Recommendation {
-  template_id?:    string;
-  week_num?:       number;
-  post_num?:       number;
-  format?:         string;
-  topic:           string;
-  content_type:    RecommendedContentType;
-  slide_count?:    number;
-  generate_images: true;
-  rationale: {
-    source:           RecommendSource;
-    framework_name?:  string;
-    kpi_primary?:     string;
-    goal?:            string;
-    week_num?:        number;
-    post_num?:        number;
-    rationale_short?: string;
-  };
-}
-
-interface StrategyTemplate {
-  id:                string;
-  week_num:          number;
-  post_num:          number;
-  format:            string | null;
-  channel_hint:      string | null;
-  topic_es:          string | null;
-  topic_en:          string | null;
-  goal_es:           string | null;
-  goal_en:           string | null;
-  sort_order:        number | null;
-  copy_structure_es: string | null;
-  copy_structure_en: string | null;
-}
-
-// Map a template `format` to the supported content_type values
-function formatToContentType(format: string | null): RecommendedContentType {
-  const f = (format ?? '').toLowerCase();
-  if (f.includes('historia') || f.includes('story') || f.includes('stories')) return 'story';
-  if (f.includes('carrusel') || f.includes('carousel')) return 'carousel';
-  if (f.includes('reel') || f.includes('video') || f.includes('short') || f.includes('tiktok')) return 'reel';
-  return 'post';
-}
-
-// Default slide count by content_type (carousels only)
-function defaultSlideCount(type: RecommendedContentType): number | undefined {
-  return type === 'carousel' ? 5 : undefined;
-}
+// Las plantillas y el contexto de la estrategia activa (del catálogo o propia
+// de la org) salen de lib/services/strategy.ts, igual que get_content_ideas.
+import {
+  defaultSlideCount,
+  findIndustryStrategyId,
+  loadStrategyContext,
+  loadStrategyRecommendations,
+  type Recommendation,
+  type RecommendSource,
+} from '@/lib/services/strategy';
 
 // GET /api/content/recommend?offset=N&lang=es|en&hint=...
 // Auth required — returns 3 channel-agnostic content recommendations driven by:
@@ -112,7 +69,7 @@ export async function GET(req: NextRequest) {
   // 2. Load org's selected strategy (if any)
   const { data: orgStrategy } = await db
     .from('kefy_org_strategies')
-    .select('strategy_id, industry_id, created_at')
+    .select('strategy_id, custom_strategy_id, industry_id, created_at')
     .eq('org_id', auth.orgId)
     .maybeSingle();
 
@@ -147,6 +104,7 @@ export async function GET(req: NextRequest) {
     const strategyCtx = await loadStrategyContext({
       db,
       orgStrategy,
+      orgId: auth.orgId,
       brandKitIndustry: brandKit?.industry ?? null,
       lang,
     });
@@ -164,11 +122,13 @@ export async function GET(req: NextRequest) {
   // Subsequent rotations (offset > 0) always go through Claude so users keep
   // getting fresh ideas instead of cycling through the same calendar.
   if (offset === 0) {
-    // Case A: org has a strategy_id
-    if (orgStrategy?.strategy_id) {
+    // Case A: org has an active strategy (catalog or its own)
+    if (orgStrategy?.strategy_id || orgStrategy?.custom_strategy_id) {
       const strategyResult = await loadStrategyRecommendations({
         db,
-        strategyId: orgStrategy.strategy_id,
+        strategyId:       orgStrategy.strategy_id,
+        customStrategyId: orgStrategy.custom_strategy_id,
+        orgId:            auth.orgId,
         createdAt:  orgStrategy.created_at,
         offset,
         lang,
@@ -181,35 +141,19 @@ export async function GET(req: NextRequest) {
 
     // Case B: no strategy but brand kit has an industry
     if (brandKit?.industry) {
-      // Match industry by slug or name (case-insensitive)
-      const { data: industryRow } = await db
-        .from('kefy_content_industries')
-        .select('id')
-        .or(`slug.eq.${brandKit.industry},name_es.ilike.${brandKit.industry},name_en.ilike.${brandKit.industry}`)
-        .limit(1)
-        .maybeSingle();
+      const fallbackId = await findIndustryStrategyId(db, brandKit.industry);
+      if (fallbackId) {
+        const fallbackResult = await loadStrategyRecommendations({
+          db,
+          strategyId: fallbackId,
+          createdAt:  null,
+          offset,
+          lang,
+          isAlreadyUsed,
+          source: 'industry_fallback',
+        });
 
-      if (industryRow?.id) {
-        const { data: fallbackStrat } = await db
-          .from('kefy_content_strategies')
-          .select('id')
-          .eq('industry_id', industryRow.id)
-          .limit(1)
-          .maybeSingle();
-
-        if (fallbackStrat?.id) {
-          const fallbackResult = await loadStrategyRecommendations({
-            db,
-            strategyId: fallbackStrat.id,
-            createdAt:  null,
-            offset,
-            lang,
-            isAlreadyUsed,
-            source: 'industry_fallback',
-          });
-
-          if (fallbackResult) return NextResponse.json(fallbackResult);
-        }
+        if (fallbackResult) return NextResponse.json(fallbackResult);
       }
     }
   }
@@ -218,6 +162,7 @@ export async function GET(req: NextRequest) {
   const strategyCtx = await loadStrategyContext({
     db,
     orgStrategy,
+    orgId: auth.orgId,
     brandKitIndustry: brandKit?.industry ?? null,
     lang,
   });
@@ -308,206 +253,3 @@ async function runAiRecommendations(opts: AiRunOpts): Promise<NextResponse> {
   }
 }
 
-// ─── Helper: resolve strategy context for the AI prompt (best-effort) ────────
-
-interface LoadStrategyCtxOpts {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db:                any;
-  orgStrategy:       { strategy_id: string | null; created_at: string | null } | null;
-  brandKitIndustry:  string | null;
-  lang:              'es' | 'en';
-}
-
-async function loadStrategyContext(opts: LoadStrategyCtxOpts): Promise<StrategyCtx | null> {
-  const { db, orgStrategy, brandKitIndustry, lang } = opts;
-
-  let strategyId: string | null = orgStrategy?.strategy_id ?? null;
-  const createdAt: string | null = orgStrategy?.created_at ?? null;
-
-  // If no explicit org strategy, try industry match.
-  if (!strategyId && brandKitIndustry) {
-    const { data: industryRow } = await db
-      .from('kefy_content_industries')
-      .select('id')
-      .or(`slug.eq.${brandKitIndustry},name_es.ilike.${brandKitIndustry},name_en.ilike.${brandKitIndustry}`)
-      .limit(1)
-      .maybeSingle();
-    if (industryRow?.id) {
-      const { data: fallbackStrat } = await db
-        .from('kefy_content_strategies')
-        .select('id')
-        .eq('industry_id', industryRow.id)
-        .limit(1)
-        .maybeSingle();
-      strategyId = fallbackStrat?.id ?? null;
-    }
-  }
-
-  if (!strategyId) return null;
-
-  const { data: strategy } = await db
-    .from('kefy_content_strategies')
-    .select(
-      `id, framework_name_es, framework_name_en,
-       kpi_primary_es, kpi_primary_en`,
-    )
-    .eq('id', strategyId)
-    .maybeSingle();
-
-  if (!strategy) return null;
-
-  const { data: templates } = await db
-    .from('kefy_strategy_templates')
-    .select('week_num, sort_order, topic_es, topic_en')
-    .eq('strategy_id', strategyId)
-    .order('week_num', { ascending: true })
-    .order('sort_order', { ascending: true });
-
-  const tpls = (templates ?? []) as Array<{ week_num: number; topic_es: string | null; topic_en: string | null }>;
-  const totalWeeks = tpls.length > 0 ? Math.max(1, ...tpls.map((t) => t.week_num)) : 1;
-
-  let currentWeek = 1;
-  if (createdAt) {
-    const weeksElapsed = Math.floor(
-      (Date.now() - new Date(createdAt).getTime()) / (7 * 24 * 60 * 60 * 1000),
-    );
-    currentWeek = ((weeksElapsed % totalWeeks) + totalWeeks) % totalWeeks + 1;
-  }
-
-  const sampleTopics = tpls
-    .filter((t) => t.week_num === currentWeek)
-    .map((t) => (lang === 'en' ? t.topic_en : t.topic_es) ?? '')
-    .filter((s) => s.length > 0);
-
-  return {
-    framework_name: (lang === 'en' ? strategy.framework_name_en : strategy.framework_name_es) ?? undefined,
-    kpi_primary:    (lang === 'en' ? strategy.kpi_primary_en    : strategy.kpi_primary_es)    ?? undefined,
-    current_week:   currentWeek,
-    total_weeks:    totalWeeks,
-    sample_topics:  sampleTopics,
-  };
-}
-
-// ─── Helper: build recommendations from a strategy + its templates ────────────
-
-interface LoadStrategyOpts {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db:             any;
-  strategyId:     string;
-  createdAt:      string | null;
-  offset:         number;
-  lang:           'es' | 'en';
-  isAlreadyUsed:  (topic: string) => boolean;
-  source:         'strategy' | 'industry_fallback';
-}
-
-async function loadStrategyRecommendations(opts: LoadStrategyOpts): Promise<{
-  recommendations: Recommendation[];
-  source: RecommendSource;
-  strategy_meta: {
-    framework_name: string;
-    kpi_primary:    string;
-    current_week:   number;
-    total_weeks:    number;
-  } | null;
-} | null> {
-  const { db, strategyId, createdAt, offset, lang, isAlreadyUsed, source } = opts;
-
-  const { data: strategy } = await db
-    .from('kefy_content_strategies')
-    .select(
-      `id, framework_name_es, framework_name_en,
-       kpi_primary_es, kpi_primary_en`,
-    )
-    .eq('id', strategyId)
-    .single();
-
-  if (!strategy) return null;
-
-  const { data: templates } = await db
-    .from('kefy_strategy_templates')
-    .select(
-      `id, week_num, post_num, format, channel_hint,
-       topic_es, copy_structure_es, goal_es,
-       topic_en, copy_structure_en, goal_en, sort_order`,
-    )
-    .eq('strategy_id', strategyId)
-    .order('week_num', { ascending: true })
-    .order('sort_order', { ascending: true });
-
-  const tpls: StrategyTemplate[] = templates ?? [];
-  if (tpls.length === 0) return null;
-
-  // Compute total weeks present in this strategy
-  const totalWeeks = Math.max(1, ...tpls.map((t) => t.week_num));
-
-  // Compute current_week: weeks since org accepted the strategy, wrapped
-  let currentWeek = 1;
-  if (createdAt) {
-    const weeksElapsed = Math.floor(
-      (Date.now() - new Date(createdAt).getTime()) / (7 * 24 * 60 * 60 * 1000),
-    );
-    currentWeek = ((weeksElapsed % totalWeeks) + totalWeeks) % totalWeeks + 1;
-  }
-
-  // Build a calendar-ordered sequence starting from currentWeek, wrapping around
-  const ordered: StrategyTemplate[] = [];
-  for (let w = 0; w < totalWeeks; w++) {
-    const weekNum = ((currentWeek - 1 + w) % totalWeeks) + 1;
-    const weekTpls = tpls.filter((t) => t.week_num === weekNum);
-    ordered.push(...weekTpls);
-  }
-
-  // Filter out templates whose topic is already in recent content
-  const fresh = ordered.filter((t) => {
-    const topic = lang === 'en' ? t.topic_en : t.topic_es;
-    return topic && !isAlreadyUsed(topic);
-  });
-
-  // Slice from offset, wrap around if not enough
-  const pool = fresh.length > 0 ? fresh : ordered;
-  const picked: StrategyTemplate[] = [];
-  for (let i = 0; i < 3 && i < pool.length; i++) {
-    picked.push(pool[(offset + i) % pool.length]);
-  }
-
-  const frameworkName = (lang === 'en' ? strategy.framework_name_en : strategy.framework_name_es) ?? '';
-  const kpiPrimary    = (lang === 'en' ? strategy.kpi_primary_en    : strategy.kpi_primary_es)    ?? '';
-
-  const recommendations: Recommendation[] = picked.map((t) => {
-    const topic = (lang === 'en' ? t.topic_en : t.topic_es) ?? '';
-    const goal  = (lang === 'en' ? t.goal_en  : t.goal_es)  ?? '';
-    const contentType = formatToContentType(t.format);
-    return {
-      template_id:     t.id,
-      week_num:        t.week_num,
-      post_num:        t.post_num,
-      format:          t.format ?? undefined,
-      topic,
-      content_type:    contentType,
-      slide_count:     defaultSlideCount(contentType),
-      generate_images: true,
-      rationale: {
-        source,
-        framework_name: frameworkName,
-        kpi_primary:    kpiPrimary,
-        goal,
-        week_num:       t.week_num,
-        post_num:       t.post_num,
-      },
-    };
-  });
-
-  if (recommendations.length === 0) return null;
-
-  return {
-    recommendations,
-    source,
-    strategy_meta: {
-      framework_name: frameworkName,
-      kpi_primary:    kpiPrimary,
-      current_week:   currentWeek,
-      total_weeks:    totalWeeks,
-    },
-  };
-}

@@ -2,8 +2,9 @@
 
 import BrandImageField from '@/components/dashboard/BrandImageField';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useDataChanged } from '@/lib/data-events';
 import type { BrandKit, BrandTone } from '@/types/brand-kit';
 import type { Locale } from '@/types/i18n';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
@@ -185,19 +186,27 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
   const [arraySuggLoading, setArraySuggLoading] = useState<Record<string, boolean>>({});
 
   // Load brand kit
-  useEffect(() => {
-    if (authLoading) return;
+  const orgName = org?.name;
+  const loadKit = useCallback(() => {
     fetch('/api/brand-kit', { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) throw new Error('Failed to load');
         const { kit: k } = await res.json() as { kit: BrandKit };
         // Pre-fill name with org name if not yet customized
-        if ((!k.name || k.name === 'Mi marca') && org?.name) k.name = org.name;
+        if ((!k.name || k.name === 'Mi marca') && orgName) k.name = orgName;
         setForm(k);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setFetching(false));
-  }, [authLoading, org?.name]);
+  }, [orgName]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    loadKit();
+  }, [authLoading, loadKit]);
+
+  // El asistente editó el perfil de marca: se recarga el formulario.
+  useDataChanged(['brand-kit'], () => { if (!authLoading) loadKit(); });
 
   async function handleLogoUpload(file: File) {
     setLogoUploading(true);

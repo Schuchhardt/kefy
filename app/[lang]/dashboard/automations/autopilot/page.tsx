@@ -12,6 +12,7 @@ import type { AIModel } from '@/types/ai';
 import type { Frequency, AutopilotRule } from '@/types/automations';
 import type { SocialAccount } from '@/types/social';
 import type { Locale } from '@/types/i18n';
+import { useDataChanged } from '@/lib/data-events';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,9 @@ export default function AutopilotPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // El asistente creó, pausó o ejecutó una regla: se recarga la lista.
+  useDataChanged(['autopilot'], () => { void fetchData(); });
 
   function toggleAccount(id: string) {
     setFormAccounts((prev) =>

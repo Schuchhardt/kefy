@@ -22,7 +22,24 @@ const PUBLIC_API_PATHS = [
   '/api/autopilot/run',
   '/api/content-library/generate',
   '/api/content/reel/reconcile',
+  // API pública y servidor MCP: se autentican con API key dentro del handler
+  // (lib/assistant/api-keys.ts). No aceptan la cookie de sesión.
+  '/api/v1/',
+  '/api/mcp',
 ];
+
+/**
+ * La ruta es pública si coincide con una entrada o cuelga de ella. El corte es
+ * por segmento: `/api/mcp` cubre `/api/mcp` y `/api/mcp/…`, pero no
+ * `/api/mcp-admin`; si no, cualquier ruta nueva que empezara igual quedaría
+ * sin la comprobación de sesión. Las entradas que acaban en `/` ya son un
+ * prefijo de segmento.
+ */
+function isPublicApiPath(pathname: string): boolean {
+  return PUBLIC_API_PATHS.some((p) =>
+    p.endsWith('/') ? pathname.startsWith(p) : pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
 
 async function verifyToken(token: string) {
   try {
@@ -34,12 +51,25 @@ async function verifyToken(token: string) {
   }
 }
 
+
+/**
+ * Login con `?next=` para volver a la página del dashboard que se pidió (p. ej.
+ * el link del asistente para conectar una red). La portada del dashboard no
+ * lo necesita. El login solo acepta rutas del dashboard (lib/safe-redirect).
+ */
+function loginRedirectUrl(req: NextRequest, lang: string): URL {
+  const loginUrl = new URL(`/${lang}/login`, req.url);
+  const target = `${req.nextUrl.pathname}${req.nextUrl.search}`;
+  if (target !== `/${lang}/dashboard`) loginUrl.searchParams.set('next', target);
+  return loginUrl;
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // ── Auth protection ─────────────────────────────────────────────────────────
   const isDashboard    = /^\/[a-z]{2}\/dashboard/.test(pathname);
-  const isProtectedApi = pathname.startsWith('/api/') && !PUBLIC_API_PATHS.some((p) => pathname.startsWith(p));
+  const isProtectedApi = pathname.startsWith('/api/') && !isPublicApiPath(pathname);
 
   if (isDashboard || isProtectedApi) {
     const token = req.cookies.get(ACCESS_COOKIE)?.value;
@@ -47,7 +77,7 @@ export async function proxy(req: NextRequest) {
     if (!token) {
       if (isDashboard) {
         const lang = pathname.split('/')[1] ?? defaultLocale;
-        return NextResponse.redirect(new URL(`/${lang}/login`, req.url));
+        return NextResponse.redirect(loginRedirectUrl(req, lang));
       }
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -56,7 +86,7 @@ export async function proxy(req: NextRequest) {
     if (!payload) {
       if (isDashboard) {
         const lang = pathname.split('/')[1] ?? defaultLocale;
-        const loginUrl = new URL(`/${lang}/login`, req.url);
+        const loginUrl = loginRedirectUrl(req, lang);
         loginUrl.searchParams.set('expired', '1');
         return NextResponse.redirect(loginUrl);
       }

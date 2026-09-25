@@ -23,6 +23,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 | PWA / service worker | [`docs/pwa.md`](docs/pwa.md) | Antes de tocar `app/sw.js/**`, `lib/service-worker.ts`, `components/PwaUpdater.tsx`, `app/manifest.ts` o `scripts/generate-build-id.mjs` |
 | Formato de imagen por red | [`docs/zernio.md`](docs/zernio.md) (sección *Formato de imagen por red*) | Antes de tocar `lib/image-fit.ts`, `lib/image-processor.ts` o el recorte de imágenes en las previews |
 | Beta abierta: créditos, trial, rate limiting y Sentry | [`docs/beta-abierta.md`](docs/beta-abierta.md) | Antes de tocar `lib/rate-limit.ts`, `lib/usage.ts`, `lib/ai-guard.ts`, `lib/subscription.ts`, `lib/observability.ts`, `lib/sentry-scrub.ts`, los planes, o **al añadir cualquier ruta que gaste dinero** (IA, render, envío de correo) |
+| Asistente / API pública / MCP | [`docs/assistant.md`](docs/assistant.md) | Antes de tocar `lib/assistant/**`, `lib/services/**`, `app/api/assistant/**`, `app/api/v1/**`, `app/api/mcp/**` o `app/api/api-keys/**` |
 
 ## Regla: Zernio
 
@@ -46,6 +47,16 @@ Lambda o Resend para cualquiera que se registre — incluso con el mes gratis ya
 vencido. Las rutas que no gastan créditos pero sí son «crear» (publicar,
 programar) usan `requireActiveSubscription` de `lib/subscription.ts`.
 Ver [`docs/beta-abierta.md`](docs/beta-abierta.md).
+
+## Regla: capacidades nuevas
+
+> **La lógica va en un servicio de `lib/services` (`(ctx, input)`) y se expone
+> como herramienta en `lib/assistant/tools`; las rutas solo adaptan HTTP.
+> Nunca lógica inline en la ruta.**
+
+Así la misma capacidad sirve a la UI, al chat del asistente, a la API REST
+(`/api/v1`) y al servidor MCP (`/api/mcp`) con las mismas reglas de marca,
+suscripción, créditos y auditoría. Ver [`docs/assistant.md`](docs/assistant.md).
 
 ## Convenciones generales
 

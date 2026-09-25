@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText } from '@/lib/ai';
-import { guardAiRequest } from '@/lib/ai-guard';
-import { reportError } from '@/lib/observability';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { generateTextPost } from '@/lib/services/content';
 import type { ContentChannel, AIModel } from '@/types/ai';
 
 export const runtime = 'nodejs';
@@ -62,122 +61,29 @@ export async function POST(req: NextRequest) {
   }
 
   const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
-
-  const db = createSupabaseServer();
-
-  // Fetch brand kit context if available
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select('id, name, tagline, tone, industry')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
   const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
 
-  // Rate limit + cuota mensual. Va después de validar el cuerpo para que una
-  // petición malformada no gaste cuota del usuario.
-  const guard = await guardAiRequest(req, {
-    auth, operation: 'text', route: 'POST /api/content/generate', language,
-  });
-  if (guard.blocked) return guard.blocked;
-
-  // Run generation
-  let result;
-  try {
-    result = await generateContentText({
-      channel,
-      topic:     (input.topic as string).trim().slice(0, 500),
-      model:     (input.model as AIModel | undefined) ?? 'claude',
-      language,
-      tone:      brandKit?.tone ?? [],
-      brandName: brandKit?.name  ?? undefined,
-      tagline:   brandKit?.tagline ?? undefined,
-      extraCtx:  brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
-    });
-  } catch (err) {
-    // El fallo es nuestro o del proveedor: se devuelve la cuota consumida.
-    await guard.refund();
-    reportError(err, { route: 'POST /api/content/generate', auth, service: 'ai', extra: { channel } });
-    const msg = err instanceof Error ? err.message : 'AI generation failed';
-    return NextResponse.json({ error: msg }, { status: 502 });
-  }
-
+  // La generación (kit de marca, cobro con la guardia de gasto, IA y guardado)
+  // vive en generateTextPost. El cobro va después de validar el cuerpo para
+  // que una petición malformada no gaste cuota del usuario.
+  const ctx = serviceContext(auth, brand?.id ?? '', language, { brandScope: 'org', source: 'route' });
   const shouldSave = input.save !== false; // default true
-  if (!shouldSave) {
-    return NextResponse.json({ result });
+
+  try {
+    const out = await generateTextPost(ctx, {
+      topic:  input.topic as string,
+      channel,
+      model:  input.model as AIModel | undefined,
+      itemId: typeof input.itemId === 'string' && input.itemId ? input.itemId : null,
+      save:   shouldSave,
+    });
+
+    if (!shouldSave) return NextResponse.json({ result: out.result });
+
+    const res = NextResponse.json({ itemId: out.itemId, result: out.result, draft: out.draft }, { status: 201 });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (e) {
+    return serviceErrorResponse(e, { route: 'POST /api/content/generate', auth });
   }
-
-  // Resolve or create content item
-  let itemId: string;
-  if (typeof input.itemId === 'string' && input.itemId) {
-    // Verify ownership
-    const { data: existing } = await db
-      .from('kefy_content_items')
-      .select('id')
-      .eq('id', input.itemId)
-      .eq('org_id', auth.orgId)
-      .maybeSingle();
-
-    if (!existing) {
-      return NextResponse.json({ error: 'Content item not found' }, { status: 404 });
-    }
-    itemId = existing.id;
-  } else {
-    // Create new item
-    const { data: newItem, error: itemError } = await db
-      .from('kefy_content_items')
-      .insert({
-        org_id:       auth.orgId,
-        brand_id:     brand?.id ?? null,
-        brand_kit_id: brandKit?.id ?? null,
-        created_by:   auth.userId,
-        channel,
-        body:         result.body,
-        hashtags:     result.hashtags,
-        status:       'draft',
-      })
-      .select('id')
-      .single();
-
-    if (itemError || !newItem) {
-      console.error('content item insert error:', itemError?.message);
-      return NextResponse.json({ error: 'Failed to save content item' }, { status: 500 });
-    }
-    itemId = newItem.id;
-  }
-
-  // Deselect previous drafts for this item
-  await db
-    .from('kefy_content_drafts')
-    .update({ selected: false })
-    .eq('content_item_id', itemId);
-
-  // Insert draft
-  const { data: draft, error: draftError } = await db
-    .from('kefy_content_drafts')
-    .insert({
-      content_item_id: itemId,
-      org_id:          auth.orgId,
-      body:            result.body,
-      model:           result.model,
-      tokens_used:     result.tokensUsed,
-      selected:        true,
-    })
-    .select('id, body, model, tokens_used, selected, created_at')
-    .single();
-
-  if (draftError || !draft) {
-    console.error('draft insert error:', draftError?.message);
-    // Non-fatal — item was created, just log
-  }
-
-  // Update item body + hashtags with latest generation
-  await db
-    .from('kefy_content_items')
-    .update({ body: result.body, hashtags: result.hashtags })
-    .eq('id', itemId);
-
-  const res = NextResponse.json({ itemId, result, draft }, { status: 201 });
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
 }

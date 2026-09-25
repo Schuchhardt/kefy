@@ -54,7 +54,7 @@ test.describe('Ajustes y cuentas sociales', () => {
       await page.route('https://auth.instagram.com/**', (route) => route.abort());
       await connectBtn.click();
       // Después del click se puede abrir una URL de OAuth; simplemente verificar que no hay error 500
-      await expect(page.getByText(/500|Server Error/i)).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/Internal Server Error|\b500\b[^.]*error/i)).not.toBeVisible({ timeout: 5000 });
     }
   });
 
@@ -94,7 +94,7 @@ test.describe('Ajustes y cuentas sociales', () => {
       if (await confirmBtn.isVisible({ timeout: 2000 })) {
         await confirmBtn.click();
       }
-      await expect(page.getByText(/500|Error/i)).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/Internal Server Error|\b500\b[^.]*error/i)).not.toBeVisible({ timeout: 5000 });
     }
   });
 

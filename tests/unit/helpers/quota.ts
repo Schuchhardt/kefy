@@ -20,6 +20,12 @@ export interface QuotaState {
   rateLimited: boolean;
   /** true → las RPC responden con error, como una base caída. */
   dbError: boolean;
+  /** false → `kefy_assistant_consume` devuelve -1 (mensajes del asistente agotados). */
+  assistantQuotaAllowed: boolean;
+  /** Mensajes del asistente ya usados este mes, antes del que se consume. */
+  assistantUsed: number;
+  /** false → `kefy_assistant_turn_step` devuelve -1 (turno sin llamadas al modelo). */
+  turnStepAllowed: boolean;
   /** Registro de las llamadas, para poder afirmar sobre ellas. */
   calls: Array<{ fn: string; args: Record<string, unknown> }>;
 }
@@ -28,6 +34,9 @@ export const quotaState: QuotaState = {
   quotaAllowed: true,
   rateLimited: false,
   dbError: false,
+  assistantQuotaAllowed: true,
+  assistantUsed: 0,
+  turnStepAllowed: true,
   calls: [],
 };
 
@@ -36,7 +45,20 @@ export function resetQuotaState(): void {
   quotaState.quotaAllowed = true;
   quotaState.rateLimited = false;
   quotaState.dbError = false;
+  quotaState.assistantQuotaAllowed = true;
+  quotaState.assistantUsed = 0;
+  quotaState.turnStepAllowed = true;
   quotaState.calls = [];
+}
+
+/** Llamadas a `kefy_assistant_consume` (intentos de descontar un mensaje del asistente). */
+export function assistantConsumedCount(): number {
+  return quotaState.calls.filter((c) => c.fn === 'kefy_assistant_consume').length;
+}
+
+/** Mensajes del asistente devueltos. */
+export function assistantRefundCount(): number {
+  return quotaState.calls.filter((c) => c.fn === 'kefy_assistant_refund').length;
 }
 
 /** Número de descuentos de créditos por un importe dado. */
@@ -79,6 +101,21 @@ export async function fakeRpc(
 
     case 'kefy_credits_refund':
       return { data: null, error: null };
+
+    // Cuota mensual de mensajes del asistente (lib/usage.ts). Devuelve el total
+    // usado tras consumir, o -1 si ya no quedaban.
+    case 'kefy_assistant_consume':
+      if (!quotaState.assistantQuotaAllowed) return { data: -1, error: null };
+      quotaState.assistantUsed += 1;
+      return { data: quotaState.assistantUsed, error: null };
+
+    case 'kefy_assistant_refund':
+      quotaState.assistantUsed = Math.max(0, quotaState.assistantUsed - 1);
+      return { data: null, error: null };
+
+    // Presupuesto de llamadas al modelo de un turno (lib/assistant/turns.ts).
+    case 'kefy_assistant_turn_step':
+      return { data: quotaState.turnStepAllowed ? 1 : -1, error: null };
 
     default:
       return { data: null, error: null };

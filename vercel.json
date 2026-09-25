@@ -40,6 +40,18 @@
     },
     "app/api/content-library/generate/route.ts": {
       "maxDuration": 300
+    },
+    "app/api/assistant/chat/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/assistant/actions/[actionId]/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/mcp/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/v1/tools/[name]/route.ts": {
+      "maxDuration": 300
     }
   }
 }

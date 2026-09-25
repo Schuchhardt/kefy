@@ -7,6 +7,7 @@ import {
   resolveEntitlement,
   getEntitlement,
   requireActiveSubscription,
+  checkSubscription,
   trialEndsAt,
   blockMessage,
   TRIAL_DAYS,
@@ -196,5 +197,52 @@ describe('blockMessage', () => {
       expect(blockMessage(reason, 'es').length).toBeGreaterThan(10);
       expect(blockMessage(reason, 'en').length).toBeGreaterThan(10);
     }
+  });
+});
+
+// ─── checkSubscription (núcleo sin HTTP) ─────────────────────────────────────
+//
+// Lo usa el registro de acciones del asistente (chat, MCP y API), que no
+// siempre responde con un Response. Tiene que dar exactamente el mismo cuerpo
+// que requireActiveSubscription, para que la UI distinga los bloqueos igual.
+
+describe('checkSubscription', () => {
+  beforeEach(() => { vi.resetAllMocks(); });
+
+  function mockSub(data: unknown, error: unknown = null) {
+    const chain: Record<string, unknown> = {};
+    chain.select = vi.fn(() => chain);
+    chain.eq = vi.fn(() => chain);
+    chain.maybeSingle = vi.fn(async () => ({ data, error }));
+    mockSupabaseClient.from.mockReturnValue(chain);
+  }
+
+  it('ok con una suscripción activa', async () => {
+    mockSub({ status: 'active', current_period_end: enDias(10) });
+
+    expect(await checkSubscription('org-1', 'es', AHORA)).toEqual({ ok: true });
+  });
+
+  it('402 con el mismo cuerpo que requireActiveSubscription', async () => {
+    mockSub({ status: 'past_due', current_period_end: enDias(10) });
+    const core = await checkSubscription('org-1', 'en', AHORA);
+
+    mockSub({ status: 'past_due', current_period_end: enDias(10) });
+    const res = await requireActiveSubscription('org-1', 'en', AHORA);
+
+    expect(core.ok).toBe(false);
+    if (core.ok) return;
+    expect(core.status).toBe(402);
+    expect(core.body).toEqual(await res!.json());
+    expect(core.body).toMatchObject({ subscriptionRequired: true, reason: 'payment_failed', status: 'past_due' });
+  });
+
+  it('503 (no 402) si la suscripción no se puede leer: falla cerrado sin culpar al usuario', async () => {
+    mockSub(null, { message: 'timeout' });
+
+    const r = await checkSubscription('org-1', 'es', AHORA);
+
+    expect(r).toMatchObject({ ok: false, status: 503 });
+    if (!r.ok) expect(r.body.subscriptionRequired).toBeUndefined();
   });
 });

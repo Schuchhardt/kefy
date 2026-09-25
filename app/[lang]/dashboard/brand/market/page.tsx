@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useDataChanged } from '@/lib/data-events';
 import type { BrandKit, CompanySize } from '@/types/brand-kit';
 import type { Industry } from '@/types/strategy';
 
@@ -172,6 +173,9 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
   useEffect(() => {
     if (!authLoading && org) void loadBrandKit();
   }, [authLoading, org, loadBrandKit]);
+
+  // El asistente editó la marca o cambió la estrategia: se recarga.
+  useDataChanged(['brand-kit', 'strategy'], () => { if (!authLoading && org) void loadBrandKit(); });
 
   async function handleSelectIndustry(id: string) {
     const next = selectedIndustryId === id ? null : id;

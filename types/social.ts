@@ -65,6 +65,12 @@ export interface ZernioPublishPayload {
   content_type?: 'post' | 'carousel' | 'reel' | 'story';
   hashtags?:     string[];
   scheduled_at?: string;
+  /**
+   * x-request-id; Zernio dedupes retries with the same id for ~5 min.
+   * Not durable idempotency — la idempotencia real es la fila de
+   * kefy_assistant_actions.
+   */
+  request_id?:   string;
 }
 
 export interface ZernioPublishResult {

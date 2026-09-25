@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { BRAND_LIMITS, slugifyBrand } from '@/lib/brands';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { listBrands } from '@/lib/services/brands';
 
 // ─── GET /api/brands ──────────────────────────────────────────────────────────
 // List all non-archived brands for the auth'd org.
@@ -11,46 +14,15 @@ export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const db = createSupabaseServer();
+  // El listado es de toda la organización: no hace falta resolver la marca
+  // activa (ni tocar su cookie) para construir el contexto.
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
 
-  const { data: brands, error } = await db
-    .from('kefy_brands')
-    .select('id, org_id, name, slug, avatar_url, archived, created_at, updated_at')
-    .eq('org_id', auth.orgId)
-    .eq('archived', false)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    console.error('brands GET error:', error.message);
-    return NextResponse.json({ error: 'Failed to fetch brands' }, { status: 500 });
+  try {
+    return NextResponse.json(await listBrands(ctx));
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/brands', auth });
   }
-
-  const rows = brands ?? [];
-
-  // Logo del Brand Kit de cada marca, para que el selector pueda usarlo cuando
-  // la marca no tiene una imagen propia. Cada marca ya subió su logo al definir
-  // su identidad: pedir la misma imagen otra vez solo para el selector sería
-  // trabajo repetido para el usuario.
-  const kitLogos = new Map<string, string>();
-  if (rows.length > 0) {
-    const { data: kits } = await db
-      .from('kefy_brand_kits')
-      .select('brand_id, logo_url')
-      .in('brand_id', rows.map((b) => b.id));
-
-    for (const kit of (kits ?? []) as Array<{ brand_id: string | null; logo_url: string | null }>) {
-      if (kit.brand_id && kit.logo_url) kitLogos.set(kit.brand_id, kit.logo_url);
-    }
-  }
-
-  const limit = BRAND_LIMITS[auth.plan] ?? 1;
-
-  return NextResponse.json({
-    brands: rows.map((b) => ({ ...b, kit_logo_url: kitLogos.get(b.id) ?? null })),
-    count: rows.length,
-    limit,
-    canCreate: rows.length < limit,
-  });
 }
 
 // ─── POST /api/brands ─────────────────────────────────────────────────────────

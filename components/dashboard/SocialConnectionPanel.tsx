@@ -1,21 +1,34 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { CHANNELS, CHANNEL_LABELS } from '@/lib/channels';
+import { useBrand } from '@/lib/brand-context';
 import type { Channel } from '@/types/channels';
 import type { SocialAccount } from '@/types/social';
 
 type Locale = 'es' | 'en';
 type Mode = 'settings' | 'onboarding';
 
+/** Redes que el panel ofrece conectar: las mismas que los botones. */
+const CONNECTABLE_PLATFORMS = new Set<string>(
+  CHANNELS.filter((ch) => ch.group === 'organic').map((ch) => ch.value),
+);
+
 interface Props {
   locale: Locale;
   mode: Mode;
   contentHref?: string;
   onAccountsChange?: (count: number) => void;
+  /**
+   * Si es `true`, el panel lee `?connect=<red>&brand=<id>` de la URL y arranca
+   * solo el flujo de conexión (el enlace que devuelven el asistente, la API y
+   * el MCP). Solo lo activa la página de ajustes: el panel del inicio no debe
+   * disparar OAuth por su cuenta.
+   */
+  autoConnectFromQuery?: boolean;
 }
 
 export default function SocialConnectionPanel({
@@ -23,16 +36,23 @@ export default function SocialConnectionPanel({
   mode,
   contentHref,
   onAccountsChange,
+  autoConnectFromQuery = false,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { brands, activeBrand, loading: brandsLoading, switchBrand } = useBrand();
 
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectSuccess, setConnectSuccess] = useState<string | null>(null);
+  // Estado del enlace directo `?connect=`: la red que se está preparando.
+  const [autoConnecting, setAutoConnecting] = useState<string | null>(null);
+  // Evita que el enlace se procese dos veces (efectos dobles de StrictMode,
+  // re-renders al cambiar la URL o al terminar de cargar las marcas).
+  const autoConnectHandled = useRef(false);
 
   const t = {
     es: {
@@ -52,6 +72,10 @@ export default function SocialConnectionPanel({
       ctaButton: 'Crear primer contenido',
       xSensitiveHint: 'Si tus imágenes salen en X detrás de un aviso de contenido sensible, desmarca «Marcar el contenido multimedia que publicas como material que puede ser sensible» en X → Configuración y privacidad → Privacidad y seguridad → Tus publicaciones. Es un ajuste de tu cuenta de X; Kefy no puede cambiarlo al publicar.',
       xSensitiveLink: 'Abrir ajustes de X',
+      autoConnecting: 'Conectando {network}…',
+      autoConnectUnknownPlatform: 'El enlace de conexión apunta a una red que Kefy no admite. Elige una de la lista.',
+      autoConnectBrandNotFound: 'La marca del enlace no está entre tus marcas, así que no se conectó ninguna cuenta.',
+      autoConnectBrandSwitchError: 'No se pudo cambiar a la marca del enlace. Inténtalo de nuevo.',
     },
     en: {
       connectError: 'Failed to connect account',
@@ -70,6 +94,10 @@ export default function SocialConnectionPanel({
       ctaButton: 'Create first content',
       xSensitiveHint: 'If your images show up on X behind a sensitive-content warning, untick “Mark media you post as having material that may be sensitive” in X → Settings and privacy → Privacy and safety → Your posts. It’s a setting on your X account; Kefy can’t override it when publishing.',
       xSensitiveLink: 'Open X settings',
+      autoConnecting: 'Connecting {network}…',
+      autoConnectUnknownPlatform: 'The connection link points to a network Kefy doesn’t support. Pick one from the list.',
+      autoConnectBrandNotFound: 'The link’s brand isn’t one of your brands, so no account was connected.',
+      autoConnectBrandSwitchError: 'Couldn’t switch to the link’s brand. Please try again.',
     },
   }[locale];
 
@@ -114,7 +142,7 @@ export default function SocialConnectionPanel({
     router.replace(pathname);
   }, [searchParams, router, pathname, fetchAccounts, t.connectError]);
 
-  async function handleConnectPlatform(platform: string) {
+  async function handleConnectPlatform(platform: string): Promise<boolean> {
     setConnecting(platform);
     setConnectError(null);
     setConnectSuccess(null);
@@ -133,11 +161,75 @@ export default function SocialConnectionPanel({
       }
 
       window.location.href = data.url;
+      return true;
     } catch (err) {
       setConnectError(err instanceof Error ? err.message : t.unknownError);
       setConnecting(null);
+      return false;
     }
   }
+
+  // ── Enlace directo: /{lang}/dashboard/settings?connect=<red>&brand=<id> ────
+  // Lo generan el asistente, la API REST y el MCP. El callback de OAuth asocia
+  // la cuenta a la marca ACTIVA (cookie), así que si el enlace trae otra marca
+  // hay que terminar de cambiar a ella antes de pedir la URL de OAuth.
+  useEffect(() => {
+    if (!autoConnectFromQuery || autoConnectHandled.current) return;
+
+    const platform = searchParams.get('connect');
+    if (!platform) return;
+    const brandId = searchParams.get('brand');
+
+    // Para validar la marca hace falta la lista: se espera a que cargue (el
+    // efecto se vuelve a ejecutar cuando cambia `brandsLoading`).
+    if (brandId && brandsLoading) return;
+
+    autoConnectHandled.current = true;
+
+    // Quitar `connect` y `brand` de la URL para que recargar la página o volver
+    // del OAuth no repita la conexión. El resto de parámetros se conserva.
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete('connect');
+    rest.delete('brand');
+    const query = rest.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+
+    if (!CONNECTABLE_PLATFORMS.has(platform)) {
+      setConnectError(t.autoConnectUnknownPlatform);
+      return;
+    }
+
+    if (brandId && !brands.some((b) => b.id === brandId)) {
+      setConnectError(t.autoConnectBrandNotFound);
+      return;
+    }
+
+    setAutoConnecting(platform);
+    setConnectError(null);
+    // Bloquea los botones también mientras se cambia de marca.
+    setConnecting(platform);
+
+    void (async () => {
+      if (brandId && brandId !== activeBrand?.id) {
+        try {
+          await switchBrand(brandId);
+        } catch (err) {
+          console.error('[social connect link] switchBrand failed:', err);
+          setConnectError(t.autoConnectBrandSwitchError);
+          setAutoConnecting(null);
+          setConnecting(null);
+          return;
+        }
+      }
+
+      const ok = await handleConnectPlatform(platform);
+      // Si arrancó bien, el navegador ya va camino de Zernio: el aviso se queda.
+      if (!ok) setAutoConnecting(null);
+    })();
+  // handleConnectPlatform y los textos no cambian el resultado: el enlace se
+  // procesa una sola vez, con los valores del momento en que se procesa.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoConnectFromQuery, searchParams, brandsLoading, brands, activeBrand, switchBrand, router, pathname]);
 
   async function handleDisconnect(accountId: string) {
     if (!confirm(t.confirmDisconnect)) return;
@@ -149,6 +241,11 @@ export default function SocialConnectionPanel({
 
   return (
     <>
+      {autoConnecting && !connectError && (
+        <p role="status" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
+          {t.autoConnecting.replace('{network}', CHANNEL_LABELS[autoConnecting as Channel] ?? autoConnecting)}
+        </p>
+      )}
       {connectError && (
         <p style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 12 }}>{connectError}</p>
       )}

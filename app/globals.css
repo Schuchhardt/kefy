@@ -992,3 +992,38 @@ img { display: block; max-width: 100%; }
 /* ── Spin animation (used by refresh icons) ─────────────── */
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
+
+/* ── Asistente IA (components/assistant) ────────────────── */
+/* El acento #C6FF4B como color de texto no se lee sobre fondo claro: en el
+   tema claro el texto de acento del asistente usa un verde oscuro. */
+:root { --assistant-accent-text: #C6FF4B; }
+[data-theme="light"] { --assistant-accent-text: #4F7A00; }
+[data-theme="dark"] { --assistant-accent-text: #C6FF4B; }
+
+.btn-sm { padding: 6px 12px; font-size: 12.5px; border-radius: 7px; gap: 6px; }
+.assistant-panel .btn:disabled,
+.assistant-panel button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+.assistant-panel .btn { font-family: var(--font-syne), sans-serif; }
+.assistant-launcher:hover { transform: scale(1.05); }
+.assistant-launcher:focus-visible,
+.assistant-panel button:focus-visible,
+.assistant-panel a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.assistant-md > :last-child { margin-bottom: 0 !important; }
+.assistant-suggestion:hover:not(:disabled) { border-color: rgba(198,255,75,0.45) !important; }
+.assistant-history-row:hover { background: var(--surface-2) !important; }
+/* Anclado a la izquierda (leads): junto al sidebar de escritorio, no encima.
+   Sidebar.tsx publica su ancho (64 o 220px) en --dashboard-sidebar-w. */
+.assistant-launcher--left,
+.assistant-panel--left { left: calc(var(--dashboard-sidebar-w, 0px) + 24px); }
+
+@media (max-width: 767px) {
+  /* Por encima del BottomNav (64px + safe area). */
+  .assistant-launcher { bottom: calc(64px + env(safe-area-inset-bottom) + 12px) !important; right: 16px !important; width: 50px !important; height: 50px !important; }
+  .assistant-launcher--left { left: 16px !important; right: auto !important; }
+  /* En móvil el panel ocupa la pantalla entera, por encima del BottomNav. */
+  .assistant-panel { inset: 0 !important; width: 100% !important; max-width: none !important; height: auto !important; border: 0 !important; border-radius: 0 !important; z-index: 450 !important; }
+  .assistant-panel-header { padding-top: calc(12px + env(safe-area-inset-top)) !important; }
+  .assistant-panel-footer { padding-bottom: calc(10px + env(safe-area-inset-bottom)) !important; }
+  /* 16px evita el zoom automático de iOS al enfocar el campo. */
+  .assistant-panel textarea { font-size: 16px !important; }
+}

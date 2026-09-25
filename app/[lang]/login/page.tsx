@@ -4,6 +4,7 @@ import { useState, FormEvent, Suspense, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { safeNextPath } from '@/lib/safe-redirect';
 import { useParams } from 'next/navigation';
 
 const VIDEO_SRC =
@@ -88,6 +89,8 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const expired = searchParams.get('expired');
   const reset   = searchParams.get('reset');
+  // Vuelve al link del dashboard que se abrió sin sesión (ver lib/safe-redirect).
+  const next    = safeNextPath(searchParams.get('next'), lang);
 
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
@@ -112,7 +115,7 @@ function LoginForm() {
         return;
       }
 
-      router.push(`/${lang}/dashboard`);
+      router.push(next ?? `/${lang}/dashboard`);
     } catch {
       const locale = lang === 'en' ? 'en' : 'es';
       setError(LOGIN_ERROR_MESSAGES[locale].network);

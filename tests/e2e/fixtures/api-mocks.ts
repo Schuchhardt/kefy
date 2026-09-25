@@ -1,3 +1,7 @@
+import type { SseEvent } from '../../../lib/assistant/types';
+
+export type { SseEvent };
+
 /**
  * Respuestas mock compartidas para todos los tests E2E.
  * Se usan con page.route() para interceptar llamadas a la API.
@@ -103,3 +107,100 @@ export const API_MOCK_MAP: Record<string, unknown> = {
   '/api/reviews': { reviews: [] },
   '/api/strategies': { strategies: [] },
 };
+
+// ─── Asistente IA ────────────────────────────────────────────────────────────
+//
+// El chat y las decisiones responden `text/event-stream`. `sseBody` arma el
+// cuerpo con el mismo framing que createSseStream (lib/assistant/sse.ts):
+//
+//   event: <type>\ndata: <json>\n\n
+//
+// y un `: ping` opcional para comprobar que el cliente ignora los comentarios.
+
+
+export function sseBody(events: SseEvent[], { ping = false } = {}): string {
+  const frames = events.map((evt) => `event: ${evt.type}\ndata: ${JSON.stringify(evt)}\n\n`);
+  return (ping ? ': ping\n\n' : '') + frames.join('');
+}
+
+export const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream; charset=utf-8',
+  'Cache-Control': 'no-cache, no-transform',
+};
+
+export const MOCK_ASSISTANT_USAGE = { used: 10, limit: 200, remaining: 190, period: '2026-09' };
+
+export const MOCK_ASSISTANT_CONVERSATIONS = [
+  {
+    id: 'conv-1',
+    title: 'Ideas para el lanzamiento',
+    last_message_at: '2026-09-22T10:00:00Z',
+    brand_id: 'brand-test-1',
+  },
+  {
+    id: 'conv-2',
+    title: 'Métricas de septiembre',
+    last_message_at: '2026-09-20T10:00:00Z',
+    brand_id: 'brand-test-1',
+  },
+];
+
+export const MOCK_ASSISTANT_CONVERSATION_2 = {
+  conversation: {
+    id: 'conv-2',
+    title: 'Métricas de septiembre',
+    brand_id: 'brand-test-1',
+    last_message_at: '2026-09-20T10:00:00Z',
+    created_at: '2026-09-20T09:58:00Z',
+  },
+  messages: [
+    {
+      id: 'm-1',
+      role: 'user',
+      text: '¿Cómo van mis publicaciones?',
+      createdAt: '2026-09-20T09:58:00Z',
+      tools: [],
+    },
+    {
+      id: 'm-2',
+      role: 'assistant',
+      text: 'Este mes llevas **1.000 impresiones**.',
+      createdAt: '2026-09-20T09:58:10Z',
+      tools: [{ toolUseId: 'tu-hist-1', name: 'get_analytics_overview', status: 'done' }],
+    },
+  ],
+  pendingActions: [],
+};
+
+export interface MockApiKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  scopes: ('read' | 'write' | 'publish')[];
+  brand_id: string | null;
+  created_by: string | null;
+  created_by_user: { name: string | null; email: string | null } | null;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  status: 'active' | 'revoked' | 'expired';
+}
+
+export function mockApiKey(overrides: Partial<MockApiKey> = {}): MockApiKey {
+  return {
+    id: 'key-1',
+    name: 'Claude Code',
+    key_prefix: 'kefy_sk_ab12',
+    scopes: ['read', 'write'],
+    brand_id: null,
+    created_by: 'u1',
+    created_by_user: { name: 'Test User', email: 'test@kefy.com' },
+    last_used_at: null,
+    expires_at: null,
+    revoked_at: null,
+    created_at: '2026-09-01T10:00:00Z',
+    status: 'active',
+    ...overrides,
+  };
+}

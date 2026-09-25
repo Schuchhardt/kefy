@@ -157,6 +157,13 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
   const { main: items, settings: settingsItem } = navItems(lang);
   const W = collapsed ? 64 : 220;
 
+  // Lo que se ancla abajo a la izquierda (el asistente en leads) se corre
+  // este ancho para no tapar los controles de abajo del sidebar.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--dashboard-sidebar-w', `${W}px`);
+  }, [W]);
+  useEffect(() => () => { document.documentElement.style.removeProperty('--dashboard-sidebar-w'); }, []);
+
   function isItemActive(item: NavItem) {
     if (item.href === `/${lang}/dashboard`) return pathname === item.href;
     return pathname.startsWith(item.href);

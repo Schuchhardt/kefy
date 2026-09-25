@@ -90,6 +90,8 @@ pero cuesta una sola escritura atómica.
 | `resetPassword` | 10 | 1 h | IP |
 | `aiGeneration` | 20 | 1 min | organización |
 | `publish` | 30 | 1 min | organización |
+| `assistant` | 30 | 1 min | organización (mensajes al asistente, bucket `assistant:org:<id>`) |
+| `apiKey` | 120 | 1 min | API key (`/api/v1` y `/api/mcp`) |
 
 **Falla abierto.** Si Supabase no responde, la petición pasa y el fallo va a
 Sentry. Un limitador caído no puede dejar a todo el mundo fuera del login: el
@@ -177,10 +179,70 @@ ya cubiertas.
 | 402 | `subscriptionRequired`, `reason` | Falta pagar | Llevar a planes |
 | 429 | `retryAfter` | Demasiadas peticiones | Esperar y reintentar |
 | 429 | `creditsExhausted` | Sin créditos este mes | Ofrecer mejorar el plan |
+| 429 | `assistantQuotaExhausted`, `limit`, `used` | Sin mensajes del asistente este mes | Ofrecer mejorar el plan (solo el chat) |
 | 503 | — | No se pudo verificar | Reintentar |
 
 `GET /api/auth/me` devuelve `subscription` y `usage` para que el dashboard avise
 **antes** de que el usuario se choque con cualquiera de los tres.
+
+### Autopilot
+
+«Ejecutar ahora» (botón de la UI, `run_autopilot_now` por API / MCP / chat)
+cobra 1 crédito de texto por regla con `chargeOrThrow` y lo devuelve si la
+ejecución falla (`lib/services/autopilot.ts`). La ejecución programada del
+cron **todavía no cobra**: si cobrara, un autopilot se pararía en silencio al
+acabarse los créditos, y eso necesita antes un aviso en la UI. Es deuda
+conocida, igual que el motor de engagement.
+
+### Asistente IA: mensajes, no créditos
+
+**Chatear con el asistente no gasta créditos de IA.** Cada plan trae una cuota
+mensual de mensajes al asistente, aparte del pool de créditos, y es lo que
+anuncia la página de precios («Asistente IA: 300 mensajes / mes»):
+
+| Plan | Mensajes al asistente / mes |
+|---|---|
+| Starter | 300 |
+| Pro | 1,500 |
+| Business | 5,000 |
+
+Viven en `PLAN_ASSISTANT_MESSAGES` (`lib/usage.ts`) y se cuentan en la misma
+fila `(org_id, period)` de `kefy_usage_counters`, columna `assistant_messages`
+(migración `20260922000001_create_assistant_and_api_keys.sql`, funciones
+`kefy_assistant_consume` / `kefy_assistant_refund`, mismo patrón atómico que
+los créditos). `tests/unit/lib/usage.test.ts` verifica que la landing diga lo
+mismo.
+
+- **1 mensaje del usuario = 1 mensaje de la cuota.** Cubre hasta 6 llamadas al
+  modelo (`MAX_MODEL_CALLS_PER_TURN` en `lib/assistant/turns.ts`), contando las
+  reanudaciones tras confirmar una acción: confirmar no gasta otro mensaje. El
+  tope lo aplica `kefy_assistant_turn_step`, que falla cerrado.
+- **Lo que el asistente genera sí cobra créditos**, igual que en la UI: un post
+  1 crédito de texto, una imagen 3, un carrusel texto + 3 por imagen. Las
+  herramientas llaman a los mismos servicios que las rutas (`chargeOrThrow`).
+- **Rate limit propio**: bucket `assistant:org:<id>`, 30 mensajes por minuto,
+  separado de `ai:org` para que chatear no frene las generaciones ni al revés.
+- **La guardia sigue siendo obligatoria.** `POST /api/assistant/chat` pasa por
+  `guardAiRequest` con `operation: 'assistant_message'`: suscripción (402) →
+  rate limit `assistant` (429 `retryAfter`) → cuota de mensajes (429
+  `assistantQuotaExhausted`). Falla cerrado igual que los créditos (503).
+- **Reembolso**: si el turno falla antes de que el modelo haya respondido nada
+  (error del proveedor, de la base), el mensaje se devuelve con
+  `refundAssistantMessage`. Si el usuario cierra el chat a mitad, no.
+- `POST /api/assistant/actions/[id]` (confirmar o rechazar) **no** pasa por la
+  guardia: sus llamadas al modelo salen del turno que ya pagó el mensaje.
+- **La API REST (`/api/v1`) y el MCP (`/api/mcp`) no descuentan mensajes**: ahí
+  no hay LLM de Kefy, el modelo lo pone el cliente. Sí cobran créditos las
+  herramientas que generan, y exigen suscripción activa las que escriben.
+
+Para mostrar lo que queda: `GET /api/assistant/usage` → `{ used, limit,
+remaining, period }`; `GET /api/assistant/conversations` trae el mismo `usage`,
+y el evento SSE `done` de cada turno también.
+
+El modelo es `MODELS.assistant` (`lib/ai.ts`): `ASSISTANT_MODEL` o, por
+defecto, `claude-sonnet-5`, con `ASSISTANT_EFFORT` (por defecto `medium`). Los
+tokens de cada turno quedan en `kefy_assistant_turns` para vigilar el coste por
+mensaje.
 
 ## 4. Sentry
 
@@ -261,6 +323,10 @@ no puede crear nada desde el primer día, que es peor que no haberla creado.
 2. Configurar en Vercel: `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, y para los
    source maps `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`.
 3. Verificar que `/monitoring` responde (el túnel de Sentry).
+4. Para el asistente: aplicar
+   `db/migrations/20260922000001_create_assistant_and_api_keys.sql` y,
+   opcionalmente, fijar `ASSISTANT_MODEL` y `ASSISTANT_EFFORT`. Sin la
+   migración el chat responde 503 (la cuota de mensajes falla cerrado).
 
 Sin el paso 1 **toda ruta de generación responde 503**: los créditos fallan
 cerrado y sin las funciones SQL no se puede verificar nada.

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { listSocialAccounts } from '@/lib/services/social';
 
 // ─── GET /api/social/accounts ────────────────────────────────────────────────
 // List connected social accounts for the active brand.
@@ -13,22 +16,16 @@ export async function GET(req: NextRequest) {
   const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
   if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
-  const db = createSupabaseServer();
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
 
-  const { data: accounts, error } = await db
-    .from('kefy_social_accounts')
-    .select('id, platform, external_id, username, avatar_url, zernio_account_id, status, token_expires_at, created_at')
-    .eq('brand_id', brand.id)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('social accounts GET error:', error.message);
-    return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 });
+  try {
+    const out = await listSocialAccounts(ctx);
+    const res = NextResponse.json(out);
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: '/api/social/accounts', auth });
   }
-
-  const res = NextResponse.json({ accounts: accounts ?? [] });
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
 }
 
 // ─── POST /api/social/accounts ───────────────────────────────────────────────

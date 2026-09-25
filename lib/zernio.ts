@@ -244,8 +244,11 @@ export async function publishPost(
     zernioBody.publishNow = true;
   }
 
-  // Simple idempotency key to allow safe retries within 5 min
-  const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  // Idempotency key to allow safe retries within 5 min. El llamador puede
+  // fijarlo (p. ej. `${actionId}:${accountId}` desde el asistente) para que un
+  // reintento dentro de esa ventana no duplique la publicación.
+  const requestId = payload.request_id
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 
   console.log(
     `[Zernio] publishPost → platform=${payload.platform} accountId=${payload.account_id}` +
