@@ -133,6 +133,7 @@ const es = {
     get_content: 'Leyendo el contenido…',
     create_post: 'Creando post…',
     create_carousel: 'Creando carrusel…',
+    create_reel: 'Creando reel…',
     create_manual_content: 'Guardando contenido…',
     update_content: 'Editando contenido…',
     generate_content_image: 'Generando imagen…',
@@ -190,6 +191,13 @@ const es = {
       const n = Number(p.slide_count ?? i.slide_count ?? 5);
       const imgs = (p.generate_images ?? i.generate_images) !== false ? ' con imágenes' : '';
       return `Crear un carrusel de ${n} slides${imgs}${topic ? ` sobre ${quote(topic)}` : ''}`;
+    },
+    create_reel: (i, p) => {
+      const topic = str(p.topic, str(i.topic));
+      const n = Number(p.variant_count ?? i.variant_count ?? 1);
+      const variants = n > 1 ? ` (${n} variantes)` : '';
+      const imgs = (p.generate_images ?? i.generate_images) !== false ? ' con imágenes' : '';
+      return `Crear un reel${imgs}${variants}${topic ? ` sobre ${quote(topic)}` : ''}`;
     },
     create_manual_content: (i) => {
       const title = str(i.title);

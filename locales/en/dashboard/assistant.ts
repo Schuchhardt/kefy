@@ -130,6 +130,7 @@ const en = {
     get_content: 'Reading the content…',
     create_post: 'Creating post…',
     create_carousel: 'Creating carousel…',
+    create_reel: 'Creating reel…',
     create_manual_content: 'Saving content…',
     update_content: 'Editing content…',
     generate_content_image: 'Generating image…',
@@ -187,6 +188,13 @@ const en = {
       const n = Number(p.slide_count ?? i.slide_count ?? 5);
       const imgs = (p.generate_images ?? i.generate_images) !== false ? ' with images' : '';
       return `Create a ${n}-slide carousel${imgs}${topic ? ` about ${quote(topic)}` : ''}`;
+    },
+    create_reel: (i, p) => {
+      const topic = str(p.topic, str(i.topic));
+      const n = Number(p.variant_count ?? i.variant_count ?? 1);
+      const variants = n > 1 ? ` (${n} variants)` : '';
+      const imgs = (p.generate_images ?? i.generate_images) !== false ? ' with images' : '';
+      return `Create a reel${imgs}${variants}${topic ? ` about ${quote(topic)}` : ''}`;
     },
     create_manual_content: (i) => {
       const title = str(i.title);

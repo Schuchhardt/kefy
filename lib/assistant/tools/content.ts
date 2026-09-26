@@ -29,6 +29,7 @@ import {
   listContent,
   updateContent,
 } from '@/lib/services/content';
+import { generateReel, REEL_SCENE_COUNT_MAX, REEL_SCENE_COUNT_MIN, REEL_VARIANT_COUNT_MAX } from '@/lib/services/reel';
 import { CREDIT_COSTS } from '@/lib/usage';
 
 // ─── Esquemas compartidos ─────────────────────────────────────────────────────
@@ -333,6 +334,86 @@ const createCarouselTool = defineTool({
   },
 });
 
+// ─── create_reel ──────────────────────────────────────────────────────────────
+
+const createReelTool = defineTool({
+  name: 'create_reel',
+  title: { es: 'Crear reel con IA', en: 'Create AI reel' },
+  kind: 'write',
+  description:
+    'Generates a short vertical video reel script (3-8 scenes, one background image per scene by default) and ' +
+    'saves it as a draft — content_type "reel". This only writes the script + images; rendering the actual video ' +
+    'is a separate step (not yet exposed as a tool) done from the dashboard. ' +
+    `Costs ${CREDIT_COSTS.text} + ${CREDIT_COSTS.image} credits per scene image, per variant. ` +
+    'Pass variant_count > 1 to get that many independent takes on the same topic in one call, each saved as its ' +
+    'own draft item and grouped so they can be compared side by side — useful when the caller wants options ' +
+    'instead of a single result. If credits run out mid-way through a later variant, the earlier ones already ' +
+    'generated are still returned rather than losing them.',
+  input: z
+    .object({
+      topic: z.string().trim().min(1).max(500),
+      scene_count: z.number().int().min(REEL_SCENE_COUNT_MIN).max(REEL_SCENE_COUNT_MAX).default(5),
+      channel: channel.default('generic'),
+      generate_images: z.boolean().default(true),
+      image_quality: imageQuality.default('medium'),
+      variant_count: z.number().int().min(1).max(REEL_VARIANT_COUNT_MAX).default(1),
+    })
+    .strict(),
+  confirm: 'never',
+  estimateCredits: (input) => {
+    const variants = input.variant_count ?? 1;
+    const perVariant = CREDIT_COSTS.text
+      + (input.generate_images !== false ? CREDIT_COSTS.image * (input.scene_count ?? 5) : 0);
+    return perVariant * variants;
+  },
+  describe: async (_ctx, input) => ({
+    topic: input.topic,
+    scene_count: input.scene_count,
+    variant_count: input.variant_count,
+    generate_images: input.generate_images,
+  }),
+  handler: async (ctx, input) => {
+    const out = await generateReel(ctx, {
+      topic:                 input.topic,
+      channel:               input.channel,
+      scene_count:           input.scene_count,
+      generate_images:       input.generate_images,
+      image_quality:         input.image_quality,
+      variant_count:         input.variant_count,
+    });
+
+    const variants = out.variants.map((v) => {
+      const withImage = v.scenes.filter((s) => !!s.image_url).length;
+      return {
+        item_id:        v.itemId,
+        variant_index:  v.variant_index,
+        status:         'draft',
+        hook:            v.hook,
+        hashtags:        v.hashtags,
+        scenes: v.scenes.map((s) => ({
+          scene_order: s.scene_order,
+          title:       s.title,
+          body:        s.body,
+          image_url:   s.image_url,
+          duration_seconds: s.duration_seconds,
+        })),
+        images_generated: withImage,
+        images_missing:   input.generate_images !== false ? v.scenes.length - withImage : 0,
+      };
+    });
+
+    return {
+      data: {
+        variant_group_id:        out.variant_group_id,
+        requested_variant_count: out.requested_variant_count,
+        variants,
+      },
+      links: variants.map((v) => itemLink(ctx.language, v.item_id)),
+      dataChanged: ['content'],
+    };
+  },
+});
+
 // ─── create_manual_content ────────────────────────────────────────────────────
 
 const manualSlide = z
@@ -534,6 +615,7 @@ export const contentTools = [
   getContentTool,
   createPostTool,
   createCarouselTool,
+  createReelTool,
   createManualContentTool,
   updateContentTool,
   generateContentImageTool,

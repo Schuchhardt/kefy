@@ -123,8 +123,10 @@ limita qué puede hacer (scopes). Por eso las recomendaciones de §5.
   `guardAiRequest({ operation: 'assistant_message' })`. Un mensaje cubre hasta 6
   llamadas al modelo, también a través de las confirmaciones.
 - **Lo que se genera sí cobra créditos**, igual que desde la UI: un post (texto
-  1 + imagen 3), una imagen (3), un carrusel (texto + imagen por slide). Lo
-  cobra el servicio con `chargeOrThrow`.
+  1 + imagen 3), una imagen (3), un carrusel (texto + imagen por slide), un reel
+  (texto + imagen por escena — y eso, multiplicado, por cada variante si se
+  pide más de una con `variant_count`). Lo cobra el servicio con
+  `chargeOrThrow`.
 - **API y MCP no cobran por llamada** (no hay modelo de Kefy): solo cobran las
   herramientas que generan. `create_manual_content` no usa IA y no cuesta
   créditos, pero exige suscripción activa como todo lo que escribe.
@@ -159,7 +161,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Quiero… | Herramienta | Scope |
 |---|---|---|
 | Ver el workspace (marcas, plan, créditos, estrategia activa) | `get_workspace_context` | read |
-| Crear contenido con IA | `create_post`, `create_carousel`, `generate_content_image` | write |
+| Crear contenido con IA | `create_post`, `create_carousel`, `create_reel`, `generate_content_image` | write |
 | Pasar contenido ya escrito desde otro proyecto | `create_manual_content`, `update_content` | write |
 | Ver y buscar contenido | `list_content`, `get_content` | read |
 | Publicar o programar | `publish_content`, `list_scheduled_posts`, `cancel_scheduled_post` | publish |

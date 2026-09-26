@@ -33,6 +33,7 @@ export const ASSISTANT_TOOL_NAMES = [
   'get_content',
   'create_post',
   'create_carousel',
+  'create_reel',
   'create_manual_content',
   'update_content',
   'generate_content_image',
