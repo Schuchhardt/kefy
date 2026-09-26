@@ -57,6 +57,9 @@ export interface AnalyticsOverview {
     scheduled_post_id: string;
     platform: string;
     content_id: string | null;
+    content_type: string | null;
+    image_url: string | null;
+    video_url: string | null;
     body_preview: string;
     impressions: number;
     engagement_rate: number;
@@ -97,7 +100,7 @@ export async function getAnalyticsOverview(
         id,
         status,
         kefy_social_accounts!inner ( id, platform, brand_id ),
-        kefy_content_items!inner ( id, channel, body )
+        kefy_content_items!inner ( id, channel, body, content_type, image_url, video_url )
       )
     `)
     .eq('org_id', ctx.auth.orgId)
@@ -148,7 +151,7 @@ export async function getAnalyticsOverview(
       : 0;
 
   type Account = { platform: string };
-  type Content = { id: string; channel: string; body: string };
+  type Content = { id: string; channel: string; body: string; content_type: string; image_url: string | null; video_url: string | null };
   type PostRow = {
     id: string;
     kefy_social_accounts: Account | Account[] | null;
@@ -182,6 +185,9 @@ export async function getAnalyticsOverview(
         scheduled_post_id: r.scheduled_post_id,
         platform:          one(post?.kefy_social_accounts)?.platform ?? 'unknown',
         content_id:        content?.id ?? null,
+        content_type:      content?.content_type ?? null,
+        image_url:         content?.image_url ?? null,
+        video_url:         content?.video_url ?? null,
         body_preview:      (content?.body ?? '').slice(0, 80),
         impressions:       r.impressions,
         engagement_rate:   Number(r.engagement_rate ?? 0),

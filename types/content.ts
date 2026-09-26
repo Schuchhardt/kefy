@@ -86,8 +86,11 @@ export interface ContentRendition {
 /** Slimmer shape used by the dashboard home "recent content" list. */
 export interface RecentContentItem {
   id:           string;
-  platform:     string;
+  channel:      string;
+  content_type: ContentType;
   body:         string;
+  image_url:    string | null;
+  video_url:    string | null;
   status:       'published' | 'scheduled' | 'draft';
   published_at: string | null;
   created_at:   string;
@@ -117,6 +120,21 @@ export interface ScheduledPost {
 
 // ─── Dashboard summary ───────────────────────────────────────────────────────
 
+export interface TopPost {
+  scheduled_post_id: string;
+  platform:          string;
+  content_id:        string | null;
+  content_type:      ContentType | null;
+  image_url:         string | null;
+  video_url:         string | null;
+  body_preview:      string;
+  impressions:       number;
+  engagement_rate:   number;
+  likes:             number;
+  comments:          number;
+  shares:            number;
+}
+
 export interface Totals {
   impressions: number;
   reach:       number;
@@ -124,6 +142,15 @@ export interface Totals {
   comments:    number;
   shares:      number;
   clicks:      number;
+  top_posts?:  TopPost[];
+}
+
+/** `latest_metrics` de GET /api/analytics/posts, para cruzar contra un item por su content_id. */
+export interface ContentPerformance {
+  impressions:     number;
+  likes:           number;
+  comments:        number;
+  engagement_rate: number;
 }
 
 export interface OnboardingStep {

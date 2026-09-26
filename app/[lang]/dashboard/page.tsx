@@ -10,7 +10,7 @@ import type { Locale } from '@/types/i18n';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
 import ChannelIcon    from '@/components/ui/ChannelIcon';
 import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
-import type { Totals, OnboardingStep, RecentContentItem } from '@/types/content';
+import type { Totals, OnboardingStep, RecentContentItem, TopPost, ContentPerformance } from '@/types/content';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────────── */
 function fmt(n: number) {
@@ -27,6 +27,7 @@ const T = {
     impressions: 'Impresiones', reach: 'Alcance', likes: 'Likes',
     comments: 'Comentarios', shares: 'Compartidos', clicks: 'Clics',
     recentContent: 'Contenido reciente',
+    topPerforming: 'Mejor rendimiento',
     noContent: 'Aún no tienes contenido publicado.',
     createFirst: 'Crear contenido',
     publishReady: 'Tienes contenido listo para publicar',
@@ -60,6 +61,7 @@ const T = {
     impressions: 'Impressions', reach: 'Reach', likes: 'Likes',
     comments: 'Comments', shares: 'Shares', clicks: 'Clicks',
     recentContent: 'Recent content',
+    topPerforming: 'Top performing',
     noContent: 'No published content yet.',
     createFirst: 'Create content',
     publishReady: 'You have content ready to publish',
@@ -98,6 +100,7 @@ function DashboardPageInner() {
 
   const [totals, setTotals]           = useState<Totals | null>(null);
   const [content, setContent]         = useState<RecentContentItem[]>([]);
+  const [perfByContentId, setPerfByContentId] = useState<Map<string, ContentPerformance>>(new Map());
   const [metricsLoading, setMLoading] = useState(true);
   const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
   const [brandKitHasData, setBrandKitHasData] = useState<boolean | null>(null);
@@ -120,8 +123,29 @@ function DashboardPageInner() {
     return fetch(`/api/analytics?from=${from.toISOString()}&to=${to.toISOString()}`, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) return;
-        const json = await res.json() as { totals: Totals };
-        setTotals(json.totals ?? null);
+        // `top_posts` llega como hermano de `totals` en la respuesta cruda
+        // (ver AnalyticsOverview en lib/services/analytics.ts) — se guarda
+        // junto para no tener que cargar un tercer estado solo por eso.
+        const json = await res.json() as { totals: Totals; top_posts?: TopPost[] };
+        setTotals(json.totals ? { ...json.totals, top_posts: json.top_posts ?? [] } : null);
+      })
+      .catch(() => {});
+  }
+
+  // Métricas de posts publicados recientemente, para poder mostrar "cómo le
+  // está yendo" junto a cada item de "Contenido reciente" que ya se publicó.
+  function fetchContentPerformance() {
+    fetch('/api/analytics/posts?limit=20', { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = await res.json() as {
+          data?: Array<{ content: { id: string | null }; latest_metrics: ContentPerformance | null }>;
+        };
+        const map = new Map<string, ContentPerformance>();
+        for (const row of json.data ?? []) {
+          if (row.content.id && row.latest_metrics) map.set(row.content.id, row.latest_metrics);
+        }
+        setPerfByContentId(map);
       })
       .catch(() => {});
   }
@@ -129,7 +153,7 @@ function DashboardPageInner() {
   // El asistente creó contenido o sincronizó métricas: se recargan.
   useDataChanged(['analytics', 'content'], () => {
     fetchRecentContent();
-    if (hasAccounts) void fetchTotals();
+    if (hasAccounts) { void fetchTotals(); fetchContentPerformance(); }
   });
 
   async function fetchAccounts() {
@@ -172,6 +196,7 @@ function DashboardPageInner() {
     if (hasAccounts === null) return;
     if (!hasAccounts) { setMLoading(false); return; }
     fetchTotals().finally(() => setMLoading(false));
+    fetchContentPerformance();
   }, [hasAccounts]);
 
   const isNewAccount = hasAccounts === false && brandKitHasData === false && content.length === 0;
@@ -211,7 +236,7 @@ function DashboardPageInner() {
     );
   }
 
-  const metricKeys: { key: keyof Totals; label: string; icon: string }[] = [
+  const metricKeys: { key: Exclude<keyof Totals, 'top_posts'>; label: string; icon: string }[] = [
     { key: 'impressions', label: t.impressions, icon: '◎' },
     { key: 'reach',       label: t.reach,       icon: '◉' },
     { key: 'likes',       label: t.likes,       icon: '♡' },
@@ -548,22 +573,37 @@ function DashboardPageInner() {
           <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.noContent}</p>
         ) : (
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-            {content.map((item, idx) => (
+            {content.map((item, idx) => {
+              const perf = perfByContentId.get(item.id);
+              const isVideo = (item.content_type === 'reel' || item.content_type === 'story') && !!item.video_url;
+              return (
               <div key={item.id} style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 padding: '12px 16px',
                 borderBottom: idx < content.length - 1 ? '1px solid var(--border)' : 'none',
               }}>
                 <span style={{
-                  width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                  background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'var(--muted)',
+                  width: 40, height: 40, borderRadius: 8, flexShrink: 0, position: 'relative',
+                  background: item.image_url ? `url(${item.image_url}) center/cover` : 'var(--border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: 'var(--muted)', overflow: 'hidden',
                 }}>
-                  <ChannelIcon name={item.platform} size={14} />
+                  {!item.image_url && <ChannelIcon name={item.channel} size={14} />}
+                  {isVideo && (
+                    <span style={{
+                      position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'rgba(0,0,0,0.28)', color: '#fff', fontSize: 14,
+                    }}>▶</span>
+                  )}
                 </span>
                 <p style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)', margin: 0 }}>
                   {item.body?.slice(0, 80) ?? '—'}
                 </p>
+                {item.status === 'published' && perf && (
+                  <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    👁 {fmt(perf.impressions)} · ♥ {fmt(perf.likes)}
+                  </span>
+                )}
                 <span style={{
                   fontSize: 10, fontWeight: 600, flexShrink: 0,
                   padding: '2px 8px', borderRadius: 5,
@@ -573,9 +613,44 @@ function DashboardPageInner() {
                   {statusLabel[item.status] ?? item.status}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
+      </section>
+      )}
+
+      {/* ── Top performing ── */}
+      {!isNewAccount && !!totals?.top_posts?.length && (
+      <section style={{ marginBottom: 40 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t.topPerforming}</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+          {totals.top_posts.map((post) => (
+            <div key={post.scheduled_post_id} style={{
+              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+            }}>
+              <div style={{
+                width: '100%', aspectRatio: '1/1', position: 'relative',
+                background: post.image_url ? `url(${post.image_url}) center/cover` : 'var(--border)',
+              }}>
+                <span style={{
+                  position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: 5,
+                  background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+                }}>
+                  <ChannelIcon name={post.platform} size={11} />
+                </span>
+              </div>
+              <div style={{ padding: '10px 12px' }}>
+                <p style={{ fontSize: 12, color: 'var(--text)', margin: '0 0 6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {post.body_preview || '—'}
+                </p>
+                <p style={{ fontSize: 11, color: 'var(--accent)', margin: 0, fontWeight: 600 }}>
+                  👁 {fmt(post.impressions)} · ♥ {fmt(post.likes)} · {(post.engagement_rate * 100).toFixed(1)}%
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
       )}
 
