@@ -726,7 +726,7 @@ function ReelSlider({
         videoUrl={videoUrl}
         muxPlaybackId={muxPlaybackId}
         renderStatus={hasVideo ? 'ready' : 'not_rendered'}
-        height={360}
+        height={560}
         autoPlay={hasVideo}
         accentColor={brandKit?.accent_color ?? brandKit?.primary_color ?? undefined}
         onRenderDone={onRenderDone}
