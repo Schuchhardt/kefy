@@ -22,5 +22,6 @@ Rules:
 - Short sentences, white space, no walls of text
 - End with one clear call-to-action (question to the audience, "Save this", "Share with someone who needs this", etc.)
 - Hashtags go on the last line, separated from the body by a blank line
+- **Plain text only — no markdown**: no `**bold**`, no `_italic_`, no `#` headers, no `-`/`*` bullet lists, no `[link](url)` syntax. These platforms show the literal asterisks/hashes to the reader instead of rendering them. Use line breaks and plain punctuation for emphasis and structure instead.
 
 Return ONLY the post body followed by the hashtags. No extra commentary, no explanations.

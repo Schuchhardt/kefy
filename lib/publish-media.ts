@@ -47,6 +47,23 @@ function isPublishableVideoUrl(url: string | null | undefined): url is string {
 }
 
 /**
+ * None of Zernio's platforms render markdown in a caption — LinkedIn,
+ * Instagram, Facebook, X, TikTok, etc. all show `**bold**` literally, with the
+ * asterisks. The copywriter prompt asks Claude not to use it, but that's not
+ * 100% reliable, so this is a safety net right before the text leaves Kefy —
+ * not a full markdown parser, just the handful of things a copywriting model
+ * actually reaches for.
+ */
+function stripMarkdownFormatting(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')  // [label](url) -> label (url)
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')               // **bold** / __bold__ -> bold
+    .replace(/`([^`]+)`/g, '$1')                      // `code` -> code
+    .replace(/^#{1,6}\s+/gm, '')                      // # Header -> Header
+    .replace(/^[ \t]*[-*+][ \t]+/gm, '• ');            // - item / * item -> • item
+}
+
+/**
  * Decide the media payload for a given format.
  *
  * Rules:
@@ -64,6 +81,7 @@ export function resolvePublishMedia(
 ): PublishMediaResult {
   if (!source.body) return { ok: false, error: 'Content has no body text' };
 
+  const body = stripMarkdownFormatting(source.body);
   const hashtags = source.hashtags ?? [];
   const videoUrl = isPublishableVideoUrl(source.video_url) ? source.video_url.trim() : null;
 
@@ -75,7 +93,7 @@ export function resolvePublishMedia(
     return {
       ok: true,
       media: {
-        text:      hashtagLine ? `${source.body}\n\n${hashtagLine}` : source.body,
+        text:      hashtagLine ? `${body}\n\n${hashtagLine}` : body,
         hashtags:  [],
         video_url: videoUrl,
         is_video:  true,
@@ -105,11 +123,11 @@ export function resolvePublishMedia(
       .filter((u): u is string => typeof u === 'string' && !!u);
 
     if (mediaUrls.length > 0) {
-      return { ok: true, media: { text: source.body, hashtags, media_urls: mediaUrls, is_video: false } };
+      return { ok: true, media: { text: body, hashtags, media_urls: mediaUrls, is_video: false } };
     }
     if (!imageUrl) return { ok: false, error: 'The carousel has no slide images to publish' };
-    return { ok: true, media: { text: source.body, hashtags, image_url: imageUrl, is_video: false } };
+    return { ok: true, media: { text: body, hashtags, image_url: imageUrl, is_video: false } };
   }
 
-  return { ok: true, media: { text: source.body, hashtags, image_url: imageUrl, is_video: false } };
+  return { ok: true, media: { text: body, hashtags, image_url: imageUrl, is_video: false } };
 }

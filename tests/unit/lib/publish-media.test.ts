@@ -136,3 +136,51 @@ describe('resolvePublishMedia — post', () => {
     expect(res.ok).toBe(false);
   });
 });
+
+describe('resolvePublishMedia — markdown sin interpolar', () => {
+  // Regresión: ninguna red de Zernio renderiza markdown en el caption — el
+  // texto salía con los asteriscos/almohadillas literales en LinkedIn.
+  it('quita **bold**, __bold__, `code`, headers y bullets', () => {
+    const body = [
+      '# Título',
+      'Esto es **muy** importante y __esto también__.',
+      'Usa `console.log` para depurar.',
+      '- primer punto',
+      '* segundo punto',
+    ].join('\n');
+
+    const res = resolvePublishMedia('post', { ...base, body });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.media.text).not.toMatch(/[*_`#]/);
+    expect(res.media.text).toContain('Título');
+    expect(res.media.text).toContain('Esto es muy importante y esto también.');
+    expect(res.media.text).toContain('console.log');
+    expect(res.media.text).toContain('• primer punto');
+    expect(res.media.text).toContain('• segundo punto');
+  });
+
+  it('convierte [texto](url) a "texto (url)"', () => {
+    const res = resolvePublishMedia('post', { ...base, body: 'Mira [nuestro sitio](https://example.com) hoy.' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.media.text).toBe('Mira nuestro sitio (https://example.com) hoy.');
+  });
+
+  it('también limpia el caption de un reel/story en video (hashtags inline incluidos)', () => {
+    const res = resolvePublishMedia('reel', {
+      ...base, video_url: 'https://s3.example.com/reel.mp4', body: '**Grandes** noticias hoy.',
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.media.text).toContain('Grandes noticias hoy.');
+    expect(res.media.text).not.toContain('**');
+  });
+
+  it('texto sin markdown queda intacto', () => {
+    const res = resolvePublishMedia('post', { ...base, body: 'Un texto normal, sin nada raro.' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.media.text).toBe('Un texto normal, sin nada raro.');
+  });
+});
