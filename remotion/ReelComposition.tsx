@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   AbsoluteFill,
+  Audio,
   Img,
   interpolate,
   spring,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
   Sequence,
@@ -28,6 +30,39 @@ export interface ReelCompositionProps {
   primaryColor?: string;   // brand kit primary color
   fontHeading?:  string;   // brand kit heading font
   logoUrl?:      string;   // brand kit logo URL
+  musicTrack?:   string;   // filename under remotion/public/audio/music/
+}
+
+// ─── Bundled audio (CC0, Kenney — see public/audio/sfx/LICENSE-kenney.txt) ────
+
+/** One per scene cut, cycled by scene index so it doesn't repeat identically. */
+const TRANSITION_SFX = ['drop_001.ogg', 'drop_002.ogg', 'drop_003.ogg', 'drop_004.ogg'];
+const LOGO_SFX       = 'pluck_001.ogg';
+
+function sfxSrc(filename: string): string {
+  return staticFile(`audio/sfx/${filename}`);
+}
+
+const MUSIC_VOLUME          = 0.24;
+const MUSIC_FADE_IN_FRAMES  = 24;
+const MUSIC_FADE_OUT_FRAMES = 45;
+
+/** Linear ramp that never throws on a degenerate (zero-width) range — unlike
+ *  `interpolate`, which requires a strictly increasing input range and would
+ *  crash on the very short/edge-case durations `calculateReelMetadata` falls
+ *  back to. */
+function rampTo(frame: number, start: number, end: number, from: number, to: number): number {
+  if (end <= start) return frame >= end ? to : from;
+  const t = Math.min(1, Math.max(0, (frame - start) / (end - start)));
+  return from + (to - from) * t;
+}
+
+function musicVolumeAt(frame: number, totalFrames: number): number {
+  const fadeInEnd    = Math.min(MUSIC_FADE_IN_FRAMES, totalFrames);
+  const fadeOutStart = Math.max(0, totalFrames - MUSIC_FADE_OUT_FRAMES);
+  const fadeIn  = rampTo(frame, 0, fadeInEnd, 0, MUSIC_VOLUME);
+  const fadeOut = rampTo(frame, fadeOutStart, totalFrames, MUSIC_VOLUME, 0);
+  return Math.min(fadeIn, fadeOut);
 }
 
 // ─── Animated gradient background ────────────────────────────────────────────
@@ -59,6 +94,28 @@ function AnimatedGradientBg({
       ].join(', '),
     }} />
   );
+}
+
+// ─── Camera moves (Ken Burns variants) ────────────────────────────────────────
+// A single fixed zoom-in read as a slideshow once scenes repeated it. Cycling
+// through a small set of moves (zoom in, zoom out, diagonal push, drift) by
+// scene index keeps every scene feeling shot separately.
+
+interface CameraMove {
+  scaleFrom: number; scaleTo: number;
+  xFrom:     number; xTo:     number;
+  yFrom:     number; yTo:     number;
+}
+
+const CAMERA_MOVES: CameraMove[] = [
+  { scaleFrom: 1.00, scaleTo: 1.09, xFrom: 0,   xTo: -18, yFrom: 0,   yTo: -10 }, // push in, drift up-left
+  { scaleFrom: 1.10, scaleTo: 1.00, xFrom: -16, xTo: 0,   yFrom: 8,   yTo: 0   }, // pull out, settle
+  { scaleFrom: 1.00, scaleTo: 1.08, xFrom: 0,   xTo: 16,  yFrom: 0,  yTo: 9   }, // push in, drift down-right
+  { scaleFrom: 1.06, scaleTo: 1.13, xFrom: 10,  xTo: -10, yFrom: -7, yTo: 7   }, // slow diagonal push
+];
+
+function getCameraMove(sceneIndex: number): CameraMove {
+  return CAMERA_MOVES[sceneIndex % CAMERA_MOVES.length]!;
 }
 
 // ─── Scene frame ranges ───────────────────────────────────────────────────────
@@ -113,6 +170,8 @@ function ReelScene({
   accentColor,
   fontHeading,
   totalScenes,
+  cameraMove,
+  isHook,
 }: {
   scene:          ReelSceneProps;
   durationFrames: number;
@@ -120,20 +179,22 @@ function ReelScene({
   primaryColor?:  string;   // reserved for future use
   fontHeading?:   string;
   totalScenes:    number;
+  cameraMove:     CameraMove;
+  isHook:         boolean;
 }) {
   const localFrame     = useCurrentFrame();
   const { fps }        = useVideoConfig();
 
-  // ── Ken Burns effect on background image ──────────────────────────────────
-  const kenScale = interpolate(localFrame, [0, durationFrames], [1.0, 1.09], {
+  // ── Ken Burns effect on background image (varies per scene — see CAMERA_MOVES) ──
+  const kenScale = interpolate(localFrame, [0, durationFrames], [cameraMove.scaleFrom, cameraMove.scaleTo], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const kenX = interpolate(localFrame, [0, durationFrames], [0, -18], {
+  const kenX = interpolate(localFrame, [0, durationFrames], [cameraMove.xFrom, cameraMove.xTo], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const kenY = interpolate(localFrame, [0, durationFrames], [0, -10], {
+  const kenY = interpolate(localFrame, [0, durationFrames], [cameraMove.yFrom, cameraMove.yTo], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
@@ -146,18 +207,26 @@ function ReelScene({
   });
   const opacity = fadeIn * fadeOut;
 
-  // ── Typewriter for title ───────────────────────────────────────────────────
+  // ── Title reveal ───────────────────────────────────────────────────────────
+  // The hook (scene 1) has ~2s to earn the rest of the video, so it slams the
+  // full line in at once instead of typing it out letter by letter.
   const typeProgress = spring({ frame: Math.max(0, localFrame - 6), fps, config: { damping: 300, stiffness: 500 } });
-  const visibleChars = Math.ceil(typeProgress * scene.title.length);
-  const cursorOn     = Math.floor(localFrame / 5) % 2 === 0 && visibleChars < scene.title.length;
+  const visibleChars = isHook ? scene.title.length : Math.ceil(typeProgress * scene.title.length);
+  const cursorOn      = !isHook && Math.floor(localFrame / 5) % 2 === 0 && visibleChars < scene.title.length;
+
+  const hookPunch = spring({ frame: localFrame, fps, config: { damping: 12, stiffness: 260, mass: 0.6 } });
+  const hookScale = isHook ? interpolate(hookPunch, [0, 1], [1.16, 1]) : 1;
 
   // ── Underline bar grows from left ─────────────────────────────────────────
   const barProgress = spring({ frame: Math.max(0, localFrame - 12), fps, config: { damping: 16, stiffness: 120 } });
 
-  // ── Body text reveal ──────────────────────────────────────────────────────
-  const bodyProgress = spring({ frame: Math.max(0, localFrame - 22), fps, config: { damping: 12, stiffness: 60 } });
-  const bodyY        = interpolate(bodyProgress, [0, 1], [36, 0]);
-  const bodyOpacity  = interpolate(bodyProgress, [0, 1], [0, 1]);
+  // ── Body text: word-by-word kinetic reveal ────────────────────────────────
+  // Fits within a fixed ~0.5s entrance budget regardless of sentence length —
+  // a 3-word line and a 12-word line both finish settling around frame ~37,
+  // just staggered differently, so short scenes never get caught mid-reveal.
+  const bodyStartFrame = 22;
+  const words           = scene.body.split(' ').filter(Boolean);
+  const staggerPerWord  = Math.max(1, Math.min(4, Math.round(15 / Math.max(words.length - 1, 1))));
 
   // ── Scene chip fade in ────────────────────────────────────────────────────
   const chipOpacity = interpolate(localFrame, [0, 14], [0, 1], { extrapolateRight: 'clamp' });
@@ -232,7 +301,11 @@ function ReelScene({
         </div>
 
         {/* Title + animated underline */}
-        <div style={{ marginBottom: 30, position: 'relative', paddingBottom: 10 }}>
+        <div style={{
+          marginBottom: 30, position: 'relative', paddingBottom: 10,
+          transform:       isHook ? `scale(${hookScale})` : undefined,
+          transformOrigin: 'left bottom',
+        }}>
           {/* Animated underline bar */}
           <div style={{
             position: 'absolute', bottom: 0, left: 0,
@@ -256,16 +329,31 @@ function ReelScene({
           </span>
         </div>
 
-        {/* Body text */}
-        <div style={{ transform: `translateY(${bodyY}px)`, opacity: bodyOpacity }}>
-          <p style={{
-            color: 'rgba(255,255,255,0.90)',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-            fontWeight: 400, fontSize: 46, lineHeight: 1.45,
-            margin: 0, textShadow: '0 2px 16px rgba(0,0,0,0.90)',
-          }}>
-            {scene.body}
-          </p>
+        {/* Body text — each word settles in on its own stagger */}
+        <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+          {words.map((word, i) => {
+            const wordStart    = bodyStartFrame + i * staggerPerWord;
+            const wordProgress = spring({
+              frame: Math.max(0, localFrame - wordStart), fps,
+              config: { damping: 14, stiffness: 120 },
+            });
+            const wordY       = interpolate(wordProgress, [0, 1], [16, 0]);
+            const wordOpacity = interpolate(wordProgress, [0, 1], [0, 1]);
+            return (
+              <span key={i} style={{
+                display: 'inline-block',
+                transform: `translateY(${wordY}px)`,
+                opacity: wordOpacity,
+                marginRight: '0.32em',
+                color: 'rgba(255,255,255,0.90)',
+                fontFamily: 'system-ui, -apple-system, sans-serif',
+                fontWeight: 400, fontSize: 46, lineHeight: 1.45,
+                textShadow: '0 2px 16px rgba(0,0,0,0.90)',
+              }}>
+                {word}
+              </span>
+            );
+          })}
         </div>
       </AbsoluteFill>
 
@@ -296,9 +384,9 @@ function isSvgUrl(url: string): boolean {
 
 // ─── Root composition ─────────────────────────────────────────────────────────
 
-export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', primaryColor, fontHeading, logoUrl }: ReelCompositionProps) {
+export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', primaryColor, fontHeading, logoUrl, musicTrack }: ReelCompositionProps) {
   const frame  = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const ranges  = getSceneRanges(scenes, fps);
 
   // Load Google Font before rendering so Remotion (browser + Lambda) can use it
@@ -322,11 +410,32 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
 
   return (
     <AbsoluteFill style={{ background: '#080810' }}>
+      {/* ── Music bed (optional — set by the render route from a fixed track list) ── */}
+      {musicTrack && (
+        <Audio
+          src={staticFile(`audio/music/${musicTrack}`)}
+          volume={(f) => musicVolumeAt(f, durationInFrames)}
+          loop
+        />
+      )}
+
+      {/* ── Logo entrance accent ─────────────────────────────────────────── */}
+      {(logoUrl || brandName) && (
+        <Sequence from={4} durationInFrames={30} layout="none">
+          <Audio src={sfxSrc(LOGO_SFX)} volume={0.5} />
+        </Sequence>
+      )}
+
       {/* ── Scenes ──────────────────────────────────────────────────────── */}
       {scenes.map((scene, i) => {
         const range = ranges[i]!;
+        const isHook = scene.scene_order === 1;
         return (
           <Sequence key={scene.scene_order} from={range.start} durationInFrames={range.durationFrames}>
+            {/* Cut accent — skipped on the hook so it doesn't collide with the logo sting */}
+            {!isHook && (
+              <Audio src={sfxSrc(TRANSITION_SFX[i % TRANSITION_SFX.length]!)} volume={0.42} />
+            )}
             <ReelScene
               scene={scene}
               durationFrames={range.durationFrames}
@@ -334,6 +443,8 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
               primaryColor={primaryColor}
               fontHeading={fontHeading}
               totalScenes={scenes.length}
+              cameraMove={getCameraMove(i)}
+              isHook={isHook}
             />
           </Sequence>
         );
@@ -413,6 +524,3 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
     </AbsoluteFill>
   );
 }
-
-
-

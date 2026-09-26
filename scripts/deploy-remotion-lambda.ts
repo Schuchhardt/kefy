@@ -69,6 +69,10 @@ async function main() {
     bucketName,
     entryPoint,
     siteName:   'kefy-reels',
+    // Explicit: without this Remotion would auto-detect a `public/` folder,
+    // which could resolve to the Next.js app's own `public/` (unrelated
+    // favicons/images) instead of `remotion/public/` (audio assets).
+    options: { publicDir: path.join(process.cwd(), 'remotion', 'public') },
   });
   console.log(`✅  Serve URL: ${serveUrl}`);
 

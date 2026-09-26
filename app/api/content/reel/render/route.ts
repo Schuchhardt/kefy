@@ -5,6 +5,7 @@ import { guardAiRequest } from '@/lib/ai-guard';
 import { reportError } from '@/lib/observability';
 import { renderMediaOnLambda } from '@remotion/lambda/client';
 import { reconcileRenderTarget, type RenderTarget } from '@/lib/reel-render';
+import { pickMusicTrack } from '@/remotion/audio-tracks';
 
 export const runtime     = 'nodejs';
 // Lambda renders async — 60 s is enough to trigger + return 202
@@ -241,6 +242,9 @@ export async function POST(req: NextRequest) {
       primaryColor: brand?.primary_color ?? undefined,
       fontHeading:  brand?.font_heading  ?? undefined,
       logoUrl:      brand?.logo_url      ?? undefined,
+      // Deterministic per item: retries/re-renders of the same target keep
+      // the same track instead of re-rolling it every time.
+      musicTrack:   pickMusicTrack(target.id),
     };
 
     // Trigger Lambda render — returns immediately with a renderId

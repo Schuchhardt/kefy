@@ -72,3 +72,35 @@ Deploy inicial: `npx tsx scripts/deploy-remotion-lambda.ts`
 
 Tests: `tests/unit/lib/reel-render.test.ts`, `tests/unit/api/reel-render.test.ts`,
 `tests/unit/api/reel-reconcile.test.ts`, `tests/unit/remotion/reel-duration.test.ts`.
+
+## Audio: música de fondo y SFX
+
+`ReelComposition.tsx` mezcla dos capas de audio, ninguna generada por IA:
+
+- **SFX de transición/logo** — `remotion/public/audio/sfx/*.ogg`, CC0
+  (Kenney, ver `LICENSE-kenney.txt` en esa carpeta). Un sonido "drop" distinto
+  por corte de escena (ciclando por índice) y un "pluck" en la entrada del
+  logo. La escena 1 (el hook) no lleva SFX de corte para no chocar con el del
+  logo — ver `TRANSITION_SFX` / `LOGO_SFX` en `ReelComposition.tsx`.
+- **Música de fondo** — opcional, prop `musicTrack` (nombre de archivo bajo
+  `remotion/public/audio/music/`). `lib/reel-render` no la toca; la elige
+  `POST /api/content/reel/render` vía `pickMusicTrack()` en
+  `remotion/audio-tracks.ts`, determinístico por `target.id` (mismo item →
+  misma pista en reintentos). Si `MUSIC_TRACKS` está vacío, `musicTrack` es
+  `undefined` y el `<Audio>` de música simplemente no se renderiza — no rompe
+  nada tener cero pistas.
+
+**Agregar/quitar una pista de música:** dejar el `.mp3` en
+`remotion/public/audio/music/` y añadir su nombre a `MUSIC_TRACKS` en
+`remotion/audio-tracks.ts`. Igual que cualquier cambio en `remotion/**`, hay
+que re-desplegar el sitio (`npx tsx scripts/deploy-remotion-lambda.ts`) para
+que Lambda vea el archivo nuevo.
+
+**`publicDir` explícito:** tanto `remotion.config.ts` (Studio local) como
+`scripts/deploy-remotion-lambda.ts` (`deploySite`) fijan `publicDir` a
+`remotion/public/` a propósito. Sin eso, Remotion podría auto-detectar el
+`public/` de la app Next.js (favicons, imágenes de marketing) en su lugar.
+
+**Ken Burns variable:** cada escena usa uno de 4 movimientos de cámara
+(`CAMERA_MOVES`, ciclado por índice) en vez de siempre el mismo zoom-in, para
+que una serie de escenas no se sienta como el mismo clip repetido.
