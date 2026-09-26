@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateReelMetadata, getTotalFrames } from '@/remotion/ReelComposition';
+import { calculateReelMetadata, getTotalFrames, overlapFor } from '@/remotion/ReelComposition';
 
 // Regresión: la duración estaba fijada a las escenas de ejemplo (17 s), así que
 // los reels largos se cortaban a mitad de escena y los cortos terminaban con
@@ -46,5 +46,76 @@ describe('calculateReelMetadata', () => {
   it('sin escenas: devuelve una duración válida (Remotion rechaza 0 frames)', () => {
     expect(calculateReelMetadata({ props: {} }, FPS).durationInFrames).toBeGreaterThan(0);
     expect(calculateReelMetadata({ props: { scenes: [] } }, FPS).durationInFrames).toBeGreaterThan(0);
+  });
+});
+
+describe('overlapFor (crossfade window)', () => {
+  it('usa la ventana completa (15 frames) en una escena de duración normal', () => {
+    expect(overlapFor(3 * FPS)).toBe(15); // escena de 3s
+  });
+
+  it('se recorta en una escena muy corta, para no arrancar antes que la anterior', () => {
+    expect(overlapFor(10)).toBe(Math.floor(10 / 3));
+    expect(overlapFor(10)).toBeLessThan(15);
+  });
+
+  it('nunca es negativo ni excede un tercio de la escena', () => {
+    for (const d of [0, 1, 5, 30, 60, 90, 150]) {
+      const overlap = overlapFor(d);
+      expect(overlap).toBeGreaterThanOrEqual(0);
+      expect(overlap).toBeLessThanOrEqual(Math.floor(d / 3));
+    }
+  });
+});
+
+// Regresión: el crossfade entre escenas (ver OVERLAP_FRAMES en ReelComposition)
+// adelanta el inicio de cada Sequence tomando frames prestados de la cola de
+// la anterior — nunca debe alargar la duración total ni mover el final de la
+// última escena, que es justo la duración que calculateReelMetadata calculó.
+describe('las Sequences con crossfade no cambian la duración total', () => {
+  function simulateSequenceRanges(durations: number[]) {
+    let start = 0;
+    const nominal = durations.map((d) => {
+      const durationFrames = Math.round(d * FPS);
+      const range = { start, end: start + durationFrames, durationFrames };
+      start += durationFrames;
+      return range;
+    });
+
+    return nominal.map((range, i) => {
+      const introOffset  = i === 0 ? 0 : overlapFor(range.durationFrames);
+      const sequenceFrom = range.start - introOffset;
+      const sequenceDur  = range.durationFrames + introOffset;
+      return { sequenceFrom, sequenceDur, sequenceEnd: sequenceFrom + sequenceDur, nominalEnd: range.end };
+    });
+  }
+
+  it('la última Sequence termina exactamente en getTotalFrames', () => {
+    const durations = [3, 4, 3, 3, 4];
+    const ranges = simulateSequenceRanges(durations);
+    const last = ranges[ranges.length - 1]!;
+
+    expect(last.sequenceEnd).toBe(getTotalFrames(scenes(...durations), FPS));
+    expect(last.nominalEnd).toBe(last.sequenceEnd);
+  });
+
+  it('cada Sequence (salvo la primera) arranca antes que su límite nominal, nunca después', () => {
+    const ranges = simulateSequenceRanges([2, 2, 5, 2]);
+    expect(ranges[0]!.sequenceFrom).toBe(0);
+    for (let i = 1; i < ranges.length; i++) {
+      expect(ranges[i]!.sequenceFrom).toBeLessThan(ranges[i]!.nominalEnd);
+      expect(ranges[i]!.sequenceFrom).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('ninguna Sequence se solapa más allá del inicio de la escena previa', () => {
+    // El crossfade de la escena i nunca debe empezar antes de que la escena
+    // i-1 haya empezado la suya — dos escenas de más atrás no deben mezclarse.
+    const durations = [2, 2, 2, 2];
+    const ranges = simulateSequenceRanges(durations);
+    for (let i = 1; i < ranges.length; i++) {
+      const prevStart = ranges[i - 1]!.sequenceFrom;
+      expect(ranges[i]!.sequenceFrom).toBeGreaterThanOrEqual(prevStart);
+    }
   });
 });

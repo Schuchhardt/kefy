@@ -62,6 +62,39 @@ escenas de ejemplo): los guiones de más de 17 s se cortaban a mitad de escena y
 los de menos terminaban con segundos de fondo muerto. La IA genera 3–8 escenas de
 2–5 s → entre 6 y 40 s reales.
 
+## Transiciones: crossfade, no corte a negro
+
+Cada escena solía hacer fade a negro y la siguiente fade desde negro — un corte
+limpio, pero se sentía como una presentación de slides, no una pieza continua.
+Ahora la escena N+1 arranca `OVERLAP_FRAMES` (15 frames, ~0.5s) antes del límite
+nominal de la escena N y se funde encima de ella (que sigue reproduciéndose
+debajo, sin fundirse ella misma) — un crossfade real. Solo la última escena
+sigue con fade a negro al final, porque no hay nada que la cubra.
+
+Esto **no cambia la duración total**: cada escena solo adelanta su propio
+arranque tomando frames prestados de la cola de la anterior; el final de la
+última escena (y por lo tanto `getTotalFrames`/`calculateReelMetadata`) no se
+mueve. Ver `overlapFor()` y los tests de
+`tests/unit/remotion/reel-duration.test.ts` que fijan justamente esa
+invariante — es la misma clase de bug que ya rompió esto una vez (ver arriba),
+así que cualquier cambio a este mecanismo tiene que mantener esos tests en verde.
+
+Se quitó también el chip de texto "N / total" (la numeración explícita de
+slide) — quedan los puntos de progreso arriba a la derecha, que se leen como
+el indicador de una Story/Reel normal, no como paginación de una presentación.
+
+## Estabilidad del fondo entre frames
+
+Un QA con `picsum.photos` (URLs con `?random=`) mostró el fondo de una escena
+cambiando de foto varias veces dentro de la misma escena — trazado a que esas
+URLs devuelven una imagen nueva en cada fetch, no a un bug de Remotion. Se
+verificó con una imagen real de `kefy-content-images` (Supabase Storage, la
+que usa producción): frames extraídos al inicio y al final de una escena de 5s
+muestran exactamente la misma foto, solo el paneo/zoom del Ken Burns cambia.
+Si algún día una URL de imagen real no es estable (un host con redirects o
+cache-busting), el síntoma sería el mismo — pero no es el caso de las URLs que
+genera `uploadBase64Image`.
+
 ## Configuración
 
 Env vars: `REMOTION_AWS_REGION`, `REMOTION_AWS_ACCESS_KEY_ID`,

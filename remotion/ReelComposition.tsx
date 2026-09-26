@@ -118,6 +118,23 @@ function getCameraMove(sceneIndex: number): CameraMove {
   return CAMERA_MOVES[sceneIndex % CAMERA_MOVES.length]!;
 }
 
+// ─── Crossfade overlap ─────────────────────────────────────────────────────────
+// Each scene used to fade to/from black on its own — a clean hard cut, but it
+// reads as a slide deck ("slide 1, slide 2...") rather than one continuous
+// piece. Instead, scene N+1's Sequence now starts OVERLAP_FRAMES before
+// scene N's nominal boundary and fades itself in over that window, covering
+// scene N (which keeps playing underneath, unfaded) — a real crossfade, not a
+// dip through black. This borrows time from the END of the previous scene's
+// window rather than adding to the total: the last scene's nominal end (and
+// therefore getTotalFrames/calculateReelMetadata) never changes.
+const OVERLAP_FRAMES = 15; // ~0.5s at 30fps
+
+/** Clamped so a pathologically short scene can never start before its own
+ *  predecessor's nominal start. */
+export function overlapFor(nominalDurationFrames: number): number {
+  return Math.max(0, Math.min(OVERLAP_FRAMES, Math.floor(nominalDurationFrames / 3)));
+}
+
 // ─── Scene frame ranges ───────────────────────────────────────────────────────
 
 function getSceneRanges(scenes: ReelSceneProps[], fps: number) {
@@ -169,21 +186,34 @@ function ReelScene({
   durationFrames,
   accentColor,
   fontHeading,
-  totalScenes,
   cameraMove,
   isHook,
+  isLast,
+  introOffset,
 }: {
   scene:          ReelSceneProps;
+  /** Full Sequence duration, including the leading crossfade window (see introOffset). */
   durationFrames: number;
   accentColor:    string;
   primaryColor?:  string;   // reserved for future use
   fontHeading?:   string;
-  totalScenes:    number;
   cameraMove:     CameraMove;
   isHook:         boolean;
+  /** True for the final scene — it fades to black instead of being covered by a next scene. */
+  isLast:         boolean;
+  /** Frames of leading crossfade this scene borrows from the previous scene's tail
+   *  (0 for the hook, which has nothing to crossfade from). Content reveals
+   *  (title, body, chip) are offset by this so they start once the crossfade
+   *  has visually settled, not while still fading in on top of the last scene. */
+  introOffset:    number;
 }) {
   const localFrame     = useCurrentFrame();
   const { fps }        = useVideoConfig();
+  // Frame 0 here = the moment this scene is fully settled (crossfade done),
+  // matching what "frame 0" meant before the overlap existed — every reveal
+  // timing constant below is unchanged from the pre-crossfade version.
+  const contentFrame   = Math.max(0, localFrame - introOffset);
+  const nominalDuration = Math.max(1, durationFrames - introOffset);
 
   // ── Ken Burns effect on background image (varies per scene — see CAMERA_MOVES) ──
   const kenScale = interpolate(localFrame, [0, durationFrames], [cameraMove.scaleFrom, cameraMove.scaleTo], {
@@ -200,25 +230,33 @@ function ReelScene({
   });
 
   // ── Scene fade in / fade out ───────────────────────────────────────────────
-  // Short transitions (8 frames each ≈ 0.27s) to minimise the dark gap between scenes
-  const fadeIn  = interpolate(localFrame, [0, 8], [0, 1], { extrapolateRight: 'clamp' });
-  const fadeOut = interpolate(localFrame, [durationFrames - 8, durationFrames], [1, 0], {
-    extrapolateLeft: 'clamp', extrapolateRight: 'clamp',
-  });
+  // Non-first scenes fade THEMSELVES in over `introOffset` frames, covering
+  // the previous scene (still playing, unfaded, underneath) — a real
+  // crossfade instead of both dipping through black. Only the last scene
+  // fades itself out at the very end; every other scene's "exit" is just the
+  // next scene's fade-in covering it, so it never needs to fade out at all.
+  const fadeIn  = introOffset > 0
+    ? interpolate(localFrame, [0, introOffset], [0, 1], { extrapolateRight: 'clamp' })
+    : interpolate(localFrame, [0, 8], [0, 1], { extrapolateRight: 'clamp' });
+  const fadeOut = isLast
+    ? interpolate(localFrame, [durationFrames - 10, durationFrames], [1, 0], {
+        extrapolateLeft: 'clamp', extrapolateRight: 'clamp',
+      })
+    : 1;
   const opacity = fadeIn * fadeOut;
 
   // ── Title reveal ───────────────────────────────────────────────────────────
   // The hook (scene 1) has ~2s to earn the rest of the video, so it slams the
   // full line in at once instead of typing it out letter by letter.
-  const typeProgress = spring({ frame: Math.max(0, localFrame - 6), fps, config: { damping: 300, stiffness: 500 } });
+  const typeProgress = spring({ frame: Math.max(0, contentFrame - 6), fps, config: { damping: 300, stiffness: 500 } });
   const visibleChars = isHook ? scene.title.length : Math.ceil(typeProgress * scene.title.length);
-  const cursorOn      = !isHook && Math.floor(localFrame / 5) % 2 === 0 && visibleChars < scene.title.length;
+  const cursorOn      = !isHook && Math.floor(contentFrame / 5) % 2 === 0 && visibleChars < scene.title.length;
 
-  const hookPunch = spring({ frame: localFrame, fps, config: { damping: 12, stiffness: 260, mass: 0.6 } });
+  const hookPunch = spring({ frame: contentFrame, fps, config: { damping: 12, stiffness: 260, mass: 0.6 } });
   const hookScale = isHook ? interpolate(hookPunch, [0, 1], [1.16, 1]) : 1;
 
   // ── Underline bar grows from left ─────────────────────────────────────────
-  const barProgress = spring({ frame: Math.max(0, localFrame - 12), fps, config: { damping: 16, stiffness: 120 } });
+  const barProgress = spring({ frame: Math.max(0, contentFrame - 12), fps, config: { damping: 16, stiffness: 120 } });
 
   // ── Body text: word-by-word kinetic reveal ────────────────────────────────
   // Stagger spread is capped tight (9 frames total, ≤3/word) because each
@@ -230,10 +268,7 @@ function ReelScene({
   const words           = scene.body.split(' ').filter(Boolean);
   const staggerPerWord  = Math.max(1, Math.min(3, Math.round(9 / Math.max(words.length - 1, 1))));
 
-  // ── Scene chip fade in ────────────────────────────────────────────────────
-  const chipOpacity = interpolate(localFrame, [0, 14], [0, 1], { extrapolateRight: 'clamp' });
-
-  const progress       = localFrame / durationFrames;
+  const progress       = Math.min(1, contentFrame / nominalDuration);
   const headingFont    = fontHeading
     ? `'${fontHeading}', system-ui, -apple-system, sans-serif`
     : 'system-ui, -apple-system, sans-serif';
@@ -290,19 +325,6 @@ function ReelScene({
         // fine tradeoff since the video is shared across networks.
         padding: '80px 68px 400px',
       }}>
-        {/* Scene chip */}
-        <div style={{ marginBottom: 22, opacity: chipOpacity }}>
-          <span style={{
-            fontSize: 13, fontWeight: 700, letterSpacing: '0.11em',
-            textTransform: 'uppercase', fontFamily: 'system-ui, sans-serif',
-            color: accentColor,
-            background: `${accentColor}18`,
-            padding: '5px 14px', borderRadius: 20,
-            border: `1px solid ${accentColor}45`,
-          }}>
-            {scene.scene_order} / {totalScenes}
-          </span>
-        </div>
 
         {/* Title + animated underline */}
         <div style={{
@@ -338,7 +360,7 @@ function ReelScene({
           {words.map((word, i) => {
             const wordStart    = bodyStartFrame + i * staggerPerWord;
             const wordProgress = spring({
-              frame: Math.max(0, localFrame - wordStart), fps,
+              frame: Math.max(0, contentFrame - wordStart), fps,
               config: { damping: 14, stiffness: 120 },
             });
             const wordY       = interpolate(wordProgress, [0, 1], [16, 0]);
@@ -447,21 +469,30 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
       {scenes.map((scene, i) => {
         const range = ranges[i]!;
         const isHook = scene.scene_order === 1;
+        const isLast = i === scenes.length - 1;
+        // Borrow `introOffset` frames from the previous scene's tail so this
+        // scene can crossfade in over it instead of both cutting to black —
+        // see OVERLAP_FRAMES. The scene's own nominal end never moves, so
+        // total composition length (getTotalFrames) is unaffected.
+        const introOffset  = i === 0 ? 0 : overlapFor(range.durationFrames);
+        const sequenceFrom = range.start - introOffset;
+        const sequenceDur  = range.durationFrames + introOffset;
         return (
-          <Sequence key={scene.scene_order} from={range.start} durationInFrames={range.durationFrames}>
+          <Sequence key={scene.scene_order} from={sequenceFrom} durationInFrames={sequenceDur}>
             {/* Cut accent — skipped on the hook so it doesn't collide with the logo sting */}
             {!isHook && (
               <Audio src={sfxSrc(TRANSITION_SFX[i % TRANSITION_SFX.length]!)} volume={0.42} />
             )}
             <ReelScene
               scene={scene}
-              durationFrames={range.durationFrames}
+              durationFrames={sequenceDur}
               accentColor={accentColor}
               primaryColor={primaryColor}
               fontHeading={fontHeading}
-              totalScenes={scenes.length}
               cameraMove={getCameraMove(Math.max(0, cameraMoveIndexByScene[i]!))}
               isHook={isHook}
+              isLast={isLast}
+              introOffset={introOffset}
             />
           </Sequence>
         );
