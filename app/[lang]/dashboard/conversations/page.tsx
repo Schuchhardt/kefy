@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback, useMemo, Suspense } from 'react';
+import type { ReactNode } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { useDataChanged } from '@/lib/data-events';
@@ -79,6 +80,43 @@ function ReplyBox({
   );
 }
 
+/** Estado vacío de una lista (hilos de DMs o comentarios): icono + título +
+ *  una línea de contexto. Nada de nombres de plataforma ni de proveedor —
+ *  solo lo que le importa a quien mira la pantalla. */
+function EmptyState({ icon, title, hint }: { icon: ReactNode; title: string; hint?: string }) {
+  return (
+    <div style={{ padding: '48px 24px', textAlign: 'center',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+      <div style={{ color: 'var(--muted)', opacity: 0.6 }}>{icon}</div>
+      <p style={{ color: 'var(--text)', fontSize: 14, fontWeight: 600 }}>{title}</p>
+      {hint && <p style={{ color: 'var(--muted)', fontSize: 12, maxWidth: 240, lineHeight: 1.5 }}>{hint}</p>}
+    </div>
+  );
+}
+
+const InboxIcon = (
+  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M3 7l9 6 9-6" />
+  </svg>
+);
+
+const CommentsIcon = (
+  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+  </svg>
+);
+
+const CaughtUpIcon = (
+  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8.5 12.5l2.5 2.5 5-5" />
+  </svg>
+);
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function ConversationsPageInner() {
@@ -97,6 +135,9 @@ function ConversationsPageInner() {
     { value: 'tiktok',    label: 'TikTok'    },
     { value: 'threads',   label: 'Threads'   },
   ];
+  const PLATFORM_LABELS: Record<string, string> = Object.fromEntries(
+    PLATFORMS.map(({ value, label }) => [value, label]),
+  );
 
   const FILTER_LABELS: Record<FilterType, string> = {
     dms:      locale === 'es' ? 'DMs'         : 'DMs',
@@ -411,11 +452,13 @@ function ConversationsPageInner() {
         {/* Platform filter */}
         {PLATFORMS.map(({ value, label }) => (
           <button key={value} onClick={() => setPlatformFilter(value as MessagingPlatform | 'all')}
-            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+            title={label} aria-label={label}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, padding: value === 'all' ? '4px 10px' : 6, borderRadius: 6, cursor: 'pointer',
               border: `1px solid ${platformFilter === value ? 'var(--accent)' : 'var(--border)'}`,
               background: platformFilter === value ? 'rgba(198,255,75,0.1)' : 'var(--surface)',
               color: platformFilter === value ? 'var(--accent)' : 'var(--muted)' }}>
-            {label}
+            {value === 'all' ? label : <ChannelIcon name={value} size={13} />}
           </button>
         ))}
 
@@ -491,10 +534,9 @@ function ConversationsPageInner() {
             display: 'flex', flexDirection: 'column', background: 'var(--surface)', overflowY: 'auto' }}>
             {threadsLoading && <p style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>{ti.loading}</p>}
             {!threadsLoading && threads.length === 0 && (
-              <div style={{ padding: 24, textAlign: 'center' }}>
-                <p style={{ color: 'var(--muted)', fontSize: 13 }}>{ti.noMessages}</p>
-                <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>{ti.noMessagesHint}</p>
-              </div>
+              unreadOnly
+                ? <EmptyState icon={CaughtUpIcon} title={ti.noUnread} hint={ti.noUnreadHint} />
+                : <EmptyState icon={InboxIcon} title={ti.noMessages} hint={ti.noMessagesHint} />
             )}
             {threads.map((thread) => {
               const isUnread = !thread.read_at && thread.direction === 'inbound';
@@ -567,9 +609,13 @@ function ConversationsPageInner() {
                   </div>
                   <div>
                     <p style={{ fontSize: 14, fontWeight: 600 }}>{activeThread.sender_name ?? activeThread.sender_id}</p>
-                    <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <ChannelIcon name={activeThread.platform} size={12} /> {activeThread.platform}
-                      {activeAccount && ` · @${activeAccount.username}`}
+                    <p style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span role="img" aria-label={PLATFORM_LABELS[activeThread.platform] ?? activeThread.platform}
+                        title={PLATFORM_LABELS[activeThread.platform] ?? activeThread.platform}
+                        style={{ display: 'flex', alignItems: 'center' }}>
+                        <ChannelIcon name={activeThread.platform} size={12} />
+                      </span>
+                      {activeAccount && `@${activeAccount.username}`}
                     </p>
                   </div>
                 </div>
@@ -713,10 +759,10 @@ function ConversationsPageInner() {
           <div style={{ maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 12 }}>
             {commentsLoading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{te.loadingComments}</p>}
             {!commentsLoading && commentThreads.length === 0 && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 12, padding: '40px 24px', textAlign: 'center' }}>
-                <p style={{ color: 'var(--muted)', fontSize: 14 }}>{te.noComments}</p>
-                <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>{te.noCommentsHint}</p>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
+                {showReplied
+                  ? <EmptyState icon={CommentsIcon} title={te.noComments} hint={te.noCommentsHint} />
+                  : <EmptyState icon={CaughtUpIcon} title={te.noCommentsCaughtUp} hint={te.noCommentsCaughtUpHint} />}
               </div>
             )}
             {commentThreads.map((thread) => {
@@ -745,9 +791,11 @@ function ConversationsPageInner() {
                       {!headerAvatar && (headerName?.[0]?.toUpperCase() ?? '?')}
                     </div>
                     <span style={{ fontWeight: 600, fontSize: 13 }}>{headerName}</span>
-                    <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                      background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <ChannelIcon name={thread.platform} size={10} /> {thread.platform}
+                    <span role="img" aria-label={PLATFORM_LABELS[thread.platform] ?? thread.platform}
+                      title={PLATFORM_LABELS[thread.platform] ?? thread.platform}
+                      style={{ display: 'inline-flex', alignItems: 'center', padding: 4, borderRadius: 4,
+                        background: 'var(--border)', color: 'var(--muted)' }}>
+                      <ChannelIcon name={thread.platform} size={11} />
                     </span>
                     <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{timeAgo(thread.latestAt)}</span>
                   </div>
@@ -817,9 +865,11 @@ function ConversationsPageInner() {
                   {!commentModal.externalAuthor?.avatar && ((commentModal.externalAuthor?.name ?? commentModal.socialAccount.username ?? '?')[0]?.toUpperCase())}
                 </div>
                 <span style={{ fontWeight: 600, fontSize: 14 }}>{commentModal.externalAuthor?.name ?? commentModal.socialAccount.username}</span>
-                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                  background: 'var(--border)', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <ChannelIcon name={commentModal.platform} size={10} /> {commentModal.platform}
+                <span role="img" aria-label={PLATFORM_LABELS[commentModal.platform] ?? commentModal.platform}
+                  title={PLATFORM_LABELS[commentModal.platform] ?? commentModal.platform}
+                  style={{ display: 'inline-flex', alignItems: 'center', padding: 4, borderRadius: 4,
+                    background: 'var(--border)', color: 'var(--muted)' }}>
+                  <ChannelIcon name={commentModal.platform} size={11} />
                 </span>
                 <button onClick={() => setCommentModal(null)}
                   style={{ marginLeft: 'auto', background: 'none', border: 'none',

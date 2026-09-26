@@ -319,15 +319,18 @@ export async function replyToThread(
     select: ACCOUNT_SELECT,
   });
   if (!account.zernio_account_id) {
-    throw new ServiceError('invalid_input', 422, 'Account not connected to Zernio');
+    throw new ServiceError('invalid_input', 422, 'Account not connected');
   }
 
   let sent;
   try {
     sent = await sendConversationMessage(input.threadId, account.zernio_account_id, text);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to send message';
-    throw new ServiceError('provider_error', 502, message);
+    // El detalle del proveedor (a veces literalmente "Zernio API error …") no
+    // es para el usuario: se reporta para diagnóstico y se devuelve un
+    // mensaje genérico.
+    reportError(err, { route: ROUTE, service: 'zernio', auth: ctx.auth, extra: { op: 'reply-to-thread' } });
+    throw new ServiceError('provider_error', 502, 'Failed to send message').markReported();
   }
 
   const db = createSupabaseServer();
@@ -390,7 +393,7 @@ export async function syncInbox(
   const { data: accounts } = await accountsQuery;
 
   if (!accounts || accounts.length === 0) {
-    return { synced: 0, failed: 0, message: 'No active accounts with Zernio connection' };
+    return { synced: 0, failed: 0, message: 'No connected accounts' };
   }
 
   // zernio_account_id → cuenta de Kefy.
@@ -409,8 +412,8 @@ export async function syncInbox(
       limit: 100,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to fetch inbox conversations';
-    throw new ServiceError('provider_error', 502, message);
+    reportError(err, { route: ROUTE, service: 'zernio', auth: ctx.auth, extra: { op: 'sync-inbox' } });
+    throw new ServiceError('provider_error', 502, 'Failed to fetch inbox conversations').markReported();
   }
 
   const conversations = inboxResponse.data ?? [];
@@ -516,7 +519,7 @@ export async function syncComments(
     .not('zernio_account_id', 'is', null);
 
   if (!accounts || accounts.length === 0) {
-    return { synced: 0, message: 'No active accounts with Zernio connection' };
+    return { synced: 0, message: 'No connected accounts' };
   }
 
   type CommentRow = {
@@ -636,7 +639,7 @@ export async function replyToComment(
     : comment.kefy_social_accounts;
 
   if (!account?.zernio_account_id) {
-    throw new ServiceError('invalid_input', 422, 'Account not connected to Zernio');
+    throw new ServiceError('invalid_input', 422, 'Account not connected');
   }
 
   const platformCommentId = comment.zernio_comment_id ?? comment.platform_comment_id;
@@ -644,8 +647,8 @@ export async function replyToComment(
   try {
     await zernioReplyToComment(account.zernio_account_id, comment.platform_post_id, platformCommentId, text);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to reply';
-    throw new ServiceError('provider_error', 502, message);
+    reportError(err, { route: ROUTE, service: 'zernio', auth: ctx.auth, extra: { op: 'reply-to-comment' } });
+    throw new ServiceError('provider_error', 502, 'Failed to reply').markReported();
   }
 
   const db = createSupabaseServer();
