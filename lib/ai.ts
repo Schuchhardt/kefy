@@ -22,6 +22,7 @@ import type {
   GenerateRecommendationsResult,
 } from '@/types/ai';
 import { withSourceBlock } from '@/lib/content-source';
+import { withProviderAlerts } from '@/lib/provider-alerts';
 
 // ─── Modelos ──────────────────────────────────────────────────────────────────
 //
@@ -40,13 +41,13 @@ export const MODELS = {
 export function getAnthropic(): Anthropic {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error('Missing ANTHROPIC_API_KEY env var');
-  return new Anthropic({ apiKey: key });
+  return new Anthropic({ apiKey: key, fetch: withProviderAlerts('anthropic') });
 }
 
 function getOpenAI(): OpenAI {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('Missing OPENAI_API_KEY env var');
-  return new OpenAI({ apiKey: key });
+  return new OpenAI({ apiKey: key, fetch: withProviderAlerts('openai') });
 }
 
 // ─── Prompt loader ────────────────────────────────────────────────────────────

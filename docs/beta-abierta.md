@@ -185,6 +185,21 @@ ya cubiertas.
 `GET /api/auth/me` devuelve `subscription` y `usage` para que el dashboard avise
 **antes** de que el usuario se choque con cualquiera de los tres.
 
+### Alerta: proveedor de IA sin crédito (distinto de los créditos de Kefy)
+
+Todo lo de arriba es el pool de créditos **de Kefy** (por organización). Si la
+cuenta de **Anthropic** u **OpenAI** misma se queda sin saldo, ningún crédito
+de Kefy protege contra eso: todas las generaciones fallan con 502 sin que nadie
+se entere hasta que un cliente se queja.
+
+`lib/provider-alerts.ts` engancha vía la opción `fetch` de `getAnthropic()` /
+`getOpenAI()` (`lib/ai.ts`) — un solo punto para cualquier llamada a cualquiera
+de los dos, chat incluido. Si una respuesta no-ok calza con el patrón de "sin
+crédito" de ese proveedor (status + texto del error; ninguno de los dos SDKs
+da un código estable para esto), manda un correo a `PLATFORM_ALERT_EMAIL` vía
+Resend — a lo sumo 1 por proveedor por hora (reusa `kefy_rate_limits`, no hay
+tabla nueva). Sin `PLATFORM_ALERT_EMAIL` o `RESEND_API_KEY`, no hace nada.
+
 ### Autopilot
 
 «Ejecutar ahora» (botón de la UI, `run_autopilot_now` por API / MCP / chat)
@@ -321,7 +336,9 @@ no puede crear nada desde el primer día, que es peor que no haberla creado.
 1. Aplicar la migración
    `db/migrations/20260901000001_create_rate_limits_and_usage.sql`.
 2. Configurar en Vercel: `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, y para los
-   source maps `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`.
+   source maps `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`. Para la
+   alerta de proveedor sin crédito: `PLATFORM_ALERT_EMAIL` (además de
+   `RESEND_API_KEY` / `RESEND_FROM_EMAIL`, que ya deberían estar).
 3. Verificar que `/monitoring` responde (el túnel de Sentry).
 4. Para el asistente: aplicar
    `db/migrations/20260922000001_create_assistant_and_api_keys.sql` y,
