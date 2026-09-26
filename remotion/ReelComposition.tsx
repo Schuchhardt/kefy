@@ -221,12 +221,14 @@ function ReelScene({
   const barProgress = spring({ frame: Math.max(0, localFrame - 12), fps, config: { damping: 16, stiffness: 120 } });
 
   // ── Body text: word-by-word kinetic reveal ────────────────────────────────
-  // Fits within a fixed ~0.5s entrance budget regardless of sentence length —
-  // a 3-word line and a 12-word line both finish settling around frame ~37,
-  // just staggered differently, so short scenes never get caught mid-reveal.
+  // Stagger spread is capped tight (9 frames total, ≤3/word) because each
+  // word's own spring keeps settling for a while after its trigger frame —
+  // an uncapped per-word stagger on an 11+ word sentence (normal for real
+  // Spanish copy) was taking ~2s to fully settle instead of the intended
+  // ~1s, per QA. Short lines are unaffected (they were already near the cap).
   const bodyStartFrame = 22;
   const words           = scene.body.split(' ').filter(Boolean);
-  const staggerPerWord  = Math.max(1, Math.min(4, Math.round(15 / Math.max(words.length - 1, 1))));
+  const staggerPerWord  = Math.max(1, Math.min(3, Math.round(9 / Math.max(words.length - 1, 1))));
 
   // ── Scene chip fade in ────────────────────────────────────────────────────
   const chipOpacity = interpolate(localFrame, [0, 14], [0, 1], { extrapolateRight: 'clamp' });
@@ -281,10 +283,12 @@ function ReelScene({
         justifyContent: 'flex-end', alignItems: 'flex-start',
         // Bottom padding is generous on purpose: Instagram/TikTok reserve the
         // bottom ~20% of the frame for their own UI (username, caption,
-        // action icons), which otherwise covers this text (144px wasn't
-        // enough — Facebook doesn't have that overlay, but the extra margin
-        // there is a fine tradeoff since the video is shared across networks).
-        padding: '80px 68px 260px',
+        // action icons) — that's 384px at 1920px tall. 144px, then 260px,
+        // both measured short of that (a 2-line body sentence, the normal
+        // case for real copy, still bottomed out inside the reserved band).
+        // Facebook doesn't have that overlay, but the extra margin there is a
+        // fine tradeoff since the video is shared across networks.
+        padding: '80px 68px 400px',
       }}>
         {/* Scene chip */}
         <div style={{ marginBottom: 22, opacity: chipOpacity }}>
@@ -389,6 +393,19 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
   const { fps, durationInFrames } = useVideoConfig();
   const ranges  = getSceneRanges(scenes, fps);
 
+  // Camera-move variety (see CAMERA_MOVES) is only ever visible on scenes
+  // that actually have a background photo — gradient-fallback scenes render
+  // AnimatedGradientBg instead and never apply it. Indexing by the scene's
+  // position in the full `scenes` array wasted move slots on gradient
+  // scenes, so the hook and the last scene (the two highest-visibility
+  // ones) often landed on the identical move whenever a reel had an even
+  // number of scenes before them. Index by position among image scenes only.
+  let imageSceneCounter = -1;
+  const cameraMoveIndexByScene = scenes.map((scene) => {
+    if (scene.image_url) imageSceneCounter++;
+    return imageSceneCounter;
+  });
+
   // Load Google Font before rendering so Remotion (browser + Lambda) can use it
   const [fontHandle] = useState(() => delayRender('Loading brand font'));
   useEffect(() => {
@@ -443,7 +460,7 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
               primaryColor={primaryColor}
               fontHeading={fontHeading}
               totalScenes={scenes.length}
-              cameraMove={getCameraMove(i)}
+              cameraMove={getCameraMove(Math.max(0, cameraMoveIndexByScene[i]!))}
               isHook={isHook}
             />
           </Sequence>
@@ -465,7 +482,12 @@ export function ReelComposition({ scenes, brandName, accentColor = '#c6ff4b', pr
               height:       7,
               borderRadius: 3.5,
               background:   isActive ? accentColor : isPast ? `${accentColor}55` : 'rgba(255,255,255,0.25)',
-              boxShadow:    isActive ? `0 0 8px ${accentColor}` : 'none',
+              // Past/upcoming dots are semi-transparent by design, which reads
+              // fine on a dark gradient scene but disappears against a bright
+              // photo background (QA: a light forest/sky scene made every
+              // non-active dot unreadable). A constant dark outline keeps a
+              // minimum edge regardless of what's behind it.
+              boxShadow:    isActive ? `0 0 8px ${accentColor}` : '0 0 2px rgba(0,0,0,0.8)',
             }} />
           );
         })}
