@@ -30,6 +30,12 @@ const T = { es: esT, en: enT } as const;
 
 // Channels are imported from lib/channels — CHANNELS_BASE removed
 
+function fmtCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 const CONTENT_TYPES_BASE: { value: ContentType; label: string }[] = [
   { value: 'post',     label: 'Post'     },
   { value: 'carousel', label: 'Carrusel' },
@@ -312,6 +318,7 @@ function ContentPageInner() {
   const [filterChannel, setFilterChannel] = useState<Channel | ''>('');
   const [filterStatus, setFilterStatus]   = useState<ContentStatus | ''>('');
   const [brandKit, setBrandKit]     = useState<{ name: string | null; logo_url: string | null; primary_color: string | null; accent_color: string | null; font_heading: string | null } | null>(null);
+  const [perfByContentId, setPerfByContentId] = useState<Map<string, { impressions: number; likes: number; engagement_rate: number }>>(new Map());
 
   // Generate form — pre-populate from ?topic=Y&type=Z (strategy page deep-link).
   // Channel/language/images are no longer user-controlled: content is
@@ -429,6 +436,22 @@ function ContentPageInner() {
       .then((r) => r.json())
       .then((d: { kit?: { name: string | null; logo_url: string | null; primary_color: string | null; accent_color: string | null; font_heading: string | null } }) => {
         if (d.kit) setBrandKit(d.kit);
+      })
+      .catch(() => {/* non-critical */});
+  }, []);
+
+  // Métricas de los items ya publicados, para mostrar "cómo le está yendo"
+  // directo en la tarjeta — sin esto, publicar era una puerta de un solo
+  // sentido: no había forma de ver el resultado sin salir a Analíticas.
+  useEffect(() => {
+    fetch('/api/analytics/posts?limit=100', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d: { data?: Array<{ content: { id: string | null }; latest_metrics: { impressions: number; likes: number; engagement_rate: number } | null }> }) => {
+        const map = new Map<string, { impressions: number; likes: number; engagement_rate: number }>();
+        for (const row of d.data ?? []) {
+          if (row.content.id && row.latest_metrics) map.set(row.content.id, row.latest_metrics);
+        }
+        setPerfByContentId(map);
       })
       .catch(() => {/* non-critical */});
   }, []);
@@ -1249,6 +1272,15 @@ function ContentPageInner() {
                       borderRadius: 4, padding: '2px 6px',
                       background: `${STATUS_COLORS[item.status]}cc`, color: '#fff',
                     }}>{STATUS_LABELS[item.status]}</span>
+                    {item.status === 'published' && perfByContentId.get(item.id) && (
+                      <span style={{
+                        position: 'absolute', bottom: 5, left: 5, fontSize: 10, fontWeight: 600,
+                        borderRadius: 4, padding: '2px 6px',
+                        background: 'rgba(0,0,0,0.65)', color: '#fff',
+                      }}>
+                        👁 {fmtCompact(perfByContentId.get(item.id)!.impressions)}
+                      </span>
+                    )}
                   </div>
                   {/* Grid info */}
                   <div style={{ padding: '8px 10px' }}>
@@ -1370,6 +1402,11 @@ function ContentPageInner() {
                     }}>
                       {STATUS_LABELS[item.status]}
                     </span>
+                    {item.status === 'published' && perfByContentId.get(item.id) && (
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        👁 {fmtCompact(perfByContentId.get(item.id)!.impressions)} · ♥ {fmtCompact(perfByContentId.get(item.id)!.likes)}
+                      </span>
+                    )}
                     <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>
                       {new Date(item.created_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short' })}
                     </span>
