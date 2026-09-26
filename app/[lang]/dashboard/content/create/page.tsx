@@ -329,7 +329,7 @@ function ContentPageInner() {
   const [genResult, setGenResult]       = useState<string | null>(null);
   const [keywordRulesCount, setKeywordRulesCount] = useState(0);
   const [ctaBannerDismissed, setCtaBannerDismissed] = useState(false);
-  const [viewMode, setViewMode]                     = useState<'list' | 'grid'>('list');
+  const [viewMode, setViewMode]                     = useState<'list' | 'grid'>('grid');
 
   // ── Smart content recommendations (calendar-driven + AI fallback) ──────────
   const [recs, setRecs]               = useState<Recommendation[]>([]);
@@ -1134,7 +1134,7 @@ function ContentPageInner() {
           </div>
         ) : (
           <div style={viewMode === 'grid'
-            ? { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }
+            ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }
             : { display: 'flex', flexDirection: 'column', gap: 10 }
           }>
             {/* Skeleton card while the copy is being written */}

@@ -179,6 +179,7 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         key={item.href}
         href={item.href}
         title={collapsed ? item.label : undefined}
+        aria-label={item.label}
         style={{
           display: 'flex',
           alignItems: 'center',

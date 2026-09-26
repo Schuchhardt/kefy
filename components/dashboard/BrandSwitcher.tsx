@@ -65,7 +65,11 @@ export default function BrandSwitcher({
         }}
         onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', flex: 1, minWidth: 0 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center',
+          justifyContent: collapsed ? 'center' : 'flex-start',
+          gap: 8, overflow: 'hidden', flex: 1, minWidth: 0,
+        }}>
           <BrandAvatar brand={activeBrand} size={28} />
           {!collapsed && (
             <span style={{
