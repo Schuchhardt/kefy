@@ -451,7 +451,10 @@ function ContentPageInner() {
         payload = { topic, language, slide_count: slides, save: true };
       } else if (type === 'reel') {
         url = '/api/content/reel';
-        payload = { topic, language, scene_count: slides, save: true, reference_image_urls: referenceImages };
+        // 2 variantes: se comparan directo en la biblioteca (ambas quedan
+        // guardadas, no hay picker aparte) en vez de forzar a elegir a ciegas
+        // con una sola opción generada.
+        payload = { topic, language, scene_count: slides, variant_count: 2, reference_image_urls: referenceImages };
       } else if (type === 'story') {
         url = '/api/content/story';
         payload = { topic, language, save: true };
@@ -473,12 +476,24 @@ function ContentPageInner() {
         result?: { body?: string; hashtags?: string[] };
         body?: string; hook?: string; hashtags?: string[];
         slides?: unknown[]; scenes?: unknown[]; image_url?: string; error?: string;
+        // /api/content/reel con variant_count > 1: cada variante es su propio
+        // item ya guardado (ver lib/services/reel.ts) — no hay nada más que
+        // "elegir" desde acá, fetchItems() más abajo las trae a la lista.
+        variants?: Array<{ itemId?: string; scenes?: unknown[] }>;
+        requested_variant_count?: number;
       };
       if (!res.ok) throw new Error(data.error ?? 'Error al generar');
 
       if (type === 'post')     setGenResult(data.result?.body ?? data.body ?? '');
       if (type === 'carousel') setGenResult(`Carrusel generado con ${(data.slides ?? []).length} slides ✓`);
-      if (type === 'reel')     setGenResult(`Reel generado con ${(data.scenes ?? []).length} escenas ✓`);
+      if (type === 'reel') {
+        if (data.variants) {
+          const sceneCounts = data.variants.map((v) => (v.scenes ?? []).length).join(' y ');
+          setGenResult(`${data.variants.length} variantes de reel generadas (${sceneCounts} escenas) — elige la que más te guste en la biblioteca ✓`);
+        } else {
+          setGenResult(`Reel generado con ${(data.scenes ?? []).length} escenas ✓`);
+        }
+      }
       if (type === 'story')    setGenResult('Story generada ✓');
 
       // Check for active keyword rules to show CTA banner

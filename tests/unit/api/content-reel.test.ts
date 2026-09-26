@@ -160,21 +160,39 @@ describe('POST /api/content/reel', () => {
     const { POST } = await import('@/app/api/content/reel/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
-    mockSupabaseClient.from.mockReturnValueOnce(mockBrandKitChain());
+
+    const insertChain = {
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'reel-1' }, error: null }),
+    };
+    mockSupabaseClient.from
+      .mockReturnValueOnce(mockBrandKitChain())
+      .mockReturnValueOnce(insertChain);
+
     vi.mocked(generateReelScript).mockResolvedValueOnce({
       scenes: makeScenes(3), hook: 'Hook', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1,
     });
 
-    const res = await POST(makeReq({ topic: 'Tutorial', generate_images: false, save: false }));
-    expect(res.status).toBe(200);
+    const res = await POST(makeReq({ topic: 'Tutorial', generate_images: false }));
+    expect(res.status).toBe(201);
     expect(generateContentImage).not.toHaveBeenCalled();
   });
 
-  it('con save:false devuelve escenas sin persistir', async () => {
+  it('save:false ya no evita persistir — un reel siempre queda en la biblioteca', async () => {
     const { POST } = await import('@/app/api/content/reel/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
-    mockSupabaseClient.from.mockReturnValueOnce(mockBrandKitChain());
+
+    const insertChain = {
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'reel-1' }, error: null }),
+    };
+    mockSupabaseClient.from
+      .mockReturnValueOnce(mockBrandKitChain())
+      .mockReturnValueOnce(insertChain);
+
     vi.mocked(generateReelScript).mockResolvedValueOnce({
       scenes: makeScenes(3), hook: 'Hook', hashtags: ['#x'], model: 'claude-opus-4-5', tokensUsed: 1,
     });
@@ -182,10 +200,84 @@ describe('POST /api/content/reel', () => {
     vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/scene.jpg');
 
     const res = await POST(makeReq({ topic: 'Tutorial', save: false }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.itemId).toBeUndefined();
-    expect(mockSupabaseClient.from).toHaveBeenCalledTimes(1);
+    expect(body.itemId).toBe('reel-1');
+    expect(insertChain.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it('devuelve 422 con variant_count fuera de rango', async () => {
+    const { POST } = await import('@/app/api/content/reel/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+
+    const res = await POST(makeReq({ topic: 'Tutorial', variant_count: 4 }));
+    expect(res.status).toBe(422);
+  });
+
+  it('variant_count:2 genera y persiste dos variantes agrupadas', async () => {
+    const { POST } = await import('@/app/api/content/reel/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+
+    const insertChainFor = (id: string) => ({
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id }, error: null }),
+    });
+    const insertChainA = insertChainFor('reel-a');
+    const insertChainB = insertChainFor('reel-b');
+    mockSupabaseClient.from
+      .mockReturnValueOnce(mockBrandKitChain())
+      .mockReturnValueOnce(insertChainA)
+      .mockReturnValueOnce(insertChainB);
+
+    vi.mocked(generateReelScript)
+      .mockResolvedValueOnce({ scenes: makeScenes(3), hook: 'Hook A', hashtags: ['#a'], model: 'claude-opus-4-5', tokensUsed: 1 })
+      .mockResolvedValueOnce({ scenes: makeScenes(3), hook: 'Hook B', hashtags: ['#b'], model: 'claude-opus-4-5', tokensUsed: 1 });
+
+    const res = await POST(makeReq({ topic: 'Tutorial', generate_images: false, variant_count: 2 }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.variants).toHaveLength(2);
+    expect(body.requested_variant_count).toBe(2);
+    expect(body.variant_group_id).toBeTruthy();
+    expect(body.variants[0].itemId).toBe('reel-a');
+    expect(body.variants[1].itemId).toBe('reel-b');
+
+    const rowA = insertChainA.insert.mock.calls[0][0] as Record<string, unknown>;
+    const rowB = insertChainB.insert.mock.calls[0][0] as Record<string, unknown>;
+    const metaA = rowA.metadata as Record<string, unknown>;
+    const metaB = rowB.metadata as Record<string, unknown>;
+    expect(metaA.variant_group_id).toBe(metaB.variant_group_id);
+    expect(metaA.variant_index).toBe(1);
+    expect(metaB.variant_index).toBe(2);
+  });
+
+  it('con variant_count:2, si la segunda variante falla se queda con la primera en vez de fallar todo', async () => {
+    const { POST } = await import('@/app/api/content/reel/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+
+    const insertChain = {
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'reel-a' }, error: null }),
+    };
+    mockSupabaseClient.from
+      .mockReturnValueOnce(mockBrandKitChain())
+      .mockReturnValueOnce(insertChain);
+
+    vi.mocked(generateReelScript)
+      .mockResolvedValueOnce({ scenes: makeScenes(3), hook: 'Hook A', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1 })
+      .mockRejectedValueOnce(new Error('AI down'));
+
+    const res = await POST(makeReq({ topic: 'Tutorial', generate_images: false, variant_count: 2 }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.requested_variant_count).toBe(2);
+    expect(body.variants).toHaveLength(1);
+    expect(body.variants[0].itemId).toBe('reel-a');
   });
 
   it('persiste el item con content_type=reel y devuelve 201', async () => {

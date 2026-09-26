@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateReelScript, generateContentImage } from '@/lib/ai';
-import { guardAiRequest } from '@/lib/ai-guard';
-import { consumeCredits, refundCredits } from '@/lib/usage';
-import { reportError } from '@/lib/observability';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import {
+  generateReel,
+  REEL_VARIANT_COUNT_MAX,
+} from '@/lib/services/reel';
 import type { ContentChannel } from '@/types/ai';
-import { uploadBase64Image } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 180;
@@ -19,7 +19,9 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 // ─── POST /api/content/reel ───────────────────────────────────────────────────
 // Generate a short-form vertical reel storyboard.
 // Claude writes the scene script; gpt-image-2 generates one background image
-// per scene (optional). Stores the result as content_type='reel'.
+// per scene (optional). Always saved as content_type='reel' — a reel never
+// stays out of the library (see lib/services/reel.ts for why `save` isn't a
+// thing here, unlike /api/content/generate or /api/content/carousel).
 //
 // Body:
 //   channel          — required
@@ -28,8 +30,16 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 //   language?        — 'es' (default) | 'en'
 //   generate_images? — boolean (default true)
 //   image_quality?   — 'low' | 'medium' (default) | 'high'
-//   save?                  — persist to DB (default true)
+//   variant_count?   — 1–3 (default 1). >1 generates that many independent
+//                      takes on the same topic, each its own item, grouped by
+//                      metadata.variant_group_id so the library can show them
+//                      side by side.
 //   reference_image_urls?  — public URLs of reference images to guide AI image generation
+//
+// Single variant (default) responds with the same flat shape as before:
+//   { itemId, scenes, hook, hashtags, model, tokensUsed }
+// variant_count > 1 responds with:
+//   { variant_group_id, requested_variant_count, variants: [{ itemId, variant_index, scenes, hook, hashtags, model, tokensUsed }] }
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -62,149 +72,52 @@ export async function POST(req: NextRequest) {
   if (typeof input.topic !== 'string' || !input.topic.trim()) {
     return NextResponse.json({ error: 'topic is required' }, { status: 422 });
   }
-
-  const rawCount    = typeof input.scene_count === 'number' ? input.scene_count : 5;
-  const sceneCount  = Math.min(8, Math.max(3, Math.floor(rawCount)));
-  const genImages   = input.generate_images !== false;  // default true
-  const imageQuality = (['low', 'medium', 'high'] as const)
-    .includes(input.image_quality as 'low' | 'medium' | 'high')
-    ? (input.image_quality as 'low' | 'medium' | 'high')
-    : 'medium';
-  const referenceImages = Array.isArray(input.reference_image_urls)
-    ? input.reference_image_urls.filter((u): u is string => typeof u === 'string').slice(0, 3)
-    : undefined;
-
-  const db = createSupabaseServer();
-
-  // Fetch brand kit context
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select('id, name, tagline, tone, industry, primary_color, secondary_color, accent_color, font_heading, logo_url')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
+  if (input.variant_count !== undefined) {
+    const vc = input.variant_count;
+    if (typeof vc !== 'number' || !Number.isFinite(vc) || vc < 1 || vc > REEL_VARIANT_COUNT_MAX) {
+      return NextResponse.json(
+        { error: `variant_count must be a number between 1 and ${REEL_VARIANT_COUNT_MAX}` },
+        { status: 422 },
+      );
+    }
+  }
 
   const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
+  const ctx = serviceContext(auth, brand?.id ?? '', language, { brandScope: 'org', source: 'route' });
 
-  const guard = await guardAiRequest(req, {
-    auth, operation: 'text', route: 'POST /api/content/reel', language,
-  });
-  if (guard.blocked) return guard.blocked;
-
-  // 1. Generate reel script with Claude
-  let generated;
   try {
-    generated = await generateReelScript({
+    const out = await generateReel(ctx, {
+      topic:                 input.topic as string,
       channel,
-      topic:       (input.topic as string).trim().slice(0, 500),
-      scene_count: sceneCount,
-      language,
-      tone:        brandKit?.tone ?? [],
-      brandName:   brandKit?.name    ?? undefined,
-      tagline:     brandKit?.tagline ?? undefined,
-      extraCtx:    brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
+      scene_count:           typeof input.scene_count === 'number' ? input.scene_count : undefined,
+      generate_images:       input.generate_images as boolean | undefined,
+      image_quality:         input.image_quality as 'low' | 'medium' | 'high' | undefined,
+      reference_image_urls:  Array.isArray(input.reference_image_urls)
+        ? input.reference_image_urls.filter((u): u is string => typeof u === 'string')
+        : undefined,
+      variant_count:         typeof input.variant_count === 'number' ? input.variant_count : undefined,
     });
-  } catch (err) {
-    await guard.refund();
-    reportError(err, { route: 'POST /api/content/reel', auth, service: 'ai', extra: { sceneCount } });
-    const msg = err instanceof Error ? err.message : 'Reel script generation failed';
-    return NextResponse.json({ error: msg }, { status: 502 });
+
+    const isMultiVariant = out.requested_variant_count > 1;
+    const payload = isMultiVariant
+      ? {
+          variant_group_id:        out.variant_group_id,
+          requested_variant_count: out.requested_variant_count,
+          variants:                out.variants,
+        }
+      : {
+          itemId:     out.variants[0]?.itemId,
+          scenes:     out.variants[0]?.scenes,
+          hook:       out.variants[0]?.hook,
+          hashtags:   out.variants[0]?.hashtags,
+          model:      out.variants[0]?.model,
+          tokensUsed: out.variants[0]?.tokensUsed,
+        };
+
+    const res = NextResponse.json(payload, { status: 201 });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (e) {
+    return serviceErrorResponse(e, { route: 'POST /api/content/reel', auth });
   }
-
-  // 2. Optionally generate one background image per scene (portrait 9:16)
-  const scenes = await Promise.all(
-    generated.scenes.map(async (scene) => {
-      if (!genImages) return { ...scene, image_url: undefined };
-
-      // Una imagen de fondo por escena: cada una consume cuota. Agotada la
-      // cuota, la escena se queda sin fondo generado y Remotion usa el gradiente
-      // de la marca — el reel sigue saliendo.
-      const sceneCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
-      if (!sceneCredits?.allowed) return { ...scene, image_url: undefined };
-
-      try {
-        // For reel backgrounds: do NOT pass logo (it's overlaid by Remotion, not baked in).
-        const bgPrompt = `Background scene for a reel: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks, NO signs with writing, NO UI overlays. Pure cinematic background scene only.`;
-        const imgResult = await generateContentImage({
-          prompt:  bgPrompt,
-          size:    '1024x1792',
-          quality: imageQuality,
-          brand: {
-            name:           brandKit?.name           ?? undefined,
-            primaryColor:   brandKit?.primary_color  ?? undefined,
-            secondaryColor: brandKit?.secondary_color ?? undefined,
-            accentColor:    brandKit?.accent_color   ?? undefined,
-            tone:           brandKit?.tone           ?? undefined,
-            // NO logoB64/logoMimeType — logo is overlaid by Remotion, must not be baked into background
-          },
-          referenceImages,
-        });
-        const imageUrl = await uploadBase64Image(
-          imgResult.b64,
-          auth.orgId,
-          `reel-scene-${scene.scene_order}-${Date.now()}.jpeg`,
-        );
-        return { ...scene, image_url: imageUrl };
-      } catch (imgErr) {
-        await refundCredits(auth.orgId, 'image');
-        reportError(imgErr, {
-          route: 'POST /api/content/reel', auth, service: 'ai',
-          extra: { escena: scene.scene_order, fase: 'imagen' },
-        });
-        return { ...scene, image_url: undefined };
-      }
-    }),
-  );
-
-  // Use the first scene's image as the item cover
-  const coverImage = scenes.find((s) => s.image_url)?.image_url ?? null;
-
-  if (input.save === false) {
-    return NextResponse.json({
-      scenes,
-      hook:       generated.hook,
-      hashtags:   generated.hashtags,
-      model:      generated.model,
-      tokensUsed: generated.tokensUsed,
-    });
-  }
-
-  // 3. Persist as a content item with content_type='reel'
-  const { data: item, error: itemError } = await db
-    .from('kefy_content_items')
-    .insert({
-      org_id:       auth.orgId,
-      brand_id:     brand?.id ?? null,
-      brand_kit_id: brandKit?.id ?? null,
-      created_by:   auth.userId,
-      channel,
-      content_type: 'reel',
-      title:        generated.hook || scenes[0]?.title || null,
-      body:         generated.hook || null,
-      image_url:    coverImage,
-      slides:       scenes,   // scenes stored in slides column
-      hashtags:     generated.hashtags,
-      status:       'draft',
-      metadata:     { scene_count: scenes.length, model: generated.model },
-    })
-    .select('id, content_type, channel, status, created_at')
-    .single();
-
-  if (itemError || !item) {
-    console.error('reel item insert error:', itemError?.message);
-    return NextResponse.json({ error: 'Failed to save reel' }, { status: 500 });
-  }
-
-  const res = NextResponse.json(
-    {
-      itemId:     item.id,
-      scenes,
-      hook:       generated.hook,
-      hashtags:   generated.hashtags,
-      model:      generated.model,
-      tokensUsed: generated.tokensUsed,
-    },
-    { status: 201 },
-  );
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
 }
