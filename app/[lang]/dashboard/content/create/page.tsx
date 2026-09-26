@@ -17,6 +17,7 @@ import type { Locale } from '@/types/i18n';
 import type { RecSource, Recommendation, StrategyMeta } from '@/types/strategy';
 import { CHANNELS as ALL_CHANNELS } from '@/lib/channels';
 import { useDataChanged } from '@/lib/data-events';
+import { useBrand } from '@/lib/brand-context';
 
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
@@ -300,6 +301,11 @@ function ContentPageInner() {
   ];
   const STATUS_LABELS = t.statusLabels as Record<ContentStatus, string>;
 
+  // La marca activa vive en BrandContext (cookie httpOnly, actualizada por
+  // BrandSwitcher). fetchItems debe depender de su id: si no, cambiar de marca
+  // no dispara un refetch y la lista se queda con el contenido de la marca
+  // anterior hasta que algo más (otro efecto) la refresque de casualidad.
+  const { activeBrand } = useBrand();
 
   const [items, setItems]           = useState<ContentItem[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -379,6 +385,13 @@ function ContentPageInner() {
   }, [filterChannel, filterStatus, setItems, setLoading]);
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
+
+  // Cambiar de marca activa (BrandSwitcher) actualiza la cookie httpOnly que
+  // /api/content lee en el servidor, pero eso no dispara por sí solo un
+  // refetch en el cliente: sin este efecto la lista se queda mostrando el
+  // contenido de la marca anterior hasta que otra cosa (cambiar un filtro,
+  // un evento `content` del asistente) refresque de casualidad.
+  useEffect(() => { if (activeBrand?.id) void fetchItems(); }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // El asistente creó o editó contenido: se recarga la lista.
   useDataChanged(['content'], () => { void fetchItems(); });

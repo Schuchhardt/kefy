@@ -20,6 +20,7 @@ vi.mock('@/components/dashboard/content/RecommendModal',      () => ({ default: 
 vi.mock('@/components/dashboard/content/ContentLibraryModal', () => ({ default: () => null }));
 
 import ContentPage from '@/app/[lang]/dashboard/content/create/page';
+import { BrandProvider } from '@/lib/brand-context';
 
 const BODY_TEXT = 'Texto generado del post';
 const IMAGE_URL = 'https://cdn.example.com/generated.jpeg';
@@ -81,6 +82,8 @@ describe('Página de creación de contenido — imagen de portada', () => {
       if (url.startsWith('/api/brand-kit'))       return jsonResponse({});
       if (url.startsWith('/api/automations'))     return jsonResponse({ rules: [] });
       if (url.startsWith('/api/content-library')) return jsonResponse({ items: [] });
+      if (url.startsWith('/api/brands/active'))   return jsonResponse({ brand: null });
+      if (url.startsWith('/api/brands'))          return jsonResponse({ brands: [], count: 0, limit: 1, canCreate: false });
       if (url.startsWith('/api/content/'))        return jsonResponse({ item: serverItems[0] });
       return jsonResponse({});
     }));
@@ -90,7 +93,7 @@ describe('Página de creación de contenido — imagen de portada', () => {
 
   /** Generates a post and leaves the cover-image request in flight. */
   async function generatePost() {
-    render(<ContentPage />);
+    render(<BrandProvider><ContentPage /></BrandProvider>);
     await waitFor(() => expect(screen.getByText('Generar Post')).toBeInTheDocument());
     // Al volver de /generate la lista ya trae el item (todavía sin imagen)
     serverItems = [generatedItem];
