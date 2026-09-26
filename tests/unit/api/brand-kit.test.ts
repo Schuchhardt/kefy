@@ -174,6 +174,15 @@ describe('PATCH /api/brand-kit', () => {
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
 
+    // Cambiar `name` siempre sincroniza kefy_brands.name (ver lib/services/
+    // brand-kit.ts) — el resultado se usa vía `await`, no `.single()`, así que
+    // la cadena tiene que ser thenable.
+    const brandSyncChain = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: (resolve: (v: { data: null; error: null }) => unknown) =>
+        Promise.resolve({ data: null, error: null }).then(resolve),
+    };
     const existsChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -187,6 +196,7 @@ describe('PATCH /api/brand-kit', () => {
     };
 
     mockSupabaseClient.from
+      .mockReturnValueOnce(brandSyncChain)
       .mockReturnValueOnce(existsChain)
       .mockReturnValueOnce(updateChain);
 
@@ -194,5 +204,100 @@ describe('PATCH /api/brand-kit', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.kit.name).toBe('Nuevo Nombre');
+  });
+
+  it('con ?syncOrg=1 y una sola marca en la org, también renombra la organización', async () => {
+    const { PATCH } = await import('@/app/api/brand-kit/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+
+    const brandSyncChain = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: (resolve: (v: { data: null; error: null }) => unknown) =>
+        Promise.resolve({ data: null, error: null }).then(resolve),
+    };
+    const brandCountChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: (resolve: (v: { count: number; error: null }) => unknown) =>
+        Promise.resolve({ count: 1, error: null }).then(resolve),
+    };
+    const orgUpdateChain = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: (resolve: (v: { data: null; error: null }) => unknown) =>
+        Promise.resolve({ data: null, error: null }).then(resolve),
+    };
+    const existsChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'kit-1' }, error: null }),
+    };
+    const updateChain = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'kit-1', name: 'Solo Marca' }, error: null }),
+    };
+
+    mockSupabaseClient.from
+      .mockReturnValueOnce(brandSyncChain)
+      .mockReturnValueOnce(brandCountChain)
+      .mockReturnValueOnce(orgUpdateChain)
+      .mockReturnValueOnce(existsChain)
+      .mockReturnValueOnce(updateChain);
+
+    const res = await PATCH(
+      makeRequest('PATCH', { name: 'Solo Marca' }, 'http://localhost:3097/api/brand-kit?syncOrg=1'),
+    );
+    expect(res.status).toBe(200);
+    expect(orgUpdateChain.update).toHaveBeenCalledWith({ name: 'Solo Marca' });
+  });
+
+  it('con ?syncOrg=1 pero varias marcas en la org, NO renombra la organización', async () => {
+    const { PATCH } = await import('@/app/api/brand-kit/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+
+    const brandSyncChain = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: (resolve: (v: { data: null; error: null }) => unknown) =>
+        Promise.resolve({ data: null, error: null }).then(resolve),
+    };
+    // Dos marcas activas en la org: el rename de la organización debe saltarse.
+    const brandCountChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: (resolve: (v: { count: number; error: null }) => unknown) =>
+        Promise.resolve({ count: 2, error: null }).then(resolve),
+    };
+    const existsChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'kit-1' }, error: null }),
+    };
+    const updateChain = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'kit-1', name: 'Segunda Marca' }, error: null }),
+    };
+
+    // Nota: no se encola un chain para `kefy_organizations` — si el código
+    // intentara renombrar la org de todos modos, `mockSupabaseClient.from`
+    // devolvería `undefined` en esa llamada y el `.update` fallaría, haciendo
+    // fallar el test.
+    mockSupabaseClient.from
+      .mockReturnValueOnce(brandSyncChain)
+      .mockReturnValueOnce(brandCountChain)
+      .mockReturnValueOnce(existsChain)
+      .mockReturnValueOnce(updateChain);
+
+    const res = await PATCH(
+      makeRequest('PATCH', { name: 'Segunda Marca' }, 'http://localhost:3097/api/brand-kit?syncOrg=1'),
+    );
+    expect(res.status).toBe(200);
   });
 });

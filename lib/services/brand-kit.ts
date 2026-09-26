@@ -132,9 +132,21 @@ export function buildBrandKitUpdate(input: Record<string, unknown>): Record<stri
 /**
  * Actualiza (o crea) el kit de la marca del contexto.
  *
- * `syncOrg` además renombra la organización y la marca con `name`: es lo que
- * hace el wizard de onboarding. Toca datos de toda la organización, así que las
- * herramientas lo rechazan con una key atada a una marca antes de llegar aquí.
+ * El nombre de `kefy_brands` (lo que muestra toda la navegación — switcher,
+ * sidebar, avatar) nunca debe divergir del nombre del kit: por eso, cada vez
+ * que `name` cambia, se sincroniza siempre a `kefy_brands`, tenga o no
+ * `syncOrg`. Antes solo se sincronizaba con `syncOrg: true` (el wizard de
+ * onboarding) — la página permanente de Brand (`/dashboard/brand/identity`)
+ * no lo pasaba, así que corregir el nombre ahí guardaba el kit pero la
+ * navegación seguía mostrando el nombre viejo (o uno mal extraído del sitio
+ * web) para siempre, sin ningún otro lugar donde corregirlo.
+ *
+ * `syncOrg` renombra además la organización — pero solo cuando esta marca es,
+ * en la práctica, la organización entera (0 o 1 marca). Antes renombraba la
+ * organización sin condición, así que completar el wizard para una marca
+ * nueva en una org multi-marca le cambiaba el nombre a toda la organización.
+ * Toca datos de toda la organización, así que las herramientas lo rechazan
+ * con una key atada a una marca antes de llegar aquí.
  *
  * El control de rol (owner/admin) vive en la ruta y en `roles` de la
  * herramienta.
@@ -147,26 +159,45 @@ export async function updateBrandKit(
   const update = buildBrandKitUpdate(input);
   const db = createSupabaseServer();
 
-  if (opts.syncOrg && typeof input.name === 'string' && input.name.trim()) {
+  if (typeof input.name === 'string' && input.name.trim()) {
     const syncedName = input.name.trim().slice(0, 100);
 
-    const [{ error: orgUpdateError }, { error: brandUpdateError }] = await Promise.all([
-      db
-        .from('kefy_organizations')
-        .update({ name: syncedName })
-        .eq('id', ctx.auth.orgId),
-      db
-        .from('kefy_brands')
-        .update({ name: syncedName })
-        .eq('id', ctx.brandId)
-        .eq('org_id', ctx.auth.orgId),
-    ]);
+    const { error: brandUpdateError } = await db
+      .from('kefy_brands')
+      .update({ name: syncedName })
+      .eq('id', ctx.brandId)
+      .eq('org_id', ctx.auth.orgId);
 
-    if (orgUpdateError || brandUpdateError) {
-      reportError(new Error(orgUpdateError?.message ?? brandUpdateError?.message ?? 'sync name failed'), {
+    if (brandUpdateError) {
+      reportError(new Error(brandUpdateError.message), {
         route: ROUTE, service: 'supabase', auth: ctx.auth,
       });
-      throw new ServiceError('unavailable', 500, 'Failed to sync organization name').markReported();
+      throw new ServiceError('unavailable', 500, 'Failed to sync brand name').markReported();
+    }
+
+    if (opts.syncOrg) {
+      const { count, error: countError } = await db
+        .from('kefy_brands')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', ctx.auth.orgId)
+        .eq('archived', false);
+
+      if (countError) {
+        reportError(new Error(countError.message), { route: ROUTE, service: 'supabase', auth: ctx.auth });
+        throw new ServiceError('unavailable', 500, 'Failed to sync organization name').markReported();
+      }
+
+      if ((count ?? 0) <= 1) {
+        const { error: orgUpdateError } = await db
+          .from('kefy_organizations')
+          .update({ name: syncedName })
+          .eq('id', ctx.auth.orgId);
+
+        if (orgUpdateError) {
+          reportError(new Error(orgUpdateError.message), { route: ROUTE, service: 'supabase', auth: ctx.auth });
+          throw new ServiceError('unavailable', 500, 'Failed to sync organization name').markReported();
+        }
+      }
     }
   }
 
