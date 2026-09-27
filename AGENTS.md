@@ -23,6 +23,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 | PWA / service worker | [`docs/pwa.md`](docs/pwa.md) | Antes de tocar `app/sw.js/**`, `lib/service-worker.ts`, `components/PwaUpdater.tsx`, `app/manifest.ts` o `scripts/generate-build-id.mjs` |
 | Formato de imagen por red | [`docs/zernio.md`](docs/zernio.md) (sección *Formato de imagen por red*) | Antes de tocar `lib/image-fit.ts`, `lib/image-processor.ts` o el recorte de imágenes en las previews |
 | Beta abierta: créditos, trial, rate limiting y Sentry | [`docs/beta-abierta.md`](docs/beta-abierta.md) | Antes de tocar `lib/rate-limit.ts`, `lib/usage.ts`, `lib/ai-guard.ts`, `lib/subscription.ts`, `lib/observability.ts`, `lib/sentry-scrub.ts`, los planes, o **al añadir cualquier ruta que gaste dinero** (IA, render, envío de correo) |
+| Landing, auth y UX mobile del dashboard | [`docs/auditoria-ux.md`](docs/auditoria-ux.md) | Antes de tocar `components/landing/**`, `locales/*/landing.ts`, las páginas de auth o el layout/mobile del dashboard: lista lo que la landing no puede prometer y el roadmap UX priorizado |
 | Asistente / API pública / MCP | [`docs/assistant.md`](docs/assistant.md) | Antes de tocar `lib/assistant/**`, `lib/services/**`, `app/api/assistant/**`, `app/api/v1/**`, `app/api/mcp/**` o `app/api/api-keys/**` |
 
 ## Regla: Zernio
