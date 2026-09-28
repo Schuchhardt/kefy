@@ -11,6 +11,7 @@ import type { Locale } from '@/types/i18n';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
 import ChannelIcon    from '@/components/ui/ChannelIcon';
 import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import type { Totals, OnboardingStep, RecentContentItem, TopPost, ContentPerformance } from '@/types/content';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────────── */
@@ -18,6 +19,44 @@ function fmt(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+/** Shown instead of the metrics/recent-content/top-performing sections while
+ *  accounts, brand kit and content are still loading — mirrors their real
+ *  shape so nothing jumps around once the data lands. */
+function DashboardSkeleton() {
+  return (
+    <>
+      <section style={{ marginBottom: 40 }}>
+        <SkeletonBlock width={120} height={16} style={{ marginBottom: 16 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {[...Array(6)].map((_, i) => (
+            <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '18px 16px' }}>
+              <SkeletonBlock width={22} height={16} style={{ marginBottom: 10 }} />
+              <SkeletonBlock width={50} height={20} style={{ marginBottom: 8 }} />
+              <SkeletonBlock width={70} height={11} />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section style={{ marginBottom: 40 }}>
+        <SkeletonBlock width={140} height={16} style={{ marginBottom: 16 }} />
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+          {[...Array(5)].map((_, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+              borderBottom: i < 4 ? '1px solid var(--border)' : 'none',
+            }}>
+              <SkeletonBlock width={40} height={40} borderRadius={8} style={{ flexShrink: 0 }} />
+              <SkeletonBlock height={11} style={{ flex: 1 }} />
+              <SkeletonBlock width={50} height={16} borderRadius={5} style={{ flexShrink: 0 }} />
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
 }
 
 const T = {
@@ -106,6 +145,7 @@ function DashboardPageInner() {
   const [metricsLoading, setMLoading] = useState(true);
   const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
   const [brandKitHasData, setBrandKitHasData] = useState<boolean | null>(null);
+  const [contentLoaded, setContentLoaded] = useState(false);
   const [syncing, setSyncing]         = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
 
@@ -116,7 +156,8 @@ function DashboardPageInner() {
         const json = await res.json() as { items?: RecentContentItem[]; content?: RecentContentItem[] };
         setContent(json.items ?? json.content ?? []);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setContentLoaded(true));
   }
 
   function fetchTotals() {
@@ -170,6 +211,14 @@ function DashboardPageInner() {
   }
 
   function loadBrandScopedData() {
+    // Vuelve al estado "cargando" — importante al cambiar de marca: si no se
+    // resetean, `isNewAccount`/el contenido de la marca anterior se siguen
+    // mostrando (o el empty state parpadea) mientras llegan los nuevos datos.
+    setHasAccounts(null);
+    setBrandKitHasData(null);
+    setContentLoaded(false);
+    setMLoading(true);
+
     // Check accounts
     fetchAccounts().catch(() => {
       setHasAccounts(false);
@@ -212,7 +261,13 @@ function DashboardPageInner() {
     fetchContentPerformance();
   }, [hasAccounts]);
 
-  const isNewAccount = hasAccounts === false && brandKitHasData === false && content.length === 0;
+  // Todo lo que decide qué sección mostrar debe esperar a que las tres cargas
+  // en paralelo (cuentas, brand kit, contenido) hayan terminado — si no,
+  // `hasAccounts`/`brandKitHasData` pueden resolver a `false` antes de que
+  // `content` termine de llegar y el empty state de "cuenta nueva" parpadea
+  // encima de datos que sí existen.
+  const dataReady = hasAccounts !== null && brandKitHasData !== null && contentLoaded;
+  const isNewAccount = dataReady && hasAccounts === false && brandKitHasData === false && content.length === 0;
   const hasPublishedOrScheduled = content.some(c => c.status === 'published' || c.status === 'scheduled');
 
   useEffect(() => {
@@ -457,6 +512,10 @@ function DashboardPageInner() {
         </p>
       </div>
 
+      {!dataReady ? (
+        <DashboardSkeleton />
+      ) : (
+      <>
       {/* ── New account setup ── */}
       {isNewAccount && (
         <section style={{ marginBottom: 40 }}>
@@ -551,7 +610,11 @@ function DashboardPageInner() {
         ) : metricsLoading ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
             {[...Array(6)].map((_, i) => (
-              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '18px 16px', height: 80, opacity: 0.5 }} />
+              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '18px 16px' }}>
+                <SkeletonBlock width={22} height={16} style={{ marginBottom: 10 }} />
+                <SkeletonBlock width={50} height={20} style={{ marginBottom: 8 }} />
+                <SkeletonBlock width={70} height={11} />
+              </div>
             ))}
           </div>
         ) : (
@@ -672,6 +735,8 @@ function DashboardPageInner() {
           ))}
         </div>
       </section>
+      )}
+      </>
       )}
 
       {/* ── Quick actions ── */}

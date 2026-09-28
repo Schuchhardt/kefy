@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { useDataChanged } from '@/lib/data-events';
 import { useBrand } from '@/lib/brand-context';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
@@ -259,9 +260,7 @@ export default function CalendarPage() {
         </div>
 
         {/* Calendar cells */}
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--muted)', fontSize: 14 }}>{t.loading}</div>
-        ) : (
+        {(
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
             {Array.from({ length: totalCells }, (_, i) => {
               const dayNum  = i - startOffset + 1;
@@ -276,7 +275,7 @@ export default function CalendarPage() {
                 <div
                   key={i}
                   onClick={() => {
-                    if (!isValid) return;
+                    if (!isValid || loading) return;
                     setSelectedDate(isSelected ? null : dateKey);
                     openScheduleForDay(viewYear, viewMonth, dayNum);
                   }}
@@ -285,7 +284,7 @@ export default function CalendarPage() {
                     padding: '8px',
                     borderTop: '1px solid var(--border)',
                     borderRight: i % 7 !== 6 ? '1px solid var(--border)' : undefined,
-                    cursor: isValid ? 'pointer' : 'default',
+                    cursor: isValid && !loading ? 'pointer' : 'default',
                     background: isSelected ? 'rgba(198,255,75,0.06)' : 'transparent',
                     transition: 'background 0.12s',
                     boxSizing: 'border-box',
@@ -293,6 +292,9 @@ export default function CalendarPage() {
                   }}
                 >
                   {isValid && (
+                    loading ? (
+                      <SkeletonBlock width={26} height={26} borderRadius={13} />
+                    ) : (
                     <>
                       <div style={{
                         width: 26, height: 26, borderRadius: '50%',
@@ -319,6 +321,7 @@ export default function CalendarPage() {
                         </div>
                       )}
                     </>
+                    )
                   )}
                 </div>
               );

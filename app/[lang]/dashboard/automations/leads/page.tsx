@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useBrand } from '@/lib/brand-context';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import esT from '@/locales/es/dashboard/leads';
 import enT from '@/locales/en/dashboard/leads';
 import type { LeadStage, Lead } from '@/types/leads';
@@ -627,7 +628,28 @@ export default function LeadsPage() {
 
       {/* Loading */}
       {loading && (
-        <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 60 }}>⏳</div>
+        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 12, alignItems: 'flex-start' }}>
+          {[...Array(4)].map((_, col) => (
+            <div key={col} style={{
+              flex: '0 0 240px', minWidth: 240,
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 12, padding: '12px 10px',
+            }}>
+              <SkeletonBlock width="60%" height={13} style={{ marginBottom: 12 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[...Array(2)].map((_, row) => (
+                  <div key={row} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <SkeletonBlock width={32} height={32} borderRadius={16} style={{ flexShrink: 0 }} />
+                      <SkeletonBlock width="60%" height={11} />
+                    </div>
+                    <SkeletonBlock width="80%" height={9} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* KANBAN VIEW */}

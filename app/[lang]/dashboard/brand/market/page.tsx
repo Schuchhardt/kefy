@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useDataChanged } from '@/lib/data-events';
+import { SkeletonBlock, FormSectionSkeleton } from '@/components/ui/Skeleton';
 import type { BrandKit, CompanySize } from '@/types/brand-kit';
 import type { Industry } from '@/types/strategy';
 
@@ -242,10 +243,13 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
 
   if (authLoading || loadingData) {
     return (
-      <div style={{ padding: '40px 48px' }}>
-        <div style={{ color: 'var(--muted)', fontSize: 14 }}>
-          {locale === 'es' ? 'Cargando...' : 'Loading...'}
+      <div style={{ padding: '40px 48px', maxWidth: 840 }}>
+        <div style={{ marginBottom: 28 }}>
+          <SkeletonBlock width={220} height={26} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width={340} height={14} />
         </div>
+        <FormSectionSkeleton fields={3} />
+        <FormSectionSkeleton fields={2} />
       </div>
     );
   }

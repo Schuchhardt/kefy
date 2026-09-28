@@ -19,6 +19,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { NetworkPreview, NET_LABEL } from '@/components/dashboard/NetworkPreview';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
 import type { ContentItem, ContentType, ContentStatus, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
@@ -168,7 +169,20 @@ export default function ContentDetailPage() {
   }
 
   if (loading) {
-    return <div style={{ padding: 40, color: 'var(--muted)' }}>{t.loading}</div>;
+    return (
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 20px 60px' }}>
+        <SkeletonBlock width={140} height={13} style={{ marginBottom: 20 }} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+          <SkeletonBlock width={70} height={22} borderRadius={4} />
+          <SkeletonBlock width={90} height={22} borderRadius={4} />
+          <SkeletonBlock width={80} height={22} borderRadius={4} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(280px, 0.9fr)', gap: 32 }}>
+          <SkeletonBlock height={520} borderRadius={12} />
+          <SkeletonBlock height={220} borderRadius={12} />
+        </div>
+      </div>
+    );
   }
   if (notFound || !item) {
     return (

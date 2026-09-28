@@ -1155,7 +1155,12 @@ function ContentPageInner() {
 
         {/* List / Grid */}
         {(loading && !generating) ? (
-          <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</p>
+          <div style={viewMode === 'grid'
+            ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }
+            : { display: 'flex', flexDirection: 'column', gap: 10 }
+          }>
+            {[...Array(6)].map((_, i) => <SkeletonCard key={i} mode={viewMode} lang={lang} />)}
+          </div>
         ) : (!generating && items.length === 0) ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <p style={{ color: 'var(--muted)', fontSize: 15 }}>{t.noContent}</p>

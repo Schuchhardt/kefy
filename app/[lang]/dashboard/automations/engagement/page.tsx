@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import type { Locale } from '@/types/i18n';
 import { useBrand } from '@/lib/brand-context';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import type { TriggerType, ActionType, EngagementPlatform, EngagementRule } from '@/types/automations';
 import esT from '@/locales/es/dashboard/engagement';
 import enT from '@/locales/en/dashboard/engagement';
@@ -318,7 +319,20 @@ export default function EngagementPage() {
       )}
 
       {/* Rules list */}
-      {loading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.loading}</p>}
+      {loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {[...Array(4)].map((_, i) => (
+            <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px' }}>
+              <SkeletonBlock width={180} height={13} style={{ marginBottom: 10 }} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <SkeletonBlock width={70} height={20} borderRadius={6} />
+                <SkeletonBlock width={70} height={20} borderRadius={6} />
+                <SkeletonBlock width={90} height={20} borderRadius={6} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {!loading && loadError && <p style={{ color: '#ff6b6b', fontSize: 13 }}>{loadError}</p>}
       {!loading && !loadError && rules.length === 0 && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',

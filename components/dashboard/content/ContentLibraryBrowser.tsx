@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import type { ContentType } from '@/types/content';
 import type { LibraryItemWithIndustry } from '@/types/content-library';
 
@@ -46,7 +47,10 @@ interface ContentLibraryBrowserProps {
 export default function ContentLibraryBrowser({ lang, onSelect }: ContentLibraryBrowserProps) {
   const t = T[lang];
   const [items, setItems]           = useState<LibraryItemWithIndustry[]>([]);
-  const [loading, setLoading]       = useState(false);
+  // Empieza en `true`: fetchItems recién marca `true` dentro de un useEffect
+  // posterior al montaje — con `false` de partida, el primer render mostraba
+  // "sin resultados" antes de que el fetch siquiera empezara.
+  const [loading, setLoading]       = useState(true);
   const [total, setTotal]           = useState(0);
   const [offset, setOffset]         = useState(0);
   const [industries, setIndustries] = useState<Industry[]>([]);
@@ -146,9 +150,11 @@ export default function ContentLibraryBrowser({ lang, onSelect }: ContentLibrary
 
       {/* Grid */}
       {loading && items.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '40px 0' }}>
-          {t.libraryLoading}
-        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+          {[...Array(6)].map((_, i) => (
+            <SkeletonBlock key={i} height={160} borderRadius={10} />
+          ))}
+        </div>
       ) : items.length === 0 ? (
         <p style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '40px 0' }}>
           {t.libraryEmpty}

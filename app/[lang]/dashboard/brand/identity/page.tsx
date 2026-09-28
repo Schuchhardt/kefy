@@ -8,6 +8,7 @@ import { useDataChanged } from '@/lib/data-events';
 import type { BrandKit, BrandTone } from '@/types/brand-kit';
 import type { Locale } from '@/types/i18n';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
+import { SkeletonBlock, FormSectionSkeleton } from '@/components/ui/Skeleton';
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 
@@ -355,8 +356,14 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
 
   if (authLoading || fetching) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '60vh' }}>
-        <span style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</span>
+      <div style={{ padding: '40px 48px', maxWidth: 840 }}>
+        <div style={{ marginBottom: 28 }}>
+          <SkeletonBlock width={220} height={26} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width={340} height={14} />
+        </div>
+        <FormSectionSkeleton fields={2} />
+        <FormSectionSkeleton fields={2} />
+        <FormSectionSkeleton fields={3} />
       </div>
     );
   }

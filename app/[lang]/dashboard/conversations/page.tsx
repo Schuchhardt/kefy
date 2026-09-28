@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback, useMemo, Suspense } from 'rea
 import type { ReactNode } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { useDataChanged } from '@/lib/data-events';
 import { useBrand } from '@/lib/brand-context';
 
@@ -165,7 +166,10 @@ function ConversationsPageInner() {
 
   // ── DMs state ──
   const [threads, setThreads]             = useState<ThreadPreview[]>([]);
-  const [threadsLoading, setThreadsLoading] = useState(false);
+  // Empieza en `true` (no `false`): fetchThreads recién marca `true` dentro de
+  // un useEffect posterior al montaje — con `false` de partida, el primer
+  // render mostraba el empty state antes de que el fetch siquiera empezara.
+  const [threadsLoading, setThreadsLoading] = useState(true);
   const [unreadOnly, setUnreadOnly]       = useState(false);
   const [activeThread, setActiveThread]   = useState<ThreadPreview | null>(null);
   const [messages, setMessages]           = useState<Message[]>([]);
@@ -180,7 +184,8 @@ function ConversationsPageInner() {
 
   // ── Comments state ──
   const [comments, setComments]           = useState<CommentItem[]>([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
+  // Mismo motivo que `threadsLoading`: evita el flash del empty state.
+  const [commentsLoading, setCommentsLoading] = useState(true);
   const [replyingComment, setReplyingComment] = useState<string | null>(null);
   const [showReplied, setShowReplied]     = useState(true);
   const [syncingComments, setSyncingComments] = useState(false);
@@ -547,7 +552,15 @@ function ConversationsPageInner() {
           {/* Thread list */}
           <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)',
             display: 'flex', flexDirection: 'column', background: 'var(--surface)', overflowY: 'auto' }}>
-            {threadsLoading && <p style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>{ti.loading}</p>}
+            {threadsLoading && [...Array(6)].map((_, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+                <SkeletonBlock width={36} height={36} borderRadius={18} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <SkeletonBlock width="50%" height={11} style={{ marginBottom: 6 }} />
+                  <SkeletonBlock width="80%" height={10} />
+                </div>
+              </div>
+            ))}
             {!threadsLoading && threads.length === 0 && (
               unreadOnly
                 ? <EmptyState icon={CaughtUpIcon} title={ti.noUnread} hint={ti.noUnreadHint} />
@@ -772,7 +785,16 @@ function ConversationsPageInner() {
         {HeaderBar}
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
           <div style={{ maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {commentsLoading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{te.loadingComments}</p>}
+            {commentsLoading && [...Array(4)].map((_, i) => (
+              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <SkeletonBlock width={32} height={32} borderRadius={16} style={{ flexShrink: 0 }} />
+                  <SkeletonBlock width={120} height={11} />
+                </div>
+                <SkeletonBlock width="90%" height={10} style={{ marginBottom: 6 }} />
+                <SkeletonBlock width="60%" height={10} />
+              </div>
+            ))}
             {!commentsLoading && commentThreads.length === 0 && (
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
                 {showReplied

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useDataChanged } from '@/lib/data-events';
 import { useAuth } from '@/lib/auth-context';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import type { Locale } from '@/types/i18n';
 import type { Objective, Industry, Strategy, Template, OrgSelection, CustomCalendarItem } from '@/types/strategy';
 import CustomStrategyPanel, { activeBadgeStyle } from '@/components/dashboard/strategy/CustomStrategyPanel';
@@ -355,8 +356,21 @@ function StrategyPageInner() {
   // ── Render ────────────────────────────────────────────────────────────────
   if (catalogLoading) {
     return (
-      <div style={{ padding: '48px 32px', color: 'var(--muted)', fontSize: 14 }}>
-        {t.loading}
+      <div style={{ padding: '32px', maxWidth: 900 }}>
+        <div style={{ marginBottom: 40 }}>
+          <SkeletonBlock width={100} height={11} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width={260} height={24} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width={420} height={13} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 32 }}>
+          <SkeletonBlock width={110} height={34} borderRadius={8} />
+          <SkeletonBlock width={110} height={34} borderRadius={8} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+          {[...Array(6)].map((_, i) => (
+            <SkeletonBlock key={i} height={100} borderRadius={12} />
+          ))}
+        </div>
       </div>
     );
   }

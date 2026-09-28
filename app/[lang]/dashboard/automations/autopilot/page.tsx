@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { CHANNELS as ALL_CHANNELS } from '@/lib/channels';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import type { Channel } from '@/types/channels';
 
 import esT from '@/locales/es/dashboard/autopilot';
@@ -335,7 +336,18 @@ export default function AutopilotPage() {
 
       {/* Rules list */}
       {loading ? (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {[...Array(3)].map((_, i) => (
+            <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px' }}>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+                <SkeletonBlock width={60} height={17} borderRadius={4} />
+                <SkeletonBlock width={60} height={17} borderRadius={4} />
+              </div>
+              <SkeletonBlock width={220} height={15} style={{ marginBottom: 6 }} />
+              <SkeletonBlock width={160} height={13} />
+            </div>
+          ))}
+        </div>
       ) : rules.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 0' }}>
           <p style={{ color: 'var(--muted)', fontSize: 15 }}>{t.noRules}</p>
