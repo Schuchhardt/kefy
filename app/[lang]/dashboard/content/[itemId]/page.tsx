@@ -39,6 +39,8 @@ const T = {
     draftNotice: 'Este contenido todavía no se publicó — puedes editarlo y publicarlo cuando esté listo.',
     edit: 'Editar',
     publish: 'Publicar o programar',
+    delete: 'Eliminar',
+    deleteConfirm: '¿Eliminar este contenido? Esta acción no se puede deshacer.',
     createSimilar: '✦ Crear uno similar',
     statsTitle: 'Rendimiento',
     noStatsYet: 'Todavía no hay métricas para este contenido — pueden tardar un poco en sincronizarse tras publicar.',
@@ -55,6 +57,8 @@ const T = {
     draftNotice: "This content hasn't been published yet — you can still edit and publish it when it's ready.",
     edit: 'Edit',
     publish: 'Publish or schedule',
+    delete: 'Delete',
+    deleteConfirm: 'Delete this content? This action cannot be undone.',
     createSimilar: '✦ Create a similar one',
     statsTitle: 'Performance',
     noStatsYet: 'No metrics yet for this content — they can take a little while to sync after publishing.',
@@ -130,6 +134,13 @@ export default function ContentDetailPage() {
 
   function handleUpdate(patch: Partial<ContentItem>) {
     setItem((prev) => prev ? { ...prev, ...patch } : prev);
+  }
+
+  async function handleDelete() {
+    if (!item) return;
+    if (!confirm(t.deleteConfirm)) return;
+    await fetch(`/api/content/${item.id}`, { method: 'DELETE', credentials: 'include' });
+    router.push(`/${lang}/dashboard/content/create`);
   }
 
   if (loading) {
@@ -241,6 +252,16 @@ export default function ContentDetailPage() {
                   }}
                 >
                   {t.edit}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  style={{
+                    background: 'transparent', color: '#e05555', border: '1px solid #e0555555', borderRadius: 8,
+                    padding: '12px 18px', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                  }}
+                >
+                  {t.delete}
                 </button>
               </div>
             </div>
