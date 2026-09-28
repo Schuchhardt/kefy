@@ -195,30 +195,42 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
   const db = createSupabaseServer();
   const { data: kit } = await getBrandKitForBrand(db, ctx.brandId);
 
-  // Secuencial a propósito: si la variante 2 se queda sin crédito o choca con
-  // el rate limit a mitad de la tanda, la 1 ya generada y cobrada no se pierde
-  // — se devuelve sola en vez de fallar toda la petición (mismo criterio que
-  // un carrusel al que se le acaban los créditos a mitad de los slides). Solo
-  // la primera variante fallando es un error duro, igual que antes de que
-  // existieran las variantes.
-  const generatedVariants: Array<{ scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> = [];
-  for (let i = 0; i < variantCount; i++) {
-    try {
-      const generated = await generateOneVariant(ctx, {
+  // En paralelo, no en serie: cada variante genera texto + hasta
+  // REEL_SCENE_COUNT_MAX imágenes, y en serie 2 variantes se acercaban al
+  // maxDuration de la ruta (180s) — la 2ª a veces ni alcanzaba a terminar
+  // dentro del tiempo de la función, así que el usuario solo veía 1 versión
+  // guardada aunque hubiera pedido 2. En paralelo, el total es ~lo que tarda
+  // la variante más lenta, no la suma de todas.
+  //
+  // Si la variante 2 se queda sin crédito o choca con el rate limit, la 1 ya
+  // generada y cobrada no se pierde — se devuelve sola en vez de fallar toda
+  // la petición (mismo criterio que un carrusel al que se le acaban los
+  // créditos a mitad de los slides). Solo la primera variante fallando es un
+  // error duro, igual que antes de que existieran las variantes.
+  const settled = await Promise.allSettled(
+    Array.from({ length: variantCount }, (_, i) =>
+      generateOneVariant(ctx, {
         channel, topic, sceneCount, genImages, imageQuality, referenceImages,
         kit: kit as KitRow | null, variantIndex: i + 1, variantCount,
-      });
-      generatedVariants.push(generated);
-    } catch (err) {
-      if (i === 0) throw err;
-      break;
-    }
-  }
+      }),
+    ),
+  );
+
+  if (settled[0]!.status === 'rejected') throw settled[0]!.reason;
+
+  // originalIndex se conserva para el metadata (variant_index) — con
+  // ejecución en paralelo una variante del medio puede fallar mientras las de
+  // los costados terminan bien, y no se quiere que eso reordene la numeración.
+  const generatedVariants: Array<{ originalIndex: number; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> =
+    settled
+      .map((r, originalIndex) => (r.status === 'fulfilled' ? { originalIndex, ...r.value } : null))
+      .filter((v): v is NonNullable<typeof v> => v !== null);
 
   const variantGroupId = variantCount > 1 ? randomUUID() : null;
 
   const variants: ReelVariant[] = [];
-  for (const [i, generated] of generatedVariants.entries()) {
+  for (const generated of generatedVariants) {
+    const i = generated.originalIndex;
     const coverImage = generated.scenes.find((s) => s.image_url)?.image_url ?? null;
     const { data: item, error: itemError } = await db
       .from('kefy_content_items')

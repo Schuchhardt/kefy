@@ -26,7 +26,7 @@
       "maxDuration": 300
     },
     "app/api/content/reel/route.ts": {
-      "maxDuration": 180
+      "maxDuration": 300
     },
     "app/api/content/reel/reconcile/route.ts": {
       "maxDuration": 120,

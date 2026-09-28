@@ -335,4 +335,54 @@ describe('POST /api/content/reel', () => {
     const res = await POST(makeReq({ topic: 'Tutorial' }));
     expect(res.status).toBe(500);
   });
+
+  // Regresión: las variantes se generaban en serie — con imágenes, 2 variantes
+  // se acercaban al maxDuration de la ruta y a veces la 2ª ni alcanzaba a
+  // terminar, dejando al usuario con "solo se generó 1 versión". Corren en
+  // paralelo ahora; este test falla si alguna vez vuelven a ejecutarse en
+  // serie (variante 2 arrancando solo después de que la 1 termine).
+  it('variant_count:2 genera las variantes en paralelo, no en serie', async () => {
+    const { POST } = await import('@/app/api/content/reel/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+
+    const insertChainFor = (id: string) => ({
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id }, error: null }),
+    });
+    mockSupabaseClient.from
+      .mockReturnValueOnce(mockBrandKitChain())
+      .mockReturnValueOnce(insertChainFor('reel-a'))
+      .mockReturnValueOnce(insertChainFor('reel-b'));
+
+    // Cada variante solo puede resolver cuando SU deferred se resuelve
+    // explícitamente. Si arrancaran en serie, la 2ª llamada a
+    // generateReelScript no ocurriría hasta después de resolver la 1ª.
+    let startedCalls = 0;
+    const deferreds: Array<{ resolve: (v: Awaited<ReturnType<typeof generateReelScript>>) => void }> = [];
+    vi.mocked(generateReelScript).mockImplementation(() => {
+      startedCalls++;
+      return new Promise((resolve) => { deferreds.push({ resolve }); });
+    });
+    vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
+    vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/scene.jpg');
+
+    const resPromise = POST(makeReq({ topic: 'Tutorial', generate_images: false, variant_count: 2 }));
+
+    // Deja correr los microtasks pendientes sin resolver ningún deferred
+    // (chargeOrThrow hace varios saltos async antes de llegar acá — de sobra
+    // para asentarlos a todos sin gastar un timer real). Si esto no alcanza a
+    // 2 llamadas, alguien volvió a poner esto en serie.
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+    expect(startedCalls).toBe(2);
+
+    deferreds[0]!.resolve({ scenes: makeScenes(3), hook: 'Hook A', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1 });
+    deferreds[1]!.resolve({ scenes: makeScenes(3), hook: 'Hook B', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1 });
+
+    const res = await resPromise;
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.variants).toHaveLength(2);
+  });
 });

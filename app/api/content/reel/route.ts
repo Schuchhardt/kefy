@@ -10,7 +10,11 @@ import {
 import type { ContentChannel } from '@/types/ai';
 
 export const runtime = 'nodejs';
-export const maxDuration = 180;
+// Variants run in parallel (lib/services/reel.ts), but each still does its
+// own text + up to REEL_SCENE_COUNT_MAX images; 180s was cutting it close
+// with 2+ variants and could silently leave a request looking like it "only
+// made 1" if the 2nd never got to finish within the function's time budget.
+export const maxDuration = 300;
 
 const VALID_CHANNELS = new Set<ContentChannel>([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
