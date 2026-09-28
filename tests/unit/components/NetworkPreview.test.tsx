@@ -69,6 +69,51 @@ describe('NetworkPreview', () => {
     expect(screen.getAllByText('marca').length).toBeGreaterThan(0);
   });
 
+  it('respeta un `channel` controlado por el padre en vez de elegir la primera red', () => {
+    render(
+      <NetworkPreview
+        {...baseProps}
+        contentType="post"
+        slides={[]}
+        channel="linkedin"
+        onChannelChange={vi.fn()}
+      />,
+    );
+    const linkedinTab = screen.getByTitle('LinkedIn');
+    // El estilo de "activo" usa var(--accent) como color de borde.
+    expect(linkedinTab.getAttribute('style')).toContain('var(--accent)');
+  });
+
+  it('notifica al padre en vez de cambiar de red internamente cuando `onChannelChange` está definido', () => {
+    const onChannelChange = vi.fn();
+    render(
+      <NetworkPreview
+        {...baseProps}
+        contentType="post"
+        slides={[]}
+        channel="linkedin"
+        onChannelChange={onChannelChange}
+      />,
+    );
+    fireEvent.click(screen.getByTitle('Instagram'));
+    expect(onChannelChange).toHaveBeenCalledWith('instagram');
+  });
+
+  it('marca con un indicador las redes en `publishedNetworks`', () => {
+    render(
+      <NetworkPreview
+        {...baseProps}
+        contentType="post"
+        slides={[]}
+        publishedNetworks={['linkedin']}
+      />,
+    );
+    const linkedinTab = screen.getByTitle('LinkedIn');
+    const instagramTab = screen.getByTitle('Instagram');
+    expect(linkedinTab.querySelector('span')).not.toBeNull();
+    expect(instagramTab.querySelector('span')).toBeNull();
+  });
+
   it('reel: usa el frame vertical y muestra la escena activa', () => {
     const scenes: ReelScene[] = [
       { scene_order: 1, title: 'Escena uno', body: 'Hook', duration_seconds: 3, image_url: null },

@@ -33,6 +33,10 @@ interface ScheduleModalProps {
   initialItem?:     ContentItem | null;
   /** Pre-selected date (e.g. when clicking a calendar day). */
   initialDate?:     Date;
+  /** Pre-checks the active account(s) on this platform (e.g. the detail page's
+   *  "publish on this network too" shortcut for a network the item hasn't
+   *  gone out to yet). */
+  initialPlatform?: string;
   brandKit?:        BrandKitInfo | null;
   lang:             'es' | 'en';
   onSuccess?:       (mode: 'now' | 'scheduled') => void;
@@ -41,7 +45,7 @@ interface ScheduleModalProps {
 const T = { es: esT.scheduleModal, en: enT.scheduleModal } as const;
 
 export default function ScheduleModal({
-  open, onClose, initialItem, initialDate, brandKit, lang, onSuccess,
+  open, onClose, initialItem, initialDate, initialPlatform, brandKit, lang, onSuccess,
 }: ScheduleModalProps) {
   const t = T[lang];
 
@@ -168,6 +172,14 @@ export default function ScheduleModal({
     () => accounts.filter((a) => a.status === 'active'),
     [accounts],
   );
+
+  // Pre-check the account(s) on `initialPlatform` once they've loaded — only
+  // while nothing else has been picked yet, so it never fights a manual choice.
+  useEffect(() => {
+    if (!open || !initialPlatform || selectedAccountIds.length > 0) return;
+    const matches = activeAccounts.filter((a) => a.platform === initialPlatform).map((a) => a.id);
+    if (matches.length > 0) setSelectedAccountIds(matches);
+  }, [open, initialPlatform, activeAccounts, selectedAccountIds.length]);
 
   // La vista previa se ciñe a las redes elegidas: cada una recorta y tapa el
   // contenido a su manera, así que mostrar sólo las que aplican evita aprobar

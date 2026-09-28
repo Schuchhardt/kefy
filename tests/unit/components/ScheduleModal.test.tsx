@@ -119,6 +119,42 @@ describe('ScheduleModal — publicar un reel', () => {
   });
 });
 
+// ─── initialPlatform: preselección de cuenta al publicar en una red puntual ──
+// La vista de detalle (/dashboard/content/[itemId]) ofrece "publicar también
+// en X" para una red a la que el item aún no salió; debe abrir el modal con
+// la cuenta de esa red ya marcada, sin tocar las demás.
+
+describe('ScheduleModal — initialPlatform', () => {
+  it('pre-marca la cuenta de la plataforma indicada sin tocar las otras', async () => {
+    const accounts = [
+      { id: 'sa-ig', platform: 'instagram', username: 'marca_ig', status: 'active' },
+      { id: 'sa-li', platform: 'linkedin',  username: 'marca_li', status: 'active' },
+    ];
+    const item = postItem();
+    const mock = vi.fn(async (url: string) => {
+      if (url.startsWith('/api/social/accounts')) return jsonResponse({ accounts });
+      if (url.includes('/renditions')) {
+        return jsonResponse({
+          renditions: [{
+            id: item.id, content_item_id: item.id, format: 'post', status: 'ready',
+            body: item.body, hashtags: item.hashtags, image_url: item.image_url, slides: null,
+            video_url: null, mux_playback_id: null, render_status: null, error_message: null, is_primary: true,
+          }],
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', mock);
+
+    render(<ScheduleModal open onClose={() => {}} initialItem={item} initialPlatform="linkedin" lang="es" />);
+
+    const liBtn = await screen.findByRole('button', { name: /@marca_li/i });
+    const igBtn = await screen.findByRole('button', { name: /@marca_ig/i });
+    await waitFor(() => expect(liBtn.textContent).toMatch(/✓/));
+    expect(igBtn.textContent).not.toMatch(/✓/);
+  });
+});
+
 // ─── Generar otro formato desde el modal ────────────────────────────────────
 // Regresión (producción): al pulsar «Generar versión de carrusel» lo único que
 // pasaba era que el botón decía «Generando…». La petición tarda minutos: no

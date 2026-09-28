@@ -18,7 +18,7 @@ import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import ChannelIcon from '@/components/ui/ChannelIcon';
-import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
+import { NetworkPreview, NET_LABEL } from '@/components/dashboard/NetworkPreview';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
 import type { ContentItem, ContentType, ContentStatus, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
@@ -42,6 +42,7 @@ const T = {
     delete: 'Eliminar',
     deleteConfirm: '¿Eliminar este contenido? Esta acción no se puede deshacer.',
     createSimilar: '✦ Crear uno similar',
+    publishOn: (network: string) => `Publicar también en ${network}`,
     statsTitle: 'Rendimiento',
     noStatsYet: 'Todavía no hay métricas para este contenido — pueden tardar un poco en sincronizarse tras publicar.',
     publishedOn: (date: string) => `Publicado el ${date}`,
@@ -60,6 +61,7 @@ const T = {
     delete: 'Delete',
     deleteConfirm: 'Delete this content? This action cannot be undone.',
     createSimilar: '✦ Create a similar one',
+    publishOn: (network: string) => `Also publish on ${network}`,
     statsTitle: 'Performance',
     noStatsYet: 'No metrics yet for this content — they can take a little while to sync after publishing.',
     publishedOn: (date: string) => `Published on ${date}`,
@@ -99,6 +101,8 @@ export default function ContentDetailPage() {
   const [activeSlide, setActiveSlide] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [previewChannel, setPreviewChannel] = useState<string | null>(null);
+  const [publishTarget, setPublishTarget] = useState<string | null>(null);
 
   const fetchItem = useCallback(() => {
     setLoading(true);
@@ -121,16 +125,36 @@ export default function ContentDetailPage() {
       .catch(() => {/* non-critical */});
   }, []);
 
-  useEffect(() => {
-    if (!item || item.status !== 'published') return;
-    fetch(`/api/analytics/posts?content_id=${encodeURIComponent(item.id)}&limit=50`, { credentials: 'include' })
+  const fetchPerformance = useCallback((id: string) => {
+    fetch(`/api/analytics/posts?content_id=${encodeURIComponent(id)}&limit=50`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { data?: PerformanceEntry[] }) => setPerformance(d.data ?? []))
       .catch(() => {/* non-critical */});
+  }, []);
+
+  useEffect(() => {
+    if (!item || item.status !== 'published') return;
+    fetchPerformance(item.id);
   // Solo depende de id/status a propósito: editar el body/hashtags no debe
   // re-disparar el fetch de métricas.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item?.id, item?.status]);
+
+  // Redes a las que este contenido ya salió — la preview debe abrir mostrando
+  // una de estas, no la primera de la lista genérica (antes mostraba Instagram
+  // por defecto aunque el post solo se hubiera publicado en LinkedIn, porque
+  // `channel` de los drafts nuevos es 'generic').
+  const publishedNetworks = Array.from(new Set(
+    performance.map((p) => p.platform).filter((p): p is string => !!p),
+  ));
+
+  useEffect(() => {
+    if (previewChannel || publishedNetworks.length === 0) return;
+    setPreviewChannel(publishedNetworks[0]);
+  // Solo se recalcula cuando llegan las métricas; una vez fijado el canal no
+  // se debe pisar aunque el usuario haya cambiado de pestaña.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [performance]);
 
   function handleUpdate(patch: Partial<ContentItem>) {
     setItem((prev) => prev ? { ...prev, ...patch } : prev);
@@ -206,22 +230,40 @@ export default function ContentDetailPage() {
               />
             </div>
           ) : (
-            <NetworkPreview
-              contentType={item.content_type}
-              defaultChannel={item.channel}
-              body={item.body}
-              imageUrl={item.image_url}
-              videoUrl={item.content_type === 'story' ? item.video_url : null}
-              hashtags={item.hashtags}
-              slides={slides}
-              activeSlide={activeSlide}
-              onActiveSlideChange={setActiveSlide}
-              username={brandKit?.name ?? 'tu_marca'}
-              logoUrl={brandKit?.logo_url ?? undefined}
-              imagePending={!item.image_url && item.image_status === 'generating'}
-              accentColor={brandKit?.accent_color ?? undefined}
-              brandFont={brandKit?.font_heading}
-            />
+            <>
+              <NetworkPreview
+                contentType={item.content_type}
+                defaultChannel={item.channel}
+                body={item.body}
+                imageUrl={item.image_url}
+                videoUrl={item.content_type === 'story' ? item.video_url : null}
+                hashtags={item.hashtags}
+                slides={slides}
+                activeSlide={activeSlide}
+                onActiveSlideChange={setActiveSlide}
+                username={brandKit?.name ?? 'tu_marca'}
+                logoUrl={brandKit?.logo_url ?? undefined}
+                imagePending={!item.image_url && item.image_status === 'generating'}
+                accentColor={brandKit?.accent_color ?? undefined}
+                brandFont={brandKit?.font_heading}
+                publishedNetworks={isPublished ? publishedNetworks : undefined}
+                channel={isPublished ? (previewChannel ?? undefined) : undefined}
+                onChannelChange={isPublished ? setPreviewChannel : undefined}
+              />
+              {isPublished && previewChannel && !publishedNetworks.includes(previewChannel) && (
+                <button
+                  type="button"
+                  onClick={() => { setPublishTarget(previewChannel); setScheduleOpen(true); }}
+                  style={{
+                    marginTop: 12, width: '100%', background: 'transparent', color: 'var(--accent)',
+                    border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 16px',
+                    fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                  }}
+                >
+                  {t.publishOn(NET_LABEL[previewChannel] ?? previewChannel)}
+                </button>
+              )}
+            </>
           )}
         </div>
 
@@ -326,13 +368,16 @@ export default function ContentDetailPage() {
       {/* ── Modales ──────────────────────────────────────────────────────── */}
       <ScheduleModal
         open={scheduleOpen}
-        onClose={() => setScheduleOpen(false)}
+        onClose={() => { setScheduleOpen(false); setPublishTarget(null); }}
         initialItem={item}
+        initialPlatform={publishTarget ?? undefined}
         brandKit={brandKit}
         lang={locale}
         onSuccess={() => {
           setScheduleOpen(false);
+          setPublishTarget(null);
           fetchItem();
+          fetchPerformance(item.id);
           router.refresh();
         }}
       />

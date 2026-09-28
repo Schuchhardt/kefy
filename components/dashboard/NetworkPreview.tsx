@@ -26,7 +26,7 @@ const NETWORKS: Record<ContentType, string[]> = {
   story:    ['instagram', 'facebook', 'tiktok'],
 };
 
-const NET_LABEL: Record<string, string> = {
+export const NET_LABEL: Record<string, string> = {
   instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn',
   twitter: 'X', threads: 'Threads', tiktok: 'TikTok',
 };
@@ -51,6 +51,16 @@ interface NetworkPreviewProps {
   /** Redes a mostrar. Por defecto, las relevantes para el formato; el modal de
    *  publicación pasa sólo las de las cuentas elegidas. */
   networks?:      string[];
+  /** Redes a las que este contenido ya se publicó — se marcan en la pestaña
+   *  con un indicador; el resto queda visible igual, para poder previsualizar
+   *  cómo se vería antes de publicar ahí también. */
+  publishedNetworks?: string[];
+  /** Red activa, controlada por el padre (p. ej. la vista de detalle, que
+   *  necesita saber cuál está seleccionada para ofrecer "publicar en esta
+   *  red" cuando no está en `publishedNetworks`). Sin este par de props el
+   *  componente gestiona su propio estado, como antes. */
+  channel?:       string;
+  onChannelChange?: (channel: string) => void;
   /** Tipografía del Brand Kit: la preview escribe con la misma fuente que el
    *  servidor usará al componer el texto dentro de la imagen. */
   brandFont?:     string | null;
@@ -59,7 +69,8 @@ interface NetworkPreviewProps {
 export function NetworkPreview({
   contentType, defaultChannel, body, imageUrl, videoUrl, hashtags,
   slides, activeSlide, onActiveSlideChange, username, logoUrl,
-  imagePending, accentColor, networks: networksProp, brandFont,
+  imagePending, accentColor, networks: networksProp, publishedNetworks,
+  channel: channelProp, onChannelChange, brandFont,
 }: NetworkPreviewProps) {
   useEffect(() => { ensureGoogleFontLoaded(brandFont); }, [brandFont]);
   const relevant = NETWORKS[contentType];
@@ -67,7 +78,9 @@ export function NetworkPreview({
   const networks = narrowed.length > 0 ? narrowed : relevant;
   // Default to the item's own channel when it's in the relevant set.
   const initial = networks.includes(defaultChannel) ? defaultChannel : networks[0];
-  const [channel, setChannel] = useState(initial);
+  const [internalChannel, setInternalChannel] = useState(initial);
+  const channel = channelProp ?? internalChannel;
+  const setChannel = onChannelChange ?? setInternalChannel;
 
   const total = slides.length;
   const idx = Math.min(Math.max(activeSlide, 0), Math.max(total - 1, 0));
@@ -79,6 +92,7 @@ export function NetworkPreview({
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {networks.map((net) => {
           const active = net === channel;
+          const published = publishedNetworks?.includes(net);
           return (
             <button
               key={net}
@@ -86,6 +100,7 @@ export function NetworkPreview({
               onClick={() => setChannel(net)}
               title={NET_LABEL[net] ?? net}
               style={{
+                position: 'relative',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 34, height: 34, borderRadius: 8, cursor: 'pointer',
                 border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
@@ -95,6 +110,12 @@ export function NetworkPreview({
               }}
             >
               <ChannelIcon name={net} size={18} />
+              {published && (
+                <span style={{
+                  position: 'absolute', top: -3, right: -3, width: 10, height: 10, borderRadius: '50%',
+                  background: 'var(--accent)', border: '1.5px solid var(--bg)',
+                }} />
+              )}
             </button>
           );
         })}
