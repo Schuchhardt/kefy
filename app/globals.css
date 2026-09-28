@@ -32,8 +32,14 @@
   --border: #DCDCD7;
   --text: #0A0A0C;
   --muted: #72727E;
-  --accent: #C6FF4B;
-  --accent-dim: #8AB833;
+  /* El lima de la marca (#C6FF4B) está pensado para fondos casi negros —
+     contra blanco da ~1.4:1 de contraste, ilegible como texto/ícono. Este
+     tono más oscuro y saturado mantiene el mismo matiz (mismo H≈85°) pero
+     ronda ~4.4:1 contra --bg/--surface y ~4.5:1 contra el texto negro de los
+     botones (#0A0A0C), el mejor balance posible ya que un --accent más
+     oscuro mejora un lado y empeora el otro. */
+  --accent: #5B8A16;
+  --accent-dim: #3F620E;
   --warm: #D45E1A;
   color: var(--text);
   background: var(--bg);
