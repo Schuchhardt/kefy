@@ -590,9 +590,9 @@ function DashboardPageInner() {
               const perf = perfByContentId.get(item.id);
               const isVideo = (item.content_type === 'reel' || item.content_type === 'story') && !!item.video_url;
               return (
-              <div key={item.id} style={{
+              <Link key={item.id} href={`/${lang}/dashboard/content/${item.id}`} style={{
                 display: 'flex', alignItems: 'center', gap: 12,
-                padding: '12px 16px',
+                padding: '12px 16px', textDecoration: 'none', color: 'inherit',
                 borderBottom: idx < content.length - 1 ? '1px solid var(--border)' : 'none',
               }}>
                 <span style={{
@@ -625,7 +625,7 @@ function DashboardPageInner() {
                 }}>
                   {statusLabel[item.status] ?? item.status}
                 </span>
-              </div>
+              </Link>
               );
             })}
           </div>
@@ -639,9 +639,16 @@ function DashboardPageInner() {
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t.topPerforming}</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
           {totals.top_posts.map((post) => (
-            <div key={post.scheduled_post_id} style={{
-              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
-            }}>
+            <Link
+              key={post.scheduled_post_id}
+              href={post.content_id ? `/${lang}/dashboard/content/${post.content_id}` : '#'}
+              onClick={(e) => { if (!post.content_id) e.preventDefault(); }}
+              style={{
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+                display: 'block', textDecoration: 'none', color: 'inherit',
+                cursor: post.content_id ? 'pointer' : 'default',
+              }}
+            >
               <div style={{
                 width: '100%', aspectRatio: '1/1', position: 'relative',
                 background: post.image_url ? `url(${post.image_url}) center/cover` : 'var(--border)',
@@ -661,7 +668,7 @@ function DashboardPageInner() {
                   👁 {fmt(post.impressions)} · ♥ {fmt(post.likes)} · {(post.engagement_rate * 100).toFixed(1)}%
                 </p>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </section>

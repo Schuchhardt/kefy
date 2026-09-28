@@ -247,6 +247,11 @@ export async function listPostPerformance(
     from?: string | null;
     to?: string | null;
     platform?: string | null;
+    /** Todas las publicaciones de un item puntual — para esto se ignora el
+     *  rango de fecha (30 días por defecto) porque el detalle de un item
+     *  quiere ver su historial completo, se haya publicado cuando se haya
+     *  publicado. */
+    content_id?: string | null;
     sort?: PostPerformanceSort;
     limit?: number;
     page?: number;
@@ -272,9 +277,13 @@ export async function listPostPerformance(
     `, { count: 'exact' })
     .eq('org_id', ctx.auth.orgId)
     .eq('status', 'published')
-    .gte('published_at', from)
-    .lte('published_at', to)
     .order('published_at', { ascending: false });
+
+  if (input.content_id) {
+    query = query.eq('kefy_content_items.id', input.content_id);
+  } else {
+    query = query.gte('published_at', from).lte('published_at', to);
+  }
 
   if (input.platform) query = query.eq('kefy_social_accounts.platform', input.platform);
   if (scope === 'brand') query = query.eq('kefy_social_accounts.brand_id', ctx.brandId);

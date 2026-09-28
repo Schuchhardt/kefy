@@ -9,11 +9,12 @@ import { listPostPerformance } from '@/lib/services/analytics';
 // La lógica vive en lib/services/analytics.ts (la comparte el asistente).
 //
 // Query params:
-//   platform  — filter by platform
-//   from      — ISO date string (default: 30 days ago)
-//   to        — ISO date string (default: now)
-//   page      — 1-based (default: 1)
-//   limit     — max 100 (default: 20)
+//   platform    — filter by platform
+//   from        — ISO date string (default: 30 days ago)
+//   to          — ISO date string (default: now)
+//   content_id  — a single item's full publish history, any date (ignores from/to)
+//   page        — 1-based (default: 1)
+//   limit       — max 100 (default: 20)
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -27,13 +28,14 @@ export async function GET(req: NextRequest) {
   const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
   try {
     const out = await listPostPerformance(ctx, {
-      from:     searchParams.get('from'),
-      to:       searchParams.get('to'),
-      platform: searchParams.get('platform'),
-      sort:     'published_at',
+      from:       searchParams.get('from'),
+      to:         searchParams.get('to'),
+      platform:   searchParams.get('platform'),
+      content_id: searchParams.get('content_id'),
+      sort:       'published_at',
       page,
       limit,
-      scope:    'org',
+      scope:      'org',
     });
     return NextResponse.json(out);
   } catch (err) {
