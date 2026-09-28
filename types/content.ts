@@ -37,6 +37,24 @@ export interface ReelScene {
 
 // ─── Content item (canonical superset) ───────────────────────────────────────
 
+/** Origen de una creación o edición: `ui` = app web, `chat` = asistente,
+ *  `api` = API REST pública, `mcp` = servidor MCP. Ver lib/services/content.ts. */
+export type ContentOrigin = 'ui' | 'chat' | 'api' | 'mcp';
+
+export interface ContentMetadata {
+  /** Origen de la creación; ausente en piezas creadas antes de que este campo existiera. */
+  created_via?:          ContentOrigin;
+  /** `true` cuando el item lo generó una regla de autopilot (no una persona). */
+  autopilot?:            boolean;
+  /** Regla de autopilot que generó el item, cuando `autopilot` es `true`. */
+  rule_id?:              string;
+  /** `true` si la API o el MCP reescribieron texto de un item ajeno a ese origen. */
+  externally_modified?:  boolean;
+  /** Origen de la última edición de texto (puede diferir de `created_via`). */
+  last_modified_via?:    ContentOrigin;
+  [key: string]: unknown;
+}
+
 export interface ContentItem {
   id:               string;
   channel:          Channel;
@@ -54,6 +72,11 @@ export interface ContentItem {
   /** State of the async cover-image generation pipeline; NULL when no generation is in flight. */
   image_status?:    'generating' | 'ready' | 'error' | null;
   created_at:       string;
+  /** NULL cuando lo creó autopilot en vez de una persona. */
+  created_by?:      string | null;
+  /** Nombre para mostrar del usuario de `created_by`; resuelto server-side (ver getContent). */
+  created_by_name?: string | null;
+  metadata?:        ContentMetadata | null;
   /** Alternate formats generated on demand for the same topic (post/carousel/reel/story). */
   renditions?:      ContentRendition[];
 }

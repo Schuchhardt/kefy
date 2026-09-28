@@ -230,7 +230,7 @@ export async function getContent(
   // error de base sigue siendo 500 y no 404, como en GET /api/content/[itemId].
   let q = db
     .from('kefy_content_items')
-    .select('*')
+    .select('*, kefy_users(name)')
     .eq('id', itemId)
     .eq('org_id', ctx.auth.orgId);
   if (ctx.brandScope === 'strict') q = q.eq('brand_id', ctx.brandId);
@@ -251,7 +251,15 @@ export async function getContent(
     .eq('org_id', ctx.auth.orgId)
     .order('created_at', { ascending: false });
 
-  const out: ContentDetail = { item: item as Record<string, unknown>, drafts: (drafts ?? []) as Record<string, unknown>[] };
+  // `created_by` puede ser NULL (autopilot); el join solo aporta el nombre
+  // para mostrar en la UI, no reemplaza el id.
+  const { kefy_users: creator, ...itemFields } = item as Record<string, unknown> & {
+    kefy_users?: { name: string | null } | null;
+  };
+  const out: ContentDetail = {
+    item: { ...itemFields, created_by_name: creator?.name ?? null },
+    drafts: (drafts ?? []) as Record<string, unknown>[],
+  };
 
   if (opts.withScheduled) {
     const { data: posts } = await db

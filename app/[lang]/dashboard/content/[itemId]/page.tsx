@@ -22,7 +22,7 @@ import { NetworkPreview, NET_LABEL } from '@/components/dashboard/NetworkPreview
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
-import type { ContentItem, ContentType, ContentStatus, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
+import type { ContentItem, ContentType, ContentStatus, ContentOrigin, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
 import type { Locale } from '@/types/i18n';
 
 const MuxReelPlayer = dynamic(
@@ -51,6 +51,10 @@ const T = {
     shares: 'Compartidos', engagementRate: 'Interacción',
     status: { draft: 'Borrador', approved: 'Aprobado', scheduled: 'Programado', published: 'Publicado', archived: 'Archivado' } as Record<ContentStatus, string>,
     contentType: { post: 'Post', carousel: 'Carrusel', reel: 'Reel', story: 'Story' } as Record<ContentType, string>,
+    autopilot: 'Autopilot',
+    createdBy: (name: string) => `por ${name}`,
+    via: (label: string) => `vía ${label}`,
+    origin: { ui: 'Web', chat: 'Asistente', api: 'API', mcp: 'MCP' } as Record<ContentOrigin, string>,
   },
   en: {
     back: '← Back to content',
@@ -70,6 +74,10 @@ const T = {
     shares: 'Shares', engagementRate: 'Engagement',
     status: { draft: 'Draft', approved: 'Approved', scheduled: 'Scheduled', published: 'Published', archived: 'Archived' } as Record<ContentStatus, string>,
     contentType: { post: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' } as Record<ContentType, string>,
+    autopilot: 'Autopilot',
+    createdBy: (name: string) => `by ${name}`,
+    via: (label: string) => `via ${label}`,
+    origin: { ui: 'Web', chat: 'Assistant', api: 'API', mcp: 'MCP' } as Record<ContentOrigin, string>,
   },
 } as const;
 
@@ -194,6 +202,10 @@ export default function ContentDetailPage() {
   }
 
   const isPublished = item.status === 'published';
+  const isAutopilot = item.metadata?.autopilot === true;
+  const creatorLabel = isAutopilot ? t.autopilot : (item.created_by_name ? t.createdBy(item.created_by_name) : null);
+  const originKey = !isAutopilot ? item.metadata?.created_via : undefined;
+  const originLabel = originKey ? t.via(t.origin[originKey] ?? originKey) : null;
   const slides = (Array.isArray(item.slides) ? item.slides : []) as Array<CarouselSlide | ReelScene>;
   const topic = item.title || (item.body ?? '').slice(0, 120);
   const similarHref = `/${lang}/dashboard/content/create?topic=${encodeURIComponent(topic)}&type=${item.content_type}`;
@@ -222,9 +234,14 @@ export default function ContentDetailPage() {
         }}>
           {t.status[item.status]}
         </span>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>
-          {new Date(item.created_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}
-        </span>
+        <div style={{ marginLeft: 'auto', textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>
+          <div>{new Date(item.created_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+          {(creatorLabel || originLabel) && (
+            <div style={{ fontSize: 11, marginTop: 2 }}>
+              {[creatorLabel, originLabel].filter(Boolean).join(' · ')}
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(280px, 0.9fr)', gap: 32 }}>
