@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { useDataChanged } from '@/lib/data-events';
+import { useBrand } from '@/lib/brand-context';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 
 import esT from '@/locales/es/dashboard/calendar';
@@ -39,6 +40,7 @@ const STATUS_LABELS_BASE: Record<PostStatus, { es: string; en: string }> = {
 
 export default function CalendarPage() {
   const { lang: rawLang } = useParams<{ lang: string }>();
+  const { activeBrand } = useBrand();
   const lang: 'es' | 'en' = rawLang === 'en' ? 'en' : 'es';
   const t = T[lang] ?? T.es;
   const locale = lang === 'en' ? 'en-US' : 'es-ES';
@@ -74,6 +76,17 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Cambiar de marca activa no disparaba por sí solo un refetch (mismo bug
+  // que en /content/create): la cookie httpOnly cambia pero el cliente se
+  // queda con las publicaciones/cuentas de la marca anterior hasta que algo
+  // más refresque de casualidad. Cerrar el modal de programar evita que se
+  // quede abierto mostrando un post de la marca que se acaba de dejar.
+  useEffect(() => {
+    if (!activeBrand?.id) return;
+    void fetchData();
+    setScheduleModalOpen(false);
+  }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // El asistente publicó, programó o canceló: se recarga el calendario.
   useDataChanged(['scheduled', 'content'], () => { void fetchData(); });

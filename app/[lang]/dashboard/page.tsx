@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useDataChanged } from '@/lib/data-events';
+import { useBrand } from '@/lib/brand-context';
 import { setOnboardingVisible } from '@/lib/onboarding-visibility';
 import type { Locale } from '@/types/i18n';
 import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
@@ -95,6 +96,7 @@ function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, org, subscription, usage, loading: authLoading } = useAuth();
+  const { activeBrand } = useBrand();
   const { lang } = useParams<{ lang: string }>();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
 
@@ -167,7 +169,7 @@ function DashboardPageInner() {
     setHasAccounts(items.length > 0);
   }
 
-  useEffect(() => {
+  function loadBrandScopedData() {
     // Check accounts
     fetchAccounts().catch(() => {
       setHasAccounts(false);
@@ -184,7 +186,18 @@ function DashboardPageInner() {
 
     // Fetch content (all statuses to detect drafts, scheduled, published)
     fetchRecentContent();
-  }, []);
+  }
+
+  useEffect(() => { loadBrandScopedData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cambiar de marca activa no disparaba por sí solo un refetch: la cookie
+  // httpOnly cambia pero estos datos (cuentas conectadas, brand kit, contenido
+  // reciente) se quedaban con los de la marca anterior. Mismo bug que en
+  // /content/create y /content/calendar.
+  useEffect(() => {
+    if (!activeBrand?.id) return;
+    loadBrandScopedData();
+  }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (searchParams.get('onboarding') === '1') {

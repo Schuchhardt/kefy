@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { useDataChanged } from '@/lib/data-events';
+import { useBrand } from '@/lib/brand-context';
 
 import esInbox from '@/locales/es/dashboard/inbox';
 import enInbox from '@/locales/en/dashboard/inbox';
@@ -121,6 +122,7 @@ const CaughtUpIcon = (
 
 function ConversationsPageInner() {
   const { lang } = useParams<{ lang: string }>();
+  const { activeBrand } = useBrand();
   const searchParams = useSearchParams();
   const locale: Locale = (lang as Locale) === 'en' ? 'en' : 'es';
   const ti = TI[locale];
@@ -225,6 +227,19 @@ function ConversationsPageInner() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterType, fetchThreads, fetchComments]);
+
+  // Cambiar de marca activa no disparaba por sí solo un refetch (mismo bug
+  // que en /content): los DMs/comentarios son de las cuentas sociales de la
+  // marca anterior hasta que algo más refresque. Más sensible acá que en
+  // contenido — es bandeja de mensajes de otra marca, no solo un thumbnail.
+  // Cierra el hilo/comentario abierto por la misma razón que en /content.
+  useEffect(() => {
+    if (!activeBrand?.id) return;
+    if (filterType === 'dms') fetchThreads(); else if (filterType === 'comments') fetchComments();
+    setActiveThread(null);
+    setCommentModal(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrand?.id]);
 
   // Si el enlace cambia con la página ya abierta (el asistente navega a otra
   // conversación), se sigue la pestaña pedida.

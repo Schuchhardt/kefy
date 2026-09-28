@@ -13,6 +13,7 @@ import type { Frequency, AutopilotRule } from '@/types/automations';
 import type { SocialAccount } from '@/types/social';
 import type { Locale } from '@/types/i18n';
 import { useDataChanged } from '@/lib/data-events';
+import { useBrand } from '@/lib/brand-context';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ const labelStyle: React.CSSProperties = {
 
 export default function AutopilotPage() {
   const { lang } = useParams<{ lang: string }>();
+  const { activeBrand } = useBrand();
   const t = T[(lang as Locale) ?? 'es'] ?? T.es;
   const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
   const CHANNELS   = ALL_CHANNELS.map((c) => c.value === 'generic' ? { ...c, label: t.channelGeneric } : c);
@@ -93,6 +95,16 @@ export default function AutopilotPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Cambiar de marca activa no disparaba por sí solo un refetch (mismo bug
+  // que en /content): las reglas/cuentas son de la marca anterior hasta que
+  // algo más refresque. Cierra el formulario abierto por la misma razón.
+  useEffect(() => {
+    if (!activeBrand?.id) return;
+    void fetchData();
+    setShowForm(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrand?.id]);
 
   // El asistente creó, pausó o ejecutó una regla: se recarga la lista.
   useDataChanged(['autopilot'], () => { void fetchData(); });

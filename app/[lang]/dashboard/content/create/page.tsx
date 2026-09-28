@@ -398,7 +398,19 @@ function ContentPageInner() {
   // refetch en el cliente: sin este efecto la lista se queda mostrando el
   // contenido de la marca anterior hasta que otra cosa (cambiar un filtro,
   // un evento `content` del asistente) refresque de casualidad.
-  useEffect(() => { if (activeBrand?.id) void fetchItems(); }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  //
+  // Cerrar los modales de ver/editar es tan importante como el refetch: si
+  // quedaban abiertos sobre un item de la marca anterior (p. ej. un reel),
+  // cambiar de marca refrescaba la lista de fondo (ya vacía, correcta) pero el
+  // modal seguía mostrando ese reel encima — se veía como "el contenido de
+  // esta marca (sin reels) muestra el reel de la otra marca", aunque los datos
+  // en la base siempre estuvieron bien separados por brand_id.
+  useEffect(() => {
+    if (!activeBrand?.id) return;
+    void fetchItems();
+    setViewItem(null);
+    setEditItem(null);
+  }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // El asistente creó o editó contenido: se recarga la lista.
   useDataChanged(['content'], () => { void fetchItems(); });

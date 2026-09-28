@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import type { Locale } from '@/types/i18n';
+import { useBrand } from '@/lib/brand-context';
 import type { TriggerType, ActionType, EngagementPlatform, EngagementRule } from '@/types/automations';
 import esT from '@/locales/es/dashboard/engagement';
 import enT from '@/locales/en/dashboard/engagement';
@@ -55,6 +56,7 @@ const labelStyle: React.CSSProperties = {
 
 export default function EngagementPage() {
   const { lang } = useParams<{ lang: string }>();
+  const { activeBrand } = useBrand();
   const locale: Locale = (lang as Locale) === 'en' ? 'en' : 'es';
   const t = DICT[locale];
   const dateLocale = locale === 'en' ? 'en-US' : 'es-ES';
@@ -89,6 +91,16 @@ export default function EngagementPage() {
   }, []);
 
   useEffect(() => { fetchRules(); }, [fetchRules]);
+
+  // Cambiar de marca activa no disparaba por sí solo un refetch (mismo bug
+  // que en /content): las reglas son de la marca anterior hasta que algo más
+  // refresque. Cierra el formulario abierto por la misma razón.
+  useEffect(() => {
+    if (!activeBrand?.id) return;
+    fetchRules();
+    setShowForm(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrand?.id]);
 
   function resetForm() {
     setName(''); setTriggerType('new_comment'); setPlatform('all');

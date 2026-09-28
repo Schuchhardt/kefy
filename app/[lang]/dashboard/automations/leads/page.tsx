@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import { useBrand } from '@/lib/brand-context';
 import esT from '@/locales/es/dashboard/leads';
 import enT from '@/locales/en/dashboard/leads';
 import type { LeadStage, Lead } from '@/types/leads';
@@ -457,6 +458,7 @@ export default function LeadsPage() {
   const params = useParams();
   const lang = (params.lang as string) || 'es';
   const t = lang === 'en' ? enT : esT;
+  const { activeBrand } = useBrand();
 
   const [leads, setLeads]             = useState<Lead[]>([]);
   const [loading, setLoading]         = useState(true);
@@ -487,6 +489,16 @@ export default function LeadsPage() {
   }, [filterStage, filterChannel, search, t.errorLoad]);
 
   useEffect(() => { loadLeads(); }, [loadLeads]);
+
+  // Cambiar de marca activa no disparaba por sí solo un refetch (mismo bug
+  // que en /content): los leads son de la marca anterior hasta que algo más
+  // refresque. Cierra el detalle abierto por la misma razón.
+  useEffect(() => {
+    if (!activeBrand?.id) return;
+    void loadLeads();
+    setSelectedLead(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrand?.id]);
 
   function updateLead(id: string, updates: Partial<Lead>) {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
