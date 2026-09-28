@@ -9,11 +9,11 @@ let searchParams = new URLSearchParams();
 vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParams,
   useParams: () => ({ lang: 'es' }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 // Los modales no participan del flujo bajo test y arrastran dependencias
 // pesadas (Mux, Remotion), así que se stubean.
-vi.mock('@/components/dashboard/content/ScheduleModal',       () => ({ default: () => null }));
 vi.mock('@/components/dashboard/content/EditContentModal',    () => ({ default: () => null }));
 vi.mock('@/components/dashboard/content/ManualCreateModal',   () => ({ default: () => null }));
 vi.mock('@/components/dashboard/content/RecommendModal',      () => ({ default: () => null }));

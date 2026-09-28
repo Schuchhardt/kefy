@@ -1,11 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
-import { useSearchParams, useParams } from 'next/navigation';
+import { useSearchParams, useParams, useRouter } from 'next/navigation';
 import ChannelIcon         from '@/components/ui/ChannelIcon';
 import GenerationLoader    from '@/components/ui/GenerationLoader';
 import ContentActions      from '@/components/dashboard/content/ContentActions';
-import ScheduleModal       from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
 import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
 import RecommendModal      from '@/components/dashboard/content/RecommendModal';
@@ -285,6 +284,7 @@ function LibraryReferenceGrid({ lang, referenceImages, onToggle, selectedLabel }
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function ContentPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { lang: rawLang } = useParams<{ lang: string }>();
   const lang: 'es' | 'en' = rawLang === 'en' ? 'en' : 'es';
@@ -362,7 +362,6 @@ function ContentPageInner() {
   const [advancedOpen, setAdvancedOpen] = useState(() => !!searchParams?.get('refImage'));
 
   // Modals
-  const [viewItem,    setViewItem]    = useState<ContentItem | null>(null);
   const [editItem,    setEditItem]    = useState<ContentItem | null>(null);
   const [manualOpen,  setManualOpen]  = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -408,7 +407,6 @@ function ContentPageInner() {
   useEffect(() => {
     if (!activeBrand?.id) return;
     void fetchItems();
-    setViewItem(null);
     setEditItem(null);
   }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -719,7 +717,6 @@ function ContentPageInner() {
     if (!confirm('¿Eliminar este contenido?')) return;
     await fetch(`/api/content/${id}`, { method: 'DELETE', credentials: 'include' });
     setItems((prev) => prev.filter((i) => i.id !== id));
-    if (viewItem?.id === id) setViewItem(null);
     if (editItem?.id === id) setEditItem(null);
   }
 
@@ -727,7 +724,6 @@ function ContentPageInner() {
   function handleItemUpdate(id: string, patch: Partial<ContentItem>) {
     setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...patch } : i));
     setEditItem((prev) => prev?.id === id ? { ...prev, ...patch } : prev);
-    setViewItem((prev) => prev?.id === id ? { ...prev, ...patch } : prev);
   }
 
   // Cover-image generation is a background job on the server (can take
@@ -1225,10 +1221,10 @@ function ContentPageInner() {
                 <div
                   key={item.id}
                   data-testid="content-card"
-                  onClick={() => setViewItem(item)}
+                  onClick={() => router.push(`/${lang}/dashboard/content/${item.id}`)}
                   style={{
                     background: 'var(--surface)',
-                    border: `1px solid ${viewItem?.id === item.id ? 'var(--accent)' : 'var(--border)'}`,
+                    border: '1px solid var(--border)',
                     borderRadius: 10, cursor: 'pointer', overflow: 'hidden',
                     transition: 'border-color 0.15s', position: 'relative',
                   }}
@@ -1238,7 +1234,7 @@ function ContentPageInner() {
                     <ContentActions
                       lang={lang}
                       size="sm"
-                      onView={() => setViewItem(item)}
+                      onView={() => router.push(`/${lang}/dashboard/content/${item.id}`)}
                       onEdit={() => setEditItem(item)}
                       onDelete={() => handleDelete(item.id)}
                     />
@@ -1326,9 +1322,9 @@ function ContentPageInner() {
               <div
                 key={item.id}
                 data-testid="content-card"
-                onClick={() => setViewItem(item)}
+                onClick={() => router.push(`/${lang}/dashboard/content/${item.id}`)}
                 style={{
-                  background: 'var(--surface)', border: `1px solid ${viewItem?.id === item.id ? 'var(--accent)' : 'var(--border)'}`,
+                  background: 'var(--surface)', border: '1px solid var(--border)',
                   borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
                   transition: 'border-color 0.15s', display: 'flex', gap: 12, alignItems: 'center',
                 }}
@@ -1433,7 +1429,7 @@ function ContentPageInner() {
                   <ContentActions
                     lang={lang}
                     size="md"
-                    onView={() => setViewItem(item)}
+                    onView={() => router.push(`/${lang}/dashboard/content/${item.id}`)}
                     onEdit={() => setEditItem(item)}
                     onDelete={() => handleDelete(item.id)}
                   />
@@ -1446,24 +1442,6 @@ function ContentPageInner() {
       </div>
 
       {/* ── Modals ──────────────────────────────────────────────────── */}
-      <ScheduleModal
-        open={!!viewItem}
-        onClose={() => setViewItem(null)}
-        initialItem={viewItem as ContentItem | null}
-        brandKit={brandKit ? {
-          name: brandKit.name ?? null,
-          logo_url: brandKit.logo_url ?? null,
-          accent_color: brandKit.accent_color ?? null,
-          primary_color: brandKit.primary_color ?? null,
-          font_heading: brandKit.font_heading ?? null,
-        } : undefined}
-        lang={lang}
-        onSuccess={() => {
-          fetchItems();
-          setViewItem(null);
-        }}
-      />
-
       <EditContentModal
         open={!!editItem}
         onClose={closeEditItem}
