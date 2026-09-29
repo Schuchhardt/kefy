@@ -1,9 +1,12 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
+import {
+  applyTheme, isTheme, isThemedPath, resolveTheme, THEME_STORAGE_KEY, type Theme,
+} from '@/lib/theme-boot';
 
-export type Theme = 'dark' | 'light';
+export type { Theme } from '@/lib/theme-boot';
 
 interface ThemeContextValue {
   theme: Theme;
@@ -15,33 +18,59 @@ const ThemeContext = createContext<ThemeContextValue>({
   toggleTheme: () => {},
 });
 
+function readSaved(): string | null {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function systemPrefersLight(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-color-scheme: light)').matches;
+}
+
+/**
+ * Tema de la app. Lo público es siempre oscuro; en el dashboard manda la
+ * preferencia guardada y, sin ella, la del sistema (ver lib/theme-boot.ts).
+ * El primer pintado ya lo resolvió THEME_BOOT_SCRIPT en <head>.
+ */
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? '/';
   const [theme, setTheme] = useState<Theme>('dark');
-  const pathname = usePathname();
 
-  // Landing pages always stay dark regardless of user preference
-  const isLandingPage = /^\/(es|en)?\/?$/.test(pathname);
-
+  // Reaplica en cada navegación: pasar de la landing (oscura) al dashboard con
+  // tema claro, o al revés, no recarga la página.
   useEffect(() => {
-    if (isLandingPage) {
-      document.documentElement.setAttribute('data-theme', 'dark');
-      return;
-    }
-    const saved = localStorage.getItem('kefy-theme') as Theme | null;
-    if (saved === 'light' || saved === 'dark') {
-      setTheme(saved);
-      document.documentElement.setAttribute('data-theme', saved);
-    }
-  }, [isLandingPage]);
+    const next = resolveTheme(pathname, readSaved(), systemPrefersLight());
+    setTheme(next);
+    applyTheme(next);
+  }, [pathname]);
 
-  const toggleTheme = () => {
+  // Sin preferencia guardada, el dashboard sigue los cambios del sistema.
+  useEffect(() => {
+    if (!isThemedPath(pathname) || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => {
+      if (isTheme(readSaved())) return;
+      const next: Theme = mq.matches ? 'light' : 'dark';
+      setTheme(next);
+      applyTheme(next);
+    };
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, [pathname]);
+
+  const toggleTheme = useCallback(() => {
     setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('kefy-theme', next);
-      document.documentElement.setAttribute('data-theme', next);
+      const next: Theme = prev === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch { /* modo privado */ }
+      applyTheme(next);
       return next;
     });
-  };
+  }, []);
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>

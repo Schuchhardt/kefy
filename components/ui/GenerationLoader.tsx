@@ -11,6 +11,7 @@ export interface GenerationLoaderProps {
   hint?:        string;
   /** Spinner diameter in px. The ring thickness scales with it. */
   size?:        number;
+  /** Cualquier color CSS (hex o `var(--…)`). Por defecto, el acento del tema. */
   accentColor?: string;
   /** `dark` sits on top of a video/black backdrop, `surface` inside a card. */
   tone?:        'dark' | 'surface';
@@ -34,7 +35,7 @@ export default function GenerationLoader({
   label,
   hint,
   size = 40,
-  accentColor = '#c6ff4b',
+  accentColor = 'var(--accent)',
   tone = 'dark',
   showBar = true,
   showPercent = true,
@@ -58,9 +59,11 @@ export default function GenerationLoader({
       ...style,
     }}>
       {showSpinner && (
-        <div style={{
+        <div aria-hidden="true" style={{
           width: size, height: size, borderRadius: '50%', flexShrink: 0,
-          border: `${borderW}px solid ${accentColor}30`,
+          // color-mix y no el sufijo de alfa en hex («#c6ff4b30»): así también
+          // sirve con `var(--accent)`, que en tema claro es otro color.
+          border: `${borderW}px solid color-mix(in srgb, ${accentColor} 19%, transparent)`,
           borderTop: `${borderW}px solid ${accentColor}`,
           animation: 'spin 1s linear infinite',
         }} />
