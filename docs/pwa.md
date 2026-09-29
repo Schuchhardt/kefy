@@ -17,6 +17,7 @@ haga hard refresh ni de que expire una cache.
 | `app/manifest.ts` | Web App Manifest en `/manifest.webmanifest` |
 | `components/PwaUpdater.tsx` | Registra el worker, detecta versiones viejas y recarga |
 | `app/layout.tsx` | Enlaza el manifest, `theme-color` y monta `PwaUpdater` |
+| `lib/theme-boot.ts` | Script de `<head>` que fija el tema antes de pintar y actualiza el `theme-color` al fondo del tema (`#08080A` oscuro, `#F5F5F0` claro). Las páginas públicas son siempre oscuras; el dashboard sigue la preferencia guardada o la del sistema. `ThemeProvider` hace lo mismo al navegar. El `theme_color` del manifest sigue siendo el oscuro (el de la pantalla de arranque) |
 
 ## Versión del build
 

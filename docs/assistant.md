@@ -127,6 +127,9 @@ limita qué puede hacer (scopes). Por eso las recomendaciones de §5.
   (texto + imagen por escena — y eso, multiplicado, por cada variante si se
   pide más de una con `variant_count`). Lo cobra el servicio con
   `chargeOrThrow`.
+- **Leer una web cuesta 1 crédito** (`import_brand_from_website`, y
+  `create_starter_posts` cuando recibe `url`): Firecrawl extrae los datos con un
+  modelo en su lado. Se devuelve si la web no se puede leer.
 - **API y MCP no cobran por llamada** (no hay modelo de Kefy): solo cobran las
   herramientas que generan. `create_manual_content` no usa IA y no cuesta
   créditos, pero exige suscripción activa como todo lo que escribe.
@@ -162,6 +165,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 |---|---|---|
 | Ver el workspace (marcas, plan, créditos, estrategia activa) | `get_workspace_context` | read |
 | Crear contenido con IA | `create_post`, `create_carousel`, `create_reel`, `generate_content_image` | write |
+| Arrancar una marca nueva: leer su web (opcional) y escribir 3 posts de inicio | `create_starter_posts` | write |
 | Pasar contenido ya escrito desde otro proyecto | `create_manual_content`, `update_content` | write |
 | Ver y buscar contenido | `list_content`, `get_content` | read |
 | Publicar o programar | `publish_content`, `list_scheduled_posts`, `cancel_scheduled_post` | publish |
@@ -171,7 +175,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Conectar una cuenta nueva | `get_connect_account_link` → link directo (una persona con sesión termina el OAuth de la red) | read |
 | Autopilot | `list_autopilot_rules`, `save_autopilot_rule`, `delete_autopilot_rule`, `run_autopilot_now` | read / publish / write |
 | Bandeja: DMs y comentarios | `list_conversations`, `get_conversation_messages`, `list_comments`, `reply_to_conversation`, `reply_to_comment` | read / publish |
-| Marca | `get_brand_profile`, `update_brand_profile` | read / write |
+| Marca | `get_brand_profile`, `update_brand_profile`, `import_brand_from_website` | read / write |
 
 **Conectar una cuenta.** Conectar una red exige que una persona autorice en el
 navegador de esa red, así que ninguna herramienta la conecta sola:
@@ -420,5 +424,7 @@ notificaciones del servidor.
 | `db/migrations/20260922000001_create_assistant_and_api_keys.sql` | Tablas y RPCs |
 | `lib/services/custom-strategy.ts`, `app/api/strategies/custom/**` | Estrategias propias de la org |
 | `lib/services/autopilot.ts`, `app/api/autopilot/**` | Reglas y ejecución del autopilot |
-| `lib/safe-redirect.ts` | `?next=` del login: solo rutas del dashboard |
+| `lib/safe-redirect.ts` | `?next=` del login y del registro: solo rutas propias del idioma (dashboard, onboarding, invitación) |
+| `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, el onboarding y `import_brand_from_website` |
+| `lib/services/onboarding.ts`, `app/api/onboarding/starter` | «Pega tu web → 3 posts» (`createStarterPosts`): lee la web si la hay, completa lo vacío del Brand Kit y escribe 3 borradores. La usan la página `/{lang}/onboarding` y `create_starter_posts` |
 | `db/migrations/20260925000001_create_custom_strategies.sql` | `kefy_custom_strategies` y `kefy_org_strategies.custom_strategy_id` |

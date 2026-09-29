@@ -172,6 +172,17 @@ Publicar y programar no gastan créditos pero también son «crear»: usan
 `tests/unit/api/ai-quotas.test.ts` es la red que avisa si se olvida en las rutas
 ya cubiertas.
 
+**Leer una web también es gasto.** `POST /api/brand-kit/enrich-url` llamaba a
+Firecrawl (dos lecturas, una con extracción por un modelo en su lado) sin
+ninguna guardia: cualquier cuenta, incluso con el mes gratis vencido, podía
+llamarla sin límite. Ahora la lógica vive en `lib/services/brand-enrich.ts` y
+cobra **1 crédito de texto** con `chargeOrThrow` (misma guardia), que se
+devuelve si la web no se puede leer. Lo mismo el onboarding
+(`POST /api/onboarding/starter`, `lib/services/onboarding.ts`): 1 crédito por
+leer la web (si se da) y 1 por cada uno de los 3 posts. La página de onboarding
+dice cuánto va a usar antes de gastar (con las 3 imágenes que pide después a
+`/api/content/image`: 12 créditos, 13 con web).
+
 ### Los tres bloqueos, y qué debe hacer la UI
 
 | Respuesta | Campo | Significa | La UI debe |
