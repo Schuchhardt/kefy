@@ -1,30 +1,16 @@
 'use client';
 
+import Icon from '@/components/ui/icons';
+import { toLocale } from '@/lib/i18n';
 import type { ContentType } from '@/types/content';
+import esT from '@/locales/es/dashboard/content';
+import enT from '@/locales/en/dashboard/content';
 
 // ─── Static, illustrative mockups explaining each content format ─────────────
 // No real data — just enough visual shape (single image, stacked slides,
 // vertical video, story ring) so someone who doesn't know the terms yet can
-// tell a post apart from a carousel/reel/story at a glance.
-
-const COPY: Record<ContentType, { es: [string, string]; en: [string, string] }> = {
-  post: {
-    es: ['Publicación', 'Una imagen + texto en el feed'],
-    en: ['Post', 'One image + text on the feed'],
-  },
-  carousel: {
-    es: ['Carrusel', 'Varias imágenes que se deslizan'],
-    en: ['Carousel', 'Several images the viewer swipes through'],
-  },
-  reel: {
-    es: ['Reel', 'Video corto vertical'],
-    en: ['Reel', 'Short vertical video'],
-  },
-  story: {
-    es: ['Story', 'Contenido efímero de 24h'],
-    en: ['Story', 'Ephemeral content, visible for 24h'],
-  },
-};
+// tell a post apart from a carousel/reel/story at a glance. The gradients are
+// image placeholders, not UI state colours.
 
 function PostMock() {
   return (
@@ -58,10 +44,10 @@ function ReelMock() {
   return (
     <div style={{
       width: 34, height: 56, borderRadius: 8, border: '1px solid var(--border)',
-      background: 'linear-gradient(180deg, #fa709a, #fee140)',
+      background: 'linear-gradient(180deg, #fa709a, #fee140)', color: '#fff',
       display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto',
     }}>
-      <span style={{ fontSize: 16, color: '#fff' }}>▶</span>
+      <Icon name="play" size={14} style={{ fill: 'currentColor' }} />
     </div>
   );
 }
@@ -97,17 +83,17 @@ interface FormatExampleProps {
 
 export default function FormatExample({ format, lang, compact }: FormatExampleProps) {
   const Mock = MOCKS[format];
-  const [title, desc] = COPY[format][lang];
+  const { title, desc } = (toLocale(lang) === 'en' ? enT : esT).formatExamples[format];
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <div style={{ width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <div aria-hidden="true" style={{ width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <Mock />
       </div>
       {!compact && (
         <div style={{ minWidth: 0 }}>
-          <p style={{ fontSize: 12.5, fontWeight: 700, margin: 0 }}>{title}</p>
-          <p style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 0', lineHeight: 1.3 }}>{desc}</p>
+          <p style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{title}</p>
+          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 0', lineHeight: 1.35 }}>{desc}</p>
         </div>
       )}
     </div>

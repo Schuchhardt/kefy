@@ -19,6 +19,8 @@ import { useAssistant } from '@/lib/assistant/use-assistant';
 import BrandAvatar from '@/components/dashboard/BrandAvatar';
 import MessageBubble from '@/components/assistant/MessageBubble';
 import { Spinner } from '@/components/assistant/ToolChip';
+import Button from '@/components/ui/Button';
+import styles from '@/components/assistant/assistant.module.css';
 
 const T = { es: esT, en: enT } as const;
 
@@ -27,11 +29,6 @@ const LINE_HEIGHT = 20;
 const MAX_ROWS = 5;
 /** Si el usuario subió más que esto, no se le arrastra al final con cada token. */
 const STICK_THRESHOLD = 80;
-
-const iconBtn = {
-  width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  borderRadius: 8, border: '1px solid transparent', background: 'transparent', color: 'var(--muted)', cursor: 'pointer',
-} as const;
 
 function isMobile(): boolean {
   try { return window.matchMedia('(max-width: 767px)').matches; } catch { return false; }
@@ -172,10 +169,10 @@ export default function AssistantPanel({
       aria-label={t.title}
       style={{
         position: 'fixed', ...alignSide, bottom: 92, width: 380, maxWidth: 'calc(100vw - 32px)',
-        height: 'min(600px, calc(100vh - 120px))',
-        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, zIndex: 400,
+        height: 'min(600px, calc(var(--viewport-h) - 120px))',
+        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, zIndex: 'var(--z-assistant)',
         display: open ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden',
-        boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
+        boxShadow: 'var(--shadow-pop)',
         fontFamily: 'var(--font-dm-sans), system-ui, sans-serif', color: 'var(--text)',
       }}
     >
@@ -193,7 +190,10 @@ export default function AssistantPanel({
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' }}>
             {activeBrand && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0, maxWidth: 170 }}>
-                <BrandAvatar brand={activeBrand} size={16} />
+                {/* El nombre se lee al lado: el avatar no lo repite. */}
+                <span aria-hidden="true" style={{ display: 'flex', flexShrink: 0 }}>
+                  <BrandAvatar brand={activeBrand} size={16} />
+                </span>
                 <span style={{ fontSize: 11.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   title={t.subtitle(activeBrand.name)}>
                   {activeBrand.name}
@@ -204,11 +204,11 @@ export default function AssistantPanel({
               <span
                 title={t.messagesLeftTitle}
                 style={{
-                  fontSize: 10.5, padding: '1px 7px', borderRadius: 999, whiteSpace: 'nowrap',
+                  fontSize: 11, padding: '1px 7px', borderRadius: 999, whiteSpace: 'nowrap',
                   fontFamily: 'var(--font-jetbrains), monospace',
-                  color: a.usage.remaining > 0 ? 'var(--assistant-accent-text)' : 'var(--muted)',
-                  background: a.usage.remaining > 0 ? 'rgba(198,255,75,0.10)' : 'var(--surface-2)',
-                  border: `1px solid ${a.usage.remaining > 0 ? 'rgba(198,255,75,0.25)' : 'var(--border)'}`,
+                  color: a.usage.remaining > 0 ? 'var(--accent-text)' : 'var(--muted)',
+                  background: a.usage.remaining > 0 ? 'var(--accent-soft)' : 'var(--surface-2)',
+                  border: `1px solid ${a.usage.remaining > 0 ? 'var(--accent-border)' : 'var(--border)'}`,
                 }}
               >
                 {t.messagesLeft(a.usage.remaining, a.usage.limit)}
@@ -216,19 +216,19 @@ export default function AssistantPanel({
             )}
           </div>
         </div>
-        <button type="button" style={{ ...iconBtn, color: view === 'history' ? 'var(--assistant-accent-text)' : 'var(--muted)' }}
+        <button type="button" className={styles.iconBtn}
           onClick={openHistory} aria-label={view === 'history' ? t.back : t.history} title={view === 'history' ? t.back : t.history}
           aria-pressed={view === 'history'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" />
           </svg>
         </button>
-        <button type="button" style={iconBtn} onClick={startNew} disabled={a.streaming} aria-label={t.newChat} title={t.newChat}>
+        <button type="button" className={styles.iconBtn} onClick={startNew} disabled={a.streaming} aria-label={t.newChat} title={t.newChat}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
           </svg>
         </button>
-        <button type="button" style={iconBtn} onClick={onClose} aria-label={t.close} title={t.close}>
+        <button type="button" className={styles.iconBtn} onClick={onClose} aria-label={t.close} title={t.close}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>
@@ -267,7 +267,8 @@ export default function AssistantPanel({
                     </button>
                     <button
                       type="button"
-                      style={{ ...iconBtn, marginRight: 6 }}
+                      className={styles.iconBtn}
+                      style={{ marginRight: 4 }}
                       onClick={() => void a.archiveConversation(c.id)}
                       aria-label={t.delete}
                       title={t.delete}
@@ -307,7 +308,7 @@ export default function AssistantPanel({
                   <button
                     key={s}
                     type="button"
-                    className="assistant-suggestion"
+                    className={`assistant-suggestion ${styles.suggestion}`}
                     disabled={composerDisabled || busy}
                     onClick={() => submit(s)}
                     style={{
@@ -347,7 +348,7 @@ export default function AssistantPanel({
         {composerDisabled && (
           <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>
             {t.disabledNotice}{' '}
-            <Link href={`/${lang}/dashboard/settings`} onClick={onNavigate} style={{ color: 'var(--assistant-accent-text)' }}>
+            <Link href={`/${lang}/dashboard/settings`} onClick={onNavigate} style={{ color: 'var(--accent-text)' }}>
               {t.disabledLink}
             </Link>
           </p>
@@ -367,21 +368,22 @@ export default function AssistantPanel({
             rows={1}
             disabled={composerDisabled}
             style={{
-              flex: 1, resize: 'none', border: 0, outline: 'none', background: 'transparent', color: 'var(--text)',
+              flex: 1, resize: 'none', border: 0, background: 'transparent', color: 'var(--text)',
               fontSize: 13.5, lineHeight: `${LINE_HEIGHT}px`, padding: '4px 6px', maxHeight: LINE_HEIGHT * MAX_ROWS + 16,
               fontFamily: 'inherit', overflowY: 'auto',
             }}
           />
           {a.streaming ? (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={a.stop} aria-label={t.stop}
-              style={{ border: '1px solid var(--border)' }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
+            <Button variant="secondary" size="sm" className={styles.composerBtn} onClick={a.stop} aria-label={t.stop}
+              icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden><rect x="5" y="5" width="14" height="14" rx="2" /></svg>}>
               {t.stop}
-            </button>
+            </Button>
           ) : (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
+            <Button
+              variant="primary"
+              size="sm"
+              iconOnly
+              className={styles.composerBtn}
               onClick={() => submit()}
               disabled={composerDisabled || busy || !draft.trim()}
               aria-label={t.send}
@@ -389,7 +391,7 @@ export default function AssistantPanel({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M12 19V5" /><path d="M5 12l7-7 7 7" />
               </svg>
-            </button>
+            </Button>
           )}
         </div>
       </footer>

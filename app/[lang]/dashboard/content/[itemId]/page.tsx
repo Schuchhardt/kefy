@@ -20,70 +20,39 @@ import Link from 'next/link';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { NetworkPreview, NET_LABEL } from '@/components/dashboard/NetworkPreview';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import Button, { ButtonLink } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import EmptyState from '@/components/ui/EmptyState';
+import StatusBadge from '@/components/ui/StatusBadge';
+import Icon, { type IconName } from '@/components/ui/icons';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { toLocale } from '@/lib/i18n';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
-import type { ContentItem, ContentType, ContentStatus, ContentOrigin, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
-import type { Locale } from '@/types/i18n';
+import type { ContentItem, ContentType, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
+import esT from '@/locales/es/dashboard/content-detail';
+import enT from '@/locales/en/dashboard/content-detail';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
+import styles from './page.module.css';
 
 const MuxReelPlayer = dynamic(
   () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
   { ssr: false, loading: () => null },
 );
 
-// ─── i18n (self-contained, como app/[lang]/dashboard/page.tsx) ───────────────
+const T = { es: esT, en: enT } as const;
+const COMMON = { es: esCommon, en: enCommon } as const;
+const PUBLISH = { es: esPublish, en: enPublish } as const;
 
-const T = {
-  es: {
-    back: '← Volver a contenido',
-    loading: 'Cargando…',
-    notFound: 'No se encontró este contenido.',
-    draftNotice: 'Este contenido todavía no se publicó — puedes editarlo y publicarlo cuando esté listo.',
-    edit: 'Editar',
-    publish: 'Publicar o programar',
-    delete: 'Eliminar',
-    deleteConfirm: '¿Eliminar este contenido? Esta acción no se puede deshacer.',
-    createSimilar: '✦ Crear uno similar',
-    publishOn: (network: string) => `Publicar también en ${network}`,
-    statsTitle: 'Rendimiento',
-    noStatsYet: 'Todavía no hay métricas para este contenido — pueden tardar un poco en sincronizarse tras publicar.',
-    publishedOn: (date: string) => `Publicado el ${date}`,
-    impressions: 'Impresiones', reach: 'Alcance', likes: 'Likes', comments: 'Comentarios',
-    shares: 'Compartidos', engagementRate: 'Interacción',
-    status: { draft: 'Borrador', approved: 'Aprobado', scheduled: 'Programado', published: 'Publicado', archived: 'Archivado' } as Record<ContentStatus, string>,
-    contentType: { post: 'Post', carousel: 'Carrusel', reel: 'Reel', story: 'Story' } as Record<ContentType, string>,
-    autopilot: 'Autopilot',
-    createdBy: (name: string) => `por ${name}`,
-    via: (label: string) => `vía ${label}`,
-    origin: { ui: 'Web', chat: 'Asistente', api: 'API', mcp: 'MCP' } as Record<ContentOrigin, string>,
-  },
-  en: {
-    back: '← Back to content',
-    loading: 'Loading…',
-    notFound: "This content couldn't be found.",
-    draftNotice: "This content hasn't been published yet — you can still edit and publish it when it's ready.",
-    edit: 'Edit',
-    publish: 'Publish or schedule',
-    delete: 'Delete',
-    deleteConfirm: 'Delete this content? This action cannot be undone.',
-    createSimilar: '✦ Create a similar one',
-    publishOn: (network: string) => `Also publish on ${network}`,
-    statsTitle: 'Performance',
-    noStatsYet: 'No metrics yet for this content — they can take a little while to sync after publishing.',
-    publishedOn: (date: string) => `Published on ${date}`,
-    impressions: 'Impressions', reach: 'Reach', likes: 'Likes', comments: 'Comments',
-    shares: 'Shares', engagementRate: 'Engagement',
-    status: { draft: 'Draft', approved: 'Approved', scheduled: 'Scheduled', published: 'Published', archived: 'Archived' } as Record<ContentStatus, string>,
-    contentType: { post: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' } as Record<ContentType, string>,
-    autopilot: 'Autopilot',
-    createdBy: (name: string) => `by ${name}`,
-    via: (label: string) => `via ${label}`,
-    origin: { ui: 'Web', chat: 'Assistant', api: 'API', mcp: 'MCP' } as Record<ContentOrigin, string>,
-  },
-} as const;
+const FORMAT_ICONS: Record<ContentType, IconName> = { post: 'post', carousel: 'carousel', reel: 'video', story: 'story' };
 
-const STATUS_COLORS: Record<ContentStatus, string> = {
-  draft: '#888', approved: '#4fc3f7', scheduled: '#ffb74d', published: 'var(--accent)', archived: '#555',
-};
+/** Alto máximo de la vista previa vertical (reel, story, TikTok). Lo fija
+ *  page.module.css: `min(640px, 75dvh)` en escritorio y 55dvh en el móvil,
+ *  para que «Publicar» no quede una pantalla y media más abajo. */
+const PREVIEW_MAX_H = 'var(--preview-max-h)';
 
 interface PerformanceEntry {
   scheduled_post_id: string;
@@ -98,9 +67,11 @@ interface PerformanceEntry {
 export default function ContentDetailPage() {
   const { lang, itemId } = useParams<{ lang: string; itemId: string }>();
   const router = useRouter();
-  const locale: Locale = (lang as Locale) === 'en' ? 'en' : 'es';
+  const locale = toLocale(lang);
   const t = T[locale];
+  const common = COMMON[locale];
   const dateLocale = locale === 'en' ? 'en-US' : 'es-ES';
+  const { confirm, dialog } = useConfirm();
 
   const [item, setItem] = useState<ContentItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -112,17 +83,22 @@ export default function ContentDetailPage() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewChannel, setPreviewChannel] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const fetchItem = useCallback(() => {
-    setLoading(true);
+  /** `silent`: recarga sin volver al esqueleto (tras publicar, con el modal
+   *  mostrando el resultado encima). */
+  const fetchItem = useCallback((opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     fetch(`/api/content/${encodeURIComponent(itemId)}`, { credentials: 'include' })
       .then(async (res) => {
-        if (!res.ok) { setNotFound(true); return; }
+        if (!res.ok) { if (!silent) setNotFound(true); return; }
         const data = await res.json() as { item?: ContentItem };
-        if (data.item) setItem(data.item); else setNotFound(true);
+        if (data.item) setItem(data.item); else if (!silent) setNotFound(true);
       })
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!silent) setNotFound(true); })
+      .finally(() => { if (!silent) setLoading(false); });
   }, [itemId]);
 
   useEffect(() => { fetchItem(); }, [fetchItem]);
@@ -171,21 +147,37 @@ export default function ContentDetailPage() {
 
   async function handleDelete() {
     if (!item) return;
-    if (!confirm(t.deleteConfirm)) return;
-    await fetch(`/api/content/${item.id}`, { method: 'DELETE', credentials: 'include' });
-    router.push(`/${lang}/dashboard/content/create`);
+    const ok = await confirm({
+      title: t.deleteConfirmTitle,
+      message: common.confirm.irreversible,
+      confirmLabel: t.delete,
+      cancelLabel: common.actions.cancel,
+      danger: true,
+    });
+    if (!ok) return;
+    setDeleting(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/content/${item.id}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error(`delete ${res.status}`);
+      router.push(`/${lang}/dashboard/content/create`);
+    } catch {
+      setActionError(t.deleteError);
+      setDeleting(false);
+    }
   }
 
   if (loading) {
     return (
-      <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 20px 60px' }}>
+      <div className="page" style={{ maxWidth: 1000, margin: '0 auto' }}>
         <SkeletonBlock width={140} height={13} style={{ marginBottom: 20 }} />
-        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
           <SkeletonBlock width={70} height={22} borderRadius={4} />
           <SkeletonBlock width={90} height={22} borderRadius={4} />
           <SkeletonBlock width={80} height={22} borderRadius={4} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(280px, 0.9fr)', gap: 32 }}>
+        <SkeletonBlock width="60%" height={24} style={{ marginBottom: 24 }} />
+        <div className={styles.layout}>
           <SkeletonBlock height={520} borderRadius={12} />
           <SkeletonBlock height={220} borderRadius={12} />
         </div>
@@ -194,9 +186,17 @@ export default function ContentDetailPage() {
   }
   if (notFound || !item) {
     return (
-      <div style={{ padding: 40 }}>
-        <p style={{ color: 'var(--muted)', marginBottom: 16 }}>{t.notFound}</p>
-        <Link href={`/${lang}/dashboard/content/create`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{t.back}</Link>
+      <div className="page" style={{ maxWidth: 1000, margin: '0 auto' }}>
+        <EmptyState
+          icon={<Icon name="search" size={28} />}
+          title={t.notFound}
+          hint={t.notFoundHint}
+          action={(
+            <ButtonLink href={`/${lang}/dashboard/content/create`} variant="secondary" icon={<Icon name="arrow-left" size={16} />}>
+              {t.back}
+            </ButtonLink>
+          )}
+        />
       </div>
     );
   }
@@ -209,44 +209,50 @@ export default function ContentDetailPage() {
   const slides = (Array.isArray(item.slides) ? item.slides : []) as Array<CarouselSlide | ReelScene>;
   const topic = item.title || (item.body ?? '').slice(0, 120);
   const similarHref = `/${lang}/dashboard/content/create?topic=${encodeURIComponent(topic)}&type=${item.content_type}`;
+  const bodyExcerpt = (item.body ?? '').trim().replace(/\s+/g, ' ');
+  const heading = item.title?.trim()
+    || (bodyExcerpt.length > 90 ? `${bodyExcerpt.slice(0, 90)}…` : bodyExcerpt)
+    || t.untitled;
+  const channelLabel = item.channel === 'generic' ? t.channelGeneric : (NET_LABEL[item.channel] ?? item.channel);
+  const numberFormat = new Intl.NumberFormat(dateLocale);
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 20px 60px' }}>
-      <Link href={`/${lang}/dashboard/content/create`} style={{ display: 'inline-block', marginBottom: 20, color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>
+    <div className="page" style={{ maxWidth: 1000, margin: '0 auto' }}>
+      <Link href={`/${lang}/dashboard/content/create`} className={styles.back}>
+        <Icon name="arrow-left" size={16} />
         {t.back}
       </Link>
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-        <span style={{
-          fontSize: 11, fontWeight: 700, background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 4, padding: '3px 8px', textTransform: 'uppercase', letterSpacing: '0.05em',
-          display: 'inline-flex', alignItems: 'center', gap: 5,
-        }}>
-          {t.contentType[item.content_type]}
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: 'var(--muted)' }}>
-          <ChannelIcon name={item.channel} size={14} /> {item.channel}
-        </span>
-        <span style={{
-          fontSize: 11, fontWeight: 600, borderRadius: 4, padding: '3px 8px',
-          background: `${STATUS_COLORS[item.status]}22`, color: STATUS_COLORS[item.status],
-        }}>
-          {t.status[item.status]}
-        </span>
-        <div style={{ marginLeft: 'auto', textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>
-          <div>{new Date(item.created_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+      <header className={styles.header}>
+        <div className={styles.headerMain}>
+          <div className={styles.badges}>
+            <span className={`ui-badge ${styles.typeBadge}`}>
+              <Icon name={FORMAT_ICONS[item.content_type]} size={12} />
+              {t.contentType[item.content_type]}
+            </span>
+            <span className={styles.channel}>
+              <ChannelIcon name={item.channel} size={14} /> {channelLabel}
+            </span>
+            <StatusBadge status={item.status} lang={locale} />
+          </div>
+          <h1 className={styles.title}>{heading}</h1>
+        </div>
+        <div className={styles.meta}>
+          <time dateTime={item.created_at}>
+            {t.createdOn(new Date(item.created_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' }))}
+          </time>
           {(creatorLabel || originLabel) && (
-            <div style={{ fontSize: 11, marginTop: 2 }}>
-              {[creatorLabel, originLabel].filter(Boolean).join(' · ')}
-            </div>
+            <span>{[creatorLabel, originLabel].filter(Boolean).join(' · ')}</span>
           )}
         </div>
-      </div>
+      </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(280px, 0.9fr)', gap: 32 }}>
+      {actionError && <div style={{ marginBottom: 16 }}><Notice tone="danger">{actionError}</Notice></div>}
+
+      <div className={styles.layout}>
         {/* ── Preview ──────────────────────────────────────────────────── */}
-        <div>
+        <div className={styles.previewCol}>
           {item.content_type === 'reel' ? (
             <div style={{ borderRadius: 12, overflow: 'hidden' }}>
               <MuxReelPlayer
@@ -255,8 +261,10 @@ export default function ContentDetailPage() {
                 muxPlaybackId={!item.video_url ? item.mux_playback_id ?? null : null}
                 renderStatus={item.video_url ? 'ready' : (item.render_status ?? 'not_rendered')}
                 height={640}
+                maxHeight={PREVIEW_MAX_H}
                 autoPlay={!!item.video_url}
                 accentColor={brandKit?.accent_color ?? undefined}
+                lang={locale}
                 onRenderDone={(_id, url) => handleUpdate({ video_url: url, render_status: 'ready' })}
               />
             </div>
@@ -272,7 +280,7 @@ export default function ContentDetailPage() {
                 slides={slides}
                 activeSlide={activeSlide}
                 onActiveSlideChange={setActiveSlide}
-                username={brandKit?.name ?? 'tu_marca'}
+                username={brandKit?.name ?? PUBLISH[locale].preview.defaultUsername}
                 logoUrl={brandKit?.logo_url ?? undefined}
                 imagePending={!item.image_url && item.image_status === 'generating'}
                 accentColor={brandKit?.accent_color ?? undefined}
@@ -280,118 +288,97 @@ export default function ContentDetailPage() {
                 publishedNetworks={isPublished ? publishedNetworks : undefined}
                 channel={isPublished ? (previewChannel ?? undefined) : undefined}
                 onChannelChange={isPublished ? setPreviewChannel : undefined}
+                lang={locale}
+                frameMaxHeight={PREVIEW_MAX_H}
               />
               {isPublished && previewChannel && !publishedNetworks.includes(previewChannel) && (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  block
+                  className={styles.publishOn}
+                  icon={<Icon name="send" size={16} />}
                   onClick={() => { setPublishTarget(previewChannel); setScheduleOpen(true); }}
-                  style={{
-                    marginTop: 12, width: '100%', background: 'transparent', color: 'var(--accent)',
-                    border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 16px',
-                    fontWeight: 600, fontSize: 13, cursor: 'pointer',
-                  }}
                 >
                   {t.publishOn(NET_LABEL[previewChannel] ?? previewChannel)}
-                </button>
+                </Button>
               )}
             </>
           )}
         </div>
 
         {/* ── Detalle / acciones ───────────────────────────────────────── */}
-        <div>
+        <div className={styles.side}>
           {!isPublished ? (
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-              <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, margin: '0 0 18px' }}>
-                {t.draftNotice}
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => setScheduleOpen(true)}
-                  style={{
-                    background: 'var(--accent)', color: '#0A0A0A', border: 'none', borderRadius: 8,
-                    padding: '12px 18px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-                  }}
-                >
+            <section className="ui-card">
+              <p className={styles.draftNotice}>{t.draftNotice}</p>
+              <div className={styles.actions}>
+                <Button variant="primary" size="lg" block icon={<Icon name="send" size={16} />} onClick={() => setScheduleOpen(true)}>
                   {t.publish}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditOpen(true)}
-                  style={{
-                    background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8,
-                    padding: '12px 18px', fontWeight: 600, fontSize: 14, cursor: 'pointer',
-                  }}
-                >
+                </Button>
+                <Button variant="secondary" block icon={<Icon name="edit" size={16} />} onClick={() => setEditOpen(true)}>
                   {t.edit}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  style={{
-                    background: 'transparent', color: '#e05555', border: '1px solid #e0555555', borderRadius: 8,
-                    padding: '12px 18px', fontWeight: 600, fontSize: 14, cursor: 'pointer',
-                  }}
+                </Button>
+                <Button
+                  variant="danger-ghost"
+                  block
+                  icon={<Icon name="trash" size={16} />}
+                  loading={deleting}
+                  onClick={() => void handleDelete()}
                 >
-                  {t.delete}
-                </button>
+                  {deleting ? common.actions.deleting : t.delete}
+                </Button>
               </div>
-            </div>
+            </section>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-                <h2 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 14px' }}>{t.statsTitle}</h2>
+            <>
+              <section className="ui-card" aria-labelledby="content-stats-title">
+                <div className="ui-card-head">
+                  <h2 id="content-stats-title" className="ui-card-title">{t.statsTitle}</h2>
+                </div>
                 {performance.length === 0 ? (
-                  <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, margin: 0 }}>{t.noStatsYet}</p>
+                  <p className={styles.muted}>{t.noStatsYet}</p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <ul className={styles.statsList}>
                     {performance.map((p) => (
-                      <div key={p.scheduled_post_id}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                      <li key={p.scheduled_post_id}>
+                        <div className={styles.metricsNet}>
                           <ChannelIcon name={p.platform ?? item.channel} size={14} />
-                          <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'capitalize' }}>{p.platform}</span>
+                          <span className={styles.metricsNetName}>{p.platform ? (NET_LABEL[p.platform] ?? p.platform) : channelLabel}</span>
                           {p.published_at && (
-                            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted)' }}>
+                            <span className={styles.metricsDate}>
                               {t.publishedOn(new Date(p.published_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short' }))}
                             </span>
                           )}
                         </div>
                         {p.latest_metrics ? (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                          <div className="auto-grid" style={{ '--min': '110px', '--gap': '8px' } as React.CSSProperties}>
                             {([
-                              [t.impressions, p.latest_metrics.impressions],
-                              [t.reach, p.latest_metrics.reach],
-                              [t.likes, p.latest_metrics.likes],
-                              [t.comments, p.latest_metrics.comments],
-                              [t.shares, p.latest_metrics.shares],
+                              [t.impressions, numberFormat.format(p.latest_metrics.impressions)],
+                              [t.reach, numberFormat.format(p.latest_metrics.reach)],
+                              [t.likes, numberFormat.format(p.latest_metrics.likes)],
+                              [t.comments, numberFormat.format(p.latest_metrics.comments)],
+                              [t.shares, numberFormat.format(p.latest_metrics.shares)],
                               [t.engagementRate, `${(p.latest_metrics.engagement_rate * 100).toFixed(1)}%`],
                             ] as const).map(([label, value]) => (
-                              <div key={label} style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px' }}>
-                                <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 2px' }}>{value}</p>
-                                <p style={{ fontSize: 10, color: 'var(--muted)', margin: 0 }}>{label}</p>
+                              <div key={label} className={styles.metric}>
+                                <p className={styles.metricValue}>{value}</p>
+                                <p className={styles.metricLabel}>{label}</p>
                               </div>
                             ))}
                           </div>
                         ) : (
-                          <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>{t.noStatsYet}</p>
+                          <p className={styles.muted}>{t.noStatsYet}</p>
                         )}
-                      </div>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
-              </div>
+              </section>
 
-              <Link
-                href={similarHref}
-                style={{
-                  display: 'block', textAlign: 'center', background: 'var(--accent)', color: '#0A0A0A',
-                  borderRadius: 8, padding: '12px 18px', fontWeight: 700, fontSize: 14, textDecoration: 'none',
-                }}
-              >
+              <ButtonLink href={similarHref} variant="primary" size="lg" block icon={<Icon name="sparkles" size={16} />}>
                 {t.createSimilar}
-              </Link>
-            </div>
+              </ButtonLink>
+            </>
           )}
         </div>
       </div>
@@ -405,9 +392,8 @@ export default function ContentDetailPage() {
         brandKit={brandKit}
         lang={locale}
         onSuccess={() => {
-          setScheduleOpen(false);
-          setPublishTarget(null);
-          fetchItem();
+          // El modal sigue abierto con el resultado: se recarga sin esqueleto.
+          fetchItem({ silent: true });
           fetchPerformance(item.id);
           router.refresh();
         }}
@@ -420,6 +406,7 @@ export default function ContentDetailPage() {
         lang={locale}
         onUpdate={handleUpdate}
       />
+      {dialog}
     </div>
   );
 }

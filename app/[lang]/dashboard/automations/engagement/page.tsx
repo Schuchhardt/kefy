@@ -1,15 +1,25 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useId, type CSSProperties, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
-import type { Locale } from '@/types/i18n';
 import { useBrand } from '@/lib/brand-context';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import Button from '@/components/ui/Button';
+import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import EmptyState from '@/components/ui/EmptyState';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { TONE_COLORS, type Tone } from '@/lib/status';
+import { toLocale } from '@/lib/i18n';
 import type { TriggerType, ActionType, EngagementPlatform, EngagementRule } from '@/types/automations';
 import esT from '@/locales/es/dashboard/engagement';
 import enT from '@/locales/en/dashboard/engagement';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
 
 const DICT = { es: esT, en: enT } as const;
+const TC   = { es: esCommon, en: enCommon } as const;
 
 const PLATFORMS: { value: EngagementPlatform; label: string }[] = [
   { value: 'linkedin',  label: 'LinkedIn'  },
@@ -19,6 +29,7 @@ const PLATFORMS: { value: EngagementPlatform; label: string }[] = [
   { value: 'tiktok',    label: 'TikTok'    },
   { value: 'threads',   label: 'Threads'   },
 ];
+const PLATFORM_LABELS: Record<string, string> = Object.fromEntries(PLATFORMS.map((p) => [p.value, p.label]));
 
 const TRIGGER_TYPES: TriggerType[] = [
   'new_comment',
@@ -42,15 +53,17 @@ const ACTION_TYPES: ActionType[] = [
 const KEYWORD_TRIGGERS: TriggerType[] = ['comment_contains_keyword', 'dm_contains_keyword'];
 const AI_ACTIONS: ActionType[]        = ['reply_comment_ai', 'send_dm_ai_response'];
 const NEEDS_TEMPLATE: ActionType[]    = ['reply_comment', 'send_dm'];
+const DELAY_MINUTES = [5, 15, 30, 60];
 
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '10px 14px', borderRadius: 8, fontSize: 14,
-  border: '1px solid var(--border)', background: 'var(--bg)',
-  color: 'var(--text)', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
-};
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)',
-  marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em',
+function badgeTone(tone: Tone): CSSProperties {
+  const c = TONE_COLORS[tone];
+  return { '--badge-color': c.color, '--badge-bg': c.background } as CSSProperties;
+}
+
+/** Chip neutro de la tarjeta (disparador, red, palabra clave, espera). */
+const chipStyle: CSSProperties = {
+  fontSize: 12, padding: '3px 8px', borderRadius: 6,
+  background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)',
 };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -58,13 +71,19 @@ const labelStyle: React.CSSProperties = {
 export default function EngagementPage() {
   const { lang } = useParams<{ lang: string }>();
   const { activeBrand } = useBrand();
-  const locale: Locale = (lang as Locale) === 'en' ? 'en' : 'es';
+  const locale = toLocale(lang);
   const t = DICT[locale];
-  const dateLocale = locale === 'en' ? 'en-US' : 'es-ES';
+  const tc = TC[locale];
+  const dateLocale = t.dateLocale;
+  const { confirm, dialog } = useConfirm();
+  const uid = useId();
+  const formId = `${uid}-form`;
+  const formTitleId = `${uid}-form-title`;
 
   const [rules, setRules]         = useState<EngagementRule[]>([]);
   const [loading, setLoading]     = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [showForm, setShowForm]   = useState(false);
   const [saving, setSaving]       = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -83,13 +102,16 @@ export default function EngagementPage() {
     setLoading(true); setLoadError(null);
     fetch('/api/automations/engagement/rules', { credentials: 'include' })
       .then(async (res) => {
-        if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? 'error'); }
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(e.error ?? '');
+        }
         const json = await res.json() as { rules: EngagementRule[] };
         setRules(json.rules ?? []);
       })
-      .catch((e: Error) => setLoadError(e.message))
+      .catch((e: Error) => setLoadError(e.message || t.errorLoad))
       .finally(() => setLoading(false));
-  }, []);
+  }, [t.errorLoad]);
 
   useEffect(() => { fetchRules(); }, [fetchRules]);
 
@@ -117,8 +139,9 @@ export default function EngagementPage() {
   const isAiAction    = AI_ACTIONS.includes(actionType);
   const needsTemplate = NEEDS_TEMPLATE.includes(actionType);
 
-  async function handleCreate() {
-    if (!name.trim()) { setFormError(t.nameLabel + ' requerido'); return; }
+  async function handleCreate(e?: FormEvent) {
+    e?.preventDefault();
+    if (!name.trim()) { setFormError(t.nameRequired); return; }
     setSaving(true); setFormError(null);
     try {
       const res = await fetch('/api/automations/engagement/rules', {
@@ -137,8 +160,8 @@ export default function EngagementPage() {
         }),
       });
       if (!res.ok) {
-        const e = await res.json() as { error?: string };
-        setFormError(e.error ?? t.errorCreate); return;
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        setFormError(err.error ?? t.errorCreate); return;
       }
       const json = await res.json() as { rule: EngagementRule };
       setRules((prev) => [json.rule, ...prev]);
@@ -148,290 +171,314 @@ export default function EngagementPage() {
   }
 
   async function toggleActive(rule: EngagementRule) {
+    setActionError(null);
     const updated = { ...rule, is_active: !rule.is_active };
     setRules((prev) => prev.map((r) => r.id === rule.id ? updated : r));
-    const res = await fetch(`/api/automations/engagement/rules/${rule.id}`, {
-      method: 'PATCH', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !rule.is_active }),
-    });
-    if (!res.ok) setRules((prev) => prev.map((r) => r.id === rule.id ? rule : r));
+    try {
+      const res = await fetch(`/api/automations/engagement/rules/${rule.id}`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !rule.is_active }),
+      });
+      if (!res.ok) throw new Error('toggle');
+    } catch {
+      setRules((prev) => prev.map((r) => r.id === rule.id ? rule : r));
+      setActionError(t.errorToggle);
+    }
   }
 
   async function deleteRule(rule: EngagementRule) {
-    if (!window.confirm(t.confirmDelete)) return;
-    setRules((prev) => prev.filter((r) => r.id !== rule.id));
-    const res = await fetch(`/api/automations/engagement/rules/${rule.id}`, {
-      method: 'DELETE', credentials: 'include',
+    const ok = await confirm({
+      title: t.confirmDelete,
+      message: <><strong style={{ color: 'var(--text)' }}>{rule.name}</strong><br />{tc.confirm.irreversible}</>,
+      confirmLabel: tc.actions.delete,
+      cancelLabel: tc.actions.cancel,
+      danger: true,
     });
-    if (!res.ok) { fetchRules(); }
+    if (!ok) return;
+    setActionError(null);
+    setRules((prev) => prev.filter((r) => r.id !== rule.id));
+    try {
+      const res = await fetch(`/api/automations/engagement/rules/${rule.id}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      if (!res.ok) throw new Error('delete');
+    } catch {
+      setActionError(t.errorDelete);
+      fetchRules();
+    }
   }
 
   return (
-    <div style={{ padding: '32px', maxWidth: 860, margin: '0 auto' }}>
+    <div className="page" style={{ maxWidth: 860 }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 28 }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-            {t.title}
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--muted)' }}>{t.subtitle}</p>
+      <div className="page-header">
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontFamily: 'var(--font-syne), system-ui, sans-serif' }}>{t.title}</h1>
+          <p>{t.subtitle}</p>
         </div>
         {!showForm && (
-          <button onClick={openForm}
-            style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 600, fontSize: 14,
-              background: 'var(--accent)', color: '#000', border: 'none', cursor: 'pointer', flexShrink: 0 }}>
-            {t.newRuleBtn}
-          </button>
+          <div className="page-header-actions">
+            <Button variant="primary" icon={<Icon name="plus" size={16} />} onClick={openForm}>
+              {t.newRuleBtn}
+            </Button>
+          </div>
         )}
       </div>
 
       {/* Create form */}
       {showForm && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 14, padding: '24px', marginBottom: 28 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20,
-            fontFamily: 'var(--font-syne)', color: 'var(--text)' }}>
-            {t.newRuleBtn}
-          </h2>
+        <form
+          id={formId}
+          className="ui-card"
+          aria-labelledby={formTitleId}
+          onSubmit={(e) => void handleCreate(e)}
+          style={{ marginBottom: 28 }}
+          noValidate
+        >
+          <h2 id={formTitleId} className="ui-card-title" style={{ marginBottom: 20 }}>{t.formTitle}</h2>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Name */}
-            <div>
-              <label style={labelStyle}>{t.nameLabel}</label>
-              <input value={name} onChange={(e) => setName(e.target.value)}
-                placeholder={t.namePlaceholder} style={inputStyle} />
-            </div>
+            <Field label={t.nameLabel} required error={formError === t.nameRequired ? formError : undefined}>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePlaceholder} />
+            </Field>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="grid-2">
               {/* Trigger */}
-              <div>
-                <label style={labelStyle}>{t.triggerLabel}</label>
-                <select value={triggerType} onChange={(e) => setTriggerType(e.target.value as TriggerType)}
-                  style={{ ...inputStyle, cursor: 'pointer' }}>
+              <Field label={t.triggerLabel}>
+                <Select value={triggerType} onChange={(e) => setTriggerType(e.target.value as TriggerType)}>
                   {TRIGGER_TYPES.map((tr) => (
                     <option key={tr} value={tr}>{t.triggers[tr] ?? tr}</option>
                   ))}
-                </select>
-              </div>
+                </Select>
+              </Field>
 
               {/* Platform */}
-              <div>
-                <label style={labelStyle}>{t.platformLabel}</label>
-                <select value={platform} onChange={(e) => setPlatform(e.target.value as EngagementPlatform | 'all')}
-                  style={{ ...inputStyle, cursor: 'pointer' }}>
+              <Field label={t.platformLabel}>
+                <Select value={platform} onChange={(e) => setPlatform(e.target.value as EngagementPlatform | 'all')}>
                   <option value="all">{t.platformAll}</option>
                   {PLATFORMS.map((p) => (
                     <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
-                </select>
-              </div>
+                </Select>
+              </Field>
             </div>
 
             {/* Keyword — only for keyword triggers */}
             {needsKeyword && (
-              <div>
-                <label style={labelStyle}>{t.keywordLabel}</label>
-                <input value={keyword} onChange={(e) => setKeyword(e.target.value)}
-                  placeholder={t.keywordPlaceholder} style={inputStyle} />
-              </div>
+              <Field label={t.keywordLabel}>
+                <Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={t.keywordPlaceholder} />
+              </Field>
             )}
 
             {/* Action */}
-            <div style={{ maxWidth: 360 }}>
-              <label style={labelStyle}>{t.actionLabel}</label>
-              <select value={actionType} onChange={(e) => setActionType(e.target.value as ActionType)}
-                style={{ ...inputStyle, cursor: 'pointer' }}>
-                {ACTION_TYPES.map((a) => (
-                  <option key={a} value={a}>{t.actions[a] ?? a}</option>
-                ))}
-              </select>
+            <div className="grid-2">
+              <Field label={t.actionLabel}>
+                <Select value={actionType} onChange={(e) => setActionType(e.target.value as ActionType)}>
+                  {ACTION_TYPES.map((a) => (
+                    <option key={a} value={a}>{t.actions[a] ?? a}</option>
+                  ))}
+                </Select>
+              </Field>
+
+              {/* Delay */}
+              <Field label={t.delayLabel}>
+                <Select value={delayMinutes} onChange={(e) => setDelayMinutes(Number(e.target.value))}>
+                  <option value={0}>{t.delayNone}</option>
+                  {DELAY_MINUTES.map((m) => <option key={m} value={m}>{m} {t.delayMinutes}</option>)}
+                  <option value={180}>3 h</option>
+                  <option value={1440}>24 h</option>
+                </Select>
+              </Field>
             </div>
 
             {/* Template — for manual template actions */}
             {needsTemplate && (
-              <div>
-                <label style={labelStyle}>{t.templateLabel}</label>
-                <textarea value={template} onChange={(e) => setTemplate(e.target.value)}
-                  placeholder={t.templatePlaceholder} rows={3}
-                  style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }} />
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{t.templateHint}</p>
-              </div>
+              <Field label={t.templateLabel} hint={t.templateHint}>
+                <Textarea value={template} onChange={(e) => setTemplate(e.target.value)}
+                  placeholder={t.templatePlaceholder} rows={3} />
+              </Field>
             )}
 
             {/* AI context — for AI-powered actions */}
             {isAiAction && (
               <div style={{
-                background: 'rgba(198,255,75,0.04)', border: '1px solid rgba(198,255,75,0.2)',
+                background: 'var(--accent-soft)', border: '1px solid var(--accent-border)',
                 borderRadius: 10, padding: '14px 16px',
               }}>
-                <label style={{ ...labelStyle, color: 'var(--accent)' }}>{t.aiContextLabel}</label>
-                <textarea value={aiContext} onChange={(e) => setAiContext(e.target.value)}
-                  placeholder={t.aiContextPlaceholder} rows={3}
-                  style={{ ...inputStyle, resize: 'vertical', minHeight: 80, borderColor: 'rgba(198,255,75,0.3)' }} />
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                  La IA usará la info de tu brand kit + este contexto para generar la respuesta.
-                </p>
+                <Field
+                  label={
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--accent-text)' }}>
+                      <Icon name="sparkles" size={14} />{t.aiContextLabel}
+                    </span>
+                  }
+                  hint={t.aiContextHint}
+                >
+                  <Textarea value={aiContext} onChange={(e) => setAiContext(e.target.value)}
+                    placeholder={t.aiContextPlaceholder} rows={3} />
+                </Field>
               </div>
             )}
-
-            {/* Delay */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div>
-                <label style={labelStyle}>{t.delayLabel}</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <select value={delayMinutes} onChange={(e) => setDelayMinutes(Number(e.target.value))}
-                    style={{ ...inputStyle, width: 'auto', cursor: 'pointer' }}>
-                    <option value={0}>{t.delayNone}</option>
-                    <option value={5}>5 {t.delayMinutes}</option>
-                    <option value={15}>15 {t.delayMinutes}</option>
-                    <option value={30}>30 {t.delayMinutes}</option>
-                    <option value={60}>60 {t.delayMinutes}</option>
-                    <option value={180}>3 h</option>
-                    <option value={1440}>24 h</option>
-                  </select>
-                </div>
-              </div>
-            </div>
           </div>
 
-          {formError && (
-            <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 12 }}>{formError}</p>
+          {formError && formError !== t.nameRequired && (
+            <div style={{ marginTop: 16 }}><Notice tone="danger">{formError}</Notice></div>
           )}
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
-            <button onClick={closeForm} disabled={saving}
-              style={{ padding: '10px 18px', borderRadius: 8, fontSize: 14, fontWeight: 500,
-                background: 'transparent', border: '1px solid var(--border)',
-                color: 'var(--muted)', cursor: 'pointer' }}>
-              {t.cancelBtn}
-            </button>
-            <button onClick={() => void handleCreate()} disabled={saving || !name.trim()}
-              style={{ padding: '10px 20px', borderRadius: 8, fontSize: 14, fontWeight: 600,
-                background: name.trim() && !saving ? 'var(--accent)' : 'var(--border)',
-                color: name.trim() && !saving ? '#000' : 'var(--muted)',
-                border: 'none', cursor: name.trim() && !saving ? 'pointer' : 'default',
-                opacity: saving ? 0.7 : 1 }}>
+          <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <Button variant="ghost" onClick={closeForm} disabled={saving}>{t.cancelBtn}</Button>
+            <Button type="submit" variant="primary" loading={saving} disabled={!name.trim()}>
               {saving ? t.saving : t.saveBtn}
-            </button>
+            </Button>
           </div>
-        </div>
+        </form>
       )}
+
+      {actionError && <div style={{ marginBottom: 16 }}><Notice tone="danger">{actionError}</Notice></div>}
 
       {/* Rules list */}
       {loading && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {[...Array(4)].map((_, i) => (
-            <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px' }}>
-              <SkeletonBlock width={180} height={13} style={{ marginBottom: 10 }} />
-              <div style={{ display: 'flex', gap: 6 }}>
-                <SkeletonBlock width={70} height={20} borderRadius={6} />
-                <SkeletonBlock width={70} height={20} borderRadius={6} />
-                <SkeletonBlock width={90} height={20} borderRadius={6} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {!loading && loadError && <p style={{ color: '#ff6b6b', fontSize: 13 }}>{loadError}</p>}
-      {!loading && !loadError && rules.length === 0 && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 14, padding: '48px 24px', textAlign: 'center' }}>
-          <p style={{ fontSize: 32, marginBottom: 12 }}>⚡</p>
-          <p style={{ fontWeight: 600, marginBottom: 4 }}>{t.noRules}</p>
-          <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.noRulesHint}</p>
-        </div>
-      )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {rules.map((rule) => (
-          <div key={rule.id} style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderLeft: `3px solid ${rule.is_active ? 'var(--accent)' : 'var(--border)'}`,
-            borderRadius: 12, padding: '16px 20px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, justifyContent: 'space-between' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>{rule.name}</span>
-                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 600,
-                    background: rule.is_active ? 'rgba(198,255,75,0.15)' : 'var(--bg)',
-                    color: rule.is_active ? 'var(--accent)' : 'var(--muted)',
-                    border: `1px solid ${rule.is_active ? 'rgba(198,255,75,0.4)' : 'var(--border)'}` }}>
-                    {rule.is_active ? t.active : t.inactive}
-                  </span>
+        <>
+          <p role="status" className="sr-only">{t.loading}</p>
+          <div aria-hidden="true" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[...Array(4)].map((_, i) => (
+              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px' }}>
+                <SkeletonBlock width={180} height={13} style={{ marginBottom: 10, maxWidth: '100%' }} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <SkeletonBlock width={70} height={20} borderRadius={6} />
+                  <SkeletonBlock width={70} height={20} borderRadius={6} />
+                  <SkeletonBlock width={90} height={20} borderRadius={6} />
                 </div>
-
-                {/* Trigger → Action badges */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                    background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-                    {t.triggers[rule.trigger_type] ?? rule.trigger_type}
-                  </span>
-                  {rule.condition_platform && (
-                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                      background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-                      {rule.condition_platform}
-                    </span>
-                  )}
-                  {rule.condition_keyword && (
-                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                      background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-                      &quot;{rule.condition_keyword}&quot;
-                    </span>
-                  )}
-                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>→</span>
-                  <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                    background: AI_ACTIONS.includes(rule.action_type as ActionType)
-                      ? 'rgba(198,255,75,0.08)' : 'var(--bg)',
-                    border: `1px solid ${AI_ACTIONS.includes(rule.action_type as ActionType) ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
-                    color: AI_ACTIONS.includes(rule.action_type as ActionType) ? 'var(--accent)' : 'var(--muted)' }}>
-                    {AI_ACTIONS.includes(rule.action_type as ActionType) ? '✦ ' : ''}{t.actions[rule.action_type] ?? rule.action_type}
-                  </span>
-                  {rule.delay_minutes > 0 && (
-                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                      background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-                      +{rule.delay_minutes}min
-                    </span>
-                  )}
-                </div>
-
-                {rule.action_template && (
-                  <p style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480 }}>
-                    &ldquo;{rule.action_template}&rdquo;
-                  </p>
-                )}
-
-                {/* Stats */}
-                {(rule.times_triggered > 0 || rule.last_triggered_at) && (
-                  <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                    {rule.times_triggered > 0 && `${rule.times_triggered}× ejecutada`}
-                    {rule.last_triggered_at && ` · última vez ${new Date(rule.last_triggered_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short' })}`}
-                  </p>
-                )}
               </div>
-
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                <button onClick={() => void toggleActive(rule)}
-                  style={{ padding: '6px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                    border: `1px solid ${rule.is_active ? 'var(--border)' : 'var(--accent)'}`,
-                    background: rule.is_active ? 'var(--bg)' : 'rgba(198,255,75,0.1)',
-                    color: rule.is_active ? 'var(--muted)' : 'var(--accent)', cursor: 'pointer' }}>
-                  {rule.is_active ? t.togglePause : t.toggleActivate}
-                </button>
-                <button onClick={() => void deleteRule(rule)}
-                  style={{ padding: '6px 12px', borderRadius: 7, fontSize: 12,
-                    border: '1px solid var(--border)', background: 'transparent',
-                    color: '#ff6b6b', cursor: 'pointer' }}>
-                  {t.deleteBtn}
-                </button>
-              </div>
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
+      {!loading && loadError && (
+        <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
+          {loadError}{' '}
+          <button
+            type="button"
+            onClick={fetchRules}
+            style={{ color: 'inherit', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: 3 }}
+          >
+            {tc.actions.retry}
+          </button>
+        </Notice>
+      )}
+      {!loading && !loadError && rules.length === 0 && (
+        <div className="ui-card">
+          <EmptyState
+            icon={<Icon name="bolt" size={32} strokeWidth={1.5} />}
+            title={t.noRules}
+            hint={t.noRulesHint}
+            action={!showForm && (
+              <Button variant="primary" icon={<Icon name="plus" size={14} />} onClick={openForm}>
+                {t.createFirstRule}
+              </Button>
+            )}
+          />
+        </div>
+      )}
+      {!loading && rules.length > 0 && (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {rules.map((rule) => {
+            const isAi = AI_ACTIONS.includes(rule.action_type as ActionType);
+            const nameId = `${uid}-rule-${rule.id}`;
+            return (
+              <li key={rule.id}>
+                <article
+                  className="ui-card"
+                  aria-labelledby={nameId}
+                  style={{ borderLeft: `3px solid ${rule.is_active ? 'var(--accent)' : 'var(--border)'}` }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                        <h2 id={nameId} style={{ fontFamily: 'inherit', fontWeight: 600, fontSize: 15, margin: 0, overflowWrap: 'anywhere' }}>
+                          {rule.name}
+                        </h2>
+                        <span className="ui-badge" style={badgeTone(rule.is_active ? 'accent' : 'neutral')}>
+                          {rule.is_active ? t.active : t.inactive}
+                        </span>
+                      </div>
+
+                      {/* Trigger → Action badges */}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={chipStyle}>{t.triggers[rule.trigger_type] ?? rule.trigger_type}</span>
+                        {rule.condition_platform && (
+                          <span style={chipStyle}>{PLATFORM_LABELS[rule.condition_platform] ?? rule.condition_platform}</span>
+                        )}
+                        {rule.condition_keyword && (
+                          <span style={chipStyle}>&quot;{rule.condition_keyword}&quot;</span>
+                        )}
+                        <span style={{ display: 'inline-flex', color: 'var(--muted)' }}>
+                          <Icon name="arrow-right" size={14} />
+                          <span className="sr-only">{t.then}</span>
+                        </span>
+                        <span
+                          style={{
+                            ...chipStyle,
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            ...(isAi ? { background: 'var(--accent-soft)', borderColor: 'var(--accent-border)', color: 'var(--accent-text)' } : {}),
+                          }}
+                        >
+                          {isAi && <Icon name="sparkles" size={12} />}
+                          {t.actions[rule.action_type] ?? rule.action_type}
+                        </span>
+                        {rule.delay_minutes > 0 && (
+                          <span style={chipStyle}>{t.delayBadge(rule.delay_minutes)}</span>
+                        )}
+                      </div>
+
+                      {rule.action_template && (
+                        <p style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic', margin: 0,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                          &ldquo;{rule.action_template}&rdquo;
+                        </p>
+                      )}
+
+                      {/* Stats */}
+                      {(rule.times_triggered > 0 || rule.last_triggered_at) && (
+                        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 0' }}>
+                          {[
+                            rule.times_triggered > 0 ? t.timesTriggered(rule.times_triggered) : null,
+                            rule.last_triggered_at
+                              ? t.lastTriggered(new Date(rule.last_triggered_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short' }))
+                              : null,
+                          ].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void toggleActive(rule)}
+                      >
+                        {rule.is_active ? t.togglePause : t.toggleActivate}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger-ghost"
+                        icon={<Icon name="trash" size={14} />}
+                        onClick={() => void deleteRule(rule)}
+                      >
+                        {t.deleteBtn}
+                      </Button>
+                    </div>
+                  </div>
+                </article>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {dialog}
     </div>
   );
 }

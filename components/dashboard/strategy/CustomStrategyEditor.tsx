@@ -7,23 +7,30 @@
 // objetivo). Valida lo mínimo en el cliente (nombre, al menos una pieza, tema
 // en cada pieza); el resto lo valida el servidor y sus errores llegan en
 // `serverError`. En pantallas estrechas cada pieza se apila en una columna.
+//
+// Al abrirse, el foco va a su título: si no, quien usa teclado o lector de
+// pantalla se quedaba en el botón que lo abrió, más abajo en la página.
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import esT from '@/locales/es/dashboard/strategy';
 import enT from '@/locales/en/dashboard/strategy';
-import { CHANNEL_LABELS } from '@/lib/channels';
-import type { Channel } from '@/types/channels';
 import type { CustomStrategyFormat, Objective } from '@/types/strategy';
+import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import Button from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
 import {
   CUSTOM_CHANNELS,
   CUSTOM_FORMATS,
   CUSTOM_STRATEGY_LIMITS,
   CUSTOM_TEXT_LIMITS,
+  channelName,
   emptyRow,
   validateDraft,
   type CustomDraft,
   type CustomDraftRow,
 } from './custom-strategy-model';
+import styles from './CustomStrategyPanel.module.css';
 
 const T = { es: esT, en: enT } as const;
 
@@ -43,37 +50,7 @@ interface Props {
   onCancel: () => void;
 }
 
-// ─── Estilos ─────────────────────────────────────────────────────────────────
-
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 6,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8,
-  // Borde en longhand: invalidInput cambia solo borderColor (mezclar el
-  // shorthand con borderColor hace que React avise al quitar el error).
-  borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--border)',
-  background: 'var(--bg)', color: 'var(--text)',
-  fontSize: 14, fontFamily: 'inherit',
-};
-
-const invalidInput: React.CSSProperties = { borderColor: 'var(--danger, #ff6b6b)' };
-
-const primaryBtn: React.CSSProperties = {
-  background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 10,
-  padding: '11px 22px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-};
-
-const secondaryBtn: React.CSSProperties = {
-  background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 10,
-  padding: '11px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-};
-
-const errorBox: React.CSSProperties = {
-  background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.35)', borderRadius: 10,
-  padding: '12px 14px', fontSize: 13, color: 'var(--text)', lineHeight: 1.5, marginBottom: 16,
-};
+const grid = (min: number, gap = 16) => ({ '--min': `${min}px`, '--gap': `${gap}px` }) as CSSProperties;
 
 // ─── Componente ──────────────────────────────────────────────────────────────
 
@@ -82,9 +59,14 @@ export default function CustomStrategyEditor({
 }: Props) {
   const t = T[lang];
   const te = t.editor;
-  const uid = useId();
+  const headingId = `strategy-editor-${useId().replace(/:/g, '')}`;
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [draft, setDraft] = useState<CustomDraft>(initial);
   const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   const validation = validateDraft(draft);
   const showErrors = submitted && validation.errors.length > 0;
@@ -121,257 +103,203 @@ export default function CustomStrategyEditor({
     return te.errors[e];
   };
 
-  const channelLabel = (c: string) => (c === 'general' ? t.custom.channelGeneral : CHANNEL_LABELS[c as Channel] ?? c);
-  const id = (name: string) => `${uid}-${name}`;
+  const title = mode === 'create' ? te.createTitle : te.editTitle;
 
   return (
     <form
-      aria-label={mode === 'create' ? te.createTitle : te.editTitle}
+      aria-labelledby={headingId}
       onSubmit={(e) => { e.preventDefault(); submit(false); }}
       noValidate
-      style={{
-        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14,
-        padding: 'clamp(16px, 4vw, 28px)', marginBottom: 32,
-      }}
+      className={`ui-card ${styles.editor}`}
     >
-      <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
-        {mode === 'create' ? te.createTitle : te.editTitle}
+      <h2 ref={headingRef} id={headingId} tabIndex={-1} className={`${styles.editorTitle} ${styles.anchor}`}>
+        {title}
       </h2>
-      {draft.based_on_strategy_id && (
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 16px' }}>{te.basedOn}</p>
-      )}
-      <div style={{ height: 12 }} />
+      {draft.based_on_strategy_id && <p className="ui-hint">{te.basedOn}</p>}
 
-      {showErrors && (
-        <div role="alert" style={errorBox}>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {validation.errors.map((e) => <li key={e}>{errorText(e)}</li>)}
-          </ul>
-        </div>
-      )}
-      {serverError && !showErrors && (
-        <div role="alert" style={errorBox}>
-          <div>{serverError.message}</div>
-          {serverError.details.length > 0 && (
-            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-              {serverError.details.map((d) => <li key={d}>{d}</li>)}
+      <div className={styles.editorBody}>
+        {showErrors && (
+          <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
+            <ul className={styles.errorList}>
+              {validation.errors.map((e) => <li key={e}>{errorText(e)}</li>)}
             </ul>
-          )}
-        </div>
-      )}
+          </Notice>
+        )}
+        {serverError && !showErrors && (
+          <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
+            <div>{serverError.message}</div>
+            {serverError.details.length > 0 && (
+              <ul className={styles.errorList}>
+                {serverError.details.map((d) => <li key={d}>{d}</li>)}
+              </ul>
+            )}
+          </Notice>
+        )}
 
-      {/* ── Datos generales ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 16, marginBottom: 16 }}>
-        <div>
-          <label htmlFor={id('name')} style={labelStyle}>{te.name} *</label>
-          <input
-            id={id('name')}
-            value={draft.name}
-            maxLength={CUSTOM_TEXT_LIMITS.name}
-            placeholder={te.namePlaceholder}
-            aria-invalid={nameInvalid || undefined}
-            required
-            onChange={(e) => set('name', e.target.value)}
-            style={{ ...inputStyle, ...(nameInvalid ? invalidInput : {}) }}
-          />
+        {/* ── Datos generales ── */}
+        <div className="auto-grid" style={grid(240)}>
+          <Field label={te.name} required>
+            <Input
+              value={draft.name}
+              maxLength={CUSTOM_TEXT_LIMITS.name}
+              placeholder={te.namePlaceholder}
+              aria-invalid={nameInvalid || undefined}
+              onChange={(e) => set('name', e.target.value)}
+            />
+          </Field>
+          <Field label={te.objective}>
+            <Select value={draft.objective_id} onChange={(e) => set('objective_id', e.target.value)}>
+              <option value="">{te.noObjective}</option>
+              {objectives.map((o) => (
+                <option key={o.id} value={o.id}>{lang === 'en' ? o.name_en : o.name_es}</option>
+              ))}
+            </Select>
+          </Field>
         </div>
+
+        <Field label={te.description}>
+          <Textarea
+            value={draft.description}
+            maxLength={CUSTOM_TEXT_LIMITS.description}
+            placeholder={te.descriptionPlaceholder}
+            rows={3}
+            onChange={(e) => set('description', e.target.value)}
+          />
+        </Field>
+
+        <div className="auto-grid" style={grid(240)}>
+          <Field label={te.kpiPrimary}>
+            <Input
+              value={draft.kpi_primary}
+              maxLength={CUSTOM_TEXT_LIMITS.kpi}
+              placeholder={te.kpiPlaceholder}
+              onChange={(e) => set('kpi_primary', e.target.value)}
+            />
+          </Field>
+          <Field label={te.kpiSecondary}>
+            <Input
+              value={draft.kpi_secondary}
+              maxLength={CUSTOM_TEXT_LIMITS.kpi}
+              onChange={(e) => set('kpi_secondary', e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <Field label={te.cta}>
+          <Textarea
+            value={draft.cta_mechanic}
+            maxLength={CUSTOM_TEXT_LIMITS.cta_mechanic}
+            placeholder={te.ctaPlaceholder}
+            rows={2}
+            onChange={(e) => set('cta_mechanic', e.target.value)}
+          />
+        </Field>
+
+        {/* ── Calendario ── */}
         <div>
-          <label htmlFor={id('objective')} style={labelStyle}>{te.objective}</label>
-          <select
-            id={id('objective')}
-            value={draft.objective_id}
-            onChange={(e) => set('objective_id', e.target.value)}
-            style={inputStyle}
+          <h3 className={styles.subheading}>{te.calendar}</h3>
+          <p className="ui-hint" style={{ marginTop: 4 }}>
+            {te.calendarHint(CUSTOM_STRATEGY_LIMITS.weeks, CUSTOM_STRATEGY_LIMITS.posts)}
+          </p>
+        </div>
+
+        <div className={styles.rows}>
+          {draft.calendar.map((row, i) => {
+            const n = i + 1;
+            const topicInvalid = submitted && validation.rowsWithoutTopic.includes(row.key);
+            return (
+              <fieldset key={row.key} data-testid="custom-calendar-row" className={styles.row}>
+                <legend className={styles.rowLegend}>{te.row(n)}</legend>
+                <div className="auto-grid" style={grid(140, 10)}>
+                  <Field label={te.week}>
+                    <Select value={row.week} onChange={(e) => setRow(row.key, { week: Number(e.target.value) })}>
+                      {Array.from({ length: CUSTOM_STRATEGY_LIMITS.weeks }, (_, w) => w + 1).map((w) => (
+                        <option key={w} value={w}>{te.weekOption(w)}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label={te.format}>
+                    <Select
+                      value={row.format}
+                      onChange={(e) => setRow(row.key, { format: e.target.value as CustomStrategyFormat })}
+                    >
+                      {CUSTOM_FORMATS.map((f) => <option key={f} value={f}>{t.custom.formats[f]}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label={te.channel}>
+                    <Select value={row.channel} onChange={(e) => setRow(row.key, { channel: e.target.value })}>
+                      {CUSTOM_CHANNELS.map((c) => <option key={c} value={c}>{channelName(c, t)}</option>)}
+                    </Select>
+                  </Field>
+                </div>
+                <Field label={te.topic} required>
+                  <Input
+                    value={row.topic}
+                    maxLength={CUSTOM_TEXT_LIMITS.topic}
+                    placeholder={te.topicPlaceholder}
+                    aria-invalid={topicInvalid || undefined}
+                    onChange={(e) => setRow(row.key, { topic: e.target.value })}
+                  />
+                </Field>
+                <div className="auto-grid" style={grid(200, 10)}>
+                  <Field label={te.angle}>
+                    <Input
+                      value={row.angle}
+                      maxLength={CUSTOM_TEXT_LIMITS.angle}
+                      placeholder={te.anglePlaceholder}
+                      onChange={(e) => setRow(row.key, { angle: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={te.goal}>
+                    <Input
+                      value={row.goal}
+                      maxLength={CUSTOM_TEXT_LIMITS.goal}
+                      placeholder={te.goalPlaceholder}
+                      onChange={(e) => setRow(row.key, { goal: e.target.value })}
+                    />
+                  </Field>
+                </div>
+                {draft.calendar.length > 1 && (
+                  <div className={styles.rowActions}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Icon name="trash" size={14} />}
+                      aria-label={te.removeRow(n)}
+                      onClick={() => removeRow(row.key)}
+                    >
+                      {te.remove}
+                    </Button>
+                  </div>
+                )}
+              </fieldset>
+            );
+          })}
+        </div>
+
+        <div>
+          <Button
+            variant="secondary"
+            icon={<Icon name="plus" size={16} />}
+            onClick={addRow}
+            disabled={draft.calendar.length >= CUSTOM_STRATEGY_LIMITS.posts}
           >
-            <option value="">{te.noObjective}</option>
-            {objectives.map((o) => (
-              <option key={o.id} value={o.id}>{lang === 'en' ? o.name_en : o.name_es}</option>
-            ))}
-          </select>
+            {te.addRow}
+          </Button>
         </div>
-      </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <label htmlFor={id('description')} style={labelStyle}>{te.description}</label>
-        <textarea
-          id={id('description')}
-          value={draft.description}
-          maxLength={CUSTOM_TEXT_LIMITS.description}
-          placeholder={te.descriptionPlaceholder}
-          rows={3}
-          onChange={(e) => set('description', e.target.value)}
-          style={{ ...inputStyle, resize: 'vertical' }}
-        />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 16, marginBottom: 16 }}>
-        <div>
-          <label htmlFor={id('kpi1')} style={labelStyle}>{te.kpiPrimary}</label>
-          <input
-            id={id('kpi1')}
-            value={draft.kpi_primary}
-            maxLength={CUSTOM_TEXT_LIMITS.kpi}
-            placeholder={te.kpiPlaceholder}
-            onChange={(e) => set('kpi_primary', e.target.value)}
-            style={inputStyle}
-          />
+        {/* ── Acciones ── */}
+        <div className={styles.buttonRow} style={{ marginTop: 8 }}>
+          <Button type="submit" variant="secondary" loading={saving}>
+            {saving ? te.saving : te.save}
+          </Button>
+          <Button variant="primary" loading={saving} onClick={() => submit(true)}>
+            {saving ? te.saving : te.saveActivate}
+          </Button>
+          <Button variant="ghost" disabled={saving} onClick={onCancel}>
+            {te.cancel}
+          </Button>
         </div>
-        <div>
-          <label htmlFor={id('kpi2')} style={labelStyle}>{te.kpiSecondary}</label>
-          <input
-            id={id('kpi2')}
-            value={draft.kpi_secondary}
-            maxLength={CUSTOM_TEXT_LIMITS.kpi}
-            onChange={(e) => set('kpi_secondary', e.target.value)}
-            style={inputStyle}
-          />
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 24 }}>
-        <label htmlFor={id('cta')} style={labelStyle}>{te.cta}</label>
-        <textarea
-          id={id('cta')}
-          value={draft.cta_mechanic}
-          maxLength={CUSTOM_TEXT_LIMITS.cta_mechanic}
-          placeholder={te.ctaPlaceholder}
-          rows={2}
-          onChange={(e) => set('cta_mechanic', e.target.value)}
-          style={{ ...inputStyle, resize: 'vertical' }}
-        />
-      </div>
-
-      {/* ── Calendario ── */}
-      <h3 style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 4px' }}>
-        {te.calendar}
-      </h3>
-      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
-        {te.calendarHint(CUSTOM_STRATEGY_LIMITS.weeks, CUSTOM_STRATEGY_LIMITS.posts)}
-      </p>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
-        {draft.calendar.map((row, i) => {
-          const n = i + 1;
-          const topicInvalid = submitted && validation.rowsWithoutTopic.includes(row.key);
-          const rid = (name: string) => id(`${row.key}-${name}`);
-          return (
-            <fieldset
-              key={row.key}
-              data-testid="custom-calendar-row"
-              style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', margin: 0, minWidth: 0 }}
-            >
-              <legend style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', padding: '0 6px' }}>{te.row(n)}</legend>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label htmlFor={rid('week')} style={labelStyle}>{te.week}</label>
-                  <select
-                    id={rid('week')}
-                    value={row.week}
-                    onChange={(e) => setRow(row.key, { week: Number(e.target.value) })}
-                    style={inputStyle}
-                  >
-                    {Array.from({ length: CUSTOM_STRATEGY_LIMITS.weeks }, (_, w) => w + 1).map((w) => (
-                      <option key={w} value={w}>{te.weekOption(w)}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor={rid('format')} style={labelStyle}>{te.format}</label>
-                  <select
-                    id={rid('format')}
-                    value={row.format}
-                    onChange={(e) => setRow(row.key, { format: e.target.value as CustomStrategyFormat })}
-                    style={inputStyle}
-                  >
-                    {CUSTOM_FORMATS.map((f) => <option key={f} value={f}>{t.custom.formats[f]}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor={rid('channel')} style={labelStyle}>{te.channel}</label>
-                  <select
-                    id={rid('channel')}
-                    value={row.channel}
-                    onChange={(e) => setRow(row.key, { channel: e.target.value })}
-                    style={inputStyle}
-                  >
-                    {CUSTOM_CHANNELS.map((c) => <option key={c} value={c}>{channelLabel(c)}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                <label htmlFor={rid('topic')} style={labelStyle}>{te.topic} *</label>
-                <input
-                  id={rid('topic')}
-                  value={row.topic}
-                  maxLength={CUSTOM_TEXT_LIMITS.topic}
-                  placeholder={te.topicPlaceholder}
-                  aria-invalid={topicInvalid || undefined}
-                  required
-                  onChange={(e) => setRow(row.key, { topic: e.target.value })}
-                  style={{ ...inputStyle, ...(topicInvalid ? invalidInput : {}) }}
-                />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 10 }}>
-                <div>
-                  <label htmlFor={rid('angle')} style={labelStyle}>{te.angle}</label>
-                  <input
-                    id={rid('angle')}
-                    value={row.angle}
-                    maxLength={CUSTOM_TEXT_LIMITS.angle}
-                    placeholder={te.anglePlaceholder}
-                    onChange={(e) => setRow(row.key, { angle: e.target.value })}
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label htmlFor={rid('goal')} style={labelStyle}>{te.goal}</label>
-                  <input
-                    id={rid('goal')}
-                    value={row.goal}
-                    maxLength={CUSTOM_TEXT_LIMITS.goal}
-                    placeholder={te.goalPlaceholder}
-                    onChange={(e) => setRow(row.key, { goal: e.target.value })}
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-              {draft.calendar.length > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                  <button
-                    type="button"
-                    onClick={() => removeRow(row.key)}
-                    aria-label={te.removeRow(n)}
-                    style={{ ...secondaryBtn, padding: '6px 12px', fontSize: 12 }}
-                  >
-                    {te.remove}
-                  </button>
-                </div>
-              )}
-            </fieldset>
-          );
-        })}
-      </div>
-
-      <button
-        type="button"
-        onClick={addRow}
-        disabled={draft.calendar.length >= CUSTOM_STRATEGY_LIMITS.posts}
-        style={{ ...secondaryBtn, padding: '8px 16px', fontSize: 13, marginBottom: 24 }}
-      >
-        {te.addRow}
-      </button>
-
-      {/* ── Acciones ── */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <button type="submit" disabled={saving} style={{ ...secondaryBtn, borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-          {saving ? te.saving : te.save}
-        </button>
-        <button type="button" disabled={saving} onClick={() => submit(true)} style={primaryBtn}>
-          {saving ? te.saving : te.saveActivate}
-        </button>
-        <button type="button" disabled={saving} onClick={onCancel} style={secondaryBtn}>
-          {te.cancel}
-        </button>
       </div>
     </form>
   );

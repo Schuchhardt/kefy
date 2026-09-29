@@ -5,7 +5,10 @@
 // Supabase y no se puede importar en el navegador); un test comprueba que no
 // se desalineen.
 
-import { ORGANIC_CHANNELS } from '@/lib/channels';
+import { CHANNEL_LABELS, ORGANIC_CHANNELS } from '@/lib/channels';
+import type { IconName } from '@/components/ui/icons';
+import type { StrategyCopy } from '@/locales/es/dashboard/strategy';
+import type { Channel } from '@/types/channels';
 import type {
   CustomCalendarItem,
   CustomStrategy,
@@ -230,4 +233,41 @@ export function generateParams(item: Pick<CustomCalendarItem, 'channel' | 'forma
     topic: item.topic,
     type: CUSTOM_FORMATS.includes(item.format) ? item.format : 'post',
   });
+}
+
+// ─── Presentación del calendario (recomendadas y propias) ────────────────────
+
+const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+/**
+ * Icono de un formato, propio (post, carousel…) o del catálogo (carrusel,
+ * historia, infografía, email…). Antes eran caracteres Unicode (▦ ▶ ✦ ⬜) que
+ * cada sistema pinta distinto y los lectores de pantalla leen en voz alta.
+ */
+export function formatIcon(format: string | null | undefined): IconName {
+  const f = (format ?? '').trim().toLowerCase();
+  if (f === 'infografía' || f === 'infografia' || f === 'infographic') return 'chart';
+  if (f === 'email') return 'mail';
+  const mapped = mapCatalogFormat(f);
+  if (mapped === 'carousel') return 'carousel';
+  if (mapped === 'reel') return 'video';
+  if (mapped === 'story') return 'story';
+  return 'post';
+}
+
+/** Nombre de un formato del catálogo en el idioma de la página (antes salía «carrusel» tal cual en inglés). */
+export function catalogFormatLabel(format: string | null | undefined, t: StrategyCopy): string {
+  const raw = (format ?? '').trim();
+  const known = t.catalogFormats[raw.toLowerCase()];
+  if (known) return known;
+  const mapped = mapCatalogFormat(raw);
+  if (mapped !== 'post' || raw.toLowerCase() === 'post') return t.custom.formats[mapped];
+  return capitalize(raw);
+}
+
+/** Nombre de un canal: «general» = cualquier red; los demás, con su nombre propio. */
+export function channelName(channel: string | null | undefined, t: StrategyCopy): string {
+  const c = (channel ?? '').trim();
+  if (!c || c === 'general') return t.custom.channelGeneral;
+  return CHANNEL_LABELS[c as Channel] ?? capitalize(c);
 }

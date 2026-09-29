@@ -42,9 +42,11 @@ describe('NetworkPreview', () => {
     // El slide activo (0) se muestra
     expect(screen.getByText('Slide uno')).toBeInTheDocument();
 
-    // Hay dos puntos de navegación; hacer click en el segundo notifica al padre
-    const dots = document.querySelectorAll('div[style*="cursor: pointer"][style*="border-radius: 3px"]');
-    expect(dots.length).toBe(2);
+    // Hay dos puntos de navegación (botones con nombre); hacer click en el
+    // segundo notifica al padre
+    const dots = screen.getAllByRole('button', { name: /^Slide \d+ de 2$/ });
+    expect(dots).toHaveLength(2);
+    expect(dots[0]).toHaveAttribute('aria-current', 'true');
     fireEvent.click(dots[1]);
     expect(onActiveSlideChange).toHaveBeenCalledWith(1);
   });
@@ -80,8 +82,9 @@ describe('NetworkPreview', () => {
       />,
     );
     const linkedinTab = screen.getByTitle('LinkedIn');
-    // El estilo de "activo" usa var(--accent) como color de borde.
-    expect(linkedinTab.getAttribute('style')).toContain('var(--accent)');
+    // La pestaña activa se anuncia con aria-pressed (y así se pinta en CSS).
+    expect(linkedinTab).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTitle('Instagram')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('notifica al padre en vez de cambiar de red internamente cuando `onChannelChange` está definido', () => {
@@ -130,5 +133,56 @@ describe('NetworkPreview', () => {
     // reel → instagram, tiktok, facebook
     const tabs = screen.getAllByRole('button').filter((b) => b.getAttribute('title'));
     expect(tabs).toHaveLength(3);
+  });
+});
+
+// ─── Accesibilidad y móvil (auditoría UX 5.2/5.5) ──────────────────────────
+
+describe('NetworkPreview — accesibilidad', () => {
+  it('las pestañas de red tienen nombre propio y dicen si ya se publicó ahí', () => {
+    render(
+      <NetworkPreview {...baseProps} contentType="post" slides={[]} publishedNetworks={['linkedin']} />,
+    );
+    expect(screen.getByRole('button', { name: 'LinkedIn (ya publicado)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Instagram' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Ver la vista previa en' })).toBeTruthy();
+  });
+
+  it('las flechas de slides avanzan y retroceden, y no pasan de los extremos', () => {
+    const onActiveSlideChange = vi.fn();
+    const { rerender } = render(
+      <NetworkPreview {...baseProps} onActiveSlideChange={onActiveSlideChange} contentType="carousel" slides={slides} activeSlide={0} />,
+    );
+    expect(screen.getByRole('button', { name: 'Slide anterior' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Slide siguiente' }));
+    expect(onActiveSlideChange).toHaveBeenCalledWith(1);
+
+    rerender(<NetworkPreview {...baseProps} onActiveSlideChange={onActiveSlideChange} contentType="carousel" slides={slides} activeSlide={1} />);
+    expect(screen.getByRole('button', { name: 'Slide siguiente' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Slide anterior' }));
+    expect(onActiveSlideChange).toHaveBeenLastCalledWith(0);
+  });
+
+  it('la interfaz simulada de la red no mete botones falsos en el orden de tabulación', () => {
+    render(<NetworkPreview {...baseProps} contentType="post" slides={[]} channel="linkedin" onChannelChange={vi.fn()} />);
+    // «Seguir», «Me gusta»… son imitación: no son botones.
+    expect(screen.queryByRole('button', { name: /seguir|me gusta|comentar/i })).toBeNull();
+  });
+
+  it('en inglés la interfaz simulada también está en inglés', () => {
+    render(<NetworkPreview {...baseProps} contentType="post" slides={[]} lang="en" />);
+    expect(screen.getByText(/Instagram ·/).textContent).toContain('Now');
+    expect(screen.getByRole('group', { name: 'Preview on' })).toBeTruthy();
+  });
+
+  it('con frameMaxHeight el marco vertical se estrecha sin cambiar su proporción', () => {
+    const scenes: ReelScene[] = [{ scene_order: 1, title: 'Escena', body: '', duration_seconds: 3, image_url: null }];
+    const { container } = render(
+      <NetworkPreview {...baseProps} contentType="reel" slides={scenes} frameMaxHeight="min(560px, 50dvh)" />,
+    );
+    const media = Array.from(container.querySelectorAll('div')).find((d) => d.style.aspectRatio === '9 / 16');
+    expect(media).toBeTruthy();
+    const frame = media!.parentElement as HTMLElement;
+    expect(frame.style.getPropertyValue('--frame-max-h')).toBe('min(560px, 50dvh)');
   });
 });

@@ -4,6 +4,10 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import type React from 'react';
 import GenerationLoader from '@/components/ui/GenerationLoader';
+import Button from '@/components/ui/Button';
+import Icon from '@/components/ui/icons';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
 
 type MuxLegacyPlayerProps = {
   playbackId: string; streamType: string; style: React.CSSProperties;
@@ -29,8 +33,15 @@ export interface MuxReelPlayerProps {
   muxPlaybackId?:   string | null;
   renderStatus?:    'not_rendered' | 'rendering' | 'ready' | 'error' | null;
   accentColor?:     string;
+  /** Alto preferido en px (el ancho sale de 9:16). En un contenedor más
+   *  estrecho el reproductor se encoge manteniendo la proporción. */
   height?:          number;
+  /** Tope de alto adicional en CSS (p. ej. `50dvh`), para que en un móvil el
+   *  video no ocupe varias pantallas. */
+  maxHeight?:       string;
   autoPlay?:        boolean;
+  /** Idioma de los mensajes de estado (por defecto, español). */
+  lang?:            'es' | 'en';
   onRenderStart?:   (itemId: string) => void;
   /** Callback receives the video URL (S3 or Mux) once ready. */
   onRenderDone?:    (itemId: string, videoUrl: string) => void;
@@ -45,10 +56,16 @@ export interface MuxReelPlayerProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function containerStyle(height: number): React.CSSProperties {
+// Fluido: nunca más ancho que su contenedor (antes `width` fijo = alto × 9/16:
+// con `height={640}` medía 360px y desbordaba un móvil de 360px). El alto sale
+// de la proporción, así que no se deforma.
+function containerStyle(height: number, maxHeight?: string): React.CSSProperties {
   const width = Math.round(height * (9 / 16));
+  const caps = [`${width}px`, '100%'];
+  if (maxHeight) caps.push(`calc(${maxHeight} * 9 / 16)`);
   return {
-    width, height,
+    width:        `min(${caps.join(', ')})`,
+    aspectRatio:  '9 / 16',
     margin:       '0 auto',
     borderRadius: 14,
     overflow:     'hidden',
@@ -56,6 +73,14 @@ function containerStyle(height: number): React.CSSProperties {
     background:   '#000',
   };
 }
+
+const fill: React.CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%' };
+
+/** Error del render: un motivo conocido (se traduce al pintarlo) o el mensaje
+ *  que devolvió el servidor. */
+type RenderError =
+  | { kind: 'failed' | 'interrupted' | 'timeout' | 'startError' | 'unknownError' }
+  | { kind: 'message'; message: string };
 
 // Resolve the initial local URL from whichever prop is available
 function resolveInitialUrl(videoUrl?: string | null, muxPlaybackId?: string | null): string | null {
@@ -74,13 +99,16 @@ export function MuxReelPlayer({
   renderStatus,
   accentColor = '#c6ff4b',
   height = 480,
+  maxHeight,
   autoPlay = false,
+  lang = 'es',
   onRenderStart,
   onRenderDone,
 }: MuxReelPlayerProps) {
+  const t = (lang === 'en' ? enPublish : esPublish).player;
   const [localUrl, setLocalUrl]     = useState<string | null>(() => resolveInitialUrl(videoUrl, muxPlaybackId));
   const [isRendering, setIsRendering] = useState(renderStatus === 'rendering');
-  const [renderError, setRenderError] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<RenderError | null>(null);
   const [progress, setProgress]       = useState<number>(0);
 
   const isRenderingRef  = useRef(renderStatus === 'rendering');
@@ -119,7 +147,7 @@ export function MuxReelPlayer({
       } else if (data.render_status === 'error') {
         isRenderingRef.current = false;
         setIsRendering(false);
-        setRenderError('El render falló. Inténtalo de nuevo.');
+        setRenderError({ kind: 'failed' });
       } else if (data.render_status === 'not_rendered') {
         // The server found the render dead (trigger lost or stale) and reset the
         // row — polling it further would never finish. Start a fresh render,
@@ -131,7 +159,7 @@ export function MuxReelPlayer({
           restartCountRef.current += 1;
           startRenderRef.current?.();
         } else {
-          setRenderError('El render se interrumpió. Inténtalo de nuevo.');
+          setRenderError({ kind: 'interrupted' });
         }
       } else {
         pollCountRef.current += 1;
@@ -140,7 +168,7 @@ export function MuxReelPlayer({
         } else {
           isRenderingRef.current = false;
           setIsRendering(false);
-          setRenderError('El render tardó demasiado. Inténtalo de nuevo.');
+          setRenderError({ kind: 'timeout' });
         }
       }
     } catch {
@@ -173,7 +201,7 @@ export function MuxReelPlayer({
       if (!res.ok) {
         isRenderingRef.current = false;
         setIsRendering(false);
-        setRenderError(data.error ?? 'Error al iniciar el render');
+        setRenderError(data.error ? { kind: 'message', message: data.error } : { kind: 'startError' });
         return;
       }
 
@@ -191,7 +219,7 @@ export function MuxReelPlayer({
     } catch (err) {
       isRenderingRef.current = false;
       setIsRendering(false);
-      setRenderError(err instanceof Error ? err.message : 'Error desconocido');
+      setRenderError(err instanceof Error && err.message ? { kind: 'message', message: err.message } : { kind: 'unknownError' });
     }
   }, [itemId, format, pollStatus, onRenderStart, onRenderDone]);
 
@@ -212,19 +240,19 @@ export function MuxReelPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const cs = containerStyle(height);
+  const cs = containerStyle(height, maxHeight);
 
   // ── Video ready (S3 URL) ───────────────────────────────────────────────────
   if (localUrl && !isMuxLegacy) {
     return (
       <div style={cs}>
-          <video
+        <video
           src={localUrl}
           controls
           playsInline
           autoPlay={autoPlay}
           muted={autoPlay}
-          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+          style={{ ...fill, objectFit: 'contain', display: 'block' }}
         />
       </div>
     );
@@ -234,37 +262,45 @@ export function MuxReelPlayer({
   if (isMuxLegacy && muxId) {
     return (
       <div style={cs}>
-        <MuxLegacyPlayer
-          playbackId={muxId}
-          streamType="on-demand"
-          style={{ width: '100%', height: '100%' }}
-          accentColor={accentColor}
-          thumbnailTime={1}
-          muted={autoPlay}
-          autoPlay={autoPlay}
-        />
+        <div style={fill}>
+          <MuxLegacyPlayer
+            playbackId={muxId}
+            streamType="on-demand"
+            style={{ width: '100%', height: '100%' }}
+            accentColor={accentColor}
+            thumbnailTime={1}
+            muted={autoPlay}
+            autoPlay={autoPlay}
+          />
+        </div>
       </div>
     );
   }
 
   // ── Error ──────────────────────────────────────────────────────────────────
   if (renderError) {
+    const message = renderError.kind === 'message' ? renderError.message : t[renderError.kind];
     return (
-      <div style={{ ...cs, background: '#0a0a0f', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-        <span style={{ fontSize: 24 }}>⚠️</span>
-        <p style={{ color: '#ff6b6b', fontSize: 13, textAlign: 'center', margin: 0, padding: '0 16px' }}>
-          {renderError}
+      <div
+        role="alert"
+        style={{
+          ...cs, background: 'var(--surface-2)', border: '1px solid var(--danger-border)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12,
+          padding: 16, boxSizing: 'border-box',
+        }}
+      >
+        <Icon name="alert" size={24} style={{ color: 'var(--danger)' }} />
+        <p style={{ color: 'var(--danger)', fontSize: 13, textAlign: 'center', margin: 0, overflowWrap: 'anywhere' }}>
+          {message}
         </p>
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<Icon name="refresh" size={14} />}
           onClick={() => { hasTriggeredRef.current = false; setRenderError(null); startRender(); }}
-          style={{
-            background: 'transparent', border: `1px solid ${accentColor}60`,
-            color: accentColor, borderRadius: 8, padding: '8px 16px',
-            fontSize: 13, fontWeight: 600, cursor: 'pointer',
-          }}
         >
-          Reintentar
-        </button>
+          {t.retry}
+        </Button>
       </div>
     );
   }
@@ -274,7 +310,7 @@ export function MuxReelPlayer({
     <div style={{ ...cs, background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <GenerationLoader
         progress={isRendering ? Math.max(progress, 0) : 0.02}
-        label={isRendering ? 'Generando video…' : 'Iniciando…'}
+        label={isRendering ? t.rendering : t.starting}
         accentColor={accentColor}
         showPercent={isRendering}
       />

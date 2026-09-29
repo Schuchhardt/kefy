@@ -1,45 +1,91 @@
-const en = {
+import type { SettingsCopy } from '@/locales/es/dashboard/settings';
+
+// Plan prices, limits and features come from lib/plans.ts and
+// locales/*/plans.ts, never from here (see the Spanish file).
+
+const en: SettingsCopy = {
   title: 'Settings',
-  subtitle: 'Manage your profile, organization and social accounts',
-  sectionProfile: 'Profile',
-  sectionOrg: 'Organization',
-  sectionSocial: 'Social accounts',
-  sectionBilling: 'Plan & billing',
-  nameLabel: 'Name',
-  emailLabel: 'Email',
-  planLabel: 'Plan',
-  saving: 'Saving...',
-  save: 'Save',
-  saved: '✓ Saved',
-  planChangeNote: 'To change plan, contact',
-  connected: 'Connected',
-  disconnect: 'Disconnect',
-  connectNew: 'Connect new account',
-  redirecting: 'Redirecting...',
-  confirmDisconnect: 'Disconnect this account? Autopilot rules using it will stop working.',
-  oauthError: 'Error generating OAuth URL',
-  unknownError: 'Unknown error',
-  expires: 'expires',
-  // Billing
-  currentPlanBadge: 'Current plan',
-  upgrade: 'Upgrade to',
-  manage: 'Manage subscription',
-  billingSuccess: '✓ Plan updated. Thank you for subscribing!',
-  billingCanceled: 'Payment process was canceled.',
-  billingError: 'Could not start the payment process.',
-  billingRedirecting: 'Redirecting to Stripe...',
-  planStarterName: 'Starter',
-  planProName: 'Pro',
-  planBusinessName: 'Business',
-  planStarterPrice: '$19',
-  planProPrice: '$69',
-  planBusinessPrice: '$199',
-  planPer: '/ mo',
-  planStarterFeatures: ['1 brand', '3 social connections', '150 AI credits / mo', 'AI assistant: 300 messages / mo', 'Calendar + scheduling', 'Basic analytics'],
-  planProFeatures: ['5 brands', '20 social connections', '500 AI credits / mo', 'AI assistant: 1,500 messages / mo', 'All channels', 'Advanced automations', 'Autopilot mode'],
-  planBusinessFeatures: ['Unlimited brands', 'Unlimited connections', '2000 AI credits / mo', 'AI assistant: 5,000 messages / mo', 'Everything in Pro', 'Priority support', 'API access'],
-  // API keys & MCP (components/dashboard/settings/ApiKeysSection.tsx)
+  subtitle: 'Your account, your organization, the plan, connected networks and integrations.',
+  indexLabel: 'Settings sections',
+
+  sections: {
+    profile: 'Profile',
+    org: 'Organization',
+    billing: 'Plan & billing',
+    social: 'Social accounts',
+    team: 'Team',
+    leadScoring: 'Lead scoring',
+  },
+
+  profile: {
+    subtitle: 'Your name and password are changed in your profile.',
+    nameLabel: 'Name',
+    emailLabel: 'Email address',
+    noName: 'No name',
+    edit: 'Edit in your profile',
+  },
+
+  org: {
+    subtitle: 'The name your team sees and that shows up in invitations.',
+    nameLabel: 'Organization name',
+    saved: 'Name saved',
+    saveError: 'Could not save the organization name. Please try again.',
+    readOnly: 'Only the owner or an admin can change the organization name.',
+  },
+
+  billing: {
+    current: 'Current plan',
+    includedTitle: 'Every plan includes',
+    upgrade: (plan: string) => `Upgrade to ${plan}`,
+    change: (plan: string) => `Switch to ${plan}`,
+    subscribe: (plan: string) => `Subscribe to ${plan}`,
+    manage: 'Manage subscription',
+    redirecting: 'Redirecting to Stripe…',
+    success: 'Plan updated. Thank you for subscribing!',
+    canceled: 'The payment process was canceled.',
+    checkoutError: 'Could not start the payment process. Please try again.',
+    portalError: 'Could not open the billing portal. Please try again.',
+    noCustomer: "You don't have a paid subscription yet. Pick a plan to subscribe.",
+    onlyManagers: 'Only the owner or an admin can change the plan.',
+    status: {
+      trial: (days: number) => (days <= 1
+        ? 'Your free month ends today. Pick a plan so your content keeps going.'
+        : `You're on your free month: ${days} days left. Pick a plan before it ends so your content keeps going.`),
+      trialEnded: 'Your free month has ended. Everything you made is still here: pick a plan to generate and publish again.',
+      paymentFailed: 'We could not process your last payment. Update your payment method in "Manage subscription".',
+      inactive: 'Your subscription is not active. Pick a plan to generate and publish again.',
+    },
+  },
+
+  leadScoring: {
+    subtitle: 'Every interaction adds points to a lead. When its score reaches a stage minimum, it moves to that stage.',
+    pointsTitle: 'Points per interaction type',
+    thresholdsTitle: 'Minimum score for each stage',
+    points: (n: number) => (n === 1 ? '1 point' : `${n} points`),
+    interactions: {
+      comment: 'Comment',
+      review: 'Review',
+      dm: 'Direct message',
+      mention: 'Mention',
+      follow: 'New follower',
+      share: 'Share',
+      click: 'Link click',
+      manual: 'Manual interaction',
+    },
+    stages: {
+      tibio: 'Warm',
+      caliente: 'Hot',
+      contactado: 'Contacted',
+      convertido: 'Converted',
+    },
+    save: 'Save scoring',
+    saved: 'Scoring saved',
+    saveError: 'Could not save the scoring. Please try again.',
+    readOnly: 'Only the owner or an admin can change the scoring.',
+  },
+
   apiKeys: {
+    dateLocale: 'en-US',
     sectionTitle: 'API & MCP',
     intro: 'Connect Kefy to Claude, Cursor or other agents and projects. Each key acts with the current role of whoever created it, and only with the permissions you choose.',
     create: 'Create API key',
@@ -68,6 +114,7 @@ const en = {
     revoking: 'Revoking…',
     revokeError: 'Could not revoke the key.',
     cancel: 'Cancel',
+    close: 'Close',
     // Create
     createTitle: 'New API key',
     nameLabel: 'Name',
@@ -95,13 +142,14 @@ const en = {
     secretTitle: 'Your new API key',
     secretWarning: 'Copy it and store it somewhere safe. You will not see it again.',
     copy: 'Copy',
-    copied: '✓ Copied',
+    copied: 'Copied',
     copyFailed: 'Could not copy',
     done: 'I saved it',
     // Connect
     connectTitle: 'Connect via MCP',
     connectIntro: 'Use this URL with the "Authorization: Bearer" header and your key. In the examples, replace kefy_sk_... with the key you created.',
     mcpUrlLabel: 'MCP server URL',
+    snippetsLabel: 'Setup examples by client',
     snippetHints: {
       claudeCode: 'Run in your terminal:',
       cursor: 'Add to ~/.cursor/mcp.json:',

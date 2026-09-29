@@ -13,9 +13,15 @@
 // No se importa nada de lib/assistant/api-keys.ts: usa node:crypto y no puede
 // entrar en el bundle del navegador. Los scopes se repiten aquí.
 
-import { useCallback, useEffect, useState } from 'react';
-import Modal from '@/components/dashboard/content/Modal';
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import Modal from '@/components/ui/Modal';
+import Button, { Spinner } from '@/components/ui/Button';
+import { Field, Input, Select } from '@/components/ui/Field';
+import Notice from '@/components/ui/Notice';
+import EmptyState from '@/components/ui/EmptyState';
+import Icon from '@/components/ui/icons';
 import { useBrand } from '@/lib/brand-context';
+import styles from './ApiKeysSection.module.css';
 
 import esT from '@/locales/es/dashboard/settings';
 import enT from '@/locales/en/dashboard/settings';
@@ -54,66 +60,10 @@ interface CreatedKey {
   secret: string;
 }
 
-// ─── Estilos ──────────────────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  fontSize: 14,
-  color: 'var(--text)',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: 'var(--muted)',
-  display: 'block',
-  marginBottom: 6,
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-};
-
-const monoStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-jetbrains), monospace',
-  fontSize: 12,
-};
-
-const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-  background: 'var(--accent)', color: '#0A0A0C', border: 'none', borderRadius: 8,
-  padding: '9px 18px', fontWeight: 600, fontSize: 13,
-  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
-});
-
-const secondaryBtn = (disabled = false): React.CSSProperties => ({
-  background: 'none', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8,
-  padding: '8px 14px', fontWeight: 600, fontSize: 12,
-  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
-});
-
-const dangerBtn = (disabled: boolean): React.CSSProperties => ({
-  background: 'rgba(255,107,107,0.12)', color: '#ff6b6b',
-  border: '1px solid rgba(255,107,107,0.35)', borderRadius: 8,
-  padding: '9px 18px', fontWeight: 600, fontSize: 13,
-  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
-});
-
-const errorStyle: React.CSSProperties = { color: '#ff6b6b', fontSize: 13 };
-
-const warningBox: React.CSSProperties = {
-  padding: '10px 12px', borderRadius: 8, fontSize: 12, lineHeight: 1.5,
-  background: 'rgba(255,176,32,0.10)', border: '1px solid rgba(255,176,32,0.35)',
-  color: 'var(--text)',
-};
-
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 
-function formatDate(iso: string, lang: 'es' | 'en'): string {
-  return new Date(iso).toLocaleDateString(lang === 'en' ? 'en-US' : 'es-ES', {
+function formatDate(iso: string, dateLocale: string): string {
+  return new Date(iso).toLocaleDateString(dateLocale, {
     day: 'numeric', month: 'short', year: 'numeric',
   });
 }
@@ -153,27 +103,22 @@ function CopyButton({ text, t }: { text: string; t: Copy }) {
   }, [state]);
 
   return (
-    <button
-      type="button"
+    <Button
+      size="sm"
+      variant="secondary"
+      icon={state === 'copied' ? <Icon name="check" size={14} /> : undefined}
       onClick={async () => setState((await copyText(text)) ? 'copied' : 'failed')}
-      style={{ ...secondaryBtn(), flexShrink: 0, padding: '6px 12px' }}
+      style={{ flexShrink: 0 }}
     >
       {state === 'copied' ? t.copied : state === 'failed' ? t.copyFailed : t.copy}
-    </button>
+    </Button>
   );
 }
 
 function CodeBlock({ code, t }: { code: string; t: Copy }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 8,
-      background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-      padding: '10px 10px 10px 14px',
-    }}>
-      <pre style={{
-        ...monoStyle, margin: 0, flex: 1, minWidth: 0,
-        whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--text)', lineHeight: 1.6,
-      }}>
+    <div className={styles.code}>
+      <pre className={`${styles.mono} ${styles.codeText}`}>
         {code}
       </pre>
       <CopyButton text={code} t={t} />
@@ -184,14 +129,12 @@ function CodeBlock({ code, t }: { code: string; t: Copy }) {
 // ─── Badge de scope ───────────────────────────────────────────────────────────
 
 function ScopeBadge({ scope, t }: { scope: Scope; t: Copy }) {
-  const publish = scope === 'publish';
+  // Publicar es el permiso con riesgo (actúa sin confirmación humana).
+  const style = (scope === 'publish'
+    ? { '--badge-color': 'var(--warning)', '--badge-bg': 'var(--warning-soft)' }
+    : { '--badge-color': 'var(--accent-text)', '--badge-bg': 'var(--accent-soft)' }) as CSSProperties;
   return (
-    <span style={{
-      fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-      background: publish ? 'rgba(255,176,32,0.12)' : 'rgba(198,255,75,0.10)',
-      border: `1px solid ${publish ? 'rgba(255,176,32,0.4)' : 'rgba(198,255,75,0.35)'}`,
-      color: 'var(--text)', whiteSpace: 'nowrap',
-    }}>
+    <span className="ui-badge" style={style}>
       {t.scopes[scope].label}
     </span>
   );
@@ -217,43 +160,32 @@ function KeyRow({
   // En una revocada la caducidad ya no importa: basta con el badge de estado.
   if (k.status !== 'revoked') {
     if (!k.expires_at) meta.push(t.noExpiry);
-    else meta.push(active ? t.expiresOn(formatDate(k.expires_at, lang)) : t.expiredOn(formatDate(k.expires_at, lang)));
+    else meta.push(active ? t.expiresOn(formatDate(k.expires_at, t.dateLocale)) : t.expiredOn(formatDate(k.expires_at, t.dateLocale)));
   }
 
   return (
-    <li style={{
-      display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      padding: '12px 14px', borderRadius: 10,
-      background: 'var(--bg)', border: '1px solid var(--border)',
-      opacity: active ? 1 : 0.6,
-    }}>
-      <div style={{ flex: '1 1 260px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 14, fontWeight: 600, overflowWrap: 'anywhere' }}>{k.name}</span>
-          <code style={{ ...monoStyle, color: 'var(--muted)' }}>{k.key_prefix}…</code>
+    <li className={styles.key} data-inactive={!active || undefined}>
+      <div className={styles.keyMain}>
+        <div className={styles.keyTitle}>
+          <span className={styles.keyName}>{k.name}</span>
+          <code className={`${styles.mono} ${styles.prefix}`}>{k.key_prefix}…</code>
           {!active && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-              textTransform: 'uppercase', letterSpacing: '0.05em',
-              background: 'var(--surface-2)', color: 'var(--muted)', border: '1px solid var(--border)',
-            }}>
+            <span className="ui-badge">
               {k.status === 'revoked' ? t.statusRevoked : t.statusExpired}
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div className={styles.badges}>
           {SCOPES.filter((s) => k.scopes.includes(s)).map((s) => (
             <ScopeBadge key={s} scope={s} t={t} />
           ))}
         </div>
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0, lineHeight: 1.5 }}>
-          {meta.join(' · ')}
-        </p>
+        <p className={styles.meta}>{meta.join(' · ')}</p>
       </div>
       {active && (
-        <button type="button" onClick={() => onRevoke(k)} style={secondaryBtn()}>
+        <Button size="sm" variant="danger-ghost" className={styles.keyAction} onClick={() => onRevoke(k)}>
           {t.revoke}
-        </button>
+        </Button>
       )}
     </li>
   );
@@ -343,118 +275,98 @@ function CreateKeyModal({
       title={created ? t.secretTitle : t.createTitle}
       subtitle={created ? `${created.name} · ${created.prefix}…` : undefined}
       maxWidth={520}
-      // Con el secreto a la vista no se cierra por un clic fuera: solo con el
-      // botón explícito (o la ✕ de la cabecera).
+      closeLabel={t.close}
+      padded
+      // Con el secreto a la vista no se cierra por un clic fuera ni con Esc:
+      // solo con el botón explícito.
       dismissable={!submitting && !created}
     >
       {created ? (
-        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={warningBox}>{t.secretWarning}</div>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: 'var(--surface)', border: '1px solid var(--accent)', borderRadius: 8,
-            padding: '10px 10px 10px 14px',
-          }}>
-            <code style={{
-              ...monoStyle, fontSize: 13, flex: 1, minWidth: 0,
-              wordBreak: 'break-all', userSelect: 'all', color: 'var(--text)',
-            }}>
-              {created.secret}
-            </code>
+        <div className={styles.stack}>
+          <Notice tone="warning" icon={<Icon name="alert" size={16} />}>{t.secretWarning}</Notice>
+          <div className={styles.secret}>
+            <code className={`${styles.mono} ${styles.secretText}`}>{created.secret}</code>
             <CopyButton text={created.secret} t={t} />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="button" onClick={onClose} style={primaryBtn(false)}>{t.done}</button>
+          <div className={styles.actions}>
+            <Button variant="primary" onClick={onClose}>{t.done}</Button>
           </div>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <div>
-            <label htmlFor="api-key-name" style={labelStyle}>{t.nameLabel}</label>
-            <input
-              id="api-key-name"
-              style={inputStyle}
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <Field label={t.nameLabel}>
+            <Input
               value={name}
               maxLength={100}
               autoFocus
               required
+              autoComplete="off"
               onChange={(e) => setName(e.target.value)}
               placeholder={t.namePlaceholder}
             />
-          </div>
+          </Field>
 
-          <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-            <legend style={labelStyle}>{t.scopesLabel}</legend>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <fieldset className={styles.fieldset}>
+            <legend className={`ui-label ${styles.legend}`}>{t.scopesLabel}</legend>
+            <div className={styles.scopes}>
               {SCOPES.map((s) => (
-                <label key={s} style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
-                  padding: '10px 12px', borderRadius: 8,
-                  border: `1px solid ${scopes.includes(s) ? 'rgba(198,255,75,0.35)' : 'var(--border)'}`,
-                  background: scopes.includes(s) ? 'rgba(198,255,75,0.05)' : 'transparent',
-                }}>
+                <label key={s} className={styles.scope} data-checked={scopes.includes(s) || undefined}>
                   <input
                     type="checkbox"
                     checked={scopes.includes(s)}
                     onChange={() => toggleScope(s)}
-                    style={{ marginTop: 3, accentColor: 'var(--accent)' }}
                   />
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{t.scopes[s].label}</span>
-                    <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>{t.scopes[s].hint}</span>
+                  <span className={styles.scopeText}>
+                    <span className={styles.scopeLabel}>{t.scopes[s].label}</span>
+                    <span className={styles.scopeHint}>{t.scopes[s].hint}</span>
                   </span>
                 </label>
               ))}
             </div>
+            {/* role="alert" y no el status de Notice: es un aviso de riesgo que
+                tiene que oírse en cuanto se marca la casilla. */}
             {scopes.includes('publish') && (
-              <div role="alert" style={{ ...warningBox, marginTop: 10 }}>⚠ {t.publishWarning}</div>
+              <div role="alert" className={`ui-notice ui-notice--warning ${styles.warning}`}>
+                <span aria-hidden="true" style={{ display: 'flex', flexShrink: 0, marginTop: 2 }}>
+                  <Icon name="alert" size={16} />
+                </span>
+                <div style={{ minWidth: 0 }}>{t.publishWarning}</div>
+              </div>
             )}
           </fieldset>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
-            <div>
-              <label htmlFor="api-key-brand" style={labelStyle}>{t.brandLabel}</label>
-              <select
-                id="api-key-brand"
-                style={inputStyle}
-                value={brandId}
-                onChange={(e) => setBrandId(e.target.value)}
-              >
+          <div className="auto-grid" style={{ '--min': '180px', '--gap': '16px' } as CSSProperties}>
+            <Field label={t.brandLabel} hint={t.brandHint}>
+              <Select value={brandId} onChange={(e) => setBrandId(e.target.value)}>
                 <option value="">{t.allBrands}</option>
                 {activeBrands.map((b) => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="api-key-expiry" style={labelStyle}>{t.expiryLabel}</label>
-              <select
-                id="api-key-expiry"
-                style={inputStyle}
-                value={expiry}
-                onChange={(e) => setExpiry(Number(e.target.value))}
-              >
+              </Select>
+            </Field>
+            <Field label={t.expiryLabel}>
+              <Select value={expiry} onChange={(e) => setExpiry(Number(e.target.value))}>
                 {EXPIRY_OPTIONS.map((d) => (
                   <option key={d} value={d}>{d === 0 ? t.expiryNever : t.expiryDays(d)}</option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '-8px 0 0' }}>{t.brandHint}</p>
 
-          {error && <p role="alert" style={{ ...errorStyle, margin: 0 }}>{error}</p>}
+          {error && <Notice tone="danger">{error}</Notice>}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <button type="button" onClick={onClose} disabled={submitting} style={secondaryBtn(submitting)}>
+          <div className={styles.actions}>
+            <Button variant="ghost" onClick={onClose} disabled={submitting}>
               {t.cancel}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              disabled={submitting || !name.trim() || scopes.length === 0}
-              style={primaryBtn(submitting || !name.trim() || scopes.length === 0)}
+              variant="primary"
+              loading={submitting}
+              disabled={!name.trim() || scopes.length === 0}
             >
               {submitting ? t.creating : t.submit}
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -509,21 +421,25 @@ function RevokeKeyModal({
       onClose={onClose}
       title={t.revokeTitle}
       maxWidth={440}
+      closeLabel={t.close}
+      padded
       dismissable={!revoking}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={revoking}>
+            {t.cancel}
+          </Button>
+          <Button variant="danger" onClick={handleRevoke} loading={revoking}>
+            {revoking ? t.revoking : t.revokeConfirm}
+          </Button>
+        </>
+      }
     >
       {target && (
-        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className={styles.stack}>
           <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>{t.revokeBody(target.name)}</p>
-          <code style={{ ...monoStyle, color: 'var(--muted)' }}>{target.key_prefix}…</code>
-          {error && <p role="alert" style={{ ...errorStyle, margin: 0 }}>{error}</p>}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <button type="button" onClick={onClose} disabled={revoking} style={secondaryBtn(revoking)}>
-              {t.cancel}
-            </button>
-            <button type="button" onClick={handleRevoke} disabled={revoking} style={dangerBtn(revoking)}>
-              {revoking ? t.revoking : t.revokeConfirm}
-            </button>
-          </div>
+          <code className={`${styles.mono} ${styles.prefix}`}>{target.key_prefix}…</code>
+          {error && <Notice tone="danger">{error}</Notice>}
         </div>
       )}
     </Modal>
@@ -571,48 +487,66 @@ function ConnectPanel({ t }: { t: Copy }) {
   // no desalinear el HTML del servidor.
   const [origin, setOrigin] = useState('');
   const [tab, setTab] = useState<SnippetKey>('claudeCode');
+  const baseId = useId();
+  const tabRefs = useRef<Partial<Record<SnippetKey, HTMLButtonElement | null>>>({});
 
   useEffect(() => { setOrigin(window.location.origin); }, []);
 
   if (!origin) return null;
   const snippets = buildSnippets(origin);
+  const tabId = (key: SnippetKey) => `${baseId}-tab-${key}`;
+  const panelId = `${baseId}-panel`;
+
+  // Pestañas ARIA: flechas, Inicio y Fin mueven la selección y el foco.
+  function onTabsKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const current = SNIPPET_TABS.findIndex((s) => s.key === tab);
+    const last = SNIPPET_TABS.length - 1;
+    const next =
+      e.key === 'ArrowRight' ? (current === last ? 0 : current + 1)
+      : e.key === 'ArrowLeft' ? (current === 0 ? last : current - 1)
+      : e.key === 'Home' ? 0
+      : e.key === 'End' ? last
+      : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    const key = SNIPPET_TABS[next].key;
+    setTab(key);
+    tabRefs.current[key]?.focus();
+  }
 
   return (
-    <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
-      <h3 style={{ fontFamily: 'var(--font-syne)', fontSize: 14, fontWeight: 700, margin: '0 0 6px' }}>
-        {t.connectTitle}
-      </h3>
-      <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
-        {t.connectIntro}
-      </p>
+    <div className={styles.connect}>
+      <h3 className={styles.connectTitle}>{t.connectTitle}</h3>
+      <p className={styles.connectIntro}>{t.connectIntro}</p>
 
-      <span style={labelStyle}>{t.mcpUrlLabel}</span>
+      <p className={styles.label}>{t.mcpUrlLabel}</p>
       <CodeBlock code={`${origin}/api/mcp`} t={t} />
 
-      <div role="tablist" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '18px 0 10px' }}>
+      <div role="tablist" aria-label={t.snippetsLabel} className={styles.tabs} onKeyDown={onTabsKeyDown}>
         {SNIPPET_TABS.map(({ key, label }) => {
           const selected = tab === key;
           return (
             <button
               key={key}
+              ref={(el) => { tabRefs.current[key] = el; }}
+              id={tabId(key)}
               type="button"
               role="tab"
               aria-selected={selected}
+              aria-controls={panelId}
+              tabIndex={selected ? 0 : -1}
               onClick={() => setTab(key)}
-              style={{
-                fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 20, cursor: 'pointer',
-                background: selected ? 'rgba(198,255,75,0.12)' : 'transparent',
-                border: `1px solid ${selected ? 'rgba(198,255,75,0.45)' : 'var(--border)'}`,
-                color: selected ? 'var(--text)' : 'var(--muted)',
-              }}
+              className={styles.tab}
             >
               {label}
             </button>
           );
         })}
       </div>
-      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px' }}>{t.snippetHints[tab]}</p>
-      <CodeBlock code={snippets[tab]} t={t} />
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)}>
+        <p className={styles.snippetHint}>{t.snippetHints[tab]}</p>
+        <CodeBlock code={snippets[tab]} t={t} />
+      </div>
     </div>
   );
 }
@@ -628,6 +562,7 @@ export default function ApiKeysSection({ lang }: { lang: 'es' | 'en' }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyRow | null>(null);
   const [showInactive, setShowInactive] = useState(false);
+  const inactiveId = useId();
 
   const load = useCallback(async () => {
     setLoadError(false);
@@ -658,59 +593,59 @@ export default function ApiKeysSection({ lang }: { lang: 'es' | 'en' }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
-        <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0, lineHeight: 1.5, flex: '1 1 300px' }}>
-          {t.intro}
-        </p>
-        <button
-          type="button"
+      <div className={styles.header}>
+        <p className={styles.intro}>{t.intro}</p>
+        <Button
+          variant="primary"
+          icon={<Icon name="plus" size={16} />}
           onClick={() => setCreateOpen(true)}
           disabled={keys === null || atLimit}
-          style={primaryBtn(keys === null || atLimit)}
         >
-          + {t.create}
-        </button>
+          {t.create}
+        </Button>
       </div>
 
       {keys === null ? (
-        <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.loading}</p>
+        <p className={styles.loading}><Spinner size={14} /> {t.loading}</p>
       ) : (
         <>
           {loadError && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-              <span style={errorStyle}>{t.loadError}</span>
-              <button type="button" onClick={load} style={secondaryBtn()}>{t.retry}</button>
-            </div>
+            <Notice tone="danger">
+              <span className={styles.inline}>
+                <span>{t.loadError}</span>
+                <Button size="sm" variant="secondary" onClick={() => void load()}>{t.retry}</Button>
+              </span>
+            </Notice>
           )}
 
           {!loadError && active.length === 0 && (
-            <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>{t.empty}</p>
+            <EmptyState compact icon={<Icon name="link" size={24} />} title={t.empty} />
           )}
 
           {active.length > 0 && (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <ul className={styles.list}>
               {active.map((k) => (
                 <KeyRow key={k.id} k={k} t={t} lang={lang} brandName={brandLabel(k.brand_id)} onRevoke={setRevokeTarget} />
               ))}
             </ul>
           )}
 
-          {atLimit && (
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '10px 0 0' }}>{t.limitNote(MAX_ACTIVE_KEYS)}</p>
-          )}
+          {atLimit && <p className={styles.note}>{t.limitNote(MAX_ACTIVE_KEYS)}</p>}
 
           {inactive.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <button
-                type="button"
+            <div className={styles.more}>
+              <Button
+                size="sm"
+                variant="ghost"
                 onClick={() => setShowInactive((v) => !v)}
                 aria-expanded={showInactive}
-                style={{ background: 'none', border: 'none', padding: 0, color: 'var(--muted)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+                aria-controls={showInactive ? inactiveId : undefined}
+                icon={<Icon name={showInactive ? 'chevron-up' : 'chevron-down'} size={14} />}
               >
                 {showInactive ? t.hideInactive : t.showInactive(inactive.length)}
-              </button>
+              </Button>
               {showInactive && (
-                <ul style={{ listStyle: 'none', padding: 0, margin: '10px 0 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <ul id={inactiveId} className={styles.list}>
                   {inactive.map((k) => (
                     <KeyRow key={k.id} k={k} t={t} lang={lang} brandName={brandLabel(k.brand_id)} onRevoke={setRevokeTarget} />
                   ))}

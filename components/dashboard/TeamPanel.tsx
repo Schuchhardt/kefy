@@ -5,8 +5,18 @@
 // La página de precios anuncia un número de miembros por plan. Hasta ahora no
 // existía forma de invitar a nadie, así que ese límite ni se cumplía ni se
 // podía alcanzar. Este panel es el flujo que faltaba.
+//
+// Los errores de /api/team/** llegan en español: se muestra la copy del idioma
+// de la interfaz según el status, no el texto del servidor.
 
-import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { useState, useEffect, useCallback, useId, type FormEvent } from 'react';
+import Button, { Spinner } from '@/components/ui/Button';
+import { Field, Input, Select } from '@/components/ui/Field';
+import Notice from '@/components/ui/Notice';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import esT from '@/locales/es/dashboard/team';
+import enT from '@/locales/en/dashboard/team';
+import styles from './TeamPanel.module.css';
 
 interface Member {
   userId: string;
@@ -23,63 +33,27 @@ interface Invitation {
   expired: boolean;
 }
 
-const COPY = {
-  es: {
-    seats: (used: number, limit: number) => `${used} de ${limit} ${limit === 1 ? 'lugar usado' : 'lugares usados'}`,
-    invite: 'Invitar',
-    inviting: 'Enviando…',
-    emailPlaceholder: 'correo@ejemplo.com',
-    roleMember: 'Miembro',
-    roleAdmin: 'Administrador',
-    roleOwner: 'Dueño',
-    you: 'tú',
-    pending: 'Invitaciones pendientes',
-    expired: 'expirada',
-    revoke: 'Revocar',
-    remove: 'Eliminar',
-    confirmRemove: (name: string) => `¿Eliminar a ${name} del equipo?`,
-    emptyPending: 'No hay invitaciones pendientes.',
-    planFull: 'Tu plan no admite más miembros. Mejora de plan para invitar a alguien más.',
-    onlyManagers: 'Solo el dueño o un administrador pueden gestionar el equipo.',
-    sentNoEmail: 'Invitación creada, pero no se pudo enviar el correo. Reenvíala más tarde.',
-    loadError: 'No pudimos cargar el equipo.',
-  },
-  en: {
-    seats: (used: number, limit: number) => `${used} of ${limit} ${limit === 1 ? 'seat used' : 'seats used'}`,
-    invite: 'Invite',
-    inviting: 'Sending…',
-    emailPlaceholder: 'email@example.com',
-    roleMember: 'Member',
-    roleAdmin: 'Admin',
-    roleOwner: 'Owner',
-    you: 'you',
-    pending: 'Pending invitations',
-    expired: 'expired',
-    revoke: 'Revoke',
-    remove: 'Remove',
-    confirmRemove: (name: string) => `Remove ${name} from the team?`,
-    emptyPending: 'No pending invitations.',
-    planFull: 'Your plan has no room for more members. Upgrade to invite someone else.',
-    onlyManagers: 'Only the owner or an admin can manage the team.',
-    sentNoEmail: 'Invitation created, but the email could not be sent. Resend it later.',
-    loadError: "We couldn't load the team.",
-  },
-} as const;
+const T = { es: esT, en: enT } as const;
 
 export default function TeamPanel({ locale, role }: { locale: 'es' | 'en'; role: string }) {
-  const t = COPY[locale];
+  const t = T[locale] ?? T.es;
   const puedeGestionar = role === 'owner' || role === 'admin';
+  const { confirm, dialog } = useConfirm();
+  const inviteTitleId = useId();
+  const pendingTitleId = useId();
 
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [limit, setLimit] = useState(1);
   const [used, setUsed] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [email, setEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
   const [sending, setSending] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,170 +63,238 @@ export default function TeamPanel({ locale, role }: { locale: 'es' | 'en'; role:
       setMembers(data.members ?? []);
       setLimit(data.limit ?? 1);
       setUsed(data.used ?? 0);
+      setLoadFailed(false);
 
       if (puedeGestionar) {
         const inv = await fetch('/api/team/invitations');
         if (inv.ok) setInvitations((await inv.json()).invitations ?? []);
       }
     } catch {
-      setError(t.loadError);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [puedeGestionar, t.loadError]);
+  }, [puedeGestionar]);
 
   useEffect(() => { void load(); }, [load]);
 
+  function inviteError(status: number, data: { planLimitReached?: boolean }): string {
+    if (status === 422) return t.invalidEmail;
+    if (status === 409) return t.alreadyMember;
+    if (status === 403) return data.planLimitReached ? t.planFull : t.onlyManagers;
+    return t.inviteError;
+  }
+
   async function handleInvite(e: FormEvent) {
     e.preventDefault();
+    const invited = email.trim();
     setSending(true);
     setError('');
-    setNotice('');
+    setNotice(null);
     try {
       const res = await fetch('/api/team/invitations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, role: inviteRole, lang: locale }),
+        body: JSON.stringify({ email: invited, role: inviteRole, lang: locale }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({})) as { emailSent?: boolean; planLimitReached?: boolean };
       if (!res.ok) {
-        setError(data.error ?? t.loadError);
+        setError(inviteError(res.status, data));
         return;
       }
       // La invitación vale aunque el correo falle: el enlace se puede reenviar.
-      if (data.emailSent === false) setNotice(t.sentNoEmail);
+      setNotice(data.emailSent === false
+        ? { tone: 'warning', text: t.sentNoEmail }
+        : { tone: 'success', text: t.invited(invited) });
       setEmail('');
       await load();
     } catch {
-      setError(t.loadError);
+      setError(t.inviteError);
     } finally {
       setSending(false);
     }
   }
 
-  async function revoke(id: string) {
-    await fetch(`/api/team/invitations/${id}`, { method: 'DELETE' });
+  async function revoke(inv: Invitation) {
+    setError('');
+    setNotice(null);
+    setBusyId(inv.id);
+    try {
+      const res = await fetch(`/api/team/invitations/${inv.id}`, { method: 'DELETE' });
+      // 404: ya no estaba pendiente (aceptada o revocada en otra pestaña).
+      if (!res.ok && res.status !== 404) setError(t.revokeError);
+    } catch {
+      setError(t.revokeError);
+    } finally {
+      setBusyId(null);
+    }
     await load();
   }
 
   async function removeMember(m: Member) {
     const nombre = m.name || m.email || '';
-    if (!window.confirm(t.confirmRemove(nombre))) return;
-    const res = await fetch(`/api/team/members/${m.userId}`, { method: 'DELETE' });
-    if (!res.ok) setError((await res.json()).error ?? t.loadError);
+    const ok = await confirm({
+      title: t.confirmRemove(nombre),
+      message: t.confirmRemoveBody,
+      confirmLabel: t.remove,
+      cancelLabel: t.cancel,
+      danger: true,
+    });
+    if (!ok) return;
+
+    setError('');
+    setNotice(null);
+    setBusyId(m.userId);
+    try {
+      const res = await fetch(`/api/team/members/${m.userId}`, { method: 'DELETE' });
+      // 403 con el botón visible solo para quien gestiona: un administrador
+      // intentando quitar a otro administrador, que es cosa del dueño.
+      if (!res.ok && res.status !== 404) setError(res.status === 403 ? t.removeOnlyOwner : t.removeError);
+    } catch {
+      setError(t.removeError);
+    } finally {
+      setBusyId(null);
+    }
     await load();
   }
 
-  if (loading) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>⏳</p>;
+  if (loading) {
+    return (
+      <p className={styles.loading}>
+        <Spinner size={14} /> {t.loading}
+      </p>
+    );
+  }
 
   const sinCupo = used >= limit;
   const roleLabel = (r: string) =>
     r === 'owner' ? t.roleOwner : r === 'admin' ? t.roleAdmin : t.roleMember;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>{t.seats(used, limit)}</p>
+    <div className={styles.panel}>
+      {loadFailed && (
+        <Notice tone="danger">
+          <span style={{ marginRight: 10 }}>{t.loadError}</span>
+          <Button size="sm" variant="secondary" onClick={() => { setLoading(true); void load(); }}>
+            {t.retry}
+          </Button>
+        </Notice>
+      )}
+
+      <p className={styles.seats}>{t.seats(used, limit)}</p>
 
       {/* Miembros */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {members.map((m) => (
-          <div key={m.userId} style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px',
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>
-                {m.name || m.email}{m.isSelf && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {t.you}</span>}
-              </p>
-              <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
-                {m.email} · {roleLabel(m.role)}
-              </p>
-            </div>
-            {puedeGestionar && !m.isSelf && m.role !== 'owner' && (
-              <button className="btn btn-ghost btn-sm" onClick={() => void removeMember(m)}>
-                {t.remove}
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+      <ul className={styles.list} aria-label={t.membersLabel}>
+        {members.map((m) => {
+          const display = m.name || m.email || '';
+          return (
+            <li key={m.userId} className={styles.row}>
+              <div className={styles.who}>
+                <p className={styles.name}>
+                  {display}
+                  {m.isSelf && <span className={styles.self}> · {t.you}</span>}
+                </p>
+                <p className={styles.meta}>
+                  {[m.name ? m.email : null, roleLabel(m.role)].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+              {puedeGestionar && !m.isSelf && m.role !== 'owner' && (
+                <Button
+                  variant="danger-ghost"
+                  size="sm"
+                  className={styles.rowAction}
+                  onClick={() => void removeMember(m)}
+                  loading={busyId === m.userId}
+                  disabled={busyId !== null}
+                  aria-label={t.removeAria(display)}
+                >
+                  {t.remove}
+                </Button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
 
-      {!puedeGestionar && (
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>{t.onlyManagers}</p>
-      )}
+      {!puedeGestionar && <p className={styles.hint}>{t.onlyManagers}</p>}
+      {error && <Notice tone="danger">{error}</Notice>}
 
       {puedeGestionar && (
         <>
           {/* Invitar */}
-          <form onSubmit={handleInvite} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder={t.emailPlaceholder}
-              disabled={sinCupo}
-              style={{
-                flex: '1 1 200px', background: 'var(--bg)', border: '1px solid var(--border)',
-                borderRadius: 8, padding: '9px 12px', color: 'var(--text)', fontSize: 13,
-              }}
-            />
-            <select
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-              disabled={sinCupo}
-              style={{
-                background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-                padding: '9px 12px', color: 'var(--text)', fontSize: 13,
-              }}
-            >
-              <option value="member">{t.roleMember}</option>
-              <option value="admin">{t.roleAdmin}</option>
-            </select>
-            <button className="btn btn-primary btn-sm" type="submit" disabled={sending || sinCupo}>
-              {sending ? t.inviting : t.invite}
-            </button>
-          </form>
+          <section aria-labelledby={inviteTitleId}>
+            <h3 id={inviteTitleId} className={styles.subTitle}>{t.inviteTitle}</h3>
+            <form onSubmit={handleInvite} className={styles.invite}>
+              <Field label={t.emailLabel} className={styles.inviteEmail}>
+                <Input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={t.emailPlaceholder}
+                  autoComplete="off"
+                  disabled={sinCupo}
+                />
+              </Field>
+              <Field label={t.roleLabel} className={styles.inviteRole}>
+                <Select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
+                  disabled={sinCupo}
+                >
+                  <option value="member">{t.roleMember}</option>
+                  <option value="admin">{t.roleAdmin}</option>
+                </Select>
+              </Field>
+              <Button type="submit" variant="primary" loading={sending} disabled={sinCupo}>
+                {sending ? t.inviting : t.invite}
+              </Button>
+            </form>
+            {sinCupo && (
+              <p className={styles.hint} style={{ marginTop: 8 }}>
+                {t.planFull}{' '}
+                <a href={`/${locale}/dashboard/settings#billing`}>{t.seePlans}</a>
+              </p>
+            )}
+          </section>
 
-          {sinCupo && (
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>{t.planFull}</p>
-          )}
-          {error && <p style={{ fontSize: 12, color: '#ff8c42', margin: 0 }}>{error}</p>}
-          {notice && <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>{notice}</p>}
+          {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
 
           {/* Pendientes */}
-          <div>
-            <p style={{
-              fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8,
-              textTransform: 'uppercase', letterSpacing: '0.1em',
-            }}>
-              {t.pending}
-            </p>
+          <section aria-labelledby={pendingTitleId}>
+            <h3 id={pendingTitleId} className={styles.subTitle}>{t.pending}</h3>
             {invitations.length === 0 ? (
-              <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>{t.emptyPending}</p>
+              <p className={styles.hint}>{t.emptyPending}</p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <ul className={styles.list}>
                 {invitations.map((inv) => (
-                  <div key={inv.id} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-                    background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px',
-                  }}>
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{ fontSize: 13, margin: 0 }}>{inv.email}</p>
-                      <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
+                  <li key={inv.id} className={styles.row}>
+                    <div className={styles.who}>
+                      <p className={styles.name} style={{ fontWeight: 500 }}>{inv.email}</p>
+                      <p className={styles.meta}>
                         {roleLabel(inv.role)}{inv.expired && ` · ${t.expired}`}
                       </p>
                     </div>
-                    <button className="btn btn-ghost btn-sm" onClick={() => void revoke(inv.id)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={styles.rowAction}
+                      onClick={() => void revoke(inv)}
+                      loading={busyId === inv.id}
+                      disabled={busyId !== null}
+                      aria-label={t.revokeAria(inv.email)}
+                    >
                       {t.revoke}
-                    </button>
-                  </div>
+                    </Button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
-          </div>
+          </section>
         </>
       )}
+
+      {dialog}
     </div>
   );
 }

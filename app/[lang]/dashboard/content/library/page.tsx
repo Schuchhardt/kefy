@@ -2,18 +2,20 @@
 
 import { useRouter, useParams } from 'next/navigation';
 import ContentLibraryBrowser from '@/components/dashboard/content/ContentLibraryBrowser';
+import { toLocale } from '@/lib/i18n';
 import type { LibraryItemWithIndustry } from '@/types/content-library';
 
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
 
-const T = { es: esT, en: enT } as const;
-
+/** Pestaña «Ideas»: catálogo por industria. Elegir una idea lleva al
+ *  formulario de «Mis contenidos» con el tema, el formato y la imagen de
+ *  referencia ya puestos. */
 export default function ContentLibraryPage() {
   const router = useRouter();
   const { lang: rawLang } = useParams<{ lang: string }>();
-  const lang: 'es' | 'en' = rawLang === 'en' ? 'en' : 'es';
-  const t = T[lang];
+  const lang = toLocale(rawLang);
+  const t = lang === 'en' ? enT : esT;
 
   function handleSelect(item: LibraryItemWithIndustry) {
     const params = new URLSearchParams({ topic: item.title, type: item.content_type });
@@ -22,15 +24,13 @@ export default function ContentLibraryPage() {
   }
 
   return (
-    <div style={{ padding: '40px 32px', overflowY: 'auto' }}>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>
-          {t.libraryModalTitle}
-        </h1>
-        <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>
-          {t.libraryModalSubtitle}
-        </p>
-      </div>
+    <div className="page page--wide">
+      <header className="page-header">
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontFamily: 'var(--font-syne), system-ui, sans-serif' }}>{t.libraryModalTitle}</h1>
+          <p>{t.libraryModalSubtitle}</p>
+        </div>
+      </header>
 
       <ContentLibraryBrowser lang={lang} onSelect={handleSelect} />
     </div>

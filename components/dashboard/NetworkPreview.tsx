@@ -6,15 +6,16 @@
 // carousels/reels the active slide/scene is driven from the parent so that
 // clicking a slide in the editor updates this preview.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { PostPreview } from './PostPreview';
-import { SlideCanvas } from './CarouselPreview';
+import { SlideCanvas, SlideDots, previewCopy } from './CarouselPreview';
 import { ImageGeneratingSpinner } from './ImageGeneratingSpinner';
 import { safeAreaFor } from '@/lib/preview-layout';
 import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
 import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ReelScene, ContentType } from '@/types/content';
+import styles from './NetworkPreview.module.css';
 
 /** Networks worth showing per format. Square formats (post/carousel) map to the
  *  native PostPreview chrome; vertical formats (reel/story) share a lighter
@@ -64,15 +65,23 @@ interface NetworkPreviewProps {
   /** Tipografía del Brand Kit: la preview escribe con la misma fuente que el
    *  servidor usará al componer el texto dentro de la imagen. */
   brandFont?:     string | null;
+  /** Idioma de la interfaz simulada de cada red y de los nombres accesibles. */
+  lang?:          'es' | 'en';
+  /** Alto máximo (CSS, p. ej. `min(560px, 50dvh)`) de los marcos verticales
+   *  9:16. El marco se estrecha para no pasarse de ese alto: en un móvil el
+   *  reel ya no empuja «Publicar» varias pantallas más abajo. No cambia la
+   *  proporción ni el recorte. */
+  frameMaxHeight?: string;
 }
 
 export function NetworkPreview({
   contentType, defaultChannel, body, imageUrl, videoUrl, hashtags,
   slides, activeSlide, onActiveSlideChange, username, logoUrl,
   imagePending, accentColor, networks: networksProp, publishedNetworks,
-  channel: channelProp, onChannelChange, brandFont,
+  channel: channelProp, onChannelChange, brandFont, lang = 'es', frameMaxHeight,
 }: NetworkPreviewProps) {
   useEffect(() => { ensureGoogleFontLoaded(brandFont); }, [brandFont]);
+  const t = previewCopy(lang);
   const relevant = NETWORKS[contentType];
   const narrowed = (networksProp ?? []).filter((n) => relevant.includes(n));
   const networks = narrowed.length > 0 ? narrowed : relevant;
@@ -86,36 +95,28 @@ export function NetworkPreview({
   const idx = Math.min(Math.max(activeSlide, 0), Math.max(total - 1, 0));
   const slide = slides[idx];
 
+  const frame = { maxHeight: frameMaxHeight, lang };
+
   return (
     <div>
       {/* ── Network tabs ─────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div className={styles.tabs} role="group" aria-label={t.networksLabel}>
         {networks.map((net) => {
           const active = net === channel;
           const published = publishedNetworks?.includes(net);
+          const name = NET_LABEL[net] ?? net;
           return (
             <button
               key={net}
               type="button"
+              className={styles.tab}
               onClick={() => setChannel(net)}
-              title={NET_LABEL[net] ?? net}
-              style={{
-                position: 'relative',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 34, height: 34, borderRadius: 8, cursor: 'pointer',
-                border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                background: active ? 'rgba(198,255,75,0.12)' : 'var(--surface)',
-                color: active ? 'var(--accent)' : 'var(--muted)',
-                transition: 'all 0.15s ease',
-              }}
+              aria-pressed={active}
+              aria-label={published ? t.networkPublished(name) : name}
+              title={name}
             >
               <ChannelIcon name={net} size={18} />
-              {published && (
-                <span style={{
-                  position: 'absolute', top: -3, right: -3, width: 10, height: 10, borderRadius: '50%',
-                  background: 'var(--accent)', border: '1.5px solid var(--bg)',
-                }} />
-              )}
+              {published && <span className={styles.publishedDot} aria-hidden="true" />}
             </button>
           );
         })}
@@ -123,10 +124,10 @@ export function NetworkPreview({
 
       {/* ── Framed preview ───────────────────────────── */}
       {contentType === 'post' && channel === 'tiktok' && (
-        <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''}>
+        <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''} {...frame}>
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+            <img src={imageUrl} alt={t.imageAlt} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
           ) : imagePending ? (
             <ImageGeneratingSpinner accentColor={accentColor} height="100%" />
           ) : (
@@ -143,6 +144,7 @@ export function NetworkPreview({
           hashtags={hashtags}
           username={username}
           logoUrl={logoUrl ?? undefined}
+          lang={lang}
           media={!imageUrl && imagePending ? (
             <ImageGeneratingSpinner accentColor={accentColor} />
           ) : undefined}
@@ -151,15 +153,15 @@ export function NetworkPreview({
 
       {contentType === 'carousel' && (
         total === 0 ? (
-          <EmptyFrame />
+          <div className={styles.emptyFrame} aria-hidden="true">—</div>
         ) : channel === 'tiktok' ? (
           // TikTok no muestra el carrusel en un feed cuadrado: lo muestra a
           // pantalla completa con su propia interfaz encima del contenido.
           <>
-            <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''}>
+            <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''} {...frame}>
               <SlideCanvas slide={slide} index={idx} total={total} platform="tiktok" format="carousel" brandFont={brandFont} />
             </TikTokFrame>
-            {total > 1 && <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />}
+            {total > 1 && <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} lang={lang} />}
           </>
         ) : (
           <PostPreview
@@ -168,10 +170,11 @@ export function NetworkPreview({
             hashtags={hashtags}
             username={username}
             logoUrl={logoUrl ?? undefined}
+            lang={lang}
             media={<SlideCanvas slide={slide} index={idx} total={total} platform={channel as ContentChannel} format="carousel" brandFont={brandFont} />}
             mediaFooter={
               total > 1 ? (
-                <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />
+                <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} lang={lang} />
               ) : null
             }
           />
@@ -183,16 +186,16 @@ export function NetworkPreview({
           ? <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           : <ReelSceneCanvas scene={slide as ReelScene | undefined} channel={channel as ContentChannel} brandFont={brandFont} />;
         return channel === 'tiktok' ? (
-          <TikTokFrame username={username} logoUrl={logoUrl} caption={body || slide?.title || ''}>{media}</TikTokFrame>
+          <TikTokFrame username={username} logoUrl={logoUrl} caption={body || slide?.title || ''} {...frame}>{media}</TikTokFrame>
         ) : (
-          <VerticalNetworkFrame channel={channel} caption={body || slide?.title || ''} username={username} logoUrl={logoUrl}>
+          <VerticalNetworkFrame channel={channel} caption={body || slide?.title || ''} username={username} logoUrl={logoUrl} maxHeight={frameMaxHeight}>
             {media}
           </VerticalNetworkFrame>
         );
       })()}
 
       {contentType === 'reel' && total > 1 && (
-        <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} />
+        <SlideDots total={total} idx={idx} onSelect={onActiveSlideChange} lang={lang} />
       )}
 
       {contentType === 'story' && (() => {
@@ -200,12 +203,12 @@ export function NetworkPreview({
           ? <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           : imageUrl
             // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+            ? <img src={imageUrl} alt={t.imageAlt} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
             : <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #a18cd1 0%, #fbc2eb 100%)' }} />;
         return channel === 'tiktok' ? (
-          <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''}>{media}</TikTokFrame>
+          <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''} {...frame}>{media}</TikTokFrame>
         ) : (
-          <VerticalNetworkFrame channel={channel} caption={body ?? ''} username={username} logoUrl={logoUrl}>
+          <VerticalNetworkFrame channel={channel} caption={body ?? ''} username={username} logoUrl={logoUrl} maxHeight={frameMaxHeight}>
             {media}
           </VerticalNetworkFrame>
         );
@@ -214,24 +217,13 @@ export function NetworkPreview({
   );
 }
 
-// ─── Slide dots (clickable) ──────────────────────────────────────────────────
-
-function SlideDots({ total, idx, onSelect }: { total: number; idx: number; onSelect: (i: number) => void }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'center', gap: 5, padding: '8px 0 2px' }}>
-      {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          onClick={() => onSelect(i)}
-          style={{
-            height: 6, width: i === idx ? 18 : 6, borderRadius: 3,
-            background: i === idx ? 'var(--accent)' : 'var(--border)',
-            cursor: 'pointer', transition: 'width 0.2s ease, background 0.2s ease',
-          }}
-        />
-      ))}
-    </div>
-  );
+/** Clases y variable del marco vertical, con o sin tope de alto. */
+function verticalFrameProps(maxHeight?: string): { className: string; style?: CSSProperties } {
+  if (!maxHeight) return { className: styles.verticalFrame };
+  return {
+    className: `${styles.verticalFrame} ${styles.verticalFrameCapped}`,
+    style: { '--frame-max-h': maxHeight } as CSSProperties,
+  };
 }
 
 // ─── Marco de TikTok ─────────────────────────────────────────────────────────
@@ -251,33 +243,37 @@ function TikTokAction({ icon, label }: { icon: React.ReactNode; label: string })
 }
 
 export function TikTokFrame({
-  username, logoUrl, caption, children,
+  username, logoUrl, caption, children, maxHeight, lang = 'es',
 }: {
   username: string;
   logoUrl?: string | null;
   caption:  string;
   children: React.ReactNode;
+  /** Ver `frameMaxHeight` en NetworkPreview. */
+  maxHeight?: string;
+  lang?:    'es' | 'en';
 }) {
   const safe = safeAreaFor('tiktok', 'carousel');
+  const t = previewCopy(lang);
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+    <div {...verticalFrameProps(maxHeight)}>
       <div style={{ position: 'relative', width: '100%', aspectRatio: '9 / 16', background: '#000' }}>
         {children}
 
-        {/* Pestañas superiores */}
-        <div style={{
+        {/* Pestañas superiores (decorativas) */}
+        <div aria-hidden="true" style={{
           position: 'absolute', top: 10, left: 0, right: 0, display: 'flex',
           justifyContent: 'center', gap: 14, fontSize: 11, fontWeight: 600,
           color: 'rgba(255,255,255,0.65)', textShadow: '0 1px 3px rgba(0,0,0,0.6)',
           pointerEvents: 'none',
         }}>
-          <span>Siguiendo</span>
-          <span style={{ color: '#fff', borderBottom: '2px solid #fff', paddingBottom: 2 }}>Para ti</span>
+          <span>{t.following}</span>
+          <span style={{ color: '#fff', borderBottom: '2px solid #fff', paddingBottom: 2 }}>{t.forYou}</span>
         </div>
 
-        {/* Columna de acciones (derecha) */}
-        <div style={{
+        {/* Columna de acciones (derecha, decorativa) */}
+        <div aria-hidden="true" style={{
           position: 'absolute', right: 0, bottom: `${safe.bottom * 100}%`,
           width: `${safe.right * 100}%`,
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
@@ -329,7 +325,7 @@ export function TikTokFrame({
           <p style={{
             margin: 0, fontSize: 10, color: 'rgba(255,255,255,0.85)',
             textShadow: '0 1px 4px rgba(0,0,0,0.7)',
-          }}>♪ sonido original — {username}</p>
+          }}><span aria-hidden="true">♪ </span>{t.originalSound(username)}</p>
         </div>
       </div>
     </div>
@@ -339,22 +335,23 @@ export function TikTokFrame({
 // ─── Vertical (9:16) network frame for reels & stories ───────────────────────
 
 function VerticalNetworkFrame({
-  channel, caption, username, logoUrl, children,
+  channel, caption, username, logoUrl, children, maxHeight,
 }: {
   channel:  string;
   caption:  string;
   username: string;
   logoUrl?: string | null;
   children: React.ReactNode;
+  maxHeight?: string;
 }) {
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+    <div {...verticalFrameProps(maxHeight)}>
       <div style={{ position: 'relative', width: '100%', aspectRatio: '9 / 16', background: '#000' }}>
         {children}
         {/* Network badge */}
         <span style={{
           position: 'absolute', top: 12, right: 12, display: 'flex', alignItems: 'center', gap: 5,
-          fontSize: 10, fontWeight: 800, background: 'rgba(0,0,0,0.55)', color: '#fff',
+          fontSize: 11, fontWeight: 800, background: 'rgba(0,0,0,0.55)', color: '#fff',
           borderRadius: 6, padding: '3px 7px',
         }}>
           <ChannelIcon name={channel} size={12} />
@@ -372,7 +369,7 @@ function VerticalNetworkFrame({
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', minWidth: 0 }}>
         <div style={{
           width: 26, height: 26, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
           background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -384,7 +381,7 @@ function VerticalNetworkFrame({
             <span style={{ fontSize: 11, fontWeight: 700, color: '#fff' }}>{username[0]?.toUpperCase()}</span>
           )}
         </div>
-        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{username}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{username}</span>
       </div>
     </div>
   );
@@ -419,16 +416,5 @@ function ReelSceneCanvas({ scene, channel = 'instagram', brandFont }: { scene?: 
         )}
       </div>
     </div>
-  );
-}
-
-function EmptyFrame() {
-  return (
-    <div style={{
-      width: '100%', aspectRatio: '1 / 1', borderRadius: 10,
-      border: '1px dashed var(--border)', background: 'var(--surface)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      color: 'var(--muted)', fontSize: 13,
-    }}>—</div>
   );
 }

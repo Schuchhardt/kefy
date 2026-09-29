@@ -1,123 +1,91 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+// ─── Mi perfil ───────────────────────────────────────────────────────────────
+//
+// Nombre (el único sitio donde se edita: Ajustes solo lo muestra y enlaza
+// aquí), contraseña y la organización en modo lectura, con enlace a Ajustes.
+
+import { useState, useEffect, useRef, type CSSProperties, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { toLocale } from '@/lib/i18n';
+import { isBillingPlan, planName } from '@/lib/plans';
+import SectionCard from '@/components/ui/SectionCard';
+import Button, { ButtonLink } from '@/components/ui/Button';
+import { Field, Input } from '@/components/ui/Field';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
+import styles from './page.module.css';
 
-// ─── i18n ────────────────────────────────────────────────────────────────────
+import esT from '@/locales/es/dashboard/profile';
+import enT from '@/locales/en/dashboard/profile';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
 
-const T = {
-  es: {
-    title: 'Mi perfil',
-    subtitle: 'Gestiona tu información personal y contraseña',
-    sectionInfo: 'Información personal',
-    sectionPassword: 'Contraseña',
-    sectionOrg: 'Organización',
-    nameLabel: 'Nombre',
-    namePlaceholder: 'Tu nombre',
-    emailLabel: 'Correo electrónico',
-    emailNote: 'El correo no se puede cambiar',
-    roleLabel: 'Rol',
-    planLabel: 'Plan',
-    orgLabel: 'Organización',
-    joinedLabel: 'Miembro desde',
-    currentPassword: 'Contraseña actual',
-    newPassword: 'Nueva contraseña',
-    newPasswordHint: 'Mínimo 8 caracteres',
-    confirmPassword: 'Confirmar nueva contraseña',
-    saveProfile: 'Guardar cambios',
-    changePassword: 'Cambiar contraseña',
-    saving: 'Guardando...',
-    saved: '✓ Cambios guardados',
-    passwordChanged: '✓ Contraseña actualizada',
-    passwordMismatch: 'Las contraseñas no coinciden',
-    roles: { owner: 'Propietario', admin: 'Administrador', member: 'Miembro' },
-    plans: { starter: 'Starter', pro: 'Pro', business: 'Business' },
-  },
-  en: {
-    title: 'My profile',
-    subtitle: 'Manage your personal information and password',
-    sectionInfo: 'Personal information',
-    sectionPassword: 'Password',
-    sectionOrg: 'Organization',
-    nameLabel: 'Name',
-    namePlaceholder: 'Your name',
-    emailLabel: 'Email address',
-    emailNote: 'Email cannot be changed',
-    roleLabel: 'Role',
-    planLabel: 'Plan',
-    orgLabel: 'Organization',
-    joinedLabel: 'Member since',
-    currentPassword: 'Current password',
-    newPassword: 'New password',
-    newPasswordHint: 'At least 8 characters',
-    confirmPassword: 'Confirm new password',
-    saveProfile: 'Save changes',
-    changePassword: 'Change password',
-    saving: 'Saving...',
-    saved: '✓ Changes saved',
-    passwordChanged: '✓ Password updated',
-    passwordMismatch: 'Passwords do not match',
-    roles: { owner: 'Owner', admin: 'Admin', member: 'Member' },
-    plans: { starter: 'Starter', pro: 'Pro', business: 'Business' },
-  },
-} as const;
+const T = { es: esT, en: enT } as const;
+const COMMON = { es: esCommon, en: enCommon } as const;
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+const PLAN_BADGE = {
+  '--badge-color': 'var(--accent-text)', '--badge-bg': 'var(--accent-soft)',
+  textTransform: 'uppercase', letterSpacing: '0.06em',
+} as CSSProperties;
+const STARTER_BADGE = { textTransform: 'uppercase', letterSpacing: '0.06em' } as CSSProperties;
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  fontSize: 14,
-  color: 'var(--text)',
-  outline: 'none',
-  fontFamily: 'var(--font-syne), sans-serif',
-  boxSizing: 'border-box',
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 600,
-  color: 'var(--muted)',
-  display: 'block',
-  marginBottom: 5,
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  fontFamily: 'var(--font-syne), sans-serif',
-};
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+/**
+ * «Guardado» junto al botón. La región viva está siempre en el DOM: una que
+ * aparece a la vez que su texto no siempre se anuncia.
+ */
+function SavedStatus({ show, label }: { show: boolean; label: string }) {
+  return (
+    <span role="status" className={styles.saved}>
+      {show && (
+        <>
+          <Icon name="check" size={14} strokeWidth={2.4} />
+          {label}
+        </>
+      )}
+    </span>
+  );
+}
 
 export default function ProfilePage() {
   const { user, org, role, plan, refresh } = useAuth();
   const { lang } = useParams<{ lang: string }>();
-  const t = T[(lang as 'es' | 'en') ?? 'es'] ?? T.es;
-  const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
+  const locale = toLocale(lang);
+  const t = T[locale];
+  const tc = COMMON[locale];
 
-  // Profile form
+  // Nombre
   const [name, setName] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
-  const [profileMsg, setProfileMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
-  // Password form
+  // Contraseña
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
+  // El «no coinciden» se muestra al salir del campo o al enviar, no con la
+  // primera letra que se escribe.
+  const [confirmTouched, setConfirmTouched] = useState(false);
   const [savingPwd, setSavingPwd] = useState(false);
-  const [pwdMsg, setPwdMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [pwdSaved, setPwdSaved] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
 
+  // Depende del nombre y no del objeto: un re-render con otro `user` igual no
+  // debe pisar lo que se está escribiendo.
+  const userName = user?.name;
   useEffect(() => {
-    if (user?.name) setName(user.name);
-  }, [user]);
+    if (userName) setName(userName);
+  }, [userName]);
 
-  async function handleSaveProfile(e: React.FormEvent) {
+  async function handleSaveProfile(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     setSavingProfile(true);
-    setProfileMsg(null);
+    setProfileError(null);
+    setProfileSaved(false);
     try {
       const res = await fetch('/api/auth/me', {
         method: 'PATCH',
@@ -125,26 +93,32 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim() }),
       });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Error');
+      if (!res.ok) {
+        setProfileError(t.saveError);
+        return;
+      }
       await refresh();
-      setProfileMsg({ type: 'ok', text: t.saved });
-      setTimeout(() => setProfileMsg(null), 4000);
-    } catch (err) {
-      setProfileMsg({ type: 'err', text: err instanceof Error ? err.message : 'Error' });
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 4000);
+    } catch {
+      setProfileError(t.saveError);
     } finally {
       setSavingProfile(false);
     }
   }
 
-  async function handleChangePassword(e: React.FormEvent) {
+  const mismatch = confirmPwd !== '' && confirmPwd !== newPwd;
+
+  async function handleChangePassword(e: FormEvent) {
     e.preventDefault();
     if (newPwd !== confirmPwd) {
-      setPwdMsg({ type: 'err', text: t.passwordMismatch });
+      setConfirmTouched(true);
+      confirmRef.current?.focus();
       return;
     }
     setSavingPwd(true);
-    setPwdMsg(null);
+    setPwdError(null);
+    setPwdSaved(false);
     try {
       const res = await fetch('/api/auth/me', {
         method: 'PATCH',
@@ -152,301 +126,161 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_password: currentPwd, new_password: newPwd }),
       });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Error');
+      if (!res.ok) {
+        // Los campos obligatorios y el mínimo de 8 ya se validan aquí: un 400
+        // es la contraseña actual que no coincide. El texto del servidor
+        // viene en español, así que no se muestra tal cual.
+        setPwdError(res.status === 400 ? t.passwordWrong : t.passwordError);
+        return;
+      }
       setCurrentPwd('');
       setNewPwd('');
       setConfirmPwd('');
-      setPwdMsg({ type: 'ok', text: t.passwordChanged });
-      setTimeout(() => setPwdMsg(null), 4000);
-    } catch (err) {
-      setPwdMsg({ type: 'err', text: err instanceof Error ? err.message : 'Error' });
+      setConfirmTouched(false);
+      setPwdSaved(true);
+      setTimeout(() => setPwdSaved(false), 4000);
+    } catch {
+      setPwdError(t.passwordError);
     } finally {
       setSavingPwd(false);
     }
   }
 
-  const userInitial = (user?.name ?? user?.email ?? '?')[0].toUpperCase();
-  const joinedDate = (user as unknown as { created_at?: string })?.created_at;
+  const userInitial = (user?.name || user?.email || '?').charAt(0).toUpperCase();
+  const joinedDate = (user as unknown as { created_at?: string } | null)?.created_at;
+  const planLabel = plan ? (isBillingPlan(plan) ? planName(plan, locale) : plan) : null;
 
   return (
-    <div style={{ padding: '40px 48px', maxWidth: 680 }}>
-
-      {/* ── Header ── */}
-      <div style={{ marginBottom: 36 }}>
-        <h1 style={{
-          fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700,
-          color: 'var(--text)', letterSpacing: '-0.02em', margin: 0,
-        }}>
-          {t.title}
-        </h1>
-        <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 5 }}>{t.subtitle}</p>
-      </div>
-
-      {/* ── Avatar + quick info ── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 20,
-        marginBottom: 32,
-        padding: '20px 24px',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 14,
-      }}>
-        <div style={{
-          width: 64,
-          height: 64,
-          borderRadius: '50%',
-          background: 'rgba(198,255,75,0.12)',
-          border: '2px solid rgba(198,255,75,0.3)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 24,
-          fontWeight: 800,
-          color: 'var(--accent)',
-          flexShrink: 0,
-          fontFamily: 'var(--font-syne), sans-serif',
-          letterSpacing: '-0.02em',
-        }}>
-          {userInitial}
-        </div>
+    <div className="page" style={{ maxWidth: 680 }}>
+      <header className="page-header">
         <div>
-          <p style={{
-            fontSize: 18,
-            fontWeight: 700,
-            color: 'var(--text)',
-            margin: 0,
-            fontFamily: 'var(--font-syne), sans-serif',
-            letterSpacing: '-0.02em',
-          }}>
-            {user?.name ?? user?.email}
-          </p>
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 0' }}>
-            {user?.email}
-          </p>
+          <h1 style={{ fontFamily: 'var(--font-syne), system-ui, sans-serif' }}>{t.title}</h1>
+          <p>{t.subtitle}</p>
+        </div>
+      </header>
+
+      {/* ── Avatar y datos rápidos ── */}
+      <div className={`ui-card ${styles.hero}`}>
+        <div className={styles.avatar} aria-hidden="true">{userInitial}</div>
+        <div className={styles.who}>
+          <p className={styles.name}>{user?.name || user?.email}</p>
+          {user?.name && <p className={styles.meta}>{user.email}</p>}
           {joinedDate && (
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
-              {t.joinedLabel}{' '}
-              {new Date(joinedDate).toLocaleDateString(dateLocale, { day: '2-digit', month: 'long', year: 'numeric' })}
+            <p className={styles.meta}>
+              {t.joined(new Date(joinedDate).toLocaleDateString(t.dateLocale, { day: '2-digit', month: 'long', year: 'numeric' }))}
             </p>
           )}
         </div>
-        {plan && (
-          <div style={{ marginLeft: 'auto' }}>
-            <span style={{
-              display: 'inline-block',
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              padding: '4px 10px',
-              borderRadius: 6,
-              background: plan === 'starter' ? 'var(--border)' : 'rgba(198,255,75,0.12)',
-              color: plan === 'starter' ? 'var(--muted)' : 'var(--accent)',
-              fontFamily: 'var(--font-syne), sans-serif',
-            }}>
-              {t.plans[plan as keyof typeof t.plans] ?? plan}
-            </span>
-          </div>
+        {planLabel && (
+          <span className="ui-badge" style={plan === 'starter' ? STARTER_BADGE : PLAN_BADGE}>
+            <span className="sr-only">{t.planLabel}: </span>
+            {planLabel}
+          </span>
         )}
       </div>
 
-      {/* ── Personal info ── */}
-      <div style={{
-        marginBottom: 24,
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        padding: '20px 24px',
-      }}>
-        <h2 style={{
-          fontFamily: 'var(--font-syne)', fontSize: 14, fontWeight: 700,
-          marginBottom: 18, paddingBottom: 12, borderBottom: '1px solid var(--border)',
-          color: 'var(--text)', letterSpacing: '-0.01em',
-        }}>
-          {t.sectionInfo}
-        </h2>
-        <form onSubmit={handleSaveProfile}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-            <div>
-              <label style={labelStyle}>{t.nameLabel}</label>
-              <input
-                style={inputStyle}
+      {/* ── Información personal ── */}
+      <SectionCard id="personal-info" title={t.sectionInfo}>
+        <form onSubmit={handleSaveProfile} className={styles.form}>
+          <div className="grid-2">
+            <Field label={t.nameLabel}>
+              <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t.namePlaceholder}
+                autoComplete="name"
                 required
               />
-            </div>
-            <div>
-              <label style={labelStyle}>{t.emailLabel}</label>
-              <input
-                style={{ ...inputStyle, opacity: 0.55, cursor: 'not-allowed' }}
-                value={user?.email ?? ''}
-                disabled
-                title={t.emailNote}
-              />
-              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{t.emailNote}</p>
-            </div>
+            </Field>
+            <Field label={t.emailLabel} hint={t.emailNote}>
+              <Input type="email" value={user?.email ?? ''} disabled />
+            </Field>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              type="submit"
-              disabled={savingProfile}
-              style={{
-                background: 'var(--accent)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 8,
-                padding: '9px 20px',
-                fontWeight: 600,
-                fontSize: 13,
-                fontFamily: 'var(--font-syne), sans-serif',
-                cursor: savingProfile ? 'not-allowed' : 'pointer',
-                opacity: savingProfile ? 0.7 : 1,
-                transition: 'opacity 0.15s',
-              }}
-            >
-              {savingProfile ? t.saving : t.saveProfile}
-            </button>
-            {profileMsg && (
-              <span style={{
-                fontSize: 13,
-                color: profileMsg.type === 'ok' ? 'var(--accent)' : '#f87171',
-              }}>
-                {profileMsg.text}
-              </span>
-            )}
+          <div className={styles.actions}>
+            <Button type="submit" variant="primary" loading={savingProfile}>
+              {savingProfile ? tc.actions.saving : t.saveProfile}
+            </Button>
+            <SavedStatus show={profileSaved} label={t.saved} />
           </div>
+          {profileError && <Notice tone="danger">{profileError}</Notice>}
         </form>
-      </div>
+      </SectionCard>
 
-      {/* ── Password ── */}
-      <div style={{
-        marginBottom: 24,
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        padding: '20px 24px',
-      }}>
-        <h2 style={{
-          fontFamily: 'var(--font-syne)', fontSize: 14, fontWeight: 700,
-          marginBottom: 18, paddingBottom: 12, borderBottom: '1px solid var(--border)',
-          color: 'var(--text)', letterSpacing: '-0.01em',
-        }}>
-          {t.sectionPassword}
-        </h2>
-        <form onSubmit={handleChangePassword}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 12 }}>
-            <div>
-              <label style={labelStyle}>{t.currentPassword}</label>
-              <input
+      {/* ── Contraseña ── */}
+      <SectionCard id="password" title={t.sectionPassword}>
+        <form onSubmit={handleChangePassword} className={styles.form}>
+          <div className="grid-2">
+            <Field label={t.currentPassword}>
+              <Input
                 type="password"
-                style={inputStyle}
                 value={currentPwd}
                 onChange={(e) => setCurrentPwd(e.target.value)}
                 autoComplete="current-password"
                 required
               />
-            </div>
-            <div>
-              <label style={labelStyle}>{t.newPassword}</label>
-              <input
+            </Field>
+            <Field label={t.newPassword} hint={t.newPasswordHint}>
+              <Input
                 type="password"
-                style={inputStyle}
                 value={newPwd}
                 onChange={(e) => setNewPwd(e.target.value)}
                 minLength={8}
                 autoComplete="new-password"
                 required
               />
-              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{t.newPasswordHint}</p>
-            </div>
+            </Field>
           </div>
-          <div style={{ marginBottom: 16, maxWidth: 320 }}>
-            <label style={labelStyle}>{t.confirmPassword}</label>
-            <input
+          <Field
+            label={t.confirmPassword}
+            error={confirmTouched && mismatch ? t.passwordMismatch : undefined}
+            className={styles.half}
+          >
+            <Input
+              ref={confirmRef}
               type="password"
-              style={{
-                ...inputStyle,
-                borderColor: confirmPwd && confirmPwd !== newPwd ? '#f87171' : undefined,
-              }}
               value={confirmPwd}
               onChange={(e) => setConfirmPwd(e.target.value)}
+              onBlur={() => setConfirmTouched(true)}
               autoComplete="new-password"
               required
             />
+          </Field>
+          <div className={styles.actions}>
+            <Button type="submit" variant="secondary" loading={savingPwd}>
+              {savingPwd ? tc.actions.saving : t.changePassword}
+            </Button>
+            <SavedStatus show={pwdSaved} label={t.passwordChanged} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              type="submit"
-              disabled={savingPwd}
-              style={{
-                background: 'var(--surface-2)',
-                color: 'var(--text)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                padding: '9px 20px',
-                fontWeight: 600,
-                fontSize: 13,
-                fontFamily: 'var(--font-syne), sans-serif',
-                cursor: savingPwd ? 'not-allowed' : 'pointer',
-                opacity: savingPwd ? 0.7 : 1,
-                transition: 'opacity 0.15s, border-color 0.15s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(198,255,75,0.4)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)'; }}
-            >
-              {savingPwd ? t.saving : t.changePassword}
-            </button>
-            {pwdMsg && (
-              <span style={{
-                fontSize: 13,
-                color: pwdMsg.type === 'ok' ? 'var(--accent)' : '#f87171',
-              }}>
-                {pwdMsg.text}
-              </span>
-            )}
-          </div>
+          {pwdError && <Notice tone="danger">{pwdError}</Notice>}
         </form>
-      </div>
+      </SectionCard>
 
-      {/* ── Organization ── */}
-      <div style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        padding: '20px 24px',
-      }}>
-        <h2 style={{
-          fontFamily: 'var(--font-syne)', fontSize: 14, fontWeight: 700,
-          marginBottom: 18, paddingBottom: 12, borderBottom: '1px solid var(--border)',
-          color: 'var(--text)', letterSpacing: '-0.01em',
-        }}>
-          {t.sectionOrg}
-        </h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {/* ── Organización (se gestiona en Ajustes) ── */}
+      <SectionCard
+        id="organization"
+        title={t.sectionOrg}
+        actions={
+          <ButtonLink
+            href={`/${locale}/dashboard/settings#org`}
+            variant="secondary"
+            size="sm"
+            icon={<Icon name="settings" size={14} />}
+          >
+            {t.orgManage}
+          </ButtonLink>
+        }
+      >
+        <dl className={styles.facts}>
           <div>
-            <label style={labelStyle}>{t.orgLabel}</label>
-            <input
-              style={{ ...inputStyle, opacity: 0.55, cursor: 'not-allowed' }}
-              value={org?.name ?? ''}
-              disabled
-            />
+            <dt>{t.orgLabel}</dt>
+            <dd>{org?.name ?? '—'}</dd>
           </div>
           <div>
-            <label style={labelStyle}>{t.roleLabel}</label>
-            <input
-              style={{ ...inputStyle, opacity: 0.55, cursor: 'not-allowed' }}
-              value={t.roles[(role as keyof typeof t.roles)] ?? role ?? ''}
-              disabled
-            />
+            <dt>{t.roleLabel}</dt>
+            <dd>{role ? (t.roles[role] ?? role) : '—'}</dd>
           </div>
-        </div>
-      </div>
-
+        </dl>
+      </SectionCard>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { StrictMode } from 'react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -213,5 +213,85 @@ describe('SocialConnectionPanel — enlace directo ?connect=', () => {
     expect(await screen.findByText(/Instagram conectado correctamente/)).toBeInTheDocument();
     expect(oauthCalls()).toHaveLength(0);
     expect(replace).toHaveBeenCalledWith('/es/dashboard/settings');
+  });
+});
+
+// ─── Botones de red y desconexión ─────────────────────────────────────────────
+
+describe('SocialConnectionPanel — botones y desconexión', () => {
+  const ACCOUNT = { id: 'acc-1', platform: 'googlebusiness', username: 'Café Andes', status: 'active', token_expires_at: null };
+
+  function withAccounts(deleteStatus = 204) {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/social/accounts/') && init?.method === 'DELETE') {
+        calls.push(`delete:${url}`);
+        return jsonResponse(deleteStatus, {});
+      }
+      if (url.startsWith('/api/social/oauth/url')) return jsonResponse(200, { url: OAUTH_URL, state: 's' });
+      return jsonResponse(200, { accounts: [ACCOUNT] });
+    });
+  }
+
+  afterEach(() => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/social/oauth/url')) {
+        calls.push(`oauth:${url}`);
+        return jsonResponse(200, { url: OAUTH_URL, state: 's' });
+      }
+      return jsonResponse(200, { accounts: [] });
+    });
+    document.body.style.overflow = '';
+  });
+
+  it('cada red es un botón con nombre accesible; las ya conectadas lo dicen', async () => {
+    withAccounts();
+    renderPanel('', { autoConnect: false });
+
+    expect(await screen.findByRole('button', { name: 'Conectar otra cuenta de Google Business' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Conectar Instagram' })).toBeInTheDocument();
+    // La red se muestra con su nombre, no con la clave interna.
+    expect(screen.getByText('Google Business · Activa')).toBeInTheDocument();
+  });
+
+  it('desconectar pide confirmación con el diálogo de la app y quita la cuenta', async () => {
+    const nativeConfirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', nativeConfirm);
+    withAccounts();
+    renderPanel('', { autoConnect: false });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Desconectar Café Andes (Google Business)' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('¿Desconectar Café Andes?');
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(calls.filter((c) => c.startsWith('delete:'))).toHaveLength(0);
+
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Sí, desconectar' })); });
+    expect(calls).toContain('delete:/api/social/accounts/acc-1');
+    await waitFor(() => expect(screen.queryByText('Google Business · Activa')).toBeNull());
+  });
+
+  it('si el servidor no desconecta, la cuenta sigue en la lista y se explica por qué', async () => {
+    withAccounts(403);
+    renderPanel('', { autoConnect: false });
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Desconectar Café Andes/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Sí, desconectar' })); });
+
+    expect(await screen.findByText('Solo el dueño o un administrador pueden desconectar cuentas.')).toBeInTheDocument();
+    expect(screen.getByText('Google Business · Activa')).toBeInTheDocument();
+  });
+
+  it('cancelar no desconecta', async () => {
+    withAccounts();
+    renderPanel('', { autoConnect: false });
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Desconectar Café Andes/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' })); });
+    expect(calls.filter((c) => c.startsWith('delete:'))).toHaveLength(0);
+    expect(screen.getByText('Google Business · Activa')).toBeInTheDocument();
   });
 });

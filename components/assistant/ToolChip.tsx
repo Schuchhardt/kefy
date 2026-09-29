@@ -12,6 +12,7 @@ import esT from '@/locales/es/dashboard/assistant';
 import enT from '@/locales/en/dashboard/assistant';
 import type { ToolLink } from '@/lib/assistant/types';
 import type { ToolPartStatus } from '@/lib/assistant/use-assistant';
+import styles from '@/components/assistant/assistant.module.css';
 
 const T = { es: esT, en: enT } as const;
 
@@ -28,7 +29,7 @@ export function Spinner({ size = 12 }: { size?: number }) {
         aria-hidden
         style={{
           width: size, height: size, borderRadius: '50%', flexShrink: 0, display: 'inline-block',
-          border: '2px solid rgba(198,255,75,0.25)', borderTopColor: 'var(--accent)',
+          border: '2px solid var(--accent-border)', borderTopColor: 'var(--accent)',
           animation: 'kefy-assistant-spin 0.9s linear infinite',
         }}
       />
@@ -52,7 +53,7 @@ function StatusIcon({ status }: { status: ToolPartStatus }) {
   const ok = status === 'done';
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden
-      stroke={ok ? 'var(--assistant-accent-text)' : 'var(--muted)'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      stroke={ok ? 'var(--accent-text)' : 'var(--muted)'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       {ok ? <path d="M5 12.5l4.5 4.5L19 7.5" /> : <path d="M6 6l12 12M18 6L6 18" />}
     </svg>
   );
@@ -106,11 +107,8 @@ export default function ToolChip({
         {link && status === 'done' ? (
           <button
             type="button"
+            className={styles.chipAction}
             onClick={() => { router.push(link.href); onNavigate?.(); }}
-            style={{
-              padding: '2px 9px', borderRadius: 999, border: '1px solid rgba(198,255,75,0.35)',
-              background: 'rgba(198,255,75,0.10)', color: 'var(--assistant-accent-text)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-            }}
           >
             {t.open}
           </button>

@@ -1,0 +1,33 @@
+/* Lista de marcas y alta de una nueva: la comparten el selector del sidebar
+   y el de la barra superior en móvil. Filas de 44px para el dedo. */
+
+.list { list-style: none; margin: 0; padding: 4px 0; max-height: 240px; overflow-y: auto; }
+
+.item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 44px; padding: 8px 14px;
+  background: none; border: 0; cursor: pointer; text-align: left;
+  color: var(--text); font-family: var(--font-syne), system-ui, sans-serif; font-size: 13px;
+}
+.item[aria-current] { color: var(--accent-text); font-weight: 700; }
+.avatar { display: flex; flex-shrink: 0; }
+.itemName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.check { color: var(--accent-text); }
+
+.divider { border-top: 1px solid var(--border); }
+
+.newBrand {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-height: 44px; padding: 8px 14px;
+  background: none; border: 0; cursor: pointer; text-align: left;
+  color: var(--muted); font-family: var(--font-syne), system-ui, sans-serif; font-size: 13px;
+}
+.newBrand:hover, .newBrand:active { color: var(--text); }
+
+.create { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px; }
+.createActions { display: flex; gap: 6px; }
+.createActions > :first-child { flex: 1; }
+
+.limit { font-size: 12px; line-height: 1.45; color: var(--danger); margin: 0; }
+.limit a { color: var(--accent-text); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.error { font-size: 12px; line-height: 1.45; color: var(--danger); margin: 0; }

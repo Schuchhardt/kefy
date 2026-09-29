@@ -1,0 +1,31 @@
+/* Mi perfil. Único sitio donde se edita el nombre de la persona. */
+
+.hero { display: flex; align-items: center; gap: 16px 20px; flex-wrap: wrap; }
+.avatar {
+  width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: var(--accent-soft); border: 2px solid var(--accent-border); color: var(--accent-text);
+  font-family: var(--font-syne), system-ui, sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.02em;
+}
+.who { flex: 1 1 200px; min-width: 0; }
+.name {
+  font-family: var(--font-syne), system-ui, sans-serif; font-size: 18px; font-weight: 700;
+  letter-spacing: -0.02em; margin: 0; color: var(--text); overflow-wrap: anywhere;
+}
+.meta { font-size: 13px; color: var(--muted); margin: 4px 0 0; overflow-wrap: anywhere; }
+
+.form { display: flex; flex-direction: column; gap: 16px; }
+.actions { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.saved { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: 13px; font-weight: 600; }
+/* La confirmación de contraseña ocupa media fila en escritorio. */
+.half { max-width: calc(50% - 8px); }
+@media (max-width: 639px) {
+  .half { max-width: none; }
+}
+
+.facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 12px 24px; margin: 0;
+}
+.facts dt { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 2px; }
+.facts dd { margin: 0; font-size: 14px; color: var(--text); overflow-wrap: anywhere; }

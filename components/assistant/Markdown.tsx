@@ -33,7 +33,7 @@ function SafeLink({ href, children, ctx }: { href: string; children: ReactNode; 
 
   if (h.startsWith('/') && !h.startsWith('//') && !h.startsWith('/\\')) {
     return (
-      <Link href={h} onClick={() => ctx.onInternalNavigate?.()} style={{ color: 'var(--assistant-accent-text)', textDecoration: 'underline' }}>
+      <Link href={h} onClick={() => ctx.onInternalNavigate?.()} style={{ color: 'var(--accent-text)', textDecoration: 'underline' }}>
         {children}
       </Link>
     );
@@ -50,7 +50,7 @@ function SafeLink({ href, children, ctx }: { href: string; children: ReactNode; 
           target="_blank"
           rel="noopener noreferrer nofollow"
           title={ctx.externalLabel(host)}
-          style={{ color: 'var(--assistant-accent-text)', textDecoration: 'underline', wordBreak: 'break-word' }}
+          style={{ color: 'var(--accent-text)', textDecoration: 'underline', wordBreak: 'break-word' }}
         >
           {children}
         </a>

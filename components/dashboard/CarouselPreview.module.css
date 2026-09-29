@@ -1,0 +1,42 @@
+/* ─── Navegación de slides (puntos + anterior/siguiente) ──────────────────────
+   Antes eran <div onClick> de 6px: no se podían usar con teclado ni tenían
+   nombre. Ahora cada punto es un botón con 36px de alto (el punto visible
+   sigue siendo pequeño) y hay flechas de 36×36 para moverse con el pulgar. */
+.slideNav {
+  display: flex; align-items: center; justify-content: center; gap: 2px;
+  padding: 4px 0 2px; min-width: 0;
+}
+.slideArrow {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  transition: background-color 0.15s, color 0.15s;
+}
+.slideArrow:hover:not(:disabled),
+.slideArrow:active:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.slideArrow:disabled { opacity: 0.35; cursor: default; }
+
+.dots { display: flex; flex-wrap: wrap; justify-content: center; min-width: 0; }
+.dot {
+  min-width: 24px; height: 36px; padding: 0 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.dotMark {
+  display: block; width: 6px; height: 6px; border-radius: 3px;
+  background: var(--muted); opacity: 0.55;
+  transition: width 0.2s ease, background-color 0.2s ease, opacity 0.2s ease;
+}
+.dot:hover .dotMark { opacity: 0.85; }
+.dot[aria-current="true"] .dotMark { width: 18px; background: var(--accent); opacity: 1; }
+
+/* ─── Flechas sobre la imagen del carrusel ─────────────────────────────────── */
+.overlayArrow {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  /* Sobre la foto del usuario: blanco translúcido como en Instagram. */
+  background: rgba(255, 255, 255, 0.92); color: #000;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+}
+.overlayArrowPrev { left: 10px; }
+.overlayArrowNext { right: 10px; }

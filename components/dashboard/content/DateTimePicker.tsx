@@ -1,8 +1,16 @@
 'use client';
 
+// Día + hora de una publicación programada. La hora es un <input type="time">:
+// en el móvil abre el selector nativo (antes eran dos campos numéricos, horas
+// y minutos, que había que teclear).
+
+import { useId } from 'react';
 import { DayPicker } from 'react-day-picker';
-import { es, enUS } from 'date-fns/locale';
+import { es, enUS } from 'react-day-picker/locale';
 import 'react-day-picker/style.css';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
+import styles from './DateTimePicker.module.css';
 
 interface DateTimePickerProps {
   value:     Date | null;
@@ -12,7 +20,17 @@ interface DateTimePickerProps {
   lang?:     'es' | 'en';
 }
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** `HH:MM` para el input; sin fecha elegida, las 09:00. */
+function timeValue(value: Date | null): string {
+  return value ? `${pad(value.getHours())}:${pad(value.getMinutes())}` : '09:00';
+}
+
 export default function DateTimePicker({ value, onChange, minDate, lang = 'es' }: DateTimePickerProps) {
+  const t = (lang === 'en' ? enPublish : esPublish).dateTime;
+  const dayLabelId = useId();
+  const timeId = useId();
   const min = minDate ?? new Date();
   const locale = lang === 'en' ? enUS : es;
 
@@ -26,21 +44,19 @@ export default function DateTimePicker({ value, onChange, minDate, lang = 'es' }
     onChange(next);
   }
 
-  function handleTimeChange(h: number, m: number) {
-    const base = value ?? new Date();
-    const next = new Date(base);
+  function handleTimeChange(raw: string) {
+    const [h, m] = raw.split(':').map(Number);
+    // Borrar el campo no borra la fecha: se ignora hasta que haya una hora.
+    if (!Number.isInteger(h) || !Number.isInteger(m)) return;
+    const next = new Date(value ?? new Date());
     next.setHours(h, m, 0, 0);
     onChange(next);
   }
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: 12,
-    }}>
-      <div className="kefy-daypicker" style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 10, padding: 8,
-      }}>
+    <div className={styles.root}>
+      <p id={dayLabelId} className="sr-only">{t.dayLabel}</p>
+      <div className={styles.calendar}>
         <DayPicker
           mode="single"
           selected={value ?? undefined}
@@ -49,84 +65,28 @@ export default function DateTimePicker({ value, onChange, minDate, lang = 'es' }
           disabled={{ before: min }}
           weekStartsOn={1}
           showOutsideDays
+          aria-labelledby={dayLabelId}
         />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
-          {lang === 'en' ? 'Time' : 'Hora'}
-        </label>
+      <div className={styles.timeRow}>
+        <label htmlFor={timeId} className={styles.timeLabel}>{t.timeLabel}</label>
         <input
-          type="number"
-          min={0}
-          max={23}
-          value={hours}
-          onChange={(e) => handleTimeChange(Math.max(0, Math.min(23, Number(e.target.value) || 0)), minutes)}
-          style={timeInputStyle}
-          aria-label={lang === 'en' ? 'Hours' : 'Horas'}
-        />
-        <span style={{ fontWeight: 700, color: 'var(--muted)' }}>:</span>
-        <input
-          type="number"
-          min={0}
-          max={59}
-          step={5}
-          value={String(minutes).padStart(2, '0')}
-          onChange={(e) => handleTimeChange(hours, Math.max(0, Math.min(59, Number(e.target.value) || 0)))}
-          style={timeInputStyle}
-          aria-label={lang === 'en' ? 'Minutes' : 'Minutos'}
+          id={timeId}
+          type="time"
+          className={`ui-input ${styles.time}`}
+          value={timeValue(value)}
+          onChange={(e) => handleTimeChange(e.target.value)}
         />
         {value && (
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
-            {value.toLocaleString(lang === 'en' ? 'en-US' : 'es-ES', {
-              weekday: 'short', day: '2-digit', month: 'short',
+          <p className={styles.summary} aria-live="polite">
+            {t.summary(value.toLocaleString(lang === 'en' ? 'en-US' : 'es-ES', {
+              weekday: 'long', day: 'numeric', month: 'long',
               hour: '2-digit', minute: '2-digit',
-            })}
-          </span>
+            }))}
+          </p>
         )}
       </div>
-
-      <style jsx global>{`
-        .kefy-daypicker .rdp-root {
-          --rdp-accent-color: var(--accent);
-          --rdp-accent-background-color: rgba(198,255,75,0.18);
-          --rdp-background-color: var(--bg);
-          --rdp-day-height: 36px;
-          --rdp-day-width: 36px;
-          --rdp-day_button-height: 32px;
-          --rdp-day_button-width: 32px;
-          --rdp-day_button-border-radius: 8px;
-          --rdp-selected-border: 2px solid var(--accent);
-          --rdp-today-color: var(--accent);
-          color: var(--text);
-          font-size: 13px;
-        }
-        .kefy-daypicker .rdp-caption_label { font-weight: 700; }
-        .kefy-daypicker .rdp-chevron       { fill: var(--text); }
-        .kefy-daypicker .rdp-day_button:hover:not([disabled]) {
-          background: rgba(198,255,75,0.10);
-        }
-        .kefy-daypicker .rdp-selected .rdp-day_button {
-          background: var(--accent);
-          color: #000;
-          font-weight: 700;
-        }
-        .kefy-daypicker .rdp-disabled { opacity: 0.3; }
-        .kefy-daypicker .rdp-weekday  { color: var(--muted); font-weight: 600; }
-      `}</style>
     </div>
   );
 }
-
-const timeInputStyle: React.CSSProperties = {
-  width: 56,
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 6,
-  padding: '6px 8px',
-  fontSize: 13,
-  color: 'var(--text)',
-  textAlign: 'center',
-  outline: 'none',
-  MozAppearance: 'textfield',
-};

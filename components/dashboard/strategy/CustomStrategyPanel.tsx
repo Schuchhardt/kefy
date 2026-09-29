@@ -11,26 +11,38 @@
 // La lista se recarga cuando cambia `reloadToken` (el asistente tocó la
 // estrategia). `prefill` abre el editor con un borrador (p. ej. «Personalizar
 // esta estrategia» desde la pestaña de recomendadas).
+//
+// También exporta las piezas que la pestaña de recomendadas pinta igual
+// (StrategySection, StrategyOverview, StrategyCalendar, ConversionMechanic y
+// ActiveBadge): así las dos pestañas no divergen.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import esT from '@/locales/es/dashboard/strategy';
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import esT, { type StrategyCopy } from '@/locales/es/dashboard/strategy';
 import enT from '@/locales/en/dashboard/strategy';
-import { CHANNEL_LABELS } from '@/lib/channels';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
 import { openAssistant } from '@/lib/assistant/open';
-import type { Channel } from '@/types/channels';
 import type { CustomCalendarItem, CustomStrategy, Objective, OrgSelection } from '@/types/strategy';
+import Button, { Spinner } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import EmptyState from '@/components/ui/EmptyState';
+import Icon, { type IconName } from '@/components/ui/icons';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import CustomStrategyEditor, { type EditorServerError } from './CustomStrategyEditor';
 import {
   CUSTOM_STRATEGY_LIMITS,
   calendarStats,
+  channelName,
   draftFromCustom,
   draftToPayload,
   emptyDraft,
+  formatIcon,
   type CustomDraft,
 } from './custom-strategy-model';
+import styles from './CustomStrategyPanel.module.css';
 
 const T = { es: esT, en: enT } as const;
-type Texts = typeof esT;
+type Texts = StrategyCopy;
 
 interface Props {
   lang: 'es' | 'en';
@@ -51,45 +63,176 @@ interface Props {
 
 type EditorState = { mode: 'create' | 'edit'; id?: string; draft: CustomDraft; key: number };
 
-// ─── Estilos ─────────────────────────────────────────────────────────────────
+// ─── Piezas compartidas con la pestaña de recomendadas ───────────────────────
 
-const sectionLabel: React.CSSProperties = {
-  fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
-  color: 'var(--muted)', marginBottom: 16,
-};
+/** Pastilla «Activa»: texto sobre el acento con --on-accent (antes #000). */
+export function ActiveBadge({ label }: { label: string }) {
+  return (
+    <span
+      className="ui-badge"
+      style={{
+        '--badge-color': 'var(--on-accent)',
+        '--badge-bg': 'var(--accent)',
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+      } as CSSProperties}
+    >
+      {label}
+    </span>
+  );
+}
 
-const smallLabel: React.CSSProperties = {
-  fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em',
-  color: 'var(--muted)', marginBottom: 4,
-};
+/** Bloque con su rótulo como encabezado (h2 en recomendadas, h3 en propias). */
+export function StrategySection({
+  label, as: Heading = 'h2', children, className, headingId: givenId,
+}: {
+  label: string;
+  as?: 'h2' | 'h3';
+  children: ReactNode;
+  className?: string;
+  /** Id del encabezado, para nombrar con él una tabla de dentro. */
+  headingId?: string;
+}) {
+  const autoId = `strategy-section-${useId().replace(/:/g, '')}`;
+  const headingId = givenId ?? autoId;
+  return (
+    <section aria-labelledby={headingId} className={[styles.section, className].filter(Boolean).join(' ')}>
+      <Heading id={headingId} className={styles.sectionLabel}>{label}</Heading>
+      {children}
+    </section>
+  );
+}
 
-const primaryBtn: React.CSSProperties = {
-  background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 10,
-  padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-};
+/** Nombre, insignia, objetivo, enfoque y KPIs; `children`, las acciones. */
+export function StrategyOverview({
+  t, name, active, meta, description, kpiPrimary, kpiSecondary, headingAs: Heading = 'h3', children,
+}: {
+  t: Texts;
+  name: string;
+  active?: boolean;
+  meta?: ReactNode;
+  description?: string | null;
+  kpiPrimary?: string | null;
+  kpiSecondary?: string | null;
+  headingAs?: 'h2' | 'h3';
+  children?: ReactNode;
+}) {
+  return (
+    <div className={styles.overview}>
+      <div className={styles.overviewTitleRow}>
+        <Heading className={styles.overviewTitle}>{name}</Heading>
+        {active && <ActiveBadge label={t.activeBadge} />}
+      </div>
+      {meta && <p className={styles.overviewMeta}>{meta}</p>}
+      {description && <p className={styles.overviewDesc}>{description}</p>}
+      {(kpiPrimary || kpiSecondary) && (
+        <dl className={styles.kpis} style={{ margin: 0 }}>
+          {kpiPrimary && (
+            <div>
+              <dt className={styles.kpiLabel}>{t.kpiPrimary}</dt>
+              <dd className={styles.kpiPrimary} style={{ margin: 0 }}>{kpiPrimary}</dd>
+            </div>
+          )}
+          {kpiSecondary && (
+            <div>
+              <dt className={styles.kpiLabel}>{t.kpiSecondary}</dt>
+              <dd className={styles.kpiSecondary} style={{ margin: 0 }}>{kpiSecondary}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {children && <div className={styles.buttonRow} style={{ marginTop: 20 }}>{children}</div>}
+    </div>
+  );
+}
 
-const secondaryBtn: React.CSSProperties = {
-  background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 10,
-  padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-};
+export function ConversionMechanic({ t, text }: { t: Texts; text: string }) {
+  return (
+    <div className={styles.mechanic}>
+      <p className={styles.mechanicLabel}>{t.conversionMechanic}</p>
+      <p className={styles.mechanicText}>{text}</p>
+    </div>
+  );
+}
 
-const dangerBtn: React.CSSProperties = {
-  ...secondaryBtn, color: '#ff6b6b', borderColor: 'rgba(255,107,107,0.5)',
-};
+export interface CalendarRow {
+  key: string;
+  week: number;
+  icon: IconName;
+  format: string;
+  channel: string;
+  topic: string;
+  detail?: string | null;
+  goal?: string | null;
+  onGenerate: () => void;
+}
 
-const noticeBox = (kind: 'error' | 'ok' | 'info'): React.CSSProperties => ({
-  background: kind === 'error' ? 'rgba(255,107,107,0.08)' : 'rgba(198,255,75,0.07)',
-  border: `1px solid ${kind === 'error' ? 'rgba(255,107,107,0.35)' : 'rgba(198,255,75,0.25)'}`,
-  borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text)', lineHeight: 1.5, marginBottom: 20,
-});
+/**
+ * Calendario por semanas. Cada semana es un <tbody> con su fila de grupo
+ * («Semana 1»); en móvil cada pieza se ve como una tarjeta. «Generar» lleva
+ * el tema en el nombre accesible: si no, un lector de pantalla oía diez
+ * botones «Generar» iguales.
+ */
+export function StrategyCalendar({ t, rows, labelledBy }: { t: Texts; rows: CalendarRow[]; labelledBy?: string }) {
+  const weeks = new Map<number, CalendarRow[]>();
+  for (const row of [...rows].sort((a, b) => a.week - b.week)) {
+    weeks.set(row.week, [...(weeks.get(row.week) ?? []), row]);
+  }
+  const [hFormat, hChannel, hTopic, hGoal, hActions] = t.tableHeaders;
 
-export const activeBadgeStyle: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 800,
-  letterSpacing: '0.08em', textTransform: 'uppercase', color: '#000', background: 'var(--accent)',
-  borderRadius: 100, padding: '3px 8px', lineHeight: 1.2, whiteSpace: 'nowrap',
-};
-
-const FORMAT_ICONS: Record<string, string> = { carousel: '▦', reel: '▶', post: '✦', story: '⬜' };
+  return (
+    <div className={styles.calendarWrap}>
+      <table className={styles.calendar} aria-labelledby={labelledBy}>
+        <thead>
+          <tr>
+            <th scope="col" className={styles.colHead}>{hFormat}</th>
+            <th scope="col" className={styles.colHead}>{hChannel}</th>
+            <th scope="col" className={styles.colHead}>{hTopic}</th>
+            <th scope="col" className={styles.colHead}>{hGoal}</th>
+            <th scope="col" className={styles.colHead}><span className="sr-only">{hActions}</span></th>
+          </tr>
+        </thead>
+        {[...weeks.entries()].map(([week, items]) => (
+          <tbody key={week}>
+            <tr className={styles.weekRow}>
+              <th scope="rowgroup" colSpan={5}>{t.weekLabel(week)}</th>
+            </tr>
+            {items.map((row) => (
+              <tr key={row.key} className={styles.itemRow}>
+                <td className={styles.formatCell}>
+                  <span className={styles.formatInner}>
+                    <Icon name={row.icon} size={16} />
+                    {row.format}
+                  </span>
+                </td>
+                <td className={styles.channelCell}>{row.channel}</td>
+                <td className={styles.topicCell}>
+                  {row.topic}
+                  {row.detail && <div className={styles.detail}>{row.detail}</div>}
+                </td>
+                <td className={styles.goalCell}>
+                  {row.goal && <><span className={styles.cellLabel}>{hGoal}: </span>{row.goal}</>}
+                </td>
+                <td className={styles.actionCell}>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={<Icon name="sparkles" size={14} />}
+                    aria-label={t.generateFor(row.topic)}
+                    onClick={row.onGenerate}
+                  >
+                    {t.generateBtn}
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}
 
 // ─── Errores del servidor ────────────────────────────────────────────────────
 
@@ -122,6 +265,8 @@ export default function CustomStrategyPanel({
 }: Props) {
   const t = T[lang];
   const tc = t.custom;
+  const common = lang === 'en' ? enCommon : esCommon;
+  const { confirm, dialog } = useConfirm();
 
   const [strategies, setStrategies] = useState<CustomStrategy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,10 +275,10 @@ export default function CustomStrategyPanel({
   const [saving, setSaving] = useState(false);
   const [editorError, setEditorError] = useState<EditorServerError | null>(null);
   const [busy, setBusy] = useState<{ id: string; action: 'activate' | 'delete' } | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
   const editorKey = useRef(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   const qs = `lang=${lang}`;
 
@@ -200,6 +345,13 @@ export default function CustomStrategyPanel({
     setNotice(null);
   }
 
+  /** Al cerrar el editor el foco vuelve al título del panel, no se pierde en <body>. */
+  function closeEditor() {
+    setEditor(null);
+    setEditorError(null);
+    requestAnimationFrame(() => titleRef.current?.focus());
+  }
+
   // ── Escritura ────────────────────────────────────────────────────────────
   async function save(draft: CustomDraft, activate: boolean) {
     if (!editor) return;
@@ -221,7 +373,7 @@ export default function CustomStrategyPanel({
       setStrategies((prev) => [strategy, ...prev.filter((s) => s.id !== strategy.id)]);
       onSelectedIdChange(strategy.id);
       if (selection) onSelectionSaved(selection);
-      setEditor(null);
+      closeEditor();
       flash('ok', activate ? tc.activated : tc.saved);
     } catch {
       setEditorError({ message: t.genericError, details: [] });
@@ -251,6 +403,18 @@ export default function CustomStrategyPanel({
     }
   }
 
+  async function askRemove(s: CustomStrategy) {
+    const isActive = s.id === activeCustomId;
+    const ok = await confirm({
+      title: tc.confirmDelete(s.name),
+      message: isActive ? `${tc.confirmDeleteActive} ${tc.confirmDeleteBody}` : tc.confirmDeleteBody,
+      confirmLabel: tc.confirmYes,
+      cancelLabel: tc.cancel,
+      danger: true,
+    });
+    if (ok) await remove(s.id);
+  }
+
   async function remove(id: string) {
     setBusy({ id, action: 'delete' });
     setNotice(null);
@@ -262,7 +426,6 @@ export default function CustomStrategyPanel({
       if (!res.ok && res.status !== 404) { flash('error', (await readError(res, t)).message); return; }
       const rest = strategies.filter((s) => s.id !== id);
       setStrategies(rest);
-      setConfirmDeleteId(null);
       onSelectedIdChange(rest[0]?.id ?? null);
       if (id === activeCustomId) onSelectionStale();
       flash('ok', tc.deleted);
@@ -282,35 +445,48 @@ export default function CustomStrategyPanel({
       ? ''
       : d.toLocaleDateString(lang === 'en' ? 'en-US' : 'es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
   };
-  const objectiveName = (id: string | null) => {
-    const o = objectives.find((x) => x.id === id);
-    return o ? `${o.icon} ${lang === 'en' ? o.name_en : o.name_es}` : null;
-  };
-  const channelLabel = (c: string) => (c === 'general' ? tc.channelGeneral : CHANNEL_LABELS[c as Channel] ?? c);
+
+  const newButton = canEdit && !editor && (
+    <Button variant="primary" icon={<Icon name="plus" size={16} />} onClick={openCreate}>{tc.newBtn}</Button>
+  );
+  const assistantButton = (
+    <Button variant="secondary" icon={<Icon name="sparkles" size={16} />} onClick={() => openAssistant(tc.assistantDraft)}>
+      {tc.askAssistant}
+    </Button>
+  );
+  // Sin estrategias, las acciones van en el estado vacío (no dos veces).
+  const empty = !loading && !loadError && strategies.length === 0 && !editor;
 
   return (
     <div>
       {/* ── Cabecera ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
-        <div style={{ flex: '1 1 280px' }}>
-          <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: '0 0 6px' }}>
-            {tc.title}
-          </h2>
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0, lineHeight: 1.6, maxWidth: 560 }}>{tc.desc}</p>
+      <div className={styles.panelHead}>
+        <div className={styles.panelIntro}>
+          <h2 ref={titleRef} tabIndex={-1} className={`${styles.panelTitle} ${styles.anchor}`}>{tc.title}</h2>
+          <p className={styles.panelDesc}>{tc.desc}</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button type="button" style={secondaryBtn} onClick={() => openAssistant(tc.assistantDraft)}>
-            {tc.askAssistant}
-          </button>
-          {canEdit && !editor && (
-            <button type="button" style={primaryBtn} onClick={openCreate}>{tc.newBtn}</button>
-          )}
-        </div>
+        {!empty && (
+          <div className={styles.buttonRow}>
+            {assistantButton}
+            {newButton}
+          </div>
+        )}
       </div>
 
-      {!canEdit && <div role="status" style={noticeBox('info')}>{t.forbidden}</div>}
+      {!canEdit && (
+        <div className={styles.notice}>
+          <Notice tone="info" live={false} icon={<Icon name="lock" size={16} />}>{t.forbidden}</Notice>
+        </div>
+      )}
       {notice && (
-        <div role={notice.kind === 'error' ? 'alert' : 'status'} style={noticeBox(notice.kind)}>{notice.text}</div>
+        <div className={styles.notice}>
+          <Notice
+            tone={notice.kind === 'error' ? 'danger' : 'success'}
+            icon={<Icon name={notice.kind === 'error' ? 'alert' : 'check-circle'} size={16} />}
+          >
+            {notice.text}
+          </Notice>
+        </div>
       )}
 
       {editor && (
@@ -323,31 +499,40 @@ export default function CustomStrategyPanel({
           saving={saving}
           serverError={editorError}
           onSave={(draft, act) => { void save(draft, act); }}
-          onCancel={() => { setEditor(null); setEditorError(null); }}
+          onCancel={closeEditor}
         />
       )}
 
       {/* ── Lista ── */}
       {loading ? (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>{tc.loading}</p>
+        <p role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--muted)', fontSize: 14 }}>
+          <Spinner size={14} /> {tc.loading}
+        </p>
       ) : loadError ? (
-        <div role="alert" style={noticeBox('error')}>{tc.loadError}</div>
+        <div className={styles.notice}>
+          <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
+            <p style={{ margin: '0 0 10px' }}>{tc.loadError}</p>
+            <Button size="sm" variant="secondary" icon={<Icon name="refresh" size={14} />} onClick={() => { void load(); }}>
+              {common.actions.retry}
+            </Button>
+          </Notice>
+        </div>
       ) : strategies.length === 0 ? (
-        !editor && (
-          <div style={{
-            background: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 12,
-            padding: '28px 24px', textAlign: 'center', color: 'var(--muted)', fontSize: 14, lineHeight: 1.6,
-          }}>
-            {tc.empty}
+        empty && (
+          <div className="ui-card" style={{ padding: 0, borderStyle: 'dashed' }}>
+            <EmptyState
+              icon={<Icon name="target" size={32} />}
+              title={tc.emptyTitle}
+              hint={tc.emptyHint}
+              action={<div className={styles.buttonRow} style={{ justifyContent: 'center' }}>{newButton}{assistantButton}</div>}
+            />
           </div>
         )
       ) : (
         <ul
           aria-label={tc.listLabel}
-          style={{
-            listStyle: 'none', padding: 0, margin: '0 0 32px',
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))', gap: 12,
-          }}
+          className={`auto-grid ${styles.list}`}
+          style={{ '--min': '240px', '--gap': '12px' } as CSSProperties}
         >
           {strategies.map((s) => {
             const isSel = s.id === selectedId;
@@ -356,29 +541,25 @@ export default function CustomStrategyPanel({
             const origin = s.created_via === 'chat' ? tc.byAssistant
               : s.created_via === 'api' || s.created_via === 'mcp' ? tc.byIntegration : null;
             return (
-              <li key={s.id}>
+              <li key={s.id} style={{ minWidth: 0 }}>
                 <button
                   type="button"
                   aria-pressed={isSel}
-                  onClick={() => { onSelectedIdChange(s.id); setConfirmDeleteId(null); }}
-                  style={{
-                    width: '100%', textAlign: 'left', font: 'inherit', color: 'inherit',
-                    background: isSel ? 'rgba(198,255,75,0.08)' : 'var(--surface)',
-                    border: `1.5px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
-                    borderRadius: 12, padding: '16px 18px', cursor: 'pointer', height: '100%',
-                  }}
+                  className={`${styles.strategyCard} ui-link-card`}
+                  onClick={() => onSelectedIdChange(s.id)}
                 >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4, wordBreak: 'break-word' }}>
-                      {s.name}
+                  <span className={styles.cardHead}>
+                    <span className={styles.cardName}>{s.name}</span>
+                    {isActive && <ActiveBadge label={t.activeBadge} />}
+                  </span>
+                  <span className={styles.cardMeta}>{tc.summary(stats.weeks, stats.pieces)}</span>
+                  <span className={styles.cardMeta}>{tc.updated(dateFmt(s.updated_at))}</span>
+                  {origin && (
+                    <span className={styles.cardOrigin}>
+                      {s.created_via === 'chat' && <Icon name="sparkles" size={12} />}
+                      {origin}
                     </span>
-                    {isActive && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-                    {tc.summary(stats.weeks, stats.pieces)}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>{tc.updated(dateFmt(s.updated_at))}</div>
-                  {origin && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 6 }}>{origin}</div>}
+                  )}
                 </button>
               </li>
             );
@@ -386,7 +567,11 @@ export default function CustomStrategyPanel({
         </ul>
       )}
 
-      {missing && <div role="alert" style={noticeBox('error')}>{tc.notFound}</div>}
+      {missing && (
+        <div className={styles.notice}>
+          <Notice tone="danger" icon={<Icon name="alert" size={16} />}>{tc.notFound}</Notice>
+        </div>
+      )}
 
       {/* ── Estrategia elegida ── */}
       {selected && (
@@ -397,17 +582,16 @@ export default function CustomStrategyPanel({
           isActive={selected.id === activeCustomId}
           canEdit={canEdit}
           busy={busy?.id === selected.id ? busy.action : null}
-          confirmingDelete={confirmDeleteId === selected.id}
-          objectiveName={objectiveName(selected.objective_id)}
-          channelLabel={channelLabel}
+          objective={objectives.find((o) => o.id === selected.objective_id) ?? null}
+          lang={lang}
           onActivate={() => { void activate(selected.id); }}
           onEdit={() => openEdit(selected)}
-          onAskDelete={() => setConfirmDeleteId(selected.id)}
-          onCancelDelete={() => setConfirmDeleteId(null)}
-          onConfirmDelete={() => { void remove(selected.id); }}
+          onDelete={() => { void askRemove(selected); }}
           onGenerate={onGenerate}
         />
       )}
+
+      {dialog}
     </div>
   );
 }
@@ -415,179 +599,76 @@ export default function CustomStrategyPanel({
 // ─── Vista de lectura ────────────────────────────────────────────────────────
 
 function SelectedStrategy({
-  t, strategy, isActive, canEdit, busy, confirmingDelete, objectiveName, channelLabel,
-  onActivate, onEdit, onAskDelete, onCancelDelete, onConfirmDelete, onGenerate,
+  t, strategy, isActive, canEdit, busy, objective, lang, onActivate, onEdit, onDelete, onGenerate,
 }: {
   t: Texts;
   strategy: CustomStrategy;
   isActive: boolean;
   canEdit: boolean;
   busy: 'activate' | 'delete' | null;
-  confirmingDelete: boolean;
-  objectiveName: string | null;
-  channelLabel: (c: string) => string;
+  objective: Objective | null;
+  lang: 'es' | 'en';
   onActivate: () => void;
   onEdit: () => void;
-  onAskDelete: () => void;
-  onCancelDelete: () => void;
-  onConfirmDelete: () => void;
+  onDelete: () => void;
   onGenerate: (item: CustomCalendarItem) => void;
 }) {
   const tc = t.custom;
-  const weeks = strategy.calendar.reduce<Record<number, CustomCalendarItem[]>>((acc, item) => {
-    (acc[item.week] ??= []).push(item);
-    return acc;
-  }, {});
+  const calendarLabelId = `custom-calendar-${useId().replace(/:/g, '')}`;
+
+  const rows: CalendarRow[] = strategy.calendar.map((item, i) => ({
+    key: `${item.week}-${i}`,
+    week: item.week,
+    icon: formatIcon(item.format),
+    format: tc.formats[item.format] ?? item.format,
+    channel: channelName(item.channel, t),
+    topic: item.topic,
+    detail: item.angle,
+    goal: item.goal,
+    onGenerate: () => onGenerate(item),
+  }));
 
   return (
     <section aria-label={strategy.name} data-testid="custom-strategy-detail">
-      {/* ── Enfoque y KPIs ── */}
-      <div style={{ marginBottom: 32 }}>
-        <p style={sectionLabel}>{tc.approach}</p>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 'clamp(16px, 4vw, 28px)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-            <h3 style={{ fontFamily: 'var(--font-syne)', fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, wordBreak: 'break-word' }}>
-              {strategy.name}
-            </h3>
-            {isActive && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
-          </div>
-          {objectiveName && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-              {tc.objective}: <span style={{ color: 'var(--text)' }}>{objectiveName}</span>
-            </div>
+      <StrategySection label={tc.approach} as="h3">
+        <StrategyOverview
+          t={t}
+          name={strategy.name}
+          active={isActive}
+          meta={objective && (
+            <>
+              {tc.objective}:
+              {objective.icon && <span aria-hidden="true">{objective.icon}</span>}
+              <strong>{lang === 'en' ? objective.name_en : objective.name_es}</strong>
+            </>
           )}
-          {strategy.description && (
-            <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, margin: '0 0 20px', whiteSpace: 'pre-line' }}>
-              {strategy.description}
-            </p>
-          )}
-          {(strategy.kpi_primary || strategy.kpi_secondary) && (
-            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 20 }}>
-              {strategy.kpi_primary && (
-                <div>
-                  <div style={smallLabel}>{t.kpiPrimary}</div>
-                  <div style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>{strategy.kpi_primary}</div>
-                </div>
-              )}
-              {strategy.kpi_secondary && (
-                <div>
-                  <div style={smallLabel}>{t.kpiSecondary}</div>
-                  <div style={{ fontSize: 14, color: 'var(--text)' }}>{strategy.kpi_secondary}</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Acciones ── */}
+          description={strategy.description}
+          kpiPrimary={strategy.kpi_primary}
+          kpiSecondary={strategy.kpi_secondary}
+        >
           {canEdit && (
-            confirmingDelete ? (
-              <div role="alertdialog" aria-label={tc.delete} style={{ ...noticeBox('error'), marginBottom: 0 }}>
-                <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{tc.confirmDelete(strategy.name)}</p>
-                {isActive && <p style={{ margin: '0 0 10px', color: 'var(--muted)' }}>{tc.confirmDeleteActive}</p>}
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-                  <button type="button" style={{ ...dangerBtn, background: '#ff6b6b', color: '#000', border: 'none' }} disabled={busy === 'delete'} onClick={onConfirmDelete}>
-                    {busy === 'delete' ? tc.deleting : tc.confirmYes}
-                  </button>
-                  <button type="button" style={secondaryBtn} disabled={busy === 'delete'} onClick={onCancelDelete}>{tc.cancel}</button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {!isActive && (
-                  <button type="button" style={primaryBtn} disabled={busy === 'activate'} onClick={onActivate}>
-                    {busy === 'activate' ? tc.activating : tc.activate}
-                  </button>
-                )}
-                <button type="button" style={secondaryBtn} onClick={onEdit}>{tc.edit}</button>
-                <button type="button" style={dangerBtn} onClick={onAskDelete}>{tc.delete}</button>
-              </div>
-            )
+            <>
+              {!isActive && (
+                <Button variant="primary" icon={<Icon name="check" size={16} />} loading={busy === 'activate'} disabled={busy !== null} onClick={onActivate}>
+                  {busy === 'activate' ? tc.activating : tc.activate}
+                </Button>
+              )}
+              <Button variant="secondary" icon={<Icon name="edit" size={16} />} disabled={busy !== null} onClick={onEdit}>{tc.edit}</Button>
+              <Button variant="danger-ghost" icon={<Icon name="trash" size={16} />} loading={busy === 'delete'} disabled={busy !== null} onClick={onDelete}>
+                {busy === 'delete' ? tc.deleting : tc.delete}
+              </Button>
+            </>
           )}
-        </div>
-      </div>
+        </StrategyOverview>
+      </StrategySection>
 
-      {/* ── Calendario ── */}
-      {strategy.calendar.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <p style={sectionLabel}>{tc.calendar}</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1.5px solid var(--border)' }}>
-                  {t.tableHeaders.map((h, i) => (
-                    <th
-                      key={`${h}-${i}`}
-                      style={{
-                        padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: 'var(--muted)',
-                        fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(weeks)
-                  .sort(([a], [b]) => Number(a) - Number(b))
-                  .map(([week, items]) => items.map((item, idx) => (
-                    <tr key={`${week}-${idx}`} style={{ borderBottom: '1px solid var(--border)' }}>
-                      {idx === 0 && (
-                        <td
-                          rowSpan={items.length}
-                          style={{ padding: 12, fontWeight: 700, color: 'var(--accent)', fontSize: 13, verticalAlign: 'top', whiteSpace: 'nowrap' }}
-                        >
-                          {tc.weekPrefix}{week}
-                        </td>
-                      )}
-                      <td style={{ padding: 12, whiteSpace: 'nowrap' }}>
-                        <span style={{ fontSize: 16, marginRight: 6 }} aria-hidden>{FORMAT_ICONS[item.format] ?? '◉'}</span>
-                        <span style={{ color: 'var(--muted)', fontSize: 12 }}>{tc.formats[item.format] ?? item.format}</span>
-                      </td>
-                      <td style={{ padding: 12, color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                        {channelLabel(item.channel)}
-                      </td>
-                      <td style={{ padding: 12, color: 'var(--text)', lineHeight: 1.5, maxWidth: 300 }}>
-                        {item.topic}
-                        {item.angle && (
-                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>{item.angle}</div>
-                        )}
-                      </td>
-                      <td style={{ padding: 12, color: 'var(--muted)', fontSize: 12 }}>{item.goal}</td>
-                      <td style={{ padding: 12, whiteSpace: 'nowrap' }}>
-                        <button
-                          type="button"
-                          onClick={() => onGenerate(item)}
-                          style={{
-                            background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
-                            padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {t.generateBtn}
-                        </button>
-                      </td>
-                    </tr>
-                  )))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {rows.length > 0 && (
+        <StrategySection label={tc.calendar} as="h3" headingId={calendarLabelId}>
+          <StrategyCalendar t={t} rows={rows} labelledBy={calendarLabelId} />
+        </StrategySection>
       )}
 
-      {/* ── Mecánica de conversión ── */}
-      {strategy.cta_mechanic && (
-        <div style={{
-          background: 'rgba(198,255,75,0.06)', border: '1px solid rgba(198,255,75,0.25)',
-          borderRadius: 12, padding: '20px 24px', marginBottom: 40,
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 8 }}>
-            {t.conversionMechanic}
-          </div>
-          <p style={{ margin: 0, fontSize: 14, color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-line' }}>
-            {strategy.cta_mechanic}
-          </p>
-        </div>
-      )}
+      {strategy.cta_mechanic && <ConversionMechanic t={t} text={strategy.cta_mechanic} />}
     </section>
   );
 }

@@ -11,6 +11,10 @@ import type { Brand } from '@/lib/brand-context';
  *      su identidad aparece con su logo sin tener que subir la misma imagen
  *      otra vez.
  *   3. La inicial sobre un color derivado del id, estable entre sesiones.
+ *
+ * Las dos primeras formas se anuncian como imagen con el nombre de la marca
+ * (la inicial también, con role="img"). Donde el nombre ya se lee al lado, el
+ * contenedor la marca como aria-hidden para no repetirlo.
  */
 export function brandImage(brand: Brand | null): string | null {
   if (!brand) return null;
@@ -21,7 +25,13 @@ function brandInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase();
 }
 
+/**
+ * Paleta fija de identidad de las marcas sin imagen. No depende del tema
+ * (una marca es del mismo color en claro y en oscuro), así que el texto que va
+ * encima tampoco: casi negro, ≥4,5:1 contra los seis tonos.
+ */
 const COLORS = ['#C6FF4B', '#4B8FFF', '#FF6B4B', '#B44BFF', '#4BFFD8', '#FF4BD0'];
+const ON_PALETTE = '#0A0A0C';
 
 /** Color estable por marca: la misma marca siempre sale del mismo color. */
 export function brandColor(id: string): string {
@@ -39,9 +49,9 @@ export default function BrandAvatar({
 
   if (!brand) {
     return (
-      <span style={{
+      <span aria-hidden="true" style={{
         width: size, height: size, borderRadius: 7, flexShrink: 0,
-        background: 'var(--accent)', color: '#000',
+        background: 'var(--accent)', color: 'var(--on-accent)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontWeight: 700, fontSize: size * 0.42, lineHeight: 1,
       }}>?</span>
@@ -62,9 +72,9 @@ export default function BrandAvatar({
   }
 
   return (
-    <span style={{
+    <span role="img" aria-label={brand.name} style={{
       width: size, height: size, borderRadius: 7, flexShrink: 0,
-      background: brandColor(brand.id), color: '#000',
+      background: brandColor(brand.id), color: ON_PALETTE,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       fontWeight: 800, fontSize: size * 0.42, lineHeight: 1,
     }}>

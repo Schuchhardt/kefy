@@ -1,10 +1,71 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Icon from '@/components/ui/icons';
 import { networkFrame, safeAreaCss } from '@/lib/preview-layout';
 import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
 import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ContentType, ReelScene } from '@/types/content';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
+import styles from './CarouselPreview.module.css';
+
+type PreviewCopy = typeof esPublish.preview;
+
+/** Textos de las vistas previas en el idioma de la interfaz. */
+export function previewCopy(lang: 'es' | 'en' = 'es'): PreviewCopy {
+  return (lang === 'en' ? enPublish : esPublish).preview;
+}
+
+/** Puntos + anterior/siguiente para recorrer los slides de un carrusel o las
+ *  escenas de un reel. Cada punto es un botón con nombre («Slide 2 de 5») y
+ *  36px de alto; las flechas miden 36×36. */
+export function SlideDots({
+  total, idx, onSelect, lang = 'es',
+}: {
+  total:    number;
+  idx:      number;
+  onSelect: (i: number) => void;
+  lang?:    'es' | 'en';
+}) {
+  const t = previewCopy(lang);
+  return (
+    <div className={styles.slideNav} role="group" aria-label={t.slidesLabel}>
+      <button
+        type="button"
+        className={styles.slideArrow}
+        aria-label={t.prevSlide}
+        disabled={idx <= 0}
+        onClick={() => onSelect(idx - 1)}
+      >
+        <Icon name="chevron-left" size={16} />
+      </button>
+      <div className={styles.dots}>
+        {Array.from({ length: total }).map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            className={styles.dot}
+            aria-label={t.slide(i + 1, total)}
+            aria-current={i === idx ? 'true' : undefined}
+            onClick={() => onSelect(i)}
+          >
+            <span className={styles.dotMark} aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className={styles.slideArrow}
+        aria-label={t.nextSlide}
+        disabled={idx >= total - 1}
+        onClick={() => onSelect(idx + 1)}
+      >
+        <Icon name="chevron-right" size={16} />
+      </button>
+    </div>
+  );
+}
 
 // Gradient palette for slides without images
 const GRADIENTS = [
@@ -155,15 +216,19 @@ export function SlideCanvas({
 
 export function CarouselPreview({
   slides,
-  username = 'tu_marca',
+  username,
   logoUrl,
   description,
+  lang = 'es',
 }: {
   slides:       CarouselSlide[];
   username?:    string;
   logoUrl?:     string | null;
   description?: string;
+  lang?:        'es' | 'en';
 }) {
+  const t = previewCopy(lang);
+  const name = username ?? t.defaultUsername;
   const [idx, setIdx] = useState(0);
   const slide = slides[idx];
   const total = slides.length;
@@ -192,7 +257,7 @@ export function CarouselPreview({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={logoUrl}
-              alt={username}
+              alt={name}
               style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', display: 'block' }}
             />
           ) : (
@@ -204,16 +269,16 @@ export function CarouselPreview({
                 fontSize: 14, fontWeight: 700, color: '#fff',
               }}
             >
-              {username[0]?.toUpperCase()}
+              {name[0]?.toUpperCase()}
             </div>
           )}
         </div>
 
-        <div style={{ flex: 1 }}>
-          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{username}</p>
-          <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>Instagram · Ahora</p>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{name}</p>
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>Instagram · {t.now}</p>
         </div>
-        <span style={{ fontSize: 18, color: 'var(--muted)', cursor: 'pointer', padding: '0 4px' }}>•••</span>
+        <Icon name="more" size={18} style={{ color: 'var(--muted)' }} />
       </div>
 
       {/* ── Image / Content area (1:1) ───────────────── */}
@@ -225,87 +290,47 @@ export function CarouselPreview({
       >
         <SlideCanvas slide={slide} index={idx} total={total} />
 
-        {/* ◀ Prev */}
         {idx > 0 && (
           <button
+            type="button"
+            className={`${styles.overlayArrow} ${styles.overlayArrowPrev}`}
+            aria-label={t.prevSlide}
             onClick={() => setIdx((i) => i - 1)}
-            style={{
-              position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-              background: 'rgba(255,255,255,0.92)', border: 'none', borderRadius: '50%',
-              width: 30, height: 30, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18, fontWeight: 700, color: '#000',
-              boxShadow: '0 1px 6px rgba(0,0,0,0.2)',
-            }}
           >
-            ‹
+            <Icon name="chevron-left" size={18} strokeWidth={2.4} />
           </button>
         )}
 
-        {/* ▶ Next */}
         {idx < total - 1 && (
           <button
+            type="button"
+            className={`${styles.overlayArrow} ${styles.overlayArrowNext}`}
+            aria-label={t.nextSlide}
             onClick={() => setIdx((i) => i + 1)}
-            style={{
-              position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-              background: 'rgba(255,255,255,0.92)', border: 'none', borderRadius: '50%',
-              width: 30, height: 30, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18, fontWeight: 700, color: '#000',
-              boxShadow: '0 1px 6px rgba(0,0,0,0.2)',
-            }}
           >
-            ›
+            <Icon name="chevron-right" size={18} strokeWidth={2.4} />
           </button>
         )}
       </div>
 
-      {/* ── Actions bar ──────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 4px', gap: 14 }}>
-        {/* Heart */}
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ cursor: 'pointer' }}>
-          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-        </svg>
-        {/* Comment */}
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ cursor: 'pointer' }}>
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-        {/* Share */}
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ cursor: 'pointer' }}>
-          <line x1="22" y1="2" x2="11" y2="13" />
-          <polygon points="22 2 15 22 11 13 2 9 22 2" />
-        </svg>
+      {/* ── Actions bar (decorativa: imita la interfaz de Instagram) ─── */}
+      <div aria-hidden="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 4px', gap: 14, color: 'var(--text)' }}>
+        <Icon name="heart" size={22} strokeWidth={2} />
+        <Icon name="inbox" size={22} strokeWidth={2} />
+        <Icon name="send" size={22} strokeWidth={2} />
         <div style={{ flex: 1 }} />
-        {/* Bookmark */}
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ cursor: 'pointer' }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
         </svg>
       </div>
 
       {/* ── Slide dots ───────────────────────────────── */}
-      {total > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 5, padding: '2px 0 8px' }}>
-          {slides.map((_, i) => (
-            <div
-              key={i}
-              onClick={() => setIdx(i)}
-              style={{
-                height: 6,
-                width: i === idx ? 18 : 6,
-                borderRadius: 3,
-                background: i === idx ? 'var(--accent)' : 'var(--border)',
-                cursor: 'pointer',
-                transition: 'width 0.2s ease, background 0.2s ease',
-              }}
-            />
-          ))}
-        </div>
-      )}
+      {total > 1 && <SlideDots total={total} idx={idx} onSelect={setIdx} lang={lang} />}
 
       {/* ── Caption ──────────────────────────────────── */}
       <div style={{ padding: '2px 12px 14px', fontSize: 13, lineHeight: 1.5 }}>
         <p style={{ margin: 0 }}>
-          <span style={{ fontWeight: 700, color: 'var(--text)' }}>{username} </span>
+          <span style={{ fontWeight: 700, color: 'var(--text)' }}>{name} </span>
           <span style={{ color: 'var(--text)', opacity: 0.9 }}>
             {description ?? slides[0]?.title ?? ''}
           </span>

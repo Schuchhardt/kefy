@@ -150,8 +150,10 @@ describe('ScheduleModal — initialPlatform', () => {
 
     const liBtn = await screen.findByRole('button', { name: /@marca_li/i });
     const igBtn = await screen.findByRole('button', { name: /@marca_ig/i });
-    await waitFor(() => expect(liBtn.textContent).toMatch(/✓/));
-    expect(igBtn.textContent).not.toMatch(/✓/);
+    // Las cuentas son botones de alternar: el estado marcado es aria-pressed
+    // (antes, un «✓» de texto que los lectores de pantalla no anunciaban).
+    await waitFor(() => expect(liBtn).toHaveAttribute('aria-pressed', 'true'));
+    expect(igBtn).toHaveAttribute('aria-pressed', 'false');
   });
 });
 
@@ -286,5 +288,158 @@ describe('ScheduleModal — generar otro formato', () => {
 
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     expect(showNotification).not.toHaveBeenCalled();
+  });
+});
+
+// ─── «Publicar» explica por qué no se puede pulsar ──────────────────────────
+// Auditoría UX 5.3: `canSubmit` deshabilitaba el botón sin decir por qué, y
+// «Conectar cuentas →» llevaba a /dashboard/social, una ruta que no existe.
+
+function stubAccounts(accounts: unknown[], extra?: (url: string, init?: RequestInit) => Response | undefined) {
+  const mock = vi.fn(async (url: string, init?: RequestInit) => {
+    const custom = extra?.(url, init);
+    if (custom) return custom;
+    if (url.startsWith('/api/social/accounts')) return jsonResponse({ accounts });
+    if (url.includes('/renditions')) return jsonResponse({ renditions: [] });
+    return jsonResponse({});
+  });
+  vi.stubGlobal('fetch', mock);
+  return mock;
+}
+
+function submitButton(name: RegExp = /publicar ahora/i) {
+  const buttons = screen.getAllByRole('button', { name });
+  return buttons[buttons.length - 1];
+}
+
+describe('ScheduleModal — motivo del botón deshabilitado', () => {
+  it('sin cuentas conectadas: lo explica junto al botón y enlaza a Ajustes › Redes', async () => {
+    stubAccounts([]);
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} lang="es" />);
+
+    const reason = await screen.findByText('Conecta al menos una cuenta para poder publicar.');
+    const btn = submitButton();
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    // El motivo es la descripción accesible del botón.
+    expect(btn.getAttribute('aria-describedby')).toBe(reason.closest('p')!.id);
+
+    const link = screen.getByRole('link', { name: /conectar cuentas/i });
+    expect(link).toHaveAttribute('href', '/es/dashboard/settings#social');
+  });
+
+  it('con cuentas pero ninguna elegida: pide elegir dónde publicar, y el aviso se va al elegir', async () => {
+    stubAccounts([ACCOUNT]);
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} lang="es" />);
+
+    expect(await screen.findByText('Elige dónde publicar antes de continuar.')).toBeTruthy();
+    await selectAccount();
+    await waitFor(() => expect(screen.queryByText('Elige dónde publicar antes de continuar.')).toBeNull());
+    expect(submitButton()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('fecha en el pasado: lo explica y no programa', async () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const mock = stubAccounts([ACCOUNT]);
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} initialDate={yesterday} lang="es" />);
+    await selectAccount();
+
+    expect(await screen.findByText(/ya pasaron: elige un momento futuro/i)).toBeTruthy();
+    fireEvent.click(submitButton(/confirmar programación/i));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mock.mock.calls.some(([url]) => url === '/api/social/schedule')).toBe(false);
+  });
+
+  it('la hora se elige con un campo de hora nativo con etiqueta', async () => {
+    stubAccounts([ACCOUNT]);
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} initialDate={tomorrow} lang="es" />);
+    const time = await screen.findByLabelText('Hora');
+    expect(time).toHaveAttribute('type', 'time');
+  });
+});
+
+// ─── Resultado: no se cierra solo ───────────────────────────────────────────
+
+describe('ScheduleModal — resultado', () => {
+  it('tras publicar muestra el resultado y no se cierra solo', async () => {
+    const onClose = vi.fn();
+    const onSuccess = vi.fn();
+    stubAccounts([ACCOUNT], (url) => (url === '/api/social/publish'
+      ? jsonResponse({ results: [{ social_account_id: 'sa-ig', platform: 'instagram', status: 'published' }] })
+      : undefined));
+    render(<ScheduleModal open onClose={onClose} onSuccess={onSuccess} initialItem={postItem()} lang="es" />);
+    await selectAccount();
+    await clickPublish();
+
+    expect(await screen.findByText('Publicado')).toBeTruthy();
+    expect(screen.getByText('Se publicó en 1 cuenta.')).toBeTruthy();
+    expect(onSuccess).toHaveBeenCalledWith('now');
+
+    // Antes: setTimeout(onClose, 1200). Ahora el usuario decide.
+    await new Promise((r) => setTimeout(r, 1400));
+    expect(onClose).not.toHaveBeenCalled();
+
+    // El del pie (el otro «Cerrar» es la X de la cabecera).
+    const closeButtons = screen.getAllByRole('button', { name: 'Cerrar' });
+    fireEvent.click(closeButtons[closeButtons.length - 1]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('si alguna cuenta falla, el resultado lo dice', async () => {
+    const accounts = [
+      { id: 'sa-ig', platform: 'instagram', username: 'marca_ig', status: 'active' },
+      { id: 'sa-li', platform: 'linkedin',  username: 'marca_li', status: 'active' },
+    ];
+    stubAccounts(accounts, (url) => (url === '/api/social/publish'
+      ? jsonResponse({ results: [
+        { social_account_id: 'sa-ig', platform: 'instagram', status: 'published' },
+        { social_account_id: 'sa-li', platform: 'linkedin', status: 'failed', error: 'Token caducado' },
+      ] })
+      : undefined));
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} lang="es" />);
+    fireEvent.click(await screen.findByRole('button', { name: /@marca_ig/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /@marca_li/i }));
+    await clickPublish();
+
+    expect(await screen.findByText('No se pudo en: @marca_li.')).toBeTruthy();
+  });
+
+  it('tras programar ofrece ver el calendario (salvo desde el propio calendario)', async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const scheduleOk = (url: string) => (url === '/api/social/schedule'
+      ? jsonResponse({ results: [{ social_account_id: 'sa-ig', platform: 'instagram', status: 'scheduled' }] }, true, 201)
+      : undefined);
+
+    stubAccounts([ACCOUNT], scheduleOk);
+    const { unmount } = render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} initialDate={tomorrow} lang="es" />);
+    await selectAccount();
+    fireEvent.click(submitButton(/confirmar programación/i));
+    expect(await screen.findByText('Programado')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /ver en el calendario/i })).toHaveAttribute('href', '/es/dashboard/content/calendar');
+    unmount();
+
+    stubAccounts([ACCOUNT], scheduleOk);
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} initialDate={tomorrow} lang="es" showCalendarLink={false} />);
+    await selectAccount();
+    fireEvent.click(submitButton(/confirmar programación/i));
+    expect(await screen.findByText('Programado')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /ver en el calendario/i })).toBeNull();
+  });
+
+  it('el error del servidor sale en el idioma del usuario, no «Error publishing»', async () => {
+    stubAccounts([ACCOUNT], (url) => (url === '/api/social/publish' ? jsonResponse({}, false, 500) : undefined));
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} lang="es" />);
+    await selectAccount();
+    await clickPublish();
+
+    expect(await screen.findByText('No se pudo publicar. Inténtalo de nuevo.')).toBeTruthy();
+    expect(screen.queryByText(/error publishing/i)).toBeNull();
+  });
+
+  it('en inglés, todo el flujo está en inglés', async () => {
+    stubAccounts([]);
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} lang="en" />);
+    expect(await screen.findByText('Connect at least one account to publish.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /connect accounts/i })).toHaveAttribute('href', '/en/dashboard/settings#social');
   });
 });

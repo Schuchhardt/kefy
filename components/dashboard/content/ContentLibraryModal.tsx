@@ -1,13 +1,12 @@
 'use client';
 
-import Modal from './Modal';
+import Modal from '@/components/ui/Modal';
 import ContentLibraryBrowser from './ContentLibraryBrowser';
+import { toLocale } from '@/lib/i18n';
 import type { LibraryItemWithIndustry } from '@/types/content-library';
 
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
-
-const T = { es: esT, en: enT } as const;
 
 interface ContentLibraryModalProps {
   open:       boolean;
@@ -16,14 +15,15 @@ interface ContentLibraryModalProps {
   onSelect:   (item: LibraryItemWithIndustry) => void;
 }
 
+/** «Ideas por industria»: el mismo catálogo que la pestaña Ideas, abierto
+ *  desde el formulario de generar (antes se llamaba «Biblioteca» aquí e
+ *  «Librería» en la pestaña). */
 export default function ContentLibraryModal({ open, onClose, lang, onSelect }: ContentLibraryModalProps) {
-  const t = T[lang];
+  const t = toLocale(lang) === 'en' ? enT : esT;
 
   return (
-    <Modal open={open} onClose={onClose} title={t.libraryModalTitle} subtitle={t.libraryModalSubtitle} maxWidth={820}>
-      <div style={{ padding: '16px 24px 24px' }}>
-        <ContentLibraryBrowser lang={lang} onSelect={onSelect} />
-      </div>
+    <Modal open={open} onClose={onClose} title={t.libraryModalTitle} subtitle={t.libraryModalSubtitle} maxWidth={820} padded>
+      <ContentLibraryBrowser lang={lang} onSelect={onSelect} />
     </Modal>
   );
 }

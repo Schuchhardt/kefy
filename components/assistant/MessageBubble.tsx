@@ -44,7 +44,7 @@ export default function MessageBubble({
           aria-label={t.you}
           style={{
             maxWidth: '85%', padding: '8px 12px', borderRadius: '14px 14px 4px 14px',
-            background: 'rgba(198,255,75,0.14)', border: '1px solid rgba(198,255,75,0.28)',
+            background: 'var(--accent-soft)', border: '1px solid var(--accent-border)',
             color: 'var(--text)', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           }}
         >

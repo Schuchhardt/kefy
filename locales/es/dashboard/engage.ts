@@ -1,21 +1,26 @@
+// Conversaciones: textos de la pestaña de comentarios. Los de la página y los
+// mensajes directos viven en inbox.ts.
+
 const es = {
   subtitle: 'Gestiona comentarios y mensajes de todas tus plataformas',
   tabComments: 'Comentarios',
-  showAll: 'Mostrando todos',
+  commentsListLabel: 'Comentarios por publicación',
   unansweredOnly: 'Solo sin responder',
-  loadingComments: 'Cargando comentarios...',
+  loadingComments: 'Cargando comentarios…',
   noComments: 'Sin comentarios todavía',
   noCommentsHint: 'Los comentarios de tus publicaciones aparecerán aquí.',
   noCommentsCaughtUp: 'Estás al día',
   noCommentsCaughtUpHint: 'No tienes comentarios sin responder.',
   yourReply: 'Tu respuesta',
-  replyBtn: '↩ Responder',
+  viewEarlier: (n: number) => (n === 1 ? 'Ver 1 mensaje anterior' : `Ver ${n} mensajes anteriores`),
+  viewConversation: 'Ver conversación',
+  replyBtn: 'Responder',
   all: 'Todos',
-  replyPlaceholder: 'Escribe tu respuesta...',
+  replyPlaceholder: 'Escribe tu respuesta…',
   replyBtnSend: 'Responder',
   errorSend: 'Error al enviar',
   syncBtn: 'Sincronizar',
-  syncing: 'Sincronizando...',
+  syncing: 'Sincronizando…',
   syncDone: (n: number) => `${n} comentario${n !== 1 ? 's' : ''} sincronizado${n !== 1 ? 's' : ''}`,
   syncError: 'Error al sincronizar',
   timeNow: 'ahora',
@@ -23,3 +28,4 @@ const es = {
 };
 
 export default es;
+export type EngageCopy = typeof es;

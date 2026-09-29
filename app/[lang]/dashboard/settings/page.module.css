@@ -1,0 +1,117 @@
+/* Ajustes. Siete secciones en un solo scroll: el índice lleva a cada una.
+   En escritorio ancho es una lista fija a la izquierda; en el resto, una fila
+   de chips con scroll horizontal sobre las tarjetas. */
+
+.sections { min-width: 0; max-width: 720px; }
+
+/* Un ancla sin margen quedaría pegada al borde (o, en móvil, bajo la franja
+   fija del selector de marca y el avatar). */
+.section { scroll-margin-top: 24px; }
+
+/* ─── Índice ─────────────────────────────────────────────────────────────── */
+.index { margin: 0 0 20px; max-width: 720px; }
+.indexList {
+  display: flex; gap: 8px;
+  list-style: none; margin: 0; padding: 2px 0 6px;
+  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.indexList::-webkit-scrollbar { display: none; }
+.indexList > li { flex-shrink: 0; }
+.indexLink {
+  display: inline-flex; align-items: center;
+  min-height: 36px; padding: 6px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font-size: 13px; font-weight: 600; white-space: nowrap; text-decoration: none;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+.indexLink:hover, .indexLink:active { color: var(--text); border-color: var(--accent-border); }
+.indexLink[aria-current] { color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent-border); }
+
+@media (min-width: 1180px) {
+  .layout {
+    display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 32px;
+    align-items: start;
+  }
+  .index { position: sticky; top: 24px; margin: 0; }
+  .indexList { flex-direction: column; gap: 2px; overflow: visible; padding: 0; }
+  .indexLink {
+    width: 100%; min-height: 36px; padding: 7px 12px;
+    border: 0; border-left: 2px solid transparent; border-radius: 0 8px 8px 0;
+    background: none; font-weight: 500; white-space: normal;
+  }
+  .indexLink:hover, .indexLink:active { background: var(--surface); }
+  .indexLink[aria-current] { border-left-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+}
+
+@media (max-width: 767px) {
+  .section { scroll-margin-top: calc(var(--mobile-topbar-h) + 12px); }
+  /* Los chips llegan al borde de la pantalla: el que queda cortado avisa de
+     que hay más a la derecha. */
+  .indexList { margin: 0 -16px; padding: 2px 16px 6px; }
+  .indexLink { min-height: 40px; }
+}
+
+/* ─── Formularios y datos ────────────────────────────────────────────────── */
+.form { display: flex; flex-direction: column; gap: 16px; }
+.actions { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.saved { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: 13px; font-weight: 600; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; }
+.loading { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin: 0; }
+
+.facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px 24px; margin: 0;
+}
+.facts dt { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 2px; }
+.facts dd { margin: 0; font-size: 14px; color: var(--text); overflow-wrap: anywhere; }
+
+/* ─── Plan y facturación ─────────────────────────────────────────────────── */
+.billingNotices { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.billingNotices:empty { display: none; }
+
+.plans { list-style: none; margin: 0; padding: 0; }
+.plan {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  padding: 16px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg);
+}
+.plan[data-featured] { border-color: var(--accent-border); }
+.plan[data-current] { border-color: var(--accent-border); background: var(--accent-soft); }
+/* Nombre y badge en la misma fila, dentro del flujo: antes el badge «Más
+   popular» iba en absoluto por encima de la tarjeta y se solapaba en móvil. */
+.planHead { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; flex-wrap: wrap; min-height: 24px; }
+.planName { font-family: var(--font-syne), system-ui, sans-serif; font-size: 15px; font-weight: 700; margin: 0; }
+.planPrice { display: flex; align-items: baseline; gap: 4px; margin: 0; }
+.planAmount { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--text); }
+.planPer { font-size: 12px; color: var(--muted); }
+.features { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.plan .features { flex: 1; }
+.features li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.4; color: var(--text-soft); }
+.check { color: var(--accent-text); margin-top: 1px; }
+
+.included { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.includedTitle { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; }
+.included .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 6px 16px; }
+
+/* ─── Scoring de leads ───────────────────────────────────────────────────── */
+.fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+/* float + clear: la única forma fiable de separar la leyenda del contenido. */
+.legend {
+  float: left; width: 100%; padding: 0; margin: 0 0 12px;
+  font-size: 12px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.fieldsetBody { clear: both; }
+.rangeRow { display: flex; align-items: center; gap: 10px; }
+.range { flex: 1; min-width: 0; min-height: 32px; accent-color: var(--accent); cursor: pointer; }
+.rangeValue { min-width: 28px; text-align: right; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (pointer: coarse), (max-width: 767px) {
+  .range { min-height: 44px; }
+}
+
+/* Se ven de 36px y se tocan en 44px: el área extra es un pseudo-elemento, como
+   .ui-btn--sm en globals.css, para no agrandar filas compactas. */
+@media (pointer: coarse), (max-width: 767px) {
+  .indexLink { position: relative; }
+  .indexLink::after { content: ''; position: absolute; inset: -4px; }
+}

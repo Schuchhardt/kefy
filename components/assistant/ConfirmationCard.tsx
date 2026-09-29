@@ -15,6 +15,7 @@ import { stripUntrustedTags } from '@/lib/assistant/summaries';
 import type { ToolLink } from '@/lib/assistant/types';
 import type { ConfirmState } from '@/lib/assistant/use-assistant';
 import { isInternalHref, Spinner } from '@/components/assistant/ToolChip';
+import Button from '@/components/ui/Button';
 
 const T = { es: esT, en: enT } as const;
 
@@ -135,13 +136,13 @@ export default function ConfirmationCard({
       aria-label={t.confirm.title}
       style={{
         border: `1px solid ${dim ? 'var(--border)' : 'var(--accent)'}`,
-        background: dim ? 'transparent' : 'rgba(198,255,75,0.06)',
+        background: dim ? 'transparent' : 'var(--accent-soft)',
         borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10,
         opacity: dim ? 0.75 : 1,
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>
           {effective === 'pending' ? t.confirm.title : title}
         </span>
         <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', lineHeight: 1.4 }}>{clean(summary)}</span>
@@ -169,19 +170,19 @@ export default function ConfirmationCard({
       )}
 
       {credits > 0 && (
-        <span style={{ fontSize: 11.5, color: 'var(--assistant-accent-text)', fontFamily: 'var(--font-jetbrains), monospace' }}>
+        <span style={{ fontSize: 11.5, color: 'var(--accent-text)', fontFamily: 'var(--font-jetbrains), monospace' }}>
           {t.confirm.cost(credits)}
         </span>
       )}
 
       {effective === 'pending' ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-primary btn-sm" disabled={!canAct} onClick={onConfirm}>
+          <Button variant="primary" size="sm" disabled={!canAct} onClick={onConfirm}>
             {t.confirm.confirm}
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!canAct} onClick={onCancel}>
+          </Button>
+          <Button variant="ghost" size="sm" disabled={!canAct} onClick={onCancel}>
             {t.confirm.cancel}
-          </button>
+          </Button>
           {expiry && !Number.isNaN(expiry.getTime()) && (
             <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
               {t.confirm.expires(expiry.toLocaleTimeString(lang === 'en' ? 'en-US' : 'es-CL', { hour: '2-digit', minute: '2-digit' }))}
@@ -191,15 +192,15 @@ export default function ConfirmationCard({
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, color: 'var(--muted)' }}>
           {effective === 'working' && <Spinner />}
-          <span style={{ color: effective === 'confirmed' ? 'var(--assistant-accent-text)' : 'var(--muted)' }}>{statusLabel}</span>
+          <span style={{ color: effective === 'confirmed' ? 'var(--accent-text)' : 'var(--muted)' }}>{statusLabel}</span>
           {link && (
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => { router.push(link.href); onNavigate?.(); }}
             >
               {t.open}
-            </button>
+            </Button>
           )}
         </div>
       )}

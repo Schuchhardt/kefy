@@ -1,0 +1,71 @@
+/* Vista previa + campos. En escritorio van lado a lado (la vista previa se
+   queda fija al hacer scroll); en el móvil, apiladas. La columna de la vista
+   previa medía 300px fijos: más que los 280px disponibles a 360px. */
+.layout { display: flex; flex-wrap: wrap; gap: 24px; padding: 20px 24px 24px; }
+@media (max-width: 767px) {
+  .layout { padding: 16px; gap: 20px; }
+}
+.previewCol { width: min(300px, 100%); flex: 0 0 auto; }
+.previewSticky { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
+.fields { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+
+.label {
+  margin: 0; font-size: 12px; font-weight: 700; color: var(--muted);
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.stack { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.thumb { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+.video { width: 140px; height: 200px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: #000; }
+
+/* Estado de guardado en el subtítulo del modal. */
+.saveStatus { display: inline-flex; align-items: center; gap: 6px; }
+.saveError { color: var(--danger); }
+
+/* Subir archivo: <label> con el input visualmente oculto (enfocable con
+   teclado; antes era `hidden` y no se podía llegar con Tab). */
+.upload:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.upload[data-loading="true"] { opacity: 0.7; cursor: progress; }
+
+/* ─── Slides / escenas ───────────────────────────────────────────────────── */
+.slides { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.slide { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.slideHead { display: flex; align-items: center; gap: 4px; padding: 4px 6px 4px 4px; }
+.slideToggle {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 6px; border-radius: 6px; text-align: left; color: var(--text);
+}
+.slideToggle:hover, .slideToggle:active { background: var(--surface-2); }
+.slideThumb {
+  width: 36px; height: 36px; border-radius: 6px; overflow: hidden; flex-shrink: 0;
+  background: var(--bg); display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--muted);
+}
+.slideThumb img { width: 100%; height: 100%; object-fit: cover; }
+.slideText { display: flex; flex-direction: column; min-width: 0; }
+.slideTitle, .slideBody { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slideTitle { font-size: 13px; font-weight: 600; }
+.slideBody { font-size: 12px; color: var(--muted); }
+.slideActions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+/* Subir / bajar / eliminar: 36×36 (antes 24px). */
+.iconBtn {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  transition: background-color 0.15s, color 0.15s;
+}
+.iconBtn:hover:not(:disabled), .iconBtn:active:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.iconBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+.iconBtnDanger { color: var(--danger); }
+.iconBtnDanger:hover:not(:disabled), .iconBtnDanger:active:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
+
+.slidePanel {
+  padding: 12px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.duration { width: 110px; }
+.slideImage { width: 80px; height: 80px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+
+.regen { border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
