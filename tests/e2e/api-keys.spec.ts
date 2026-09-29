@@ -110,7 +110,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     await page.goto('/es/dashboard/settings');
 
     await expect(page.getByRole('heading', { name: 'API y MCP' })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole('button', { name: '+ Crear API key' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Crear API key' })).toBeEnabled();
 
     const row = page.getByRole('listitem').filter({ hasText: 'Claude Code' });
     await expect(row.getByText('kefy_sk_ab12…')).toBeVisible();
@@ -133,7 +133,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     await page.goto('/es/dashboard/settings');
 
     await expect(page.getByText('Aún no hay API keys.', { exact: false })).toBeVisible({ timeout: 15000 });
-    await page.getByRole('button', { name: '+ Crear API key' }).click();
+    await page.getByRole('button', { name: 'Crear API key' }).click();
 
     const modal = page.getByRole('dialog').filter({ hasText: 'Nueva API key' });
     await expect(modal).toBeVisible();
@@ -176,7 +176,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     expect(api.posts[0]).not.toHaveProperty('expires_in_days');
 
     await secretModal.getByRole('button', { name: 'Copiar' }).click();
-    await expect(secretModal.getByRole('button', { name: '✓ Copiado' })).toBeVisible();
+    await expect(secretModal.getByRole('button', { name: 'Copiado' })).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __copied?: string }).__copied)).toBe(SECRET);
 
     await page.mouse.click(5, 5);
@@ -193,7 +193,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     await expect(page.getByText(SECRET)).toHaveCount(0);
 
     // Reabrir el modal empieza de cero: el secreto no vuelve.
-    await page.getByRole('button', { name: '+ Crear API key' }).click();
+    await page.getByRole('button', { name: 'Crear API key' }).click();
     const again = page.getByRole('dialog').filter({ hasText: 'Nueva API key' });
     await expect(again).toBeVisible();
     await expect(page.getByText(SECRET)).toHaveCount(0);
@@ -248,10 +248,9 @@ test.describe('API keys y MCP en Ajustes', () => {
     // La página cargó (sección de equipo) pero sin API y MCP.
     await expect(page.getByRole('heading', { name: 'Equipo' })).toBeVisible({ timeout: 15000 });
     // Y ya sabe quién es el usuario (el email sale de /api/auth/me): sin esto,
-    // «no hay sección» pasaría también antes de conocer el rol.
-    await expect.poll(() => page.locator('input').evaluateAll(
-      (els) => els.some((el) => (el as HTMLInputElement).value === 'test@kefy.com'),
-    )).toBe(true);
+    // «no hay sección» pasaría también antes de conocer el rol. Ajustes muestra
+    // el email como texto (se edita en Perfil).
+    await expect(page.getByText('test@kefy.com', { exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'API y MCP' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Crear API key/ })).toHaveCount(0);
     expect(api.gets).toBe(0);
@@ -264,7 +263,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     await page.goto('/en/dashboard/settings');
 
     await expect(page.getByRole('heading', { name: 'API & MCP' })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole('button', { name: '+ Create API key' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create API key' })).toBeVisible();
     const row = page.getByRole('listitem').filter({ hasText: 'Claude Code' });
     await expect(row.getByText('kefy_sk_ab12…')).toBeVisible();
     await expect(row.getByRole('button', { name: 'Revoke' })).toBeVisible();
@@ -275,7 +274,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     const api = await mockApiKeys(page, []);
     await page.goto('/es/dashboard/settings');
 
-    await page.getByRole('button', { name: '+ Crear API key' }).click({ timeout: 15000 });
+    await page.getByRole('button', { name: 'Crear API key' }).click({ timeout: 15000 });
     const modal = page.getByRole('dialog').filter({ hasText: 'Nueva API key' });
     await modal.getByLabel('Nombre').fill('Solo Test Brand');
     // Por defecto: todas las marcas y sin expiración.
@@ -313,7 +312,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     });
     await page.goto('/es/dashboard/settings');
 
-    await page.getByRole('button', { name: '+ Crear API key' }).click({ timeout: 15000 });
+    await page.getByRole('button', { name: 'Crear API key' }).click({ timeout: 15000 });
     const modal = page.getByRole('dialog').filter({ hasText: 'Nueva API key' });
     await modal.getByLabel('Nombre').fill('Agente');
     for (const f of failures) {
@@ -361,7 +360,7 @@ test.describe('API keys y MCP en Ajustes', () => {
     await page.goto('/es/dashboard/settings');
 
     await expect(page.getByRole('listitem').filter({ hasText: 'Key 9' })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole('button', { name: '+ Crear API key' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Crear API key' })).toBeDisabled();
     await expect(page.getByText('Máximo 10 keys activas por organización.')).toBeVisible();
   });
 

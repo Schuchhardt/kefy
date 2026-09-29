@@ -37,22 +37,24 @@ test.describe('Brand Kit', () => {
     });
 
     await page.goto('/es/dashboard/brand/identity');
-    await page.waitForTimeout(1000); // Dar tiempo a que la página cargue
 
-    // Enviar cambios
-    const saveBtn = page.getByRole('button', { name: /guardar|save/i }).first();
-    if (await saveBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await saveBtn.click();
-      await expect.poll(() => patchBody, { timeout: 5000 }).not.toBeNull();
-      
-      // Validar payload: NO debe incluir campos de mercado
-      expect(patchBody).not.toHaveProperty('company_size');
-      expect(patchBody).not.toHaveProperty('niche');
-      expect(patchBody).not.toHaveProperty('target_audience');
-      expect(patchBody).not.toHaveProperty('differentiators');
-      expect(patchBody).not.toHaveProperty('challenges');
-      expect(patchBody).not.toHaveProperty('competitors');
-    }
+    // «Guardar cambios» está desactivado hasta que algo cambia y solo envía
+    // lo que cambió: se edita un campo de identidad y se guarda.
+    await page.getByLabel('Eslogan').fill('Probar es fácil');
+    const saveBtn = page.getByRole('button', { name: 'Guardar cambios' });
+    await expect(saveBtn).toBeEnabled();
+    await saveBtn.click();
+    await expect.poll(() => patchBody, { timeout: 5000 }).not.toBeNull();
+
+    expect(patchBody).toMatchObject({ tagline: 'Probar es fácil' });
+    // NO debe incluir campos de mercado (antes Identidad enviaba el kit entero
+    // y podía pisar lo guardado en Mercado).
+    expect(patchBody).not.toHaveProperty('company_size');
+    expect(patchBody).not.toHaveProperty('niche');
+    expect(patchBody).not.toHaveProperty('target_audience');
+    expect(patchBody).not.toHaveProperty('differentiators');
+    expect(patchBody).not.toHaveProperty('challenges');
+    expect(patchBody).not.toHaveProperty('competitors');
   });
 
   test('carga la página de mercado y muestra contenido', async ({ authenticatedPage: page }) => {
