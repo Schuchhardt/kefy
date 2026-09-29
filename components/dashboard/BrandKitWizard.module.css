@@ -1,0 +1,120 @@
+/* Completa tu marca (components/dashboard/BrandKitWizard). */
+
+.wizard { display: flex; flex-direction: column; gap: 16px; }
+.loading { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 32px 0; }
+
+/* ── Pasos ───────────────────────────────────────────────── */
+/* position: relative para que los .sr-only de los pasos no tomen como bloque
+   contenedor a .dashboard-main y le añadan scroll horizontal. */
+.stepsNav { position: relative; overflow-x: auto; scrollbar-width: none; margin: 0 -4px; }
+.stepsNav::-webkit-scrollbar { display: none; }
+.steps { list-style: none; margin: 0; padding: 0 4px; display: flex; gap: 6px; }
+.stepBtn {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 14px 6px 8px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.stepBtn:hover { color: var(--text); border-color: var(--accent-border); }
+.stepBtn[aria-current='step'] { color: var(--text); border-color: var(--accent); font-weight: 700; }
+.stepNum {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0;
+  background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 700;
+}
+.stepBtn[data-done='true'] .stepNum { background: var(--accent-soft); color: var(--accent-text); }
+.stepBtn[aria-current='step'] .stepNum { background: var(--accent); color: var(--on-accent); }
+
+/* ── Tarjeta ─────────────────────────────────────────────── */
+.card {
+  display: flex; flex-direction: column; gap: 20px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px 32px;
+}
+.head { display: flex; flex-direction: column; gap: 8px; }
+.stepOf { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-text); margin: 0; }
+.progress { height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.progress > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s ease; }
+.title {
+  font-family: var(--font-syne), system-ui, sans-serif; font-size: 20px; font-weight: 700;
+  line-height: 1.3; margin: 6px 0 0; color: var(--text);
+}
+.title:focus { outline: none; }
+.intro { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0; }
+.body { display: flex; flex-direction: column; gap: 20px; }
+.fieldBlock { display: flex; flex-direction: column; gap: 8px; }
+
+.fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+.toggle {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 16px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: 14px;
+}
+.toggle:hover { border-color: var(--accent-border); }
+.toggle[aria-pressed='true'] {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); font-weight: 600;
+}
+
+/* ── Plegable (redes sociales) ───────────────────────────── */
+.details { display: flex; flex-direction: column; gap: 10px; }
+.details[open] > :not(summary) { margin-top: 10px; }
+.summary {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: var(--text); list-style: none;
+}
+.summary::-webkit-details-marker { display: none; }
+.summary svg { transition: transform 0.15s; color: var(--muted); }
+.details[open] .summary svg { transform: rotate(90deg); }
+
+/* ── Sugerencias de IA ───────────────────────────────────── */
+.suggest { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.suggestError { font-size: 13px; color: var(--muted); margin: 0; }
+.suggestList { display: flex; flex-wrap: wrap; gap: 6px; }
+.suggestItem {
+  min-height: 40px; padding: 8px 14px; border-radius: 12px; text-align: left;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.4;
+}
+.suggestItem:hover { border-color: var(--accent-border); }
+.suggestItem[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+
+/* ── Lo encontrado en la web ─────────────────────────────── */
+.found {
+  border: 1px solid var(--accent-border); background: var(--bg); border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.foundTitle { font-size: 14px; font-weight: 600; color: var(--accent-text); margin: 0; }
+.foundList { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.foundRow { display: grid; grid-template-columns: minmax(0, 160px) minmax(0, 1fr); gap: 10px; font-size: 13px; }
+.foundRow dt { color: var(--muted); }
+.foundRow dd { margin: 0; color: var(--text); overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; }
+.swatch { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border); flex-shrink: 0; }
+.actionsRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ── Imagen ──────────────────────────────────────────────── */
+.color { display: flex; align-items: center; gap: 8px; }
+.colorPicker {
+  width: 46px; height: 44px; flex-shrink: 0; padding: 3px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+}
+/* Fondo blanco a propósito: la mayoría de los logos están pensados para él. */
+.logo {
+  max-height: 80px; max-width: 200px; object-fit: contain; align-self: flex-start;
+  border-radius: 8px; border: 1px solid var(--border); padding: 8px; background: #fff;
+}
+
+/* ── Pie ─────────────────────────────────────────────────── */
+.footer {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  border-top: 1px solid var(--border); padding-top: 16px;
+}
+.footerStart, .footerEnd { display: flex; gap: 8px; align-items: center; }
+.status { margin: 0; font-size: 13px; color: var(--muted); text-align: right; min-height: 1em; }
+
+@media (max-width: 767px) {
+  .card { padding: 20px 16px; border-radius: 12px; }
+  .footer { grid-template-columns: minmax(0, 1fr); }
+  .footerStart:empty { display: none; }
+  .status { text-align: left; }
+  .footerEnd { flex-direction: column-reverse; align-items: stretch; }
+  .footerEnd > * { width: 100%; }
+  .foundRow { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}

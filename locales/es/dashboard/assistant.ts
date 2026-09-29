@@ -124,6 +124,7 @@ const es = {
     open_page: 'Abriendo página…',
     get_brand_profile: 'Leyendo el perfil de marca…',
     update_brand_profile: 'Actualizando el perfil de marca…',
+    import_brand_from_website: 'Leyendo tu web…',
     get_strategy_catalog: 'Revisando estrategias…',
     preview_strategy: 'Preparando la estrategia…',
     set_active_strategy: 'Activando la estrategia…',
@@ -132,6 +133,7 @@ const es = {
     list_content: 'Buscando contenidos…',
     get_content: 'Leyendo el contenido…',
     create_post: 'Creando post…',
+    create_starter_posts: 'Creando tus 3 posts de inicio…',
     create_carousel: 'Creando carrusel…',
     create_reel: 'Creando reel…',
     create_manual_content: 'Guardando contenido…',
@@ -165,6 +167,12 @@ const es = {
       const base = f ? `Actualizar ${f} del perfil de marca` : 'Actualizar el perfil de marca';
       return p.sync_org_name ? `${base} y renombrar la organización` : base;
     },
+    import_brand_from_website: (i, p) => {
+      const url = str(p.url, str(i.url));
+      return url
+        ? `Leer ${quote(url)} y completar los campos vacíos del perfil de marca (1 crédito)`
+        : 'Leer tu web y completar los campos vacíos del perfil de marca (1 crédito)';
+    },
     get_strategy_catalog: () => 'Revisar el catálogo de estrategias',
     preview_strategy: () => 'Ver una estrategia',
     set_active_strategy: (_i, p) => {
@@ -185,6 +193,12 @@ const es = {
       const topic = str(p.topic, str(i.topic));
       const img = (p.with_image ?? i.with_image) !== false ? ' con imagen' : '';
       return topic ? `Crear un post${img} sobre ${quote(topic)}` : `Crear un post${img}`;
+    },
+    create_starter_posts: (i, p) => {
+      const url = str(p.url, str(i.url));
+      return url
+        ? `Leer ${quote(url)}, completar lo vacío del perfil de marca y crear 3 posts de inicio`
+        : 'Crear 3 posts de inicio con la descripción de tu negocio';
     },
     create_carousel: (i, p) => {
       const topic = str(p.topic, str(i.topic));

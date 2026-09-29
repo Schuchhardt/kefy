@@ -14,6 +14,8 @@ import { wrapUntrusted } from '@/lib/assistant/untrusted';
 import type { BrandKit } from '@/types/brand-kit';
 import { ServiceError, msg } from '@/lib/services/errors';
 import { getOrCreateBrandKit, updateBrandKit } from '@/lib/services/brand-kit';
+import { importBrandFromWebsite } from '@/lib/services/brand-enrich';
+import { CREDIT_COSTS } from '@/lib/usage';
 
 const BRAND_TONES = [
   'professional', 'friendly', 'authoritative', 'playful',
@@ -149,4 +151,36 @@ const updateBrandProfileTool = defineTool({
   },
 });
 
-export const brandTools = [getBrandProfileTool, updateBrandProfileTool];
+// ─── import_brand_from_website ───────────────────────────────────────────────
+
+const importBrandFromWebsiteTool = defineTool({
+  name: 'import_brand_from_website',
+  title: { es: 'Leer la web de la marca', en: 'Import brand from website' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    "Reads the brand's website and fills in the EMPTY fields of the brand profile (name, tagline, mission, industry, " +
+    'audience, tone, colors, logo, fonts, social links). It never overwrites a field that already has a value: ' +
+    'data.filled lists what was saved and data.kept what the website had but was left as is. ' +
+    'Always requires user confirmation. ' +
+    `Cost: ${CREDIT_COSTS.text} credit, refunded if the website can't be read.`,
+  input: z.object({
+    url: z.string().trim().min(4).max(500).describe('Website URL, e.g. https://example.com (https:// is added if missing).'),
+  }).strict(),
+  confirm: 'always',
+  estimateCredits: () => CREDIT_COSTS.text,
+  // Lo que devuelve es texto de una web de terceros: lo que venga después en
+  // el turno pasa por la persona.
+  taints: 'always',
+  describe: async (_ctx, input) => ({ url: input.url }),
+  handler: async (ctx, input) => {
+    const out = await importBrandFromWebsite(ctx, { url: input.url });
+    return {
+      data: { url: out.url, filled: out.filled, kept: out.kept, kit: projectKit(out.kit) },
+      links: brandLinks(ctx.language),
+      dataChanged: out.filled.length > 0 ? ['brand-kit'] : undefined,
+    };
+  },
+});
+
+export const brandTools = [getBrandProfileTool, updateBrandProfileTool, importBrandFromWebsiteTool];

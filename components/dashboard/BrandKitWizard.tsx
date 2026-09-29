@@ -1,741 +1,762 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+// ─── Completa tu marca: el Brand Kit en 5 pantallas ──────────────────────────
+//
+// Antes eran 20 pasos de una sola pregunta, en voseo, sin «Terminar más tarde»
+// y con sugerencias de IA que se pedían solas al entrar en cada paso (y
+// gastaban un crédito cada vez). Vivía incrustado en el home y desaparecía en
+// cuanto la cuenta dejaba de ser nueva, sin forma de retomarlo.
+//
+// Ahora:
+// - 5 pantallas con los campos agrupados (lib/brand-setup.ts) y una lista de
+//   pasos que marca cuáles están completos y deja saltar a cualquiera;
+// - retoma en la primera pantalla incompleta;
+// - guarda solo lo que cambió (PATCH /api/brand-kit), valida antes de enviar
+//   y avisa si se sale con cambios sin guardar;
+// - «Terminar más tarde» guarda y sale;
+// - las sugerencias de IA y la lectura de la web solo se piden con un botón
+//   que dice lo que cuestan.
+//
+// Se usa en /{lang}/dashboard/brand/setup.
+
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { BrandKit, BrandTone, CompanySize } from '@/types/brand-kit';
-import type { Locale } from '@/types/i18n';
-import type { WizardStepId, WizardStep, BrandKitWizardProps } from '@/types/components/brand-kit-wizard';
+import type { BrandKitWizardProps } from '@/types/components/brand-kit-wizard';
+import { BRAND_SETUP_GROUPS, brandCompleteness, firstIncompleteGroup, isFilled } from '@/lib/brand-setup';
+import { useBrand } from '@/lib/brand-context';
+import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import Button, { Spinner } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import ArrayChips from '@/components/ui/ArrayChips';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
+import Icon from '@/components/ui/icons';
+import esBrand from '@/locales/es/dashboard/brand';
+import enBrand from '@/locales/en/dashboard/brand';
+import esSetup from '@/locales/es/dashboard/brand-setup';
+import enSetup from '@/locales/en/dashboard/brand-setup';
+import styles from './BrandKitWizard.module.css';
 
-// ─── i18n ─────────────────────────────────────────────────────────────────────
-
-const T = {
-  es: {
-    title: 'Cuéntanos sobre tu marca',
-    subtitle: 'Completá esta información para que Kefy genere contenido consistente con tu identidad.',
-    saving: 'Guardando...', saved: '✓ Guardado', save: 'Guardar y continuar',
-    next: 'Siguiente', prev: 'Anterior', skip: 'Saltar', finish: 'Finalizar',
-    loading: 'Cargando...', loadError: 'Error al cargar',
-    enrichBtn: 'Analizar con IA', enriching: 'Analizando...',
-    enrichSuccess: '¡Encontramos información de tu marca!',
-    enrichError: 'No pudimos analizar el sitio. Continuá manualmente.',
-    confirmEnriched: 'Revisá la información que encontramos:',
-    applyEnriched: 'Confirmar y continuar',
-    addPlaceholder: 'Escribe y presiona Enter...',
-    stepOf: (c: number, total: number) => `Paso ${c} de ${total}`,
-    sec1: 'Quién eres', sec2: 'Tu mercado',
-    yes: 'Sí', no: 'No',
-    suggestions: 'Sugerencias IA', loadingSuggestions: 'Cargando sugerencias...',
-    socialUrls: 'Redes sociales (opcional)',
-    q_name: '¿Cuál es el nombre de tu marca?',
-    q_websiteUrl: '¿Tenés un sitio web o página de redes sociales principal?',
-    q_mission: '¿Qué hace tu empresa? ¿Cuál es su misión?',
-    q_industry: '¿En qué industria opera tu marca?',
-    q_logo: '¿Tenés el logo de tu marca? Podés subir un archivo o pegar una URL.',
-    q_language: '¿En qué idioma te comunicás con tus clientes?',
-    q_customerLocations: '¿Dónde están tus clientes? (países o ciudades)',
-    q_usesEmojis: '¿Tu marca usa emojis en su comunicación?',
-    q_communicationStyle: '¿Cómo describirías el estilo de comunicación de tu marca?',
-    q_tone: '¿Cuál es el tono de voz de tu marca? (podés elegir varios)',
-    q_tagline: '¿Cuál es el tagline o eslogan de tu marca?',
-    q_colors: 'Definí la paleta de colores de tu marca',
-    q_fonts: '¿Qué tipografías usa tu marca?',
-    q_notes: 'Alguna guía de estilo adicional o instrucción especial para la IA',
-    q_companySize: '¿Cuántos empleados tiene tu empresa?',
-    q_niche: '¿Cuál es el nicho específico de tu marca?',
-    q_targetAudience: '¿Quién es tu público objetivo?',
-    q_differentiators: '¿Qué diferencia a tu marca de la competencia?',
-    q_challenges: '¿Cuáles son los principales retos o dificultades de tu negocio?',
-    q_competitors: '¿Quiénes son tus principales competidores?',
-  },
-  en: {
-    title: 'Tell us about your brand',
-    subtitle: 'Fill in this information so Kefy can generate content consistent with your identity.',
-    saving: 'Saving...', saved: '✓ Saved', save: 'Save & continue',
-    next: 'Next', prev: 'Back', skip: 'Skip', finish: 'Finish',
-    loading: 'Loading...', loadError: 'Error loading',
-    enrichBtn: 'Analyze with AI', enriching: 'Analyzing...',
-    enrichSuccess: 'We found information about your brand!',
-    enrichError: 'Could not analyze the site. Continue manually.',
-    confirmEnriched: 'Review the information we found:',
-    applyEnriched: 'Confirm & continue',
-    addPlaceholder: 'Type and press Enter...',
-    stepOf: (c: number, total: number) => `Step ${c} of ${total}`,
-    sec1: 'Who you are', sec2: 'Your market',
-    yes: 'Yes', no: 'No',
-    suggestions: 'AI Suggestions', loadingSuggestions: 'Loading suggestions...',
-    socialUrls: 'Social networks (optional)',
-    q_name: "What is your brand's name?",
-    q_websiteUrl: 'Do you have a website or main social media page?',
-    q_mission: "What does your company do? What's its mission?",
-    q_industry: 'What industry does your brand operate in?',
-    q_logo: 'Do you have your brand logo? You can upload a file or paste a URL.',
-    q_language: 'What language do you communicate with your customers in?',
-    q_customerLocations: 'Where are your customers? (countries or cities)',
-    q_usesEmojis: 'Does your brand use emojis in its communication?',
-    q_communicationStyle: "How would you describe your brand's communication style?",
-    q_tone: "What is your brand's tone of voice? (you can choose multiple)",
-    q_tagline: "What is your brand's tagline or slogan?",
-    q_colors: 'Define your brand color palette',
-    q_fonts: 'What fonts does your brand use?',
-    q_notes: 'Any additional style guide or special instruction for the AI',
-    q_companySize: 'How many employees does your company have?',
-    q_niche: "What is your brand's specific niche?",
-    q_targetAudience: 'Who is your target audience?',
-    q_differentiators: 'What sets your brand apart from the competition?',
-    q_challenges: 'What are the main challenges or difficulties in your business?',
-    q_competitors: 'Who are your main competitors?',
-  },
-} as const;
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const TONES: { value: BrandTone; label: Record<Locale, string> }[] = [
-  { value: 'professional',  label: { es: 'Profesional',   en: 'Professional'  } },
-  { value: 'friendly',      label: { es: 'Amigable',      en: 'Friendly'      } },
-  { value: 'authoritative', label: { es: 'Autoritativo',  en: 'Authoritative' } },
-  { value: 'playful',       label: { es: 'Divertido',     en: 'Playful'       } },
-  { value: 'inspirational', label: { es: 'Inspiracional', en: 'Inspirational' } },
-  { value: 'educational',   label: { es: 'Educativo',     en: 'Educational'   } },
-  { value: 'casual',        label: { es: 'Casual',        en: 'Casual'        } },
-  { value: 'formal',        label: { es: 'Formal',        en: 'Formal'        } },
+const TONES: BrandTone[] = [
+  'professional', 'friendly', 'authoritative', 'playful', 'inspirational', 'educational', 'casual', 'formal',
 ];
-
 const COMPANY_SIZES: CompanySize[] = ['1-10', '11-50', '51-200', '201-500', '500+'];
+const SOCIAL_CHANNELS = [
+  ['instagram', 'Instagram'], ['linkedin', 'LinkedIn'], ['twitter', 'X (Twitter)'],
+  ['facebook', 'Facebook'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'],
+] as const;
+const LANGUAGES = ['es', 'en', 'pt', 'fr'] as const;
+const HEX = /^#[0-9A-Fa-f]{6}$/;
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'image/gif'];
+const LOGO_MAX_BYTES = 5 * 1024 * 1024;
+const ALL_FIELDS = BRAND_SETUP_GROUPS.flatMap((g) => g.fields);
+const COLOR_FIELDS = ['primary_color', 'secondary_color', 'accent_color'] as const;
 
-const SOCIAL_CHANNELS = ['instagram', 'linkedin', 'twitter', 'facebook', 'tiktok', 'youtube'];
+type Kit = Partial<BrandKit>;
+type FieldErrors = Partial<Record<keyof BrandKit, string>>;
+type SuggestionState = { loading: boolean; items: string[] | null; error: string | null };
+type ApiError = { message: string; plans?: boolean };
 
-const LANGUAGES = [
-  { value: 'es', label: 'Español' },
-  { value: 'en', label: 'English' },
-  { value: 'pt', label: 'Português' },
-  { value: 'fr', label: 'Français' },
-];
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', background: 'var(--bg)', border: '1px solid var(--border)',
-  borderRadius: 8, padding: '10px 14px', fontSize: 14, color: 'var(--text)',
-  outline: 'none', boxSizing: 'border-box',
-};
-
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--muted)',
-  marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em',
-};
-
-// ─── Wizard step definitions ──────────────────────────────────────────────────
-
-const WIZARD_STEPS: WizardStep[] = [
-  { id: 'name',            section: 1, field: 'name' },
-  { id: 'website',         section: 1, field: 'website_url', isUrl: true },
-  { id: 'mission',         section: 1, field: 'mission', aiField: 'mission' },
-  { id: 'industry',        section: 1, field: 'industry', aiField: 'industry' },
-  { id: 'language',        section: 1, field: 'language', isSelect: true, selectOptions: LANGUAGES },
-  { id: 'locations',       section: 1, field: 'customer_locations', isArray: true, aiField: 'customer_locations' },
-  { id: 'emojis',          section: 1, field: 'uses_emojis', isBoolean: true },
-  { id: 'comm_style',      section: 1, field: 'communication_style', aiField: 'communication_style' },
-  { id: 'tone',            section: 1, field: 'tone', isTone: true },
-  { id: 'tagline',         section: 1, field: 'tagline', aiField: 'tagline' },
-  { id: 'colors',          section: 1, field: null, isColor: true },
-  { id: 'fonts',           section: 1, field: null, isFont: true },
-  { id: 'logo',            section: 1, field: 'logo_url', isLogo: true },
-  { id: 'notes',           section: 1, field: 'notes' },
-  { id: 'company_size',    section: 2, field: 'company_size', isCompanySize: true },
-  { id: 'niche',           section: 2, field: 'niche', aiField: 'niche' },
-  { id: 'target_audience', section: 2, field: 'target_audience', aiField: 'target_audience' },
-  { id: 'differentiators', section: 2, field: 'differentiators', isArray: true, aiField: 'differentiators' },
-  { id: 'challenges',      section: 2, field: 'challenges', isArray: true, aiField: 'challenges' },
-  { id: 'competitors',     section: 2, field: 'competitors', isArray: true, aiField: 'competitors' },
-];
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function ArrayChips({
-  value, onChange, placeholder, suggestions, loadingSugg, onLoadSuggestions,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-  placeholder: string;
-  suggestions?: string[];
-  loadingSugg?: boolean;
-  onLoadSuggestions?: () => void;
-}) {
-  const [input, setInput] = useState('');
-  function add(item: string) {
-    const trimmed = item.trim();
-    if (!trimmed || value.includes(trimmed) || value.length >= 10) return;
-    onChange([...value, trimmed]);
-    setInput('');
+/** URL escrita a mano → con protocolo (https por defecto). null si no es válida. */
+function normalizeUrl(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const url = new URL(withProtocol);
+    return url.hostname.includes('.') ? url.toString().replace(/\/$/, '') : null;
+  } catch {
+    return null;
   }
-  return (
-    <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        {value.map((v) => (
-          <span key={v} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(198,255,75,0.12)', border: '1px solid var(--accent)', borderRadius: 20, padding: '4px 10px', fontSize: 13, color: 'var(--accent)' }}>
-            {v}
-            <button type="button" onClick={() => onChange(value.filter((x) => x !== v))}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
-          </span>
-        ))}
-      </div>
-      {suggestions !== undefined && (
-        <div style={{ marginBottom: 8 }}>
-          {loadingSugg ? (
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando sugerencias...</span>
-          ) : suggestions.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {suggestions.filter((s) => !value.includes(s)).map((s) => (
-                <button key={s} type="button" onClick={() => add(s)}
-                  style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>
-                  + {s}
-                </button>
-              ))}
-            </div>
-          ) : onLoadSuggestions ? (
-            <button type="button" onClick={onLoadSuggestions}
-              style={{ fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-              Cargar sugerencias IA
-            </button>
-          ) : null}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input style={{ ...inputStyle, flex: 1 }} value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(input); } }}
-          placeholder={placeholder} />
-        <button type="button" onClick={() => add(input)}
-          style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>+</button>
-      </div>
-    </div>
-  );
 }
 
-function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <label style={labelStyle}>{label}</label>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <input type="color" value={value} onChange={(e) => onChange(e.target.value)}
-          style={{ width: 40, height: 38, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', padding: 2, background: 'var(--bg)' }} />
-        <input style={{ ...inputStyle, flex: 1 }} value={value}
-          onChange={(e) => onChange(e.target.value)} placeholder="#000000" maxLength={7} />
-      </div>
-    </div>
-  );
+/** Valor tal como se guardaría: textos recortados, vacíos como null, redes sin huecos. */
+function normalizeForSave(field: keyof BrandKit, value: unknown): unknown {
+  if (field === 'website_url' || field === 'logo_url') {
+    return typeof value === 'string' && value.trim() ? normalizeUrl(value) : null;
+  }
+  if (field === 'social_urls') {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries((value ?? {}) as Record<string, unknown>)) {
+      if (typeof v === 'string' && v.trim()) out[k] = normalizeUrl(v) ?? v.trim();
+    }
+    return out;
+  }
+  if (typeof value === 'string') return value.trim() ? value.trim() : null;
+  return value ?? null;
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+function sameValue(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) => (v === undefined || v === '' ? null : v);
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+}
 
-export default function BrandKitWizard({ locale: localeProp, orgName, onComplete }: BrandKitWizardProps) {
-  const locale: Locale = (localeProp === 'en' ? 'en' : 'es') as Locale;
-  const t = T[locale];
+/** Error del API legible (el servidor ya lo manda en el idioma pedido). */
+async function apiError(res: Response, fallback: string): Promise<ApiError> {
+  const data = await res.json().catch(() => null) as { error?: unknown; creditsExhausted?: unknown } | null;
+  return {
+    message: typeof data?.error === 'string' ? data.error : fallback,
+    plans: res.status === 402 || data?.creditsExhausted === true,
+  };
+}
 
-  const [form, setForm] = useState<Partial<BrandKit>>({});
-  const [fetching, setFetching] = useState(true);
+export default function BrandKitWizard({ locale, orgName, onComplete, onExit }: BrandKitWizardProps) {
+  const lang: 'es' | 'en' = locale === 'en' ? 'en' : 'es';
+  const tb = lang === 'en' ? enBrand : esBrand;
+  const t = lang === 'en' ? enSetup : esSetup;
+  const { refresh: refreshBrands } = useBrand();
+
+  const [kit, setKit] = useState<Kit | null>(null);
+  const [form, setForm] = useState<Kit>({});
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const formRef = useRef<Partial<BrandKit>>({});
-  const suggCacheRef = useRef<Record<string, string[]>>({});
-  const localeRef = useRef<Locale>(locale);
-  const suggInflight = useRef<string | null>(null);
+  const [saveError, setSaveError] = useState<ApiError | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [suggestions, setSuggestions] = useState<Record<string, SuggestionState>>({});
+  const [enrich, setEnrich] = useState<
+    { status: 'idle' | 'loading' | 'empty' | 'applied' } | { status: 'found'; data: Kit } | { status: 'error'; error: ApiError }
+  >({ status: 'idle' });
+  const [logo, setLogo] = useState<{ status: 'idle' | 'uploading' } | { status: 'error'; message: string }>({ status: 'idle' });
 
-  const [wizardStep, setWizardStep] = useState(0);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [loadingSugg, setLoadingSugg] = useState(false);
-  const [suggCache, setSuggCache] = useState<Record<string, string[]>>({});
-
-  const [enrichUrl, setEnrichUrl] = useState('');
-  const [enriching, setEnriching] = useState(false);
-  const [enrichResult, setEnrichResult] = useState<Partial<BrandKit> | null>(null);
-  const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
-
-  const [logoUploading, setLogoUploading] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const navigated = useRef(false);
 
-  const [arraySugg, setArraySugg] = useState<Record<string, string[]>>({});
-  const [arraySuggLoading, setArraySuggLoading] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    fetch('/api/brand-kit', { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Failed to load');
-        const { kit: k } = await res.json() as { kit: BrandKit };
-        if ((!k.name || k.name === 'Mi marca') && orgName) k.name = orgName;
-        setForm(k);
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setFetching(false));
+  const load = useCallback(async () => {
+    setLoadState('loading');
+    try {
+      const res = await fetch('/api/brand-kit', { credentials: 'include' });
+      if (!res.ok) throw new Error(String(res.status));
+      const { kit: k } = await res.json() as { kit: BrandKit };
+      const initial: Kit = { ...k };
+      // El kit nace con el nombre por defecto de la base: se propone el del negocio.
+      if ((!initial.name || initial.name === 'Mi marca') && orgName) initial.name = orgName;
+      setKit(k);
+      setForm(initial);
+      setStep(firstIncompleteGroup(k));
+      setLoadState('ready');
+    } catch {
+      setLoadState('error');
+    }
   }, [orgName]);
 
-  useEffect(() => {
-    formRef.current = form;
-    suggCacheRef.current = suggCache;
-    localeRef.current = locale;
-  });
+  useEffect(() => { void load(); }, [load]);
 
-  function updateField<K extends keyof BrandKit>(key: K, value: BrandKit[K]) {
+  // Al cambiar de pantalla el foco va a su título: sin esto, con teclado o
+  // lector de pantalla el foco se quedaba en un botón que ya no existe.
+  useEffect(() => {
+    if (!navigated.current) return;
+    headingRef.current?.focus();
+  }, [step]);
+
+  const changes = useMemo(() => {
+    const patch: Record<string, unknown> = {};
+    if (!kit) return patch;
+    for (const field of ALL_FIELDS) {
+      const next = normalizeForSave(field, form[field]);
+      if (!sameValue(next, kit[field])) patch[field] = next;
+    }
+    return patch;
+  }, [form, kit]);
+  const dirty = Object.keys(changes).length > 0;
+
+  // Cerrar o recargar la pestaña con cambios sin guardar pide confirmación.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  const completeness = useMemo(() => brandCompleteness(form), [form]);
+
+  function update<K extends keyof BrandKit>(key: K, value: BrandKit[K] | null) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }
 
-  const fetchSuggestions = useCallback(async (field: string) => {
-    if (suggInflight.current === field) return;
-    if (suggCacheRef.current[field]) { setSuggestions(suggCacheRef.current[field]); return; }
-    suggInflight.current = field;
-    setLoadingSugg(true);
-    setSuggestions([]);
+  function goTo(index: number) {
+    navigated.current = true;
+    setSaveError(null);
+    setStep(index);
+  }
+
+  function validate(): FieldErrors {
+    const errs: FieldErrors = {};
+    if (!isFilled(form.name)) errs.name = tb.identity.nameRequired;
+    for (const f of ['website_url', 'logo_url'] as const) {
+      const v = form[f];
+      if (typeof v === 'string' && v.trim() && !normalizeUrl(v)) errs[f] = tb.identity.urlInvalid;
+    }
+    for (const f of COLOR_FIELDS) {
+      const v = form[f];
+      if (typeof v === 'string' && v.trim() && !HEX.test(v.trim())) errs[f] = tb.identity.colorInvalid;
+    }
+    const social = (form.social_urls ?? {}) as Record<string, unknown>;
+    if (Object.values(social).some((v) => typeof v === 'string' && v.trim() && !normalizeUrl(v))) {
+      errs.social_urls = tb.identity.urlInvalid;
+    }
+    return errs;
+  }
+
+  /** Guarda todo lo que cambió (de cualquier pantalla). false si no se pudo. */
+  async function save(): Promise<boolean> {
+    const errs = validate();
+    setFieldErrors(errs);
+    const invalid = Object.keys(errs) as (keyof BrandKit)[];
+    if (invalid.length > 0) {
+      setSaveError({ message: t.errors.fix });
+      const groupIndex = BRAND_SETUP_GROUPS.findIndex((g) => g.fields.includes(invalid[0]));
+      if (groupIndex !== -1 && groupIndex !== step) goTo(groupIndex);
+      return false;
+    }
+    if (!dirty) return true;
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // syncOrg: con una sola marca, el nombre de la organización sigue al de la marca.
+      const res = await fetch('/api/brand-kit?syncOrg=1', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      if (!res.ok) {
+        setSaveError(res.status === 403 ? { message: t.errors.forbidden } : await apiError(res, t.errors.save));
+        return false;
+      }
+      const { kit: updated } = await res.json() as { kit: BrandKit };
+      setKit(updated);
+      setForm((prev) => {
+        const next = { ...prev };
+        for (const field of ALL_FIELDS) next[field] = updated[field] as never;
+        return next;
+      });
+      setSaved(true);
+      // El nombre y el logo se ven en el selector de marca.
+      if ('name' in changes || 'logo_url' in changes) void refreshBrands();
+      return true;
+    } catch {
+      setSaveError({ message: t.errors.save });
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleNext(e?: FormEvent) {
+    e?.preventDefault();
+    if (saving) return;
+    if (!(await save())) return;
+    if (step === BRAND_SETUP_GROUPS.length - 1) onComplete();
+    else goTo(step + 1);
+  }
+
+  async function handleLater() {
+    if (saving) return;
+    if (await save()) (onExit ?? onComplete)();
+  }
+
+  async function suggest(field: keyof BrandKit) {
+    setSuggestions((p) => ({ ...p, [field]: { loading: true, items: null, error: null } }));
     try {
       const res = await fetch('/api/brand-kit/ai-suggest', {
-        method: 'POST', credentials: 'include',
+        method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, context: formRef.current, lang: localeRef.current }),
+        body: JSON.stringify({ field, context: form, lang }),
       });
-      if (!res.ok) throw new Error();
-      const { suggestions: sugg } = await res.json() as { suggestions: string[] };
-      setSuggestions(sugg);
-      setSuggCache((prev) => ({ ...prev, [field]: sugg }));
-    } catch { setSuggestions([]); }
-    finally { suggInflight.current = null; setLoadingSugg(false); }
-  }, []);
+      if (!res.ok) {
+        const err = await apiError(res, t.errors.suggestions);
+        setSuggestions((p) => ({ ...p, [field]: { loading: false, items: null, error: err.message } }));
+        return;
+      }
+      const data = await res.json() as { suggestions?: unknown };
+      const items = Array.isArray(data.suggestions)
+        ? data.suggestions.filter((s): s is string => typeof s === 'string' && !!s.trim())
+        : [];
+      setSuggestions((p) => ({
+        ...p, [field]: { loading: false, items, error: items.length ? null : t.noSuggestions },
+      }));
+    } catch {
+      setSuggestions((p) => ({ ...p, [field]: { loading: false, items: null, error: t.errors.suggestions } }));
+    }
+  }
 
-  useEffect(() => {
-    const step = WIZARD_STEPS[wizardStep];
-    setSuggestions([]);
-    setLoadingSugg(false);
-
-    const requiresWebsite = step?.aiField === 'mission';
-    const hasWebsite = !!String(formRef.current.website_url ?? '').trim();
-
-    if (requiresWebsite && !hasWebsite) {
+  async function readWebsite() {
+    const url = normalizeUrl(String(form.website_url ?? ''));
+    if (!url) {
+      setFieldErrors((p) => ({ ...p, website_url: tb.identity.urlInvalid }));
       return;
     }
-
-    if (step?.aiField && !step.isArray && !step.isTone) {
-      void fetchSuggestions(step.aiField);
+    setEnrich({ status: 'loading' });
+    try {
+      const res = await fetch('/api/brand-kit/enrich-url', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, lang }),
+      });
+      if (!res.ok) {
+        setEnrich({ status: 'error', error: await apiError(res, t.website.error) });
+        return;
+      }
+      const { extracted } = await res.json() as { extracted?: Kit };
+      const data = Object.fromEntries(Object.entries(extracted ?? {}).filter(([, v]) => isFilled(v))) as Kit;
+      setEnrich(Object.keys(data).length ? { status: 'found', data } : { status: 'empty' });
+    } catch {
+      setEnrich({ status: 'error', error: { message: t.website.error } });
     }
-  }, [wizardStep, fetchSuggestions]);
+  }
 
-  async function handleLogoUpload(file: File) {
-    setLogoUploading(true);
+  function applyEnriched() {
+    if (enrich.status !== 'found') return;
+    setForm((prev) => ({ ...prev, ...enrich.data }));
+    setSaved(false);
+    setEnrich({ status: 'applied' });
+  }
+
+  async function uploadLogo(file: File) {
+    if (!LOGO_TYPES.includes(file.type)) { setLogo({ status: 'error', message: tb.identity.logoBadType }); return; }
+    if (file.size > LOGO_MAX_BYTES) { setLogo({ status: 'error', message: tb.identity.logoTooBig }); return; }
+    setLogo({ status: 'uploading' });
     try {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('type', 'logo');
       fd.append('label', 'Logo');
       const res = await fetch('/api/brand-kit/assets', { method: 'POST', credentials: 'include', body: fd });
-      if (!res.ok) throw new Error('upload failed');
+      if (!res.ok) throw new Error(String(res.status));
       const { asset } = await res.json() as { asset: { public_url: string } };
-      updateField('logo_url', asset.public_url);
-    } catch { /* silently ignore */ }
-    finally { setLogoUploading(false); }
-  }
-
-  async function handleEnrich(urlOverride?: string) {
-    const url = urlOverride ?? enrichUrl;
-    if (!url.trim()) return;
-    setEnriching(true);
-    setEnrichResult(null);
-    setEnrichMsg(null);
-    try {
-      const res = await fetch('/api/brand-kit/enrich-url', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), lang: localeRef.current }),
-      });
-      if (!res.ok) throw new Error();
-      const { extracted } = await res.json() as { extracted: Partial<BrandKit> };
-      if (Object.keys(extracted).length === 0) throw new Error('empty');
-      setEnrichResult(extracted);
-      setEnrichMsg(t.enrichSuccess);
-    } catch { setEnrichMsg(t.enrichError); }
-    finally { setEnriching(false); }
-  }
-
-  function applyEnriched() {
-    if (!enrichResult) return;
-    setForm((prev) => ({ ...prev, ...enrichResult }));
-    setEnrichResult(null);
-    setEnrichMsg(null);
-    setEnrichUrl('');
-    setWizardStep(2);
-  }
-
-  async function loadArraySugg(field: string) {
-    if (arraySugg[field]) return;
-    setArraySuggLoading((p) => ({ ...p, [field]: true }));
-    try {
-      const res = await fetch('/api/brand-kit/ai-suggest', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, context: form, lang: locale }),
-      });
-      if (!res.ok) throw new Error();
-      const { suggestions: sugg } = await res.json() as { suggestions: string[] };
-      setArraySugg((p) => ({ ...p, [field]: sugg }));
-    } catch { setArraySugg((p) => ({ ...p, [field]: [] })); }
-    finally { setArraySuggLoading((p) => ({ ...p, [field]: false })); }
-  }
-
-  async function handleSave(isFinish = false): Promise<boolean> {
-    if (saving) return false;
-    setSaving(true);
-    setError(null);
-    const payload = {
-      name: form.name ?? orgName ?? null,
-      tagline: form.tagline ?? null, industry: form.industry ?? null,
-      website_url: form.website_url ?? null, social_urls: form.social_urls ?? {},
-      language: form.language ?? 'es', customer_locations: form.customer_locations ?? [],
-      uses_emojis: form.uses_emojis ?? false, communication_style: form.communication_style ?? null,
-      mission: form.mission ?? null, tone: form.tone ?? [],
-      primary_color: form.primary_color ?? null, secondary_color: form.secondary_color ?? null,
-      accent_color: form.accent_color ?? null, font_heading: form.font_heading ?? null,
-      font_body: form.font_body ?? null, logo_url: form.logo_url ?? null, notes: form.notes ?? null,
-      company_size: form.company_size ?? null, differentiators: form.differentiators ?? [],
-      challenges: form.challenges ?? [], niche: form.niche ?? null,
-      competitors: form.competitors ?? [], target_audience: form.target_audience ?? null,
-    };
-    try {
-      const res = await fetch('/api/brand-kit?syncOrg=1', {
-        method: 'PATCH', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const { error: msg } = await res.json() as { error?: string };
-        throw new Error(msg ?? 'Error al guardar');
-      }
-      const { kit: updated } = await res.json() as { kit: BrandKit };
-      setForm(updated);
-      setSaved(true);
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-      saveTimeout.current = setTimeout(() => setSaved(false), 3000);
-      if (isFinish) onComplete();
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido');
-      return false;
-    } finally { setSaving(false); }
-  }
-
-  async function wizardNext() {
-    if (wizardStep < WIZARD_STEPS.length - 1) {
-      const ok = await handleSave(false);
-      if (!ok) return;
-      setWizardStep((s) => s + 1);
-    } else {
-      const finished = await handleSave(true);
-      if (!finished) return;
+      update('logo_url', asset.public_url);
+      setLogo({ status: 'idle' });
+    } catch {
+      setLogo({ status: 'error', message: tb.identity.logoFailed });
+    } finally {
+      if (logoInputRef.current) logoInputRef.current.value = '';
     }
   }
-  function wizardPrev() { if (wizardStep > 0) setWizardStep((s) => s - 1); }
 
-  if (fetching) {
+  // ─── Piezas ────────────────────────────────────────────────────────────────
+
+  const fieldLabel: Partial<Record<keyof BrandKit, string>> = {
+    name: tb.name, tagline: tb.tagline, industry: tb.industry, website_url: tb.websiteUrl,
+    social_urls: tb.socialUrls, language: tb.language, customer_locations: tb.customerLocations,
+    uses_emojis: tb.usesEmojis, communication_style: tb.communicationStyle, mission: tb.mission,
+    tone: tb.tone, primary_color: tb.primaryColor, secondary_color: tb.secondaryColor,
+    accent_color: tb.accentColor, font_heading: tb.fontHeading, font_body: tb.fontBody,
+    logo_url: tb.logo, notes: tb.notes, company_size: tb.companySize,
+    differentiators: tb.differentiators, challenges: tb.challenges, niche: tb.niche,
+    competitors: tb.competitors, target_audience: tb.targetAudience,
+  };
+
+  function suggestionsFor(field: keyof BrandKit, apply: (value: string) => void, current?: string): ReactNode {
+    const s = suggestions[field];
+    const label = fieldLabel[field] ?? String(field);
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 24px' }}>
-        <span style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</span>
+      <div className={styles.suggest}>
+        <Button
+          size="sm" variant="ghost" icon={<Icon name="sparkles" size={14} />}
+          loading={s?.loading} onClick={() => void suggest(field)}
+          aria-label={t.suggest(label)}
+        >
+          {t.suggestShort}
+        </Button>
+        {s?.error && <p className={styles.suggestError} role="status">{s.error}</p>}
+        {s?.items && s.items.length > 0 && (
+          <div className={styles.suggestList} role="group" aria-label={`${t.suggestionsTitle}: ${label}`}>
+            {s.items.map((item) => (
+              <button
+                key={item} type="button" className={styles.suggestItem}
+                aria-pressed={current === item} onClick={() => apply(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
 
-  const step = WIZARD_STEPS[wizardStep];
-  const progress = ((wizardStep + 1) / WIZARD_STEPS.length) * 100;
+  function textField(field: keyof BrandKit, opts: {
+    multiline?: boolean; placeholder?: string; hint?: string; required?: boolean; suggest?: boolean; label?: string;
+  } = {}) {
+    const value = typeof form[field] === 'string' ? (form[field] as string) : '';
+    const Control = opts.multiline ? Textarea : Input;
+    return (
+      <div className={styles.fieldBlock}>
+        <Field label={opts.label ?? fieldLabel[field] ?? String(field)} hint={opts.hint} error={fieldErrors[field]} required={opts.required}>
+          <Control
+            value={value}
+            onChange={(e: { target: { value: string } }) => update(field, e.target.value as never)}
+            placeholder={opts.placeholder}
+            {...(opts.multiline ? { rows: 3 } : {})}
+          />
+        </Field>
+        {opts.suggest && suggestionsFor(field, (v) => update(field, v as never), value)}
+      </div>
+    );
+  }
 
-  const wizardQuestions: Record<WizardStepId, string> = {
-    name: t.q_name, website: t.q_websiteUrl, mission: t.q_mission,
-    industry: t.q_industry, language: t.q_language, locations: t.q_customerLocations,
-    emojis: t.q_usesEmojis, comm_style: t.q_communicationStyle, tone: t.q_tone,
-    tagline: t.q_tagline, colors: t.q_colors, fonts: t.q_fonts, logo: t.q_logo, notes: t.q_notes,
-    company_size: t.q_companySize, niche: t.q_niche, target_audience: t.q_targetAudience,
-    differentiators: t.q_differentiators, challenges: t.q_challenges, competitors: t.q_competitors,
-  };
+  function chipsField(field: 'customer_locations' | 'differentiators' | 'competitors' | 'challenges', placeholder?: string) {
+    const s = suggestions[field];
+    return (
+      <Field label={fieldLabel[field] ?? field}>
+        {(p) => (
+          <ArrayChips
+            id={p.id}
+            aria-describedby={p['aria-describedby']}
+            lang={lang}
+            value={(form[field] as string[] | undefined) ?? []}
+            onChange={(v) => update(field, v)}
+            placeholder={placeholder}
+            suggestions={s?.items ?? undefined}
+            loadingSuggestions={s?.loading}
+            onRequestSuggestions={() => void suggest(field)}
+          />
+        )}
+      </Field>
+    );
+  }
 
-  function renderStepContent() {
-    if (!step) return null;
-
-    if (step.id === 'website') {
-      return (
-        <div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input style={{ ...inputStyle, flex: 1 }}
-              value={enrichUrl || (form.website_url ?? '')}
-              onChange={(e) => { setEnrichUrl(e.target.value); updateField('website_url', e.target.value || null); }}
-              placeholder="https://tuempresa.com" type="url" />
-            {(enrichUrl || form.website_url) && (
-              <button type="button" onClick={() => void handleEnrich()} disabled={enriching}
-                style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: enriching ? 'not-allowed' : 'pointer', opacity: enriching ? 0.7 : 1, whiteSpace: 'nowrap' }}>
-                {enriching ? t.enriching : t.enrichBtn}
-              </button>
-            )}
-          </div>
-          {enrichMsg && !enrichResult && (
-            <p style={{ fontSize: 13, color: '#ff6b6b', marginTop: 8 }}>{enrichMsg}</p>
-          )}
-          {enrichResult && (
-            <div style={{ marginTop: 14, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, padding: 16 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 10 }}>{t.confirmEnriched}</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                {Object.entries(enrichResult).map(([k, v]) => {
-                  if (!v || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0)) return null;
-                  const display = Array.isArray(v) ? (v as string[]).join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v);
-                  return (
-                    <div key={k} style={{ fontSize: 13, display: 'flex', gap: 8 }}>
-                      <span style={{ color: 'var(--muted)', minWidth: 140, flexShrink: 0 }}>{k}</span>
-                      <span style={{ color: 'var(--text)' }}>{display}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              <button type="button" onClick={applyEnriched}
-                style={{ marginTop: 12, padding: '9px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                {t.applyEnriched}
-              </button>
-            </div>
-          )}
-          <div style={{ marginTop: 16 }}>
-            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.socialUrls}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {SOCIAL_CHANNELS.map((ch) => (
-                <div key={ch} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 68, textTransform: 'capitalize' }}>{ch}</span>
-                  <input style={{ ...inputStyle, fontSize: 12, padding: '7px 10px' }}
-                    value={(form.social_urls as Record<string, string> | undefined)?.[ch] ?? ''}
-                    onChange={(e) => updateField('social_urls', { ...(form.social_urls ?? {}), [ch]: e.target.value || undefined })}
-                    placeholder="URL" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (step.isBoolean) {
-      const current = form.uses_emojis;
-      return (
-        <div style={{ display: 'flex', gap: 12 }}>
-          {([true, false] as const).map((v) => (
-            <button key={String(v)} type="button" onClick={() => updateField('uses_emojis', v)}
-              style={{ padding: '10px 28px', borderRadius: 8, fontSize: 14, fontWeight: current === v ? 600 : 400, border: `1px solid ${current === v ? 'var(--accent)' : 'var(--border)'}`, background: current === v ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: current === v ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-              {v ? t.yes : t.no}
+  function toggleGroup<T extends string>(legend: string, options: readonly T[], isActive: (o: T) => boolean,
+    onToggle: (o: T) => void, label: (o: T) => string, hint?: string) {
+    return (
+      <fieldset className={styles.fieldset}>
+        <legend className="ui-label">{legend}</legend>
+        {hint && <p className="ui-hint" style={{ marginTop: -2 }}>{hint}</p>}
+        <div className={styles.toggles}>
+          {options.map((o) => (
+            <button
+              key={o} type="button" className={styles.toggle}
+              aria-pressed={isActive(o)} onClick={() => onToggle(o)}
+            >
+              {isActive(o) && <Icon name="check" size={14} />}
+              {label(o)}
             </button>
           ))}
         </div>
-      );
-    }
+      </fieldset>
+    );
+  }
 
-    if (step.isTone) {
-      const activeTones = (form.tone ?? []) as BrandTone[];
-      return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {TONES.map(({ value, label }) => {
-            const active = activeTones.includes(value);
+  function renderBusiness() {
+    const social = (form.social_urls ?? {}) as Record<string, string | undefined>;
+    return (
+      <>
+        {textField('name', { required: true, placeholder: tb.identity.namePlaceholder })}
+        <div className={styles.fieldBlock}>
+          <Field label={tb.websiteUrl} hint={tb.identity.websiteHint} error={fieldErrors.website_url}>
+            <Input
+              type="url" inputMode="url" autoComplete="url" autoCapitalize="none" spellCheck={false}
+              value={form.website_url ?? ''}
+              onChange={(e) => update('website_url', e.target.value)}
+              placeholder={t.website.placeholder}
+            />
+          </Field>
+          <div className={styles.suggest}>
+            <Button
+              size="sm" variant="secondary" icon={<Icon name="globe" size={14} />}
+              loading={enrich.status === 'loading'} disabled={!isFilled(form.website_url)}
+              onClick={() => void readWebsite()}
+            >
+              {enrich.status === 'loading' ? t.website.reading : t.website.read}
+            </Button>
+          </div>
+          {enrich.status === 'error' && (
+            <Notice tone="warning">
+              {enrich.error.message}{' '}
+              {enrich.error.plans && <a href={`/${lang}/dashboard/settings#billing`}>{t.errors.plans}</a>}
+            </Notice>
+          )}
+          {enrich.status === 'empty' && <Notice tone="warning">{t.website.empty}</Notice>}
+          {enrich.status === 'applied' && <Notice tone="success">{t.website.applied}</Notice>}
+          {enrich.status === 'found' && (
+            <div className={styles.found}>
+              <p className={styles.foundTitle}>{t.website.found}</p>
+              <dl className={styles.foundList}>
+                {Object.entries(enrich.data).map(([key, value]) => (
+                  <div key={key} className={styles.foundRow}>
+                    <dt>{fieldLabel[key as keyof BrandKit] ?? key}</dt>
+                    <dd>
+                      {typeof value === 'string' && HEX.test(value) && (
+                        <span className={styles.swatch} style={{ background: value }} aria-hidden="true" />
+                      )}
+                      {Array.isArray(value)
+                        ? value.map((v) => (tb.tones as Record<string, string>)[v] ?? v).join(', ')
+                        : typeof value === 'object' && value
+                          ? Object.entries(value as Record<string, string>).map(([k, v]) => `${k}: ${v}`).join(' · ')
+                          : typeof value === 'boolean' ? (value ? tb.yes : tb.no) : String(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <div className={styles.actionsRow}>
+                <Button size="sm" variant="primary" onClick={applyEnriched}>{t.website.apply}</Button>
+                <Button size="sm" variant="ghost" onClick={() => setEnrich({ status: 'idle' })}>{t.website.discard}</Button>
+              </div>
+            </div>
+          )}
+        </div>
+        {textField('mission', { multiline: true, placeholder: tb.identity.missionPlaceholder, suggest: true })}
+        {textField('industry', { placeholder: tb.identity.industryPlaceholder, suggest: true })}
+        {/* Seis campos opcionales: plegados, para que la primera pantalla no
+            sea kilométrica en móvil. Abiertos si ya hay alguno o hay error. */}
+        <details
+          className={styles.details}
+          open={!!fieldErrors.social_urls || Object.values(social).some((v) => !!v?.trim()) || undefined}
+        >
+          <summary className={styles.summary}>
+            <Icon name="chevron-right" size={16} />
+            {t.socialOptional}
+          </summary>
+          <p className="ui-hint">{tb.identity.socialHint}</p>
+          {fieldErrors.social_urls && <p className="ui-error" role="alert">{fieldErrors.social_urls}</p>}
+          <div className="auto-grid" style={{ ['--min' as string]: '220px' }}>
+            {SOCIAL_CHANNELS.map(([key, name]) => (
+              <Field key={key} label={name}>
+                <Input
+                  type="url" inputMode="url" autoCapitalize="none" spellCheck={false}
+                  value={social[key] ?? ''}
+                  onChange={(e) => update('social_urls', { ...social, [key]: e.target.value })}
+                  placeholder={t.socialPlaceholder}
+                />
+              </Field>
+            ))}
+          </div>
+        </details>
+      </>
+    );
+  }
+
+  function renderVoice() {
+    const tones = (form.tone ?? []) as BrandTone[];
+    return (
+      <>
+        {toggleGroup(tb.tone, TONES, (o) => tones.includes(o),
+          (o) => update('tone', tones.includes(o) ? tones.filter((x) => x !== o) : [...tones, o]),
+          (o) => tb.tones[o], tb.identity.toneHint)}
+        {textField('communication_style', { multiline: true, placeholder: tb.identity.communicationPlaceholder, suggest: true })}
+        {toggleGroup(tb.usesEmojis, ['yes', 'no'] as const,
+          (o) => (o === 'yes' ? form.uses_emojis === true : form.uses_emojis === false),
+          (o) => update('uses_emojis', o === 'yes'),
+          (o) => (o === 'yes' ? t.emojisYes : t.emojisNo))}
+        <Field label={tb.language}>
+          <Select value={form.language ?? 'es'} onChange={(e) => update('language', e.target.value as BrandKit['language'])}>
+            {LANGUAGES.map((l) => <option key={l} value={l}>{t.languages[l]}</option>)}
+          </Select>
+        </Field>
+        {textField('tagline', { placeholder: tb.identity.taglinePlaceholder, suggest: true })}
+      </>
+    );
+  }
+
+  function renderLook() {
+    return (
+      <>
+        <div className="auto-grid" style={{ ['--min' as string]: '180px' }}>
+          {COLOR_FIELDS.map((f) => {
+            const label = fieldLabel[f] ?? f;
+            const value = form[f] ?? '';
             return (
-              <button key={value} type="button"
-                onClick={() => { const next = active ? activeTones.filter((x) => x !== value) : [...activeTones, value]; updateField('tone', next); }}
-                style={{ padding: '8px 16px', borderRadius: 20, fontSize: 13, fontWeight: active ? 600 : 400, border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: active ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-                {label[locale]}
-              </button>
+              <Field key={f} label={label} error={fieldErrors[f]}>
+                {(p) => (
+                  <div className={styles.color}>
+                    <input
+                      type="color" className={styles.colorPicker}
+                      value={HEX.test(value) ? value : '#000000'}
+                      onChange={(e) => update(f, e.target.value)}
+                      aria-label={tb.identity.colorPicker(label)}
+                    />
+                    <Input {...p} value={value} onChange={(e) => update(f, e.target.value)} placeholder="#000000" maxLength={7} />
+                  </div>
+                )}
+              </Field>
             );
           })}
         </div>
-      );
-    }
-
-    if (step.isColor) {
-      return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          <ColorField label={locale === 'es' ? 'Color primario' : 'Primary color'} value={form.primary_color ?? '#000000'} onChange={(v) => updateField('primary_color', v)} />
-          <ColorField label={locale === 'es' ? 'Color secundario' : 'Secondary color'} value={form.secondary_color ?? '#ffffff'} onChange={(v) => updateField('secondary_color', v)} />
-          <ColorField label={locale === 'es' ? 'Color de acento' : 'Accent color'} value={form.accent_color ?? '#c6ff4b'} onChange={(v) => updateField('accent_color', v)} />
+        <div className="grid-2">
+          <Field label={tb.fontHeading}>
+            {(p) => (
+              <GoogleFontSelect
+                id={p.id} aria-describedby={p['aria-describedby']} lang={lang}
+                value={form.font_heading} onChange={(v) => update('font_heading', v)}
+                placeholder={tb.identity.fontHeadingPlaceholder} previewText={tb.identity.fontHeadingPreview}
+              />
+            )}
+          </Field>
+          <Field label={tb.fontBody}>
+            {(p) => (
+              <GoogleFontSelect
+                id={p.id} aria-describedby={p['aria-describedby']} lang={lang}
+                value={form.font_body} onChange={(v) => update('font_body', v)}
+                placeholder={tb.identity.fontBodyPlaceholder} previewText={tb.identity.fontBodyPreview}
+              />
+            )}
+          </Field>
         </div>
-      );
-    }
-
-    if (step.isFont) {
-      return (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <label style={labelStyle}>{locale === 'es' ? 'Fuente de títulos' : 'Heading font'}</label>
-            <GoogleFontSelect
-              value={form.font_heading}
-              onChange={(value) => updateField('font_heading', value)}
-              placeholder={locale === 'es' ? 'Selecciona fuente para títulos' : 'Select heading font'}
-              previewText={locale === 'es' ? 'Titulares con estilo' : 'Headlines with style'}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>{locale === 'es' ? 'Fuente de texto' : 'Body font'}</label>
-            <GoogleFontSelect
-              value={form.font_body}
-              onChange={(value) => updateField('font_body', value)}
-              placeholder={locale === 'es' ? 'Selecciona fuente de texto' : 'Select body font'}
-              previewText={locale === 'es' ? 'Texto claro y legible' : 'Readable body copy'}
-            />
-          </div>
-        </div>
-      );
-    }
-
-    if (step.isCompanySize) {
-      return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {COMPANY_SIZES.map((size) => (
-            <button key={size} type="button" onClick={() => updateField('company_size', size)}
-              style={{ padding: '10px 20px', borderRadius: 8, fontSize: 14, fontWeight: form.company_size === size ? 600 : 400, border: `1px solid ${form.company_size === size ? 'var(--accent)' : 'var(--border)'}`, background: form.company_size === size ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: form.company_size === size ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-              {size} {locale === 'es' ? 'empleados' : 'employees'}
-            </button>
-          ))}
-        </div>
-      );
-    }
-
-    if (step.isSelect && step.selectOptions && step.field) {
-      const fieldKey = step.field as keyof BrandKit;
-      return (
-        <select style={inputStyle} value={String(form[fieldKey] ?? '')}
-          onChange={(e) => updateField(fieldKey, e.target.value as never)}>
-          {step.selectOptions.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (step.isArray && step.field) {
-      const fieldKey = step.field as keyof BrandKit;
-      const arrVal = (form[fieldKey] as string[] | undefined) ?? [];
-      return (
-        <ArrayChips
-          value={arrVal}
-          onChange={(v) => updateField(fieldKey, v as never)}
-          placeholder={t.addPlaceholder}
-          suggestions={step.aiField ? (arraySugg[step.aiField] ?? []) : undefined}
-          loadingSugg={step.aiField ? (arraySuggLoading[step.aiField] ?? false) : false}
-          onLoadSuggestions={step.aiField ? () => void loadArraySugg(step.aiField!) : undefined}
-        />
-      );
-    }
-
-    if (step.isLogo) {
-      return (
-        <div>
-          {form.logo_url && (
-            <div style={{ marginBottom: 16 }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={form.logo_url} alt="Logo" style={{ maxHeight: 80, maxWidth: 200, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--border)', padding: 8, background: '#fff' }} />
-            </div>
+        <fieldset className={styles.fieldset}>
+          <legend className="ui-label">{tb.logo}</legend>
+          {form.logo_url && normalizeUrl(form.logo_url) && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={form.logo_url} alt={tb.identity.logoAlt} className={styles.logo} />
           )}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-            <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLogoUpload(f); }} />
-            <button type="button" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}
-              style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, cursor: logoUploading ? 'not-allowed' : 'pointer', opacity: logoUploading ? 0.7 : 1 }}>
-              {logoUploading ? (locale === 'es' ? 'Subiendo...' : 'Uploading...') : (locale === 'es' ? '↑ Subir archivo' : '↑ Upload file')}
-            </button>
+          <div className={styles.actionsRow}>
+            <input
+              ref={logoInputRef} type="file" accept={LOGO_TYPES.join(',')} className="sr-only"
+              aria-label={tb.identity.logoFile} tabIndex={-1}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadLogo(f); }}
+            />
+            <Button
+              size="sm" variant="secondary" icon={<Icon name="upload" size={14} />}
+              loading={logo.status === 'uploading'} onClick={() => logoInputRef.current?.click()}
+              aria-describedby="wizard-logo-hint"
+            >
+              {logo.status === 'uploading' ? tb.identity.logoUploading : tb.identity.logoUpload}
+            </Button>
             {form.logo_url && (
-              <button type="button" onClick={() => updateField('logo_url', null)}
-                style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: '#ff6b6b', fontSize: 13, cursor: 'pointer' }}>
-                {locale === 'es' ? 'Quitar logo' : 'Remove logo'}
-              </button>
+              <Button size="sm" variant="danger-ghost" onClick={() => update('logo_url', null)}>
+                {tb.identity.logoRemove}
+              </Button>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>URL:</span>
-            <input style={inputStyle} value={form.logo_url ?? ''}
-              onChange={(e) => updateField('logo_url', e.target.value || null)}
-              placeholder="https://..." type="url" />
-          </div>
-        </div>
-      );
-    }
-
-    if (step.id === 'notes') {
-      return (
-        <textarea style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }}
-          value={form.notes ?? ''}
-          onChange={(e) => updateField('notes', e.target.value || null)}
-          placeholder={locale === 'es' ? 'Guías de estilo, instrucciones para la IA...' : 'Style guides, AI instructions...'} />
-      );
-    }
-
-    const fieldKey = step.field as keyof BrandKit | null;
-    const currentVal = fieldKey ? String(form[fieldKey] ?? '') : '';
-    const shouldHideAiSuggestions = step.aiField === 'mission' && !String(form.website_url ?? '').trim();
-
-    return (
-      <div>
-        {!shouldHideAiSuggestions && loadingSugg ? (
-          <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{t.loadingSuggestions}</p>
-        ) : !shouldHideAiSuggestions && suggestions.length > 0 ? (
-          <div style={{ marginBottom: 12 }}>
-            <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.suggestions}</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {suggestions.map((s) => (
-                <button key={s} type="button"
-                  onClick={() => { if (fieldKey) updateField(fieldKey, s as never); }}
-                  style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, border: `1px solid ${currentVal === s ? 'var(--accent)' : 'var(--border)'}`, background: currentVal === s ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: currentVal === s ? 'var(--accent)' : 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        <input style={inputStyle}
-          value={currentVal}
-          onChange={(e) => { if (fieldKey) updateField(fieldKey, e.target.value as never); }}
-          placeholder={locale === 'es' ? 'O escribe tu respuesta...' : 'Or type your answer...'}
-          onKeyDown={(e) => { if (e.key === 'Enter') void wizardNext(); }} />
-      </div>
+          <p id="wizard-logo-hint" className="ui-hint">{tb.identity.logoHint}</p>
+          {logo.status === 'error' && <Notice tone="danger">{logo.message}</Notice>}
+          <Field label={tb.identity.logoUrl} error={fieldErrors.logo_url}>
+            <Input
+              type="url" inputMode="url" autoCapitalize="none" spellCheck={false}
+              value={form.logo_url ?? ''} onChange={(e) => update('logo_url', e.target.value)} placeholder="https://…"
+            />
+          </Field>
+        </fieldset>
+      </>
     );
   }
 
+  function renderAudience() {
+    return (
+      <>
+        {textField('target_audience', { multiline: true, placeholder: tb.market.audiencePlaceholder, suggest: true })}
+        {textField('niche', { placeholder: tb.market.nichePlaceholder, suggest: true })}
+        {chipsField('customer_locations', tb.identity.locationsPlaceholder)}
+        {toggleGroup(tb.companySize, COMPANY_SIZES, (o) => form.company_size === o,
+          (o) => update('company_size', form.company_size === o ? null : o), (o) => t.companySize(o))}
+      </>
+    );
+  }
+
+  function renderDifference() {
+    return (
+      <>
+        {chipsField('differentiators', tb.market.differentiatorsPlaceholder)}
+        {chipsField('competitors', tb.market.competitorsPlaceholder)}
+        {chipsField('challenges', tb.market.challengesPlaceholder)}
+        {textField('notes', { multiline: true, placeholder: tb.identity.notesPlaceholder, hint: tb.identity.notesHint })}
+      </>
+    );
+  }
+
+  // ─── Render ────────────────────────────────────────────────────────────────
+
+  if (loadState === 'loading') {
+    return (
+      <div className={styles.loading} role="status">
+        <Spinner size={18} />
+        <span>{t.loading}</span>
+      </div>
+    );
+  }
+  if (loadState === 'error') {
+    return (
+      <Notice tone="danger">
+        {t.loadError}{' '}
+        <Button size="sm" variant="secondary" onClick={() => void load()}>{t.retry}</Button>
+      </Notice>
+    );
+  }
+
+  const group = BRAND_SETUP_GROUPS[step];
+  const last = step === BRAND_SETUP_GROUPS.length - 1;
+  const total = BRAND_SETUP_GROUPS.length;
+  const body = {
+    business: renderBusiness, voice: renderVoice, look: renderLook,
+    audience: renderAudience, difference: renderDifference,
+  }[group.id]();
+
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '28px 32px' }}>
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t.title}</h2>
-        <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.subtitle}</p>
-      </div>
+    <div className={styles.wizard}>
+      <nav aria-label={t.stepsNav} className={styles.stepsNav}>
+        <ol className={styles.steps}>
+          {BRAND_SETUP_GROUPS.map((g, i) => {
+            const done = !completeness.incomplete.includes(g.id);
+            return (
+              <li key={g.id}>
+                <button
+                  type="button" className={styles.stepBtn}
+                  aria-current={i === step ? 'step' : undefined}
+                  data-done={done}
+                  onClick={() => goTo(i)}
+                >
+                  <span className={styles.stepNum} aria-hidden="true">
+                    {done ? <Icon name="check" size={14} /> : i + 1}
+                  </span>
+                  <span className={styles.stepName}>{t.steps[g.id]}</span>
+                  <span className="sr-only"> ({done ? t.statusDone : t.statusPending})</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
 
-      <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)' }}>
-          {step.section === 1 ? `1. ${t.sec1}` : `2. ${t.sec2}`}
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.stepOf(wizardStep + 1, WIZARD_STEPS.length)}</span>
-      </div>
-      <div style={{ height: 4, background: 'var(--border)', borderRadius: 4, marginBottom: 24, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${progress}%`, background: 'var(--accent)', borderRadius: 4, transition: 'width 0.3s ease' }} />
-      </div>
-
-      <h3 style={{ fontFamily: 'var(--font-syne)', fontSize: 19, fontWeight: 700, marginBottom: 20, lineHeight: 1.3 }}>
-        {wizardQuestions[step.id]}
-      </h3>
-
-      {renderStepContent()}
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 28 }}>
-        <button type="button" onClick={wizardPrev} disabled={wizardStep === 0}
-          style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: wizardStep === 0 ? 'var(--muted)' : 'var(--text)', fontSize: 13, cursor: wizardStep === 0 ? 'default' : 'pointer', opacity: wizardStep === 0 ? 0.4 : 1 }}>
-          {t.prev}
-        </button>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {error && <span style={{ color: '#ff6b6b', fontSize: 12 }}>{error}</span>}
-          {saved && <span style={{ color: 'var(--accent)', fontSize: 12 }}>{t.saved}</span>}
-          {step.field !== 'name' && !step.isColor && !step.isFont && (
-            <button type="button" onClick={() => void wizardNext()}
-              style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 13, cursor: 'pointer' }}>
-              {t.skip}
-            </button>
-          )}
-          <button type="button" onClick={() => void wizardNext()} disabled={saving}
-            style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
-            {saving ? t.saving : wizardStep === WIZARD_STEPS.length - 1 ? t.finish : t.next}
-          </button>
+      <form className={styles.card} onSubmit={(e) => void handleNext(e)} noValidate>
+        <div className={styles.head}>
+          <p className={styles.stepOf}>{t.stepOf(step + 1, total, t.steps[group.id])}</p>
+          <div
+            className={styles.progress} role="progressbar" aria-label={t.title}
+            aria-valuemin={0} aria-valuemax={100} aria-valuenow={completeness.percent}
+          >
+            <span style={{ width: `${completeness.percent}%` }} />
+          </div>
+          <h2 ref={headingRef} tabIndex={-1} className={styles.title}>{t.steps[group.id]}</h2>
+          <p className={styles.intro}>{t.intros[group.id]}</p>
         </div>
-      </div>
+
+        <div className={styles.body}>{body}</div>
+
+        {saveError && (
+          <Notice tone="danger">
+            {saveError.message}{' '}
+            {saveError.plans && <a href={`/${lang}/dashboard/settings#billing`}>{t.errors.plans}</a>}
+          </Notice>
+        )}
+
+        <div className={styles.footer}>
+          <div className={styles.footerStart}>
+            {step > 0 && (
+              <Button variant="ghost" icon={<Icon name="arrow-left" size={16} />} onClick={() => goTo(step - 1)}>
+                {t.prev}
+              </Button>
+            )}
+          </div>
+          <p className={styles.status} role="status">
+            {saving ? t.saving : saved && !dirty ? t.saved : ''}
+          </p>
+          <div className={styles.footerEnd}>
+            <Button variant="ghost" onClick={() => void handleLater()} disabled={saving}>{t.later}</Button>
+            <Button type="submit" variant="primary" loading={saving}>{last ? t.finish : t.next}</Button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

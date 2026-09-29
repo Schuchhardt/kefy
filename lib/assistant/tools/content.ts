@@ -31,6 +31,7 @@ import {
 } from '@/lib/services/content';
 import { generateReel, REEL_SCENE_COUNT_MAX, REEL_SCENE_COUNT_MIN, REEL_VARIANT_COUNT_MAX } from '@/lib/services/reel';
 import { CREDIT_COSTS } from '@/lib/usage';
+import { DESCRIPTION_MAX, STARTER_ANGLES, createStarterPosts } from '@/lib/services/onboarding';
 
 // ─── Esquemas compartidos ─────────────────────────────────────────────────────
 
@@ -270,6 +271,47 @@ const createPostTool = defineTool({
       data,
       links: [itemLink(ctx.language, itemId)],
       dataChanged: ['content'],
+    };
+  },
+});
+
+// ─── create_starter_posts ─────────────────────────────────────────────────────
+
+const createStarterPostsTool = defineTool({
+  name: 'create_starter_posts',
+  title: { es: 'Crear 3 posts de inicio', en: 'Create 3 starter posts' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    'Onboarding shortcut for a new brand: optionally reads the business website (filling only EMPTY brand profile ' +
+    'fields) and writes 3 draft posts with different angles: introduction, a useful tip, and the main benefit with ' +
+    'a call to action. Text only (use generate_content_image afterwards for images). Needs a url, a one-sentence ' +
+    'description, or both. Always requires user confirmation because it can change the brand profile. ' +
+    `Cost: ${CREDIT_COSTS.text} credit per post, plus ${CREDIT_COSTS.text} if a url is given (refunded on failure).`,
+  input: z.object({
+    url: z.string().trim().min(4).max(500).optional().describe('Business website.'),
+    description: z.string().trim().min(3).max(DESCRIPTION_MAX).optional().describe('What the business does, in one sentence.'),
+    channel: channel.default('instagram'),
+  }).strict().refine((v) => !!v.url || !!v.description, { message: 'url or description is required' }),
+  confirm: 'always',
+  estimateCredits: (input) => STARTER_ANGLES.length * CREDIT_COSTS.text + (input.url ? CREDIT_COSTS.text : 0),
+  describe: async (_ctx, input) => ({ url: input.url ?? null, description: input.description ?? null, channel: input.channel }),
+  handler: async (ctx, input) => {
+    const out = await createStarterPosts(ctx, {
+      url: input.url ?? null,
+      description: input.description ?? null,
+      channel: input.channel,
+    });
+    return {
+      data: {
+        brand_name: out.brandName,
+        filled: out.filled,
+        failed: out.failed,
+        website_error: out.websiteError ?? null,
+        posts: out.posts.map((p) => ({ item_id: p.id, angle: p.angle, body: p.body, hashtags: p.hashtags, status: 'draft' })),
+      },
+      links: out.posts.map((p) => itemLink(ctx.language, p.id)),
+      dataChanged: out.filled.length > 0 ? ['content', 'brand-kit'] : ['content'],
     };
   },
 });
@@ -614,6 +656,7 @@ export const contentTools = [
   listContentTool,
   getContentTool,
   createPostTool,
+  createStarterPostsTool,
   createCarouselTool,
   createReelTool,
   createManualContentTool,
