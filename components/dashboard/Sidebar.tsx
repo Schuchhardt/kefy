@@ -5,122 +5,23 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { useTheme } from '@/lib/theme-context';
+import { useBrand } from '@/lib/brand-context';
+import { useUnreadCount } from '@/hooks/useUnreadCount';
 import BrandSwitcher from '@/components/dashboard/BrandSwitcher';
-
-/* ─── SVG Icons ─────────────────────────────────────────────────────────── */
-const icons = {
-  home: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9.5z"/>
-      <path d="M9 21V12h6v9"/>
-    </svg>
-  ),
-  brand: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-      <path d="M2 17l10 5 10-5"/>
-      <path d="M2 12l10 5 10-5"/>
-    </svg>
-  ),
-  content: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2"/>
-      <path d="M3 9h18"/>
-      <path d="M9 21V9"/>
-    </svg>
-  ),
-  conversations: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-    </svg>
-  ),
-  automations: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-    </svg>
-  ),
-  settings: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-    </svg>
-  ),
-  chevronLeft: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="15 18 9 12 15 6"/>
-    </svg>
-  ),
-  chevronRight: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="9 18 15 12 9 6"/>
-    </svg>
-  ),
-  logout: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-      <polyline points="16 17 21 12 16 7"/>
-      <line x1="21" y1="12" x2="9" y2="12"/>
-    </svg>
-  ),
-  sun: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5"/>
-      <line x1="12" y1="1" x2="12" y2="3"/>
-      <line x1="12" y1="21" x2="12" y2="23"/>
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-      <line x1="1" y1="12" x2="3" y2="12"/>
-      <line x1="21" y1="12" x2="23" y2="12"/>
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-    </svg>
-  ),
-  moon: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-    </svg>
-  ),
-} as const;
-
-/* ─── Nav items ──────────────────────────────────────────────────────────── */
-const NAV_LABELS: Record<string, { es: string; en: string }> = {
-  dashboard:     { es: 'Dashboard',        en: 'Dashboard'     },
-  brand:         { es: 'Mi marca',         en: 'My Brand'      },
-  content:       { es: 'Contenido',        en: 'Content'       },
-  conversations: { es: 'Conversaciones',   en: 'Conversations' },
-  automations:   { es: 'Automatizaciones', en: 'Automations'   },
-  settings:      { es: 'Ajustes',          en: 'Settings'      },
-};
-
-type IconKey = keyof typeof icons;
-
-interface NavItem {
-  href: string;
-  label: string;
-  iconKey: IconKey;
-}
-
-function navItems(lang: string): { main: NavItem[]; settings: NavItem } {
-  const l = (key: string) => NAV_LABELS[key]?.[lang as 'es' | 'en'] ?? NAV_LABELS[key]?.es ?? key;
-  return {
-    main: [
-      { href: `/${lang}/dashboard`,               label: l('dashboard'),     iconKey: 'home'          },
-      { href: `/${lang}/dashboard/brand`,         label: l('brand'),         iconKey: 'brand'         },
-      { href: `/${lang}/dashboard/content`,       label: l('content'),       iconKey: 'content'       },
-      { href: `/${lang}/dashboard/conversations`, label: l('conversations'), iconKey: 'conversations' },
-      { href: `/${lang}/dashboard/automations`,   label: l('automations'),   iconKey: 'automations'   },
-    ],
-    settings: { href: `/${lang}/dashboard/settings`, label: l('settings'), iconKey: 'settings' },
-  };
-}
+import Icon from '@/components/ui/icons';
+import { dashboardNav, isNavItemActive, type DashboardNavItem } from '@/lib/dashboard-nav';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
 export default function DashboardSidebar({ lang }: { lang: string }) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const { activeBrand } = useBrand();
   const [collapsed, setCollapsed] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const unreadCount = useUnreadCount(activeBrand?.id);
+  const t = lang === 'en' ? enCommon : esCommon;
 
   function switchLang(targetLang: string) {
     const segments = pathname.split('/');
@@ -128,33 +29,7 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
     router.push(segments.join('/'));
   }
 
-  useEffect(() => {
-    async function fetchUnread() {
-      try {
-        const [dmsRes, commentsRes] = await Promise.all([
-          fetch('/api/messaging?unread=true&limit=1', { credentials: 'include' }),
-          fetch('/api/comments?replied=false&limit=1', { credentials: 'include' }),
-        ]);
-        let count = 0;
-        if (dmsRes.ok) {
-          const d = await dmsRes.json() as { threads?: unknown[] };
-          count += d.threads?.length ?? 0;
-        }
-        if (commentsRes.ok) {
-          const d = await commentsRes.json() as { comments?: unknown[] };
-          count += d.comments?.length ?? 0;
-        }
-        setUnreadCount(count);
-      } catch {
-        // non-critical
-      }
-    }
-    fetchUnread();
-    const interval = setInterval(fetchUnread, 30_000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const { main: items, settings: settingsItem } = navItems(lang);
+  const { main: items, settings: settingsItem, create } = dashboardNav(lang);
   const W = collapsed ? 64 : 220;
 
   // Lo que se ancla abajo a la izquierda (el asistente en leads) se corre
@@ -164,68 +39,29 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
   }, [W]);
   useEffect(() => () => { document.documentElement.style.removeProperty('--dashboard-sidebar-w'); }, []);
 
-  function isItemActive(item: NavItem) {
-    if (item.href === `/${lang}/dashboard`) return pathname === item.href;
-    return pathname.startsWith(item.href);
-  }
-
-  function renderNavItem(item: NavItem) {
-    const active = isItemActive(item);
-    const isConv = item.iconKey === 'conversations';
-    const showBadge = isConv && unreadCount > 0;
+  function renderNavItem(item: DashboardNavItem) {
+    const active = isNavItemActive(item, pathname, lang);
+    const showBadge = item.key === 'inbox' && unreadCount > 0;
+    const badgeLabel = showBadge ? t.nav.unread(unreadCount) : undefined;
 
     return (
       <Link
         key={item.href}
         href={item.href}
         title={collapsed ? item.label : undefined}
-        aria-label={item.label}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'flex-start',
-          gap: collapsed ? 0 : 10,
-          padding: collapsed ? '10px 0' : '9px 16px',
-          fontSize: 13,
-          fontWeight: active ? 600 : 400,
-          color: active ? 'var(--accent)' : 'var(--text)',
-          background: active ? 'rgba(198,255,75,0.06)' : 'transparent',
-          borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
-          cursor: 'pointer',
-          transition: 'color 0.15s, background 0.15s',
-          textDecoration: 'none',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          position: 'relative',
-        }}
+        aria-label={collapsed ? [item.label, badgeLabel].filter(Boolean).join('. ') : undefined}
+        aria-current={active ? 'page' : undefined}
+        className={`sidebar-link${active ? ' is-active' : ''}${collapsed ? ' is-collapsed' : ''}`}
       >
-        <span style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0, opacity: active ? 1 : 0.6,
-          color: active ? 'var(--accent)' : 'inherit',
-          transition: 'opacity 0.15s', position: 'relative',
-        }}>
-          {icons[item.iconKey]}
-          {showBadge && collapsed && (
-            <span style={{
-              position: 'absolute', top: -3, right: -3,
-              width: 7, height: 7, borderRadius: '50%',
-              background: '#ff6b6b', border: '1.5px solid var(--surface)',
-            }} />
-          )}
+        <span className="sidebar-link-icon">
+          <Icon name={item.icon} size={18} />
+          {showBadge && collapsed && <span className="sidebar-dot" aria-hidden="true" />}
         </span>
         {!collapsed && (
           <>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-              {item.label}
-            </span>
+            <span className="sidebar-link-label">{item.label}</span>
             {showBadge && (
-              <span style={{
-                marginLeft: 'auto', fontSize: 10, fontWeight: 700,
-                color: '#fff', background: '#ff6b6b',
-                padding: '1px 5px', borderRadius: 8, flexShrink: 0,
-                minWidth: 16, textAlign: 'center',
-              }}>
+              <span className="ui-count" aria-label={badgeLabel}>
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
@@ -236,36 +72,14 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
   }
 
   return (
-    <aside
-      className="dashboard-sidebar"
-      style={{
-        width: W,
-        height: '100vh',
-        position: 'sticky',
-        top: 0,
-        alignSelf: 'flex-start',
-        background: 'var(--surface)',
-        borderRight: '1px solid var(--border)',
-        display: 'flex',
-        flexDirection: 'column',
-        flexShrink: 0,
-        transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)',
-        overflow: 'hidden',
-        fontFamily: 'var(--font-syne), system-ui, sans-serif',
-      }}
-    >
+    <aside className="dashboard-sidebar" style={{ width: W }}>
       {/* ── Kefy logo ── */}
-      <div style={{
-        display: 'flex', alignItems: 'center',
-        justifyContent: collapsed ? 'center' : 'space-between',
-        padding: collapsed ? '14px 0' : '14px 16px',
-        flexShrink: 0,
-      }}>
+      <div className={`sidebar-head${collapsed ? ' is-collapsed' : ''}`}>
         {!collapsed && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Image src="/apple-touch-icon.png" alt="Kefy" width={26} height={26} style={{ borderRadius: 6, flexShrink: 0, display: 'block' }} />
+            <Image src="/apple-touch-icon.png" alt="" width={26} height={26} style={{ borderRadius: 6, flexShrink: 0, display: 'block' }} />
             <span style={{ fontWeight: 800, fontSize: 17, color: 'var(--text)', letterSpacing: '-0.02em', lineHeight: 1 }}>
-              Kef<span style={{ color: 'var(--accent)' }}>y</span>
+              Kef<span style={{ color: 'var(--accent-text)' }}>y</span>
             </span>
           </div>
         )}
@@ -273,17 +87,14 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
           <Image src="/apple-touch-icon.png" alt="Kefy" width={26} height={26} style={{ borderRadius: 6, display: 'block' }} />
         )}
         <button
+          type="button"
           onClick={() => setCollapsed((v) => !v)}
-          title={collapsed ? 'Expandir' : 'Colapsar'}
-          style={{
-            background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 6, borderRadius: 6, transition: 'color 0.15s, background 0.15s', flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)'; (e.currentTarget as HTMLButtonElement).style.background = 'var(--border)'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+          title={collapsed ? t.nav.expand : t.nav.collapse}
+          aria-label={collapsed ? t.nav.expand : t.nav.collapse}
+          aria-expanded={!collapsed}
+          className="sidebar-icon-btn"
         >
-          {collapsed ? icons.chevronRight : icons.chevronLeft}
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={16} strokeWidth={2} />
         </button>
       </div>
 
@@ -292,76 +103,52 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
         <BrandSwitcher collapsed={collapsed} lang={lang === 'en' ? 'en' : 'es'} />
       </div>
 
+      {/* ── Acción principal: crear contenido ── */}
+      <div style={{ padding: collapsed ? '10px 0' : '12px 12px 4px', display: 'flex', justifyContent: 'center' }}>
+        <Link
+          href={create.href}
+          className={`ui-btn ui-btn--primary${collapsed ? ' ui-btn--icon' : ' ui-btn--block'}`}
+          title={collapsed ? create.label : undefined}
+          aria-label={collapsed ? create.label : undefined}
+        >
+          <Icon name="plus" size={16} strokeWidth={2.2} />
+          {!collapsed && create.label}
+        </Link>
+      </div>
+
       {/* ── Main nav ── */}
-      <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
+      <nav aria-label={t.nav.mainNav} style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
         {items.map((item) => renderNavItem(item))}
       </nav>
 
-      {/* ── Lang + Theme (above settings) ── */}
-      {!collapsed ? (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '8px 16px', borderTop: '1px solid var(--border)',
-        }}>
-          <div style={{ display: 'flex', gap: 4 }}>
+      {/* ── Idioma + tema ── */}
+      <div className={`sidebar-prefs${collapsed ? ' is-collapsed' : ''}`}>
+        {!collapsed && (
+          <div role="group" aria-label={t.nav.language} style={{ display: 'flex', gap: 4 }}>
             {(['es', 'en'] as const).map((l) => (
               <button
                 key={l}
+                type="button"
                 onClick={() => switchLang(l)}
-                style={{
-                  padding: '3px 10px',
-                  fontSize: 10,
-                  fontWeight: lang === l ? 700 : 400,
-                  borderRadius: 5,
-                  border: 'none',
-                  background: lang === l ? 'var(--accent)' : 'var(--border)',
-                  color: lang === l ? '#fff' : 'var(--muted)',
-                  cursor: lang === l ? 'default' : 'pointer',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  fontFamily: 'var(--font-syne), sans-serif',
-                  transition: 'all 0.15s',
-                }}
+                aria-pressed={lang === l}
+                disabled={lang === l}
+                className="sidebar-lang-btn"
               >
                 {l}
               </button>
             ))}
           </div>
-          <button
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Cambiar a claro' : 'Cambiar a oscuro'}
-            style={{
-              background: 'var(--border)', border: 'none', borderRadius: 6,
-              color: 'var(--muted)', cursor: 'pointer', width: 26, height: 26,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background 0.15s, color 0.15s',
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted)'; }}
-          >
-            {theme === 'dark' ? icons.sun : icons.moon}
-          </button>
-        </div>
-      ) : (
-        <div style={{
-          display: 'flex', justifyContent: 'center',
-          padding: '8px 0', borderTop: '1px solid var(--border)',
-        }}>
-          <button
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Cambiar a claro' : 'Cambiar a oscuro'}
-            style={{
-              background: 'var(--border)', border: 'none', borderRadius: 6,
-              color: 'var(--muted)', cursor: 'pointer', width: 26, height: 26,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background 0.15s',
-            }}
-          >
-            {theme === 'dark' ? icons.sun : icons.moon}
-          </button>
-        </div>
-      )}
+        )}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? t.nav.themeToLight : t.nav.themeToDark}
+          aria-label={theme === 'dark' ? t.nav.themeToLight : t.nav.themeToDark}
+          className="sidebar-icon-btn sidebar-icon-btn--boxed"
+        >
+          <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+        </button>
+      </div>
 
       {/* ── Settings ── */}
       <div style={{ paddingTop: 4, paddingBottom: 4 }}>
@@ -370,39 +157,16 @@ export default function DashboardSidebar({ lang }: { lang: string }) {
 
       {/* ── Footer ── */}
       {!collapsed && (
-        <div style={{
-          padding: '8px 16px 12px',
-          borderTop: '1px solid var(--border)',
-        }}>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 5 }}>
-            <Link
-              href={`/${lang}/privacidad`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                fontSize: 10, color: 'var(--muted)', textDecoration: 'none',
-                transition: 'color 0.15s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
-            >
-              Privacidad
+        <div style={{ padding: '6px 16px 10px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <Link href={`/${lang}/privacidad`} target="_blank" rel="noopener noreferrer" className="sidebar-footer-link">
+              {t.nav.privacy}
             </Link>
-            <Link
-              href={`/${lang}/terminos`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                fontSize: 10, color: 'var(--muted)', textDecoration: 'none',
-                transition: 'color 0.15s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
-            >
-              Términos
+            <Link href={`/${lang}/terminos`} target="_blank" rel="noopener noreferrer" className="sidebar-footer-link">
+              {t.nav.terms}
             </Link>
           </div>
-          <p style={{ fontSize: 10, color: 'var(--muted)', margin: 0, opacity: 0.6 }}>© 2026 Kefy</p>
+          <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>© {new Date().getFullYear()} Kefy</p>
         </div>
       )}
     </aside>

@@ -27,10 +27,14 @@ vi.mock('@/components/dashboard/BrandSwitcher', () => ({
   default: () => <div data-testid="brand-switcher" />,
 }));
 
-// Mockear fetch global para el efecto de mensajes no leídos
+vi.mock('@/lib/brand-context', () => ({
+  useBrand: vi.fn().mockReturnValue({ activeBrand: { id: 'brand-1', name: 'Mi Marca' } }),
+}));
+
+// Mockear fetch global para el contador de mensajes sin responder
 const mockFetch = vi.fn().mockResolvedValue({
   ok: true,
-  json: async () => ({ threads: [], comments: [] }),
+  json: async () => ({ total: 0 }),
 });
 vi.stubGlobal('fetch', mockFetch);
 
@@ -42,7 +46,7 @@ describe('DashboardSidebar', () => {
     vi.clearAllMocks();
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ threads: [], comments: [] }),
+      json: async () => ({ total: 0 }),
     });
   });
 
@@ -58,14 +62,15 @@ describe('DashboardSidebar', () => {
     render(<DashboardSidebar lang="es" />);
     expect(screen.getByText('Mi marca')).toBeInTheDocument();
     expect(screen.getByText('Contenido')).toBeInTheDocument();
-    expect(screen.getByText('Automatizaciones')).toBeInTheDocument();
+    expect(screen.getByText('Inbox')).toBeInTheDocument();
+    expect(screen.getByText('Automatizar')).toBeInTheDocument();
   });
 
   it('muestra etiquetas en inglés para lang="en"', () => {
     render(<DashboardSidebar lang="en" />);
-    expect(screen.getByText('My Brand')).toBeInTheDocument();
+    expect(screen.getByText('My brand')).toBeInTheDocument();
     expect(screen.getByText('Content')).toBeInTheDocument();
-    expect(screen.getByText('Automations')).toBeInTheDocument();
+    expect(screen.getByText('Automate')).toBeInTheDocument();
   });
 
   it('los hrefs de los ítems incluyen el lang', () => {
@@ -84,9 +89,29 @@ describe('DashboardSidebar', () => {
     const root = document.documentElement;
     const { unmount } = render(<DashboardSidebar lang="es" />);
     expect(root.style.getPropertyValue('--dashboard-sidebar-w')).toBe('220px');
-    fireEvent.click(screen.getByTitle('Colapsar'));
+    fireEvent.click(screen.getByRole('button', { name: 'Colapsar menú' }));
     expect(root.style.getPropertyValue('--dashboard-sidebar-w')).toBe('64px');
     unmount();
     expect(root.style.getPropertyValue('--dashboard-sidebar-w')).toBe('');
+  });
+
+  // El mismo nombre y destino que en el BottomNav (lib/dashboard-nav.ts).
+  it('marca la sección activa con aria-current', () => {
+    render(<DashboardSidebar lang="es" />);
+    const home = screen.getAllByRole('link').find((l) => l.getAttribute('href') === '/es/dashboard');
+    expect(home).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('ofrece crear contenido como acción principal', () => {
+    render(<DashboardSidebar lang="es" />);
+    const create = screen.getByRole('link', { name: /Crear contenido/ });
+    expect(create.getAttribute('href')).toBe('/es/dashboard/content/create?new=1');
+  });
+
+  it('muestra el total de mensajes sin responder en Inbox', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ total: 7 }) });
+    render(<DashboardSidebar lang="es" />);
+    expect(await screen.findByLabelText('7 mensajes o comentarios sin responder')).toHaveTextContent('7');
+    expect(mockFetch).toHaveBeenCalledWith('/api/messaging/summary', expect.anything());
   });
 });
