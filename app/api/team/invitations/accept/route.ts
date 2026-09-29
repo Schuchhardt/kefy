@@ -1,28 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
-import { getAuthFromRequest, hashToken } from '@/lib/auth';
+import { getAuthFromRequest } from '@/lib/auth';
 import { normalizeEmail } from '@/lib/team';
 import { reportError } from '@/lib/observability';
 import { checkRateLimit, clientIp, rateLimitResponse } from '@/lib/rate-limit';
+import { INVITATION_ERRORS, invitationProblem, loadInvitationByToken } from '@/lib/invitations';
+
+// Las respuestas de error llevan `code` (ver lib/auth-errors.ts): la página
+// de invitación las traduce en vez de mostrar el texto del API tal cual.
 
 // ─── GET /api/team/invitations/accept?token=… ────────────────────────────────
 // Describe una invitación sin aceptarla, para que la página pueda mostrar a qué
 // organización se está entrando antes de pedir cuenta. No requiere sesión: el
 // token es la credencial, y quien lo tiene lo recibió por correo.
 
-async function loadInvitation(token: string) {
-  const db = createSupabaseServer();
-  const { data } = await db
-    .from('kefy_org_invitations')
-    .select('id, org_id, email, role, expires_at, accepted_at, kefy_organizations(name)')
-    .eq('token_hash', hashToken(token))
-    .maybeSingle();
-  return data;
-}
-
 export async function GET(req: NextRequest) {
   const token = new URL(req.url).searchParams.get('token');
-  if (!token) return NextResponse.json({ error: 'Token requerido' }, { status: 400 });
+  if (!token) return NextResponse.json({ error: 'Token requerido', code: 'token_required' }, { status: 400 });
 
   // El token se compara contra la base: sin freno esto permite sondearlos.
   const limite = await checkRateLimit({
@@ -32,23 +26,17 @@ export async function GET(req: NextRequest) {
     return rateLimitResponse(limite, 'Demasiados intentos. Intenta más tarde.');
   }
 
-  const invitation = await loadInvitation(token);
-  if (!invitation) {
-    return NextResponse.json({ error: 'La invitación no existe o ya fue usada' }, { status: 404 });
+  const invitation = await loadInvitationByToken(token);
+  const problem = invitationProblem(invitation);
+  if (problem || !invitation) {
+    const { status, error } = INVITATION_ERRORS[problem ?? 'invitation_not_found'];
+    return NextResponse.json({ error, code: problem }, { status });
   }
-  if (invitation.accepted_at) {
-    return NextResponse.json({ error: 'Esta invitación ya fue aceptada' }, { status: 409 });
-  }
-  if (new Date(invitation.expires_at) <= new Date()) {
-    return NextResponse.json({ error: 'La invitación expiró. Pide una nueva.' }, { status: 410 });
-  }
-
-  const org = invitation.kefy_organizations as unknown as { name: string } | null;
 
   return NextResponse.json({
     email: invitation.email,
     role: invitation.role,
-    orgName: org?.name ?? null,
+    orgName: invitation.orgName,
     expiresAt: invitation.expires_at,
   });
 }
@@ -76,22 +64,18 @@ export async function POST(req: NextRequest) {
 
   let body: unknown;
   try { body = await req.json(); } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
   }
   const token = (body as Record<string, unknown>)?.token;
   if (typeof token !== 'string' || !token) {
-    return NextResponse.json({ error: 'Token requerido' }, { status: 400 });
+    return NextResponse.json({ error: 'Token requerido', code: 'token_required' }, { status: 400 });
   }
 
-  const invitation = await loadInvitation(token);
-  if (!invitation) {
-    return NextResponse.json({ error: 'La invitación no existe o ya fue usada' }, { status: 404 });
-  }
-  if (invitation.accepted_at) {
-    return NextResponse.json({ error: 'Esta invitación ya fue aceptada' }, { status: 409 });
-  }
-  if (new Date(invitation.expires_at) <= new Date()) {
-    return NextResponse.json({ error: 'La invitación expiró. Pide una nueva.' }, { status: 410 });
+  const invitation = await loadInvitationByToken(token);
+  const problem = invitationProblem(invitation);
+  if (problem || !invitation) {
+    const { status, error } = INVITATION_ERRORS[problem ?? 'invitation_not_found'];
+    return NextResponse.json({ error, code: problem }, { status });
   }
 
   const db = createSupabaseServer();
@@ -103,7 +87,11 @@ export async function POST(req: NextRequest) {
 
   if (!user || normalizeEmail(user.email) !== normalizeEmail(invitation.email)) {
     return NextResponse.json(
-      { error: `Esta invitación es para ${invitation.email}. Inicia sesión con esa cuenta.`, wrongAccount: true },
+      {
+        error: `Esta invitación es para ${invitation.email}. Inicia sesión con esa cuenta.`,
+        code: 'invitation_wrong_account',
+        wrongAccount: true,
+      },
       { status: 403 },
     );
   }
@@ -119,7 +107,7 @@ export async function POST(req: NextRequest) {
       route: 'POST /api/team/invitations/accept', auth,
       extra: { invitationId: invitation.id },
     });
-    return NextResponse.json({ error: 'No se pudo unir a la organización' }, { status: 500 });
+    return NextResponse.json({ error: 'No se pudo unir a la organización', code: 'generic' }, { status: 500 });
   }
 
   await db

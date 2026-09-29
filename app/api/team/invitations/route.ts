@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { localizedSlug } from '@/lib/localized-paths';
 import { Resend } from 'resend';
 import { render } from '@react-email/render';
 import { createSupabaseServer } from '@/lib/supabase';
@@ -174,7 +175,8 @@ export async function POST(req: NextRequest) {
   let emailSent = false;
   if (resendApiKey) {
     try {
-      const inviteUrl = `${appUrl()}/${lang}/invitacion?token=${raw}`;
+      // Un slug por idioma: /es/invitacion, /en/invitation.
+      const inviteUrl = `${appUrl()}/${lang}/${localizedSlug('invitacion', lang)}?token=${raw}`;
       const html = await render(
         TeamInvitation({
           orgName: org?.name ?? 'Kefy',

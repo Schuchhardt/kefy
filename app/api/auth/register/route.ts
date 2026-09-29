@@ -4,6 +4,9 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { checkRateLimit, clientIp, registerRule, rateLimitResponse } from '@/lib/rate-limit';
 import { reportError } from '@/lib/observability';
 import { trialEndsAt, TRIAL_DAYS } from '@/lib/subscription';
+import { normalizeEmail } from '@/lib/team';
+import { INVITATION_ERRORS, invitationProblem, loadInvitationByToken, type InvitationRow } from '@/lib/invitations';
+import type { JWTPayload } from '@/types/auth';
 import {
   signAccessToken,
   generateRefreshToken,
@@ -39,31 +42,58 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
   }
 
-  const { email, password, name, orgName } = body as Record<string, unknown>;
+  const { email, password, name, orgName, invitationToken } = body as Record<string, unknown>;
 
   if (typeof email !== 'string' || !isValidEmail(email)) {
-    return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
+    return NextResponse.json({ error: 'Valid email is required', code: 'invalid_email' }, { status: 400 });
   }
   if (typeof password !== 'string' || password.length < 8) {
-    return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Password must be at least 8 characters', code: 'password_too_short' },
+      { status: 400 },
+    );
   }
   if (typeof name !== 'string' || !name.trim()) {
-    return NextResponse.json({ error: 'Name is required' }, { status: 400 });
-  }
-  if (typeof orgName !== 'string' || !orgName.trim()) {
-    return NextResponse.json({ error: 'Organization name is required' }, { status: 400 });
+    return NextResponse.json({ error: 'Name is required', code: 'name_required' }, { status: 400 });
   }
 
-  const sanitizedEmail   = email.trim().toLowerCase();
-  const sanitizedName    = name.trim().slice(0, 100);
-  const sanitizedOrgName = orgName.trim().slice(0, 100);
+  const sanitizedEmail = email.trim().toLowerCase();
+  const sanitizedName  = name.trim().slice(0, 100);
+
+  // ── Registro desde una invitación ──────────────────────────────────────────
+  // Quien llega con el enlace de una invitación entra en la organización que lo
+  // invitó: no se crea organización, marca ni suscripción propias. Antes el
+  // registro ignoraba la invitación y la persona terminaba en una cuenta vacía
+  // con su propio mes de prueba, sin acceso al equipo.
+  let invitation: InvitationRow | null = null;
+  if (invitationToken !== undefined && invitationToken !== null && invitationToken !== '') {
+    if (typeof invitationToken !== 'string') {
+      return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
+    }
+    invitation = await loadInvitationByToken(invitationToken);
+    const problem = invitationProblem(invitation);
+    if (problem || !invitation) {
+      const { status, error } = INVITATION_ERRORS[problem ?? 'invitation_not_found'];
+      return NextResponse.json({ error, code: problem }, { status });
+    }
+    // La invitación es para un email concreto: el token no sirve para dar de
+    // alta otra dirección.
+    if (normalizeEmail(invitation.email) !== normalizeEmail(sanitizedEmail)) {
+      return NextResponse.json(
+        { error: `Esta invitación es para ${invitation.email}.`, code: 'invitation_wrong_account' },
+        { status: 403 },
+      );
+    }
+  } else if (typeof orgName !== 'string' || !orgName.trim()) {
+    return NextResponse.json({ error: 'Organization name is required', code: 'org_required' }, { status: 400 });
+  }
 
   const db = createSupabaseServer();
 
@@ -75,7 +105,7 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
 
   if (existing) {
-    return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
+    return NextResponse.json({ error: 'Email already registered', code: 'email_taken' }, { status: 409 });
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
@@ -111,7 +141,7 @@ export async function POST(req: NextRequest) {
       extra: { fase: step },
     });
     await undoAll();
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, code: 'generic' }, { status: 500 });
   }
 
   // Create user
@@ -126,7 +156,16 @@ export async function POST(req: NextRequest) {
   }
   rollback.push(async () => { await db.from('kefy_users').delete().eq('id', user.id); });
 
+  if (invitation) {
+    return joinInvitedOrg({
+      invitation,
+      user: { id: user.id, email: sanitizedEmail, name: sanitizedName },
+      fail,
+    });
+  }
+
   // Create org with unique slug
+  const sanitizedOrgName = (orgName as string).trim().slice(0, 100);
   const baseSlug = slugify(sanitizedOrgName) || 'org';
   const slug = `${baseSlug}-${user.id.slice(0, 8)}`;
 
@@ -217,5 +256,59 @@ export async function POST(req: NextRequest) {
   res.cookies.set(ACCESS_COOKIE, accessToken, accessCookieOptions());
   res.cookies.set(REFRESH_COOKIE, refreshRaw, refreshCookieOptions());
   res.cookies.set(ACTIVE_BRAND_COOKIE, brand.id, activeBrandCookieOptions());
+  return res;
+}
+
+// ─── Alta dentro de la organización que invitó ───────────────────────────────
+
+async function joinInvitedOrg({ invitation, user, fail }: {
+  invitation: InvitationRow;
+  user: { id: string; email: string; name: string };
+  fail: (step: string, error: { message?: string } | null, message: string) => Promise<NextResponse>;
+}): Promise<NextResponse> {
+  const db = createSupabaseServer();
+
+  const { error: membershipError } = await db.from('kefy_org_memberships').insert({
+    org_id: invitation.org_id,
+    user_id: user.id,
+    role: invitation.role,
+  });
+  if (membershipError) {
+    return fail('unirse por invitación', membershipError, 'Failed to create account');
+  }
+
+  // Marcar la invitación como usada no es terminal: la membresía ya existe y
+  // la invitación caduca sola, pero conviene saber si falla.
+  const { error: acceptError } = await db
+    .from('kefy_org_invitations')
+    .update({ accepted_at: new Date().toISOString(), accepted_by: user.id })
+    .eq('id', invitation.id);
+  if (acceptError) {
+    reportError(new Error(acceptError.message), {
+      route: 'POST /api/auth/register',
+      extra: { fase: 'marcar invitación aceptada', invitationId: invitation.id },
+    });
+  }
+
+  const accessToken = await signAccessToken({
+    userId: user.id,
+    orgId: invitation.org_id,
+    role: invitation.role,
+    plan: (invitation.orgPlan ?? 'starter') as JWTPayload['plan'],
+  });
+
+  const { raw: refreshRaw, hash: refreshHash, expiresAt } = generateRefreshToken();
+  await db.from('kefy_refresh_tokens').insert({
+    user_id: user.id,
+    token_hash: refreshHash,
+    expires_at: expiresAt.toISOString(),
+  });
+
+  const res = NextResponse.json(
+    { user, orgId: invitation.org_id, joinedByInvitation: true },
+    { status: 201 },
+  );
+  res.cookies.set(ACCESS_COOKIE, accessToken, accessCookieOptions());
+  res.cookies.set(REFRESH_COOKIE, refreshRaw, refreshCookieOptions());
   return res;
 }
