@@ -1,50 +1,43 @@
+import Icon, { type IconName } from '@/components/ui/icons';
 import type { KefyCopy } from '@/types/locales';
 
 interface Props {
   copy: KefyCopy['how'];
 }
 
+const ICONS = new Set<string>(['brand', 'content', 'inbox', 'sparkles', 'calendar', 'bolt']);
+
+// Tres pasos (antes «Un sistema. Tres capas.» presentaba cinco, con el detalle
+// del scoring en puntos que a quien tiene una tienda no le dice nada).
 export default function HowSection({ copy }: Props) {
   return (
-    <section className="section" id="how">
+    <section className="section" id="how" aria-labelledby="how-title">
       <div className="container">
         <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
-          <h2 className="h2">{copy.h2}</h2>
-          <p className="intro">{copy.intro}</p>
+          <h2 id="how-title" className="h2">{copy.h2}</h2>
         </div>
 
-        <div className="steps">
-          {copy.steps.map((step, i) => {
-            const isLast = i === copy.steps.length - 1;
-            return (
-              <div
-                key={i}
-                className={`step${isLast ? ' last' : ''} reveal`}
-                style={{ animationDelay: `${i * 0.08}s` }}
-              >
-                <div className="step-ic">{step.ic}</div>
-                <h3>{step.t}</h3>
-                <p>{step.d}</p>
-                <div className="step-num">{step.n}</div>
+        <ol className="steps" style={{ listStyle: 'none', padding: 0 }}>
+          {copy.steps.map((step, i) => (
+            <li key={step.n} className="step reveal" style={{ animationDelay: `${i * 0.08}s` }}>
+              <div className="step-ic" aria-hidden="true">
+                {ICONS.has(step.ic) ? <Icon name={step.ic as IconName} size={20} /> : step.ic}
               </div>
-            );
-          })}
-        </div>
+              <h3>{step.t}</h3>
+              <p>{step.d}</p>
+              {/* Número «fantasma» decorativo (contraste bajo a propósito): va en
+                  un pseudo-elemento para que no cuente como texto. */}
+              <div className="step-num" aria-hidden="true" data-num={step.n} />
+            </li>
+          ))}
+        </ol>
 
-        <div className="how-closer reveal">
+        <p className="how-closer reveal">
           {copy.closer[0]}{' '}
           <span className="how-closer-pill">{copy.closer[1]}</span>{' '}
           {copy.closer[2]}
-        </div>
-
-        {copy.noNeeds && copy.noNeeds.length > 0 && (
-          <ul className="how-no-needs reveal" style={{ animationDelay: '0.2s' }}>
-            {copy.noNeeds.map((item, i) => (
-              <li key={i}>{item}</li>
-            ))}
-          </ul>
-        )}
+        </p>
       </div>
     </section>
   );

@@ -1,378 +1,359 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+// ─── Demo animada del hero ───────────────────────────────────────────────────
+//
+// Tres pasos: crear una publicación, responder a quien comenta y escribe por
+// DM, y detectar quién quiere comprar. Lo que antes fallaba (auditoría 3.3):
+// - Ciclaba sola con ~20 setTimeout aunque estuviera fuera de la pantalla o la
+//   pestaña oculta, y cambiaba de paso mientras alguien leía. Ahora solo
+//   avanza visible, se pausa (botón) y deja de avanzar sola en cuanto la
+//   persona elige un paso.
+// - Con movimiento reducido no anima: muestra cada paso completo.
+// - En móvil enseñaba dos columnas de ~170px y escondía la tercera (inbox y
+//   pipeline, lo que realmente vende). Ahora es una sola columna: el post en el
+//   paso 1 y la actividad en los pasos 2 y 3.
+// - 58 estilos en línea con texto de 9–11px: ahora son clases (globals.css,
+//   «Demo del hero») y nada baja de 12px.
+// - Los textos venían con `copy.x ?? 'texto en español'`, que escondía huecos
+//   de traducción: ahora son obligatorios en el tipo.
+
+import { useEffect, useRef, useState } from 'react';
 import type { KefyCopy } from '@/types/locales';
 
 type DemoStep = 'content' | 'inbox' | 'pipeline';
 const STEP_IDS: DemoStep[] = ['content', 'inbox', 'pipeline'];
 
+/** Duración de cada paso antes de pasar al siguiente (si nadie eligió uno). */
+const STEP_DURATION: Record<DemoStep, number> = { content: 8000, inbox: 9000, pipeline: 9500 };
+
 interface HeroDemoProps {
   copy: KefyCopy['demo'];
 }
 
-function IgAvatar({ src, name, size = 36, ring = false }: { src?: string; name: string; size?: number; ring?: boolean }) {
-  const initials = name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
-  const inner = src ? (
+function initials(name: string): string {
+  return name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function Avatar({ src, name, size, ring = false }: { src?: string; name: string; size: number; ring?: boolean }) {
+  const inner = src
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-  ) : (
-    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111', fontSize: size * 0.38, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-syne, serif)' }}>
-      {initials}
-    </div>
-  );
-  if (ring) {
-    return (
-      <div style={{ width: size, height: size, borderRadius: '50%', padding: 2, flexShrink: 0, background: 'linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }}>
-        <div style={{ borderRadius: '50%', overflow: 'hidden', width: '100%', height: '100%' }}>{inner}</div>
-      </div>
-    );
-  }
+    ? <img src={src} alt="" className="demo-avatar-img" />
+    : <span className="demo-avatar-initials">{initials(name)}</span>;
   return (
-    <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--border)', background: '#111' }}>
-      {inner}
-    </div>
+    <span className={`demo-avatar${ring ? ' demo-avatar--ring' : ''}`} style={{ width: size, height: size }} aria-hidden="true">
+      <span className="demo-avatar-inner">{inner}</span>
+    </span>
   );
 }
 
 export default function HeroDemo({ copy }: HeroDemoProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<DemoStep>('content');
 
-  // Step 1 — creation phases:
-  //  0=skeleton  1=brand kit done  2=image done  3=caption done
-  //  4=post assembled (postReady)  5=scheduled
+  // Paso 1: 0 esqueleto · 1 marca · 2 imagen · 3 texto · 4 post armado · 5 programado
   const [creationPhase, setCreationPhase] = useState(0);
-
-  // Step 2
+  // Paso 2
   const [commentVisible, setCommentVisible] = useState(false);
   const [brandReplyVisible, setBrandReplyVisible] = useState(false);
   const [dmMsgCount, setDmMsgCount] = useState(0);
   const [botThinking, setBotThinking] = useState<string | null>(null);
-
-  // Step 3
+  // Paso 3
   const [pipelineStage, setPipelineStage] = useState(-1);
   const [scoreBarWidth, setScoreBarWidth] = useState(0);
   const [qualifiedVisible, setQualifiedVisible] = useState(false);
   const [linkSentVisible, setLinkSentVisible] = useState(false);
 
-  const stepRef = useRef<DemoStep>('content');
-  useEffect(() => { stepRef.current = step; }, [step]);
+  // Cuándo puede animar.
+  const [inView, setInView] = useState(true);
+  const [pageVisible, setPageVisible] = useState(true);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [interacted, setInteracted] = useState(false);
+  const playing = inView && pageVisible && !paused && !reducedMotion;
 
-  const botThought0 = copy.botThoughts?.[0] ?? 'Analizando intención de compra…';
-  const botThought1 = copy.botThoughts?.[1] ?? 'Score +15 · Clasificando como lead caliente 🔥';
-
-  // Step 1
   useEffect(() => {
-    if (step !== 'content') { return; }
-    setCreationPhase(0);
-    const t1 = setTimeout(() => setCreationPhase(1), 900);
-    const t2 = setTimeout(() => setCreationPhase(2), 2100);
-    const t3 = setTimeout(() => setCreationPhase(3), 3300);
-    const t4 = setTimeout(() => setCreationPhase(4), 4400);
-    const t5 = setTimeout(() => setCreationPhase(5), 5600);
-    const t6 = setTimeout(() => { if (stepRef.current === 'content') setStep('inbox'); }, 8000);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5); clearTimeout(t6); };
-  }, [step]);
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.2 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
-  // Step 2
   useEffect(() => {
-    if (step !== 'inbox') {
-      setCommentVisible(false); setBrandReplyVisible(false);
-      setDmMsgCount(0); setBotThinking(null); return;
+    const onVisibility = () => setPageVisible(document.visibilityState === 'visible');
+    onVisibility();
+    document.addEventListener('visibilitychange', onVisibility);
+    if (typeof window.matchMedia !== 'function') return () => document.removeEventListener('visibilitychange', onVisibility);
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onMotion = () => setReducedMotion(mq.matches);
+    onMotion();
+    mq.addEventListener?.('change', onMotion);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      mq.removeEventListener?.('change', onMotion);
+    };
+  }, []);
+
+  const dmThread = copy.dmThread;
+  const thoughts = copy.botThoughts;
+
+  // Línea de tiempo del paso actual. Sin reproducción (pausa, fuera de vista,
+  // movimiento reducido) el paso se muestra completo y quieto; al reanudar se
+  // vuelve a reproducir desde el principio.
+  useEffect(() => {
+    const timers: number[] = [];
+    const at = (ms: number, fn: () => void) => { timers.push(window.setTimeout(fn, ms)); };
+
+    const showFinal = () => {
+      if (step === 'content') setCreationPhase(5);
+      if (step === 'inbox') {
+        setCommentVisible(true); setBrandReplyVisible(true);
+        setDmMsgCount(dmThread.length); setBotThinking(thoughts[thoughts.length - 1] ?? null);
+      }
+      if (step === 'pipeline') {
+        setPipelineStage(2); setScoreBarWidth(72); setQualifiedVisible(true); setLinkSentVisible(true);
+      }
+    };
+
+    if (!playing) {
+      showFinal();
+      return;
     }
-    const t1 = setTimeout(() => setCommentVisible(true), 500);
-    const t2 = setTimeout(() => setBrandReplyVisible(true), 1700);
-    const t3 = setTimeout(() => setDmMsgCount(1), 2800);
-        const t4 = setTimeout(() => setBotThinking(botThought0), 3600);
-    const t5 = setTimeout(() => setDmMsgCount(2), 4800);
-    const t6 = setTimeout(() => setBotThinking(botThought1), 5600);
-    const t7 = setTimeout(() => setDmMsgCount(3), 6600);
-    const t8 = setTimeout(() => { if (stepRef.current === 'inbox') setStep('pipeline'); }, 10000);
-    return () => { [t1, t2, t3, t4, t5, t6, t7, t8].forEach(clearTimeout); };
-  }, [step, botThought0, botThought1]);
 
-  // Step 3
-  useEffect(() => {
-    if (step !== 'pipeline') {
-      setPipelineStage(-1); setScoreBarWidth(0);
-      setQualifiedVisible(false); setLinkSentVisible(false); return;
+    if (step === 'content') {
+      setCreationPhase(0);
+      [900, 2100, 3300, 4400, 5600].forEach((ms, i) => at(ms, () => setCreationPhase(i + 1)));
     }
-    let s = -1;
-    const t0 = setTimeout(() => {
-      const id = setInterval(() => { s++; setPipelineStage(s); if (s >= 2) clearInterval(id); }, 700);
-    }, 300);
-    const t1 = setTimeout(() => setScoreBarWidth(72), 800);
-    const t2 = setTimeout(() => setQualifiedVisible(true), 3200);
-    const t3 = setTimeout(() => setLinkSentVisible(true), 4000);
-    const t4 = setTimeout(() => { if (stepRef.current === 'pipeline') setStep('content'); }, 9500);
-    return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
-  }, [step]);
+    if (step === 'inbox') {
+      setCommentVisible(false); setBrandReplyVisible(false); setDmMsgCount(0); setBotThinking(null);
+      at(500, () => setCommentVisible(true));
+      at(1700, () => setBrandReplyVisible(true));
+      dmThread.forEach((_, i) => at(2800 + i * 2000, () => setDmMsgCount(i + 1)));
+      thoughts.forEach((thought, i) => at(3600 + i * 2000, () => setBotThinking(thought)));
+    }
+    if (step === 'pipeline') {
+      setPipelineStage(-1); setScoreBarWidth(0); setQualifiedVisible(false); setLinkSentVisible(false);
+      [300, 1000, 1700].forEach((ms, i) => at(ms, () => setPipelineStage(i)));
+      at(800, () => setScoreBarWidth(72));
+      at(3200, () => setQualifiedVisible(true));
+      at(4000, () => setLinkSentVisible(true));
+    }
 
-  const brandName = copy.contextProduct ?? 'HiClothes';
-  const handle = copy.brandHandle ?? '@hiclothes';
-  const brandInitials = brandName.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
-  const labels = copy.stepLabels ?? ['Crear contenido', 'Interacciones', 'Pipeline de leads'];
-  const stepDescs = copy.stepDescriptions ?? [
-    'Kefy analiza tu marca y genera imagen, caption y programación automáticamente.',
-    'Alguien comentó en tu post. Kefy detectó intención de compra y está enviando un DM.',
-    'María fue calificada como lead caliente. Kefy le envió el link de compra por DM.',
-  ];
-  const creationSteps = copy.creationSteps ?? ['Analizando brand kit', 'Generando imagen', 'Generando caption', 'Armando post', 'Programando'];
-  const creationStepsLong = copy.creationStepsLong ?? ['Analizando brand kit', 'Generando imagen del post', 'Generando caption', 'Armando post completo', 'Programando publicación'];
-  const progressLabel = copy.progressLabel ?? 'Progreso';
-  const commentBrandReply = copy.commentBrandReply ?? '¡Hola! Te contactamos por DM 👋';
-  const instagramNow = copy.instagramNow ?? 'Instagram · Ahora';
-  const stages = copy.pipelineStages ?? [];
-  const dmMsgs = copy.dmThread ?? [];
-  const commentThread = copy.commentThread ?? [];
+    if (!interacted) {
+      at(STEP_DURATION[step], () => {
+        setStep((current) => STEP_IDS[(STEP_IDS.indexOf(current) + 1) % STEP_IDS.length]);
+      });
+    }
+
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [step, playing, interacted, dmThread, thoughts]);
+
+  function chooseStep(s: DemoStep) {
+    setInteracted(true);
+    setStep(s);
+  }
+
+  const brandName = copy.contextProduct;
+  const handle = copy.brandHandle;
   const postReady = step !== 'content' || creationPhase >= 4;
-
-  const skel = (w: string | number, h: number, radius = 4, extra?: React.CSSProperties): React.CSSProperties => ({
-    width: w, height: h, borderRadius: radius,
-    background: 'rgba(255,255,255,0.08)',
-    animation: 'skeletonPulse 1.4s ease-in-out infinite',
-    flexShrink: 0, ...extra,
-  });
+  const stepIndex = STEP_IDS.indexOf(step);
 
   return (
-    <div className="demo reveal is-in">
+    <div ref={rootRef} className="demo reveal is-in" role="region" aria-label={copy.ariaLabel}>
       <div className="demo-bar">
-        <div className="demo-dots"><span /><span /><span /></div>
-        <div className="demo-url">
-          <span className="acc" />kefy.app /&nbsp;<span>dashboard</span>
-        </div>
+        <div className="demo-dots" aria-hidden="true"><span /><span /><span /></div>
+        <div className="demo-url" aria-hidden="true">kefy.app / <span>dashboard</span></div>
+        {!reducedMotion && (
+          <button
+            type="button"
+            className="demo-pause"
+            onClick={() => setPaused((p) => !p)}
+            aria-pressed={paused}
+            aria-label={paused ? copy.play : copy.pause}
+          >
+            {paused ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8V4z" /></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+            )}
+          </button>
+        )}
       </div>
 
-      {/* Fixed 3-column layout */}
-      <div className="demo-grid" style={{ overflow: 'hidden' }}>
-
-        {/* COL 1: Steps */}
-        <div style={{ borderRight: '1px solid var(--border)', padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg)' }}>
-          {STEP_IDS.map((s, i) => {
-            const isActive = step === s;
-            const isDone = STEP_IDS.indexOf(step) > i;
-            return (
-              <button key={s} onClick={() => setStep(s)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 9px', borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%', background: isActive ? 'var(--surface)' : 'transparent', transition: 'background 0.2s' }}>
-                <div style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-syne, serif)', background: isDone ? 'var(--accent)' : isActive ? 'rgba(198,255,75,0.1)' : 'var(--surface)', border: `1px solid ${isDone ? 'var(--accent)' : isActive ? 'rgba(198,255,75,0.35)' : 'var(--border)'}`, color: isDone ? '#000' : isActive ? 'var(--accent)' : 'var(--muted)' }}>
-                  {isDone ? '✓' : i + 1}
-                </div>
-                <span style={{ fontSize: 11, fontFamily: 'var(--font-syne, serif)', fontWeight: isActive ? 700 : 500, color: isActive ? 'var(--text)' : 'var(--muted)', lineHeight: 1.3 }}>
-                  {labels[i]}
-                </span>
-              </button>
-            );
-          })}
-
-          <div style={{ borderTop: '1px solid var(--border)', margin: '8px 0' }} />
-
-          <div style={{ fontSize: 10, color: 'var(--muted)', lineHeight: 1.6 }}>
-            {step === 'content' && stepDescs[0]}
-            {step === 'inbox' && stepDescs[1]}
-            {step === 'pipeline' && stepDescs[2]}
+      <div className="demo-grid" data-step={step}>
+        {/* ── Columna 1: pasos ── */}
+        <div className="demo-col1">
+          <div className="demo-step-list" role="group" aria-label={copy.stepsLabel}>
+            {STEP_IDS.map((s, i) => {
+              const isActive = step === s;
+              const isDone = stepIndex > i;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => chooseStep(s)}
+                  aria-pressed={isActive}
+                  className={`demo-step${isActive ? ' is-active' : ''}${isDone ? ' is-done' : ''}`}
+                >
+                  <span className="demo-step-num" aria-hidden="true">{isDone ? '✓' : i + 1}</span>
+                  <span className="demo-step-label">{copy.stepLabels[i]}</span>
+                </button>
+              );
+            })}
           </div>
 
+          <p className="demo-step-desc">{copy.stepDescriptions[stepIndex]}</p>
+
           {step === 'content' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8 }}>
-              {creationSteps.map((label, i) => {
-                const doneAt = i + 1;
-                const done = creationPhase >= doneAt;
-                const active = creationPhase === doneAt - 1;
+            <ol className="demo-mini-progress" aria-hidden="true">
+              {copy.creationSteps.map((label, i) => {
+                const done = creationPhase >= i + 1;
+                const active = creationPhase === i;
                 return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, transition: 'color 0.3s', color: done ? 'var(--accent)' : active ? 'var(--text)' : 'rgba(255,255,255,0.22)' }}>
-                    <span style={{ fontSize: 9, width: 11, flexShrink: 0 }}>{done ? '✓' : '·'}</span>
+                  <li key={label} className={done ? 'is-done' : active ? 'is-active' : ''}>
+                    <span className="demo-mini-mark">{done ? '✓' : '·'}</span>
                     {label}
-                    {active && <span style={{ marginLeft: 2, width: 4, height: 4, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block', animation: 'pulseDot 1s ease-in-out infinite' }} />}
-                  </div>
+                  </li>
                 );
               })}
-            </div>
+            </ol>
           )}
 
-          <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 7 }}>
-            {copy.brandLogoSrc
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={copy.brandLogoSrc} alt={brandName} style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }} />
-              : <div style={{ width: 22, height: 22, borderRadius: 5, background: 'rgba(198,255,75,0.08)', border: '1px solid rgba(198,255,75,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-syne, serif)', flexShrink: 0 }}>{brandInitials}</div>
-            }
+          <div className="demo-brand-foot">
+            <Avatar src={copy.brandLogoSrc} name={brandName} size={26} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--font-syne, serif)' }}>{brandName}</div>
-              <div style={{ fontSize: 9, color: 'var(--muted)' }}>{handle}</div>
+              <div className="demo-brand-foot-name">{brandName}</div>
+              <div className="demo-brand-foot-handle">{handle}</div>
             </div>
           </div>
         </div>
 
-        {/* COL 2: IG post — always visible */}
-        <div style={{ borderRight: '1px solid var(--border)', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--surface)' }}>
-          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', gap: 7 }}>
-              {!postReady
-                ? <div style={skel(26, 26, 13)} />
-                : <IgAvatar src={copy.brandLogoSrc} name={brandName} size={26} ring />
-              }
+        {/* ── Columna 2: el post de Instagram ── */}
+        <div className="demo-col2">
+          <div className="demo-ig">
+            <div className="demo-ig-head">
+              {postReady ? <Avatar src={copy.brandLogoSrc} name={brandName} size={30} ring /> : <span className="demo-skel" style={{ width: 30, height: 30, borderRadius: '50%' }} />}
               <div style={{ flex: 1, minWidth: 0 }}>
-                {!postReady ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={skel('65%', 7)} />
-                    <div style={skel('45%', 6)} />
-                  </div>
+                {postReady ? (
+                  <>
+                    <div className="demo-ig-handle">{handle}</div>
+                    <div className="demo-ig-meta">{copy.instagramNow}</div>
+                  </>
                 ) : (
                   <>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{handle}</div>
-                    <div style={{ fontSize: 9, color: 'var(--muted)' }}>{instagramNow}</div>
+                    <span className="demo-skel" style={{ width: '65%', height: 9 }} />
+                    <span className="demo-skel" style={{ width: '45%', height: 8, marginTop: 5 }} />
                   </>
                 )}
               </div>
             </div>
 
-            {/* Image */}
-            <div style={{ position: 'relative', width: '100%', aspectRatio: '1/1', maxHeight: 166, overflow: 'hidden', background: 'rgba(255,255,255,0.06)' }}>
-              {!postReady ? (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5, animation: 'skeletonPulse 1.4s ease-in-out infinite', background: 'rgba(255,255,255,0.05)' }}>
-                  <span style={{ fontSize: 20, opacity: 0.2 }}>🖼</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', opacity: 0.55, fontFamily: 'var(--font-jetbrains, monospace)' }}>
-                    {creationPhase <= 1 ? (copy.imageGenerating ?? 'Generando imagen…') : (copy.imageReady ?? 'Imagen lista ✓')}
-                  </span>
-                </div>
-              ) : copy.brandProductSrc ? (
+            <div className="demo-ig-media">
+              {postReady ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={copy.brandProductSrc} alt="producto" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                <img src={copy.brandProductSrc} alt={copy.productAlt} />
               ) : (
-                <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #1a1510, #0f120d)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span style={{ fontSize: 24, opacity: 0.18 }}>👗</span>
+                <div className="demo-ig-media-loading">
+                  <span className="demo-ig-media-text">
+                    {creationPhase <= 1 ? copy.imageGenerating : copy.imageReady}
+                  </span>
                 </div>
               )}
             </div>
 
-            {/* Caption skeleton */}
             {!postReady && creationPhase >= 2 && (
-              <div style={{ padding: '7px 10px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={skel('92%', 6)} />
-                <div style={skel('75%', 6)} />
-                <div style={skel('52%', 6)} />
+              <div className="demo-ig-caption-skel" aria-hidden="true">
+                <span className="demo-skel" style={{ width: '92%', height: 8 }} />
+                <span className="demo-skel" style={{ width: '75%', height: 8 }} />
+                <span className="demo-skel" style={{ width: '52%', height: 8 }} />
               </div>
             )}
 
-            {/* Real caption + actions */}
             {postReady && (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', padding: '5px 10px 2px', gap: 9 }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.75 }}><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.75 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.75 }}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                  <div style={{ flex: 1 }} />
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.75 }}><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                <div className="demo-ig-actions" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" /></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" /></svg>
                 </div>
-                <div style={{ padding: '2px 10px 2px', fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{copy.likesLabel ?? '247 likes'}</div>
-                <div style={{ padding: '0 10px 8px', fontSize: 9, lineHeight: 1.5, color: 'var(--muted)' }}>
-                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>{handle} </span>
-                  {copy.commentPostCaption ?? 'Nueva colección — Invierno Silencioso ❄️'}
-                </div>
+                <div className="demo-ig-likes">{copy.likesLabel}</div>
+                <p className="demo-ig-caption"><strong>{handle}</strong> {copy.commentPostCaption}</p>
               </>
             )}
 
-            {/* Comment thread (step 2) */}
             {step === 'inbox' && postReady && commentVisible && (
-              <div style={{ borderTop: '1px solid var(--border)', padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start', animation: 'msgIn 0.3s ease-out' }}>
-                  <div style={{ width: 17, height: 17, borderRadius: '50%', background: 'rgba(168,85,247,0.14)', border: '1px solid rgba(168,85,247,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 6, fontWeight: 700, color: '#a855f7', flexShrink: 0, fontFamily: 'var(--font-syne, serif)' }}>MG</div>
-                  <div>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text)' }}>@maria.g_shop </span>
-                    <span style={{ fontSize: 9, color: '#D6D5CE' }}>{commentThread[0]?.text ?? '¿Tienen talla M? 🔥'}</span>
-                  </div>
+              <div className="demo-ig-comments">
+                <div className="demo-ig-comment demo-anim-in">
+                  <Avatar name={copy.commenterName} size={22} />
+                  <p><strong>{copy.commenterHandle}</strong> {copy.commentThread[0]?.text}</p>
                 </div>
                 {brandReplyVisible && (
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start', animation: 'msgIn 0.3s ease-out' }}>
-                    <IgAvatar src={copy.brandLogoSrc} name={brandName} size={17} />
-                    <div>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{handle} </span>
-                      <span style={{ fontSize: 9, color: '#D6D5CE' }}>{commentBrandReply}</span>
-                    </div>
+                  <div className="demo-ig-comment demo-anim-in">
+                    <Avatar src={copy.brandLogoSrc} name={brandName} size={22} />
+                    <p><strong className="demo-accent">{handle}</strong> {copy.commentBrandReply}</p>
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          {/* Status badge */}
           {step === 'content' && (
-            <div style={{ padding: '6px 9px', borderRadius: 7, fontSize: 9, fontFamily: 'var(--font-jetbrains, monospace)', transition: 'all 0.4s', background: creationPhase >= 5 ? 'rgba(198,255,75,0.06)' : 'transparent', border: `1px solid ${creationPhase >= 5 ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`, color: creationPhase >= 5 ? 'var(--accent)' : 'var(--muted)' }}>
-              {creationPhase < 4 ? (copy.statusGenerating ?? '⏳ Generando contenido…')
-                : creationPhase === 4 ? (copy.statusAssembling ?? '📋 Armando post…')
-                : `${copy.postPublished ?? '✓ Publicado'} · ${copy.postScheduledFor ?? 'Sáb 23 may · 18:00'}`}
+            <div className={`demo-status${creationPhase >= 5 ? ' is-done' : ''}`}>
+              {creationPhase < 4 ? copy.statusGenerating
+                : creationPhase === 4 ? copy.statusAssembling
+                : `${copy.postPublished} · ${copy.postScheduledFor}`}
             </div>
           )}
         </div>
 
-        {/* COL 3: Activity / Inbox / Pipeline */}
-        <div className="demo-col3" style={{ padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
-
-          {/* STEP 1 */}
+        {/* ── Columna 3: progreso, DMs y pipeline ── */}
+        <div className="demo-col3">
           {step === 'content' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--muted)', fontFamily: 'var(--font-syne, serif)', fontWeight: 600, marginBottom: 2 }}>{progressLabel}</div>
-              {creationStepsLong.map((label, i) => {
-                const doneAt = i + 1;
-                const done = creationPhase >= doneAt;
-                const active = creationPhase === doneAt - 1;
+            <div className="demo-progress">
+              <div className="demo-kicker">{copy.progressLabel}</div>
+              {copy.creationStepsLong.map((label, i) => {
+                const done = creationPhase >= i + 1;
+                const active = creationPhase === i;
                 return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 8, transition: 'all 0.35s', background: done ? 'rgba(198,255,75,0.04)' : active ? 'var(--surface)' : 'transparent', border: `1px solid ${done ? 'rgba(198,255,75,0.15)' : active ? 'var(--border)' : 'transparent'}` }}>
-                    <span style={{ width: 16, height: 16, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, fontFamily: 'var(--font-syne, serif)', background: done ? 'var(--accent)' : active ? 'rgba(198,255,75,0.1)' : 'var(--surface)', border: `1px solid ${done ? 'var(--accent)' : 'var(--border)'}`, color: done ? '#000' : active ? 'var(--accent)' : 'var(--muted)' }}>
-                      {done ? '✓' : i + 1}
-                    </span>
-                    <span style={{ fontSize: 12, color: done ? 'var(--accent)' : active ? 'var(--text)' : 'var(--muted)', transition: 'color 0.3s', fontFamily: 'var(--font-jetbrains, monospace)' }}>{label}</span>
-                    {active && <span style={{ marginLeft: 'auto', width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1s ease-in-out infinite' }} />}
+                  <div key={label} className={`demo-progress-row${done ? ' is-done' : active ? ' is-active' : ''}`}>
+                    <span className="demo-progress-num" aria-hidden="true">{done ? '✓' : i + 1}</span>
+                    <span>{label}</span>
                   </div>
                 );
               })}
             </div>
           )}
 
-          {/* STEP 2: DM inbox */}
           {step === 'inbox' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, flexShrink: 0 }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#a855f7', flexShrink: 0, fontFamily: 'var(--font-syne, serif)' }}>MG</div>
+            <div className="demo-dm">
+              <div className="demo-dm-head">
+                <Avatar name={copy.commenterName} size={30} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--font-syne, serif)' }}>maria.g_shop</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Instagram Direct</div>
+                  <div className="demo-dm-name">{copy.commenterHandle.replace(/^@/, '')}</div>
+                  <div className="demo-dm-channel">{copy.dmChannel}</div>
                 </div>
-                <div style={{ padding: '2px 8px', background: 'rgba(198,255,75,0.06)', border: '1px solid rgba(198,255,75,0.22)', borderRadius: 999, fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--font-jetbrains, monospace)', flexShrink: 0 }}>IG DM</div>
+                <span className="demo-chip">{copy.dmBadge}</span>
               </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
-                {dmMsgs.slice(0, dmMsgCount).map((msg, i) => {
-                  const isBrand = msg.sender === 'brand';
-                  return (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-end', gap: 6, flexDirection: isBrand ? 'row-reverse' : 'row', animation: 'msgIn 0.32s ease-out' }}>
-                      <div style={{ width: 20, height: 20, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 700, flexShrink: 0, fontFamily: 'var(--font-syne, serif)', background: isBrand ? 'rgba(198,255,75,0.1)' : 'rgba(168,85,247,0.1)', border: `1px solid ${isBrand ? 'rgba(198,255,75,0.25)' : 'rgba(168,85,247,0.25)'}`, color: isBrand ? 'var(--accent)' : '#a855f7' }}>
-                        {isBrand ? brandInitials : 'MG'}
-                      </div>
-                      <div style={{ maxWidth: '80%', padding: '7px 10px', fontSize: 11, lineHeight: 1.5, color: '#D6D5CE', borderRadius: 10, borderBottomRightRadius: isBrand ? 2 : 10, borderBottomLeftRadius: isBrand ? 10 : 2, background: isBrand ? 'rgba(198,255,75,0.07)' : 'var(--surface)', border: `1px solid ${isBrand ? 'rgba(198,255,75,0.18)' : 'var(--border)'}` }}>
-                        {msg.text}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="demo-dm-thread">
+                {dmThread.slice(0, dmMsgCount).map((msg, i) => (
+                  <div key={i} className={`demo-dm-msg demo-anim-in${msg.sender === 'brand' ? ' is-brand' : ''}`}>
+                    {msg.sender === 'brand' && <span className="demo-dm-auto">{copy.autoReplyLabel}</span>}
+                    <p>{msg.text}</p>
+                  </div>
+                ))}
               </div>
-
-              {botThinking && (
-                <div style={{ padding: '9px 11px', background: 'rgba(198,255,75,0.04)', border: '1px solid rgba(198,255,75,0.18)', borderRadius: 9, flexShrink: 0, animation: 'msgIn 0.3s ease-out' }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4, fontFamily: 'var(--font-syne, serif)', fontWeight: 600 }}>🤖 Kefy Autopilot</div>
-                  <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-jetbrains, monospace)', lineHeight: 1.5 }}>{botThinking}</div>
-                </div>
-              )}
+              {botThinking && <div className="demo-thought demo-anim-in">{botThinking}</div>}
             </div>
           )}
 
-          {/* STEP 3: Pipeline */}
           {step === 'pipeline' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="demo-pipeline">
               <div className="demo-lead-card">
                 <div className="demo-lead-hd">
-                  <div className="demo-lead-av">{(copy.leadName ?? 'M')[0]}</div>
+                  <div className="demo-lead-av" aria-hidden="true">{copy.leadName[0]}</div>
                   <div className="demo-lead-meta">
                     <div className="demo-lead-name">{copy.leadName}</div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>@maria.g_shop · Instagram</div>
+                    <div className="demo-lead-handle">{copy.leadHandle}</div>
                   </div>
                   <div className="demo-lead-score-badge">
                     <span className="demo-lead-score-n">{copy.leadScore}</span>
@@ -380,37 +361,35 @@ export default function HeroDemo({ copy }: HeroDemoProps) {
                   </div>
                 </div>
                 <div className="demo-score-bar-wrap">
-                  <div className="demo-score-bar-label">{copy.scoreBarLabel ?? 'Score acumulado'}</div>
-                  <div className="demo-score-bar">
-                    <div className="demo-score-bar-fill" style={{ width: `${scoreBarWidth}%` }} />
-                  </div>
+                  <div className="demo-kicker">{copy.scoreBarLabel}</div>
+                  <div className="demo-score-bar"><div className="demo-score-bar-fill" style={{ width: `${scoreBarWidth}%` }} /></div>
                 </div>
                 <div className="demo-stage-row">
-                  {stages.map((stage, i) => (
-                    <div key={i} className={`demo-stage-pill${i === pipelineStage ? ' active' : i < pipelineStage ? ' done' : ''}`}>
-                      {i < pipelineStage && <span style={{ marginRight: 3, fontSize: 9 }}>✓</span>}
+                  {copy.pipelineStages.map((stage, i) => (
+                    <span key={stage} className={`demo-stage-pill${i === pipelineStage ? ' active' : i < pipelineStage ? ' done' : ''}`}>
+                      {i < pipelineStage && <span aria-hidden="true">✓ </span>}
                       {stage}
-                    </div>
+                    </span>
                   ))}
                 </div>
               </div>
               {qualifiedVisible && (
-                <div className="demo-qualified-badge">
-                  <span className="demo-qualified-ic">🔥</span>
-                  {copy.qualifiedLabel ?? 'Lead autocalificado ✓'}
+                <div className="demo-qualified-badge demo-anim-in">
+                  <span aria-hidden="true">🔥</span>
+                  {copy.qualifiedLabel}
                 </div>
               )}
               {linkSentVisible && (
-                <div className="demo-link-sent">
+                <div className="demo-link-sent demo-anim-in">
                   <div className="demo-link-sent-head">
                     <div className="demo-link-sent-lbl">{copy.linkSentLabel}</div>
                     <div className="demo-link-sent-time">{copy.linkSentTime}</div>
                   </div>
                   <div className="demo-link-sent-url">
-                    <span className="demo-link-sent-ic">🔗</span>
+                    <span aria-hidden="true">🔗</span>
                     <span className="demo-link-sent-href">{copy.linkSentUrl}</span>
                   </div>
-                  <div className="demo-link-sent-platform">Enviado vía IG DM · Kefy Autopilot</div>
+                  <div className="demo-link-sent-via">{copy.linkSentVia}</div>
                 </div>
               )}
             </div>

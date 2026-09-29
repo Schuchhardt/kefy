@@ -31,18 +31,21 @@ export interface FeatureItem { ic: string; t: string; d: string; }
 export interface FeatureLayer { name: string; badge: string; badgeColor?: string; items: string[]; }
 export interface WhoSegment { ic: string; t: string; d: string; }
 export interface PlanFeature { dim?: boolean; t: string; }
+/**
+ * Un plan tal como lo anuncia la landing. Solo hay precio mensual: Stripe no
+ * tiene precios anuales (la landing anunciaba «Anual — 20% OFF»).
+ * `contact`: el botón lleva a hablar con ventas en vez de al registro.
+ */
 export interface Plan {
   name:          string;
   price:         string;
-  annualPrice?:  string;
-  annualBilled?: string;
   per:           string;
   tagline:       string;
   features:      (string | PlanFeature)[];
   cta:           string;
   featured?:     boolean;
   badge?:        string;
-  launchPrice?:  string;
+  contact?:      boolean;
 }
 export interface CreditItem { ic: string; label: string; }
 export interface CmpRow { feature: string; values: string[]; }
@@ -56,69 +59,109 @@ export interface ProofPoint { k: string; lbl: string; d: string; }
 export interface EngageScoreItem { type: string; pts: string; }
 export interface EngageStagePill { key: string; label: string; emoji: string; }
 
+/** Llamada a la acción única de la landing: el mismo texto y la misma nota en
+ *  nav, hero, precios y final (antes había cinco verbos para la misma acción). */
+export interface LandingCta { label: string; note: string; }
+
+/** Lo que incluyen todos los planes (no cambia entre ellos). */
+export interface PlanIncluded { title: string; items: string[]; }
+
 export interface KefyCopy {
-  nav: { links: NavLink[]; primary: string; };
-  hero: { tag: string; h1: string[]; h1em: string; sub: string; cta1: string; cta2: string; ctaNote?: string; emailPlaceholder?: string; stats: HeroStat[]; };
-  demo: {
-    contextLbl: string; contextProduct: string; contextDesc: string;
-    channelsLbl: string; goalLbl: string; goalK: string; goalV: string;
-    audienceK: string; audienceV: string; url: string;
-    outputs: { linkedin: DemoOutput; meta: DemoOutput; x: DemoOutput, facebook: DemoOutput };
-    stepLabels: string[];
-    strategyLbl: string;
-    strategyGoal: string;
-    strategyNiche: string;
-    postBody: string;
-    postPublished: string;
-    postScheduleLabel?: string;
-    postScheduledFor?: string;
-    inboxTitle: string;
-    scoreLabel: string;
-    inboxMessages: DemoMessage[];
-    autoReplyLabel: string;
-    autoReplyText: string;
-    pipelineLbl: string;
-    pipelineStages: string[];
-    leadName: string;
-    leadScore: string;
-    // New rich demo fields
-    brandLogoSrc?: string;
-    brandProductSrc?: string;
-    brandHandle?: string;
-    brandAudience?: string;
-    brandTone?: string;
-    brandCategory?: string;
-    marketPills?: string[];
-    commentThread?: DemoDMMessage[];
-    dmThread?: DemoDMMessage[];
-    dmTriggerLabel?: string;
-    linkSentLabel?: string;
-    linkSentUrl?: string;
-    linkSentTime?: string;
-    qualifiedLabel?: string;
-    commentPostCaption?: string;
-    commentLabel?: string;
-    dmLabel?: string;
-    scoreBarLabel?: string;
-    stepDescriptions?: string[];
-    creationSteps?: string[];
-    creationStepsLong?: string[];
-    progressLabel?: string;
-    botThoughts?: string[];
-    commentBrandReply?: string;
-    instagramNow?: string;
-    statusGenerating?: string;
-    statusAssembling?: string;
-    imageGenerating?: string;
-    imageReady?: string;
-    likesLabel?: string;
+  nav: {
+    ariaLabel: string;
+    links: NavLink[];
+    menuOpen: string; menuClose: string;
+    languageLabel: string;
+    languages: { es: string; en: string };
   };
-  problem: { tag: string; h2: string; intro: string; pains: Pain[]; stats: StatCard[]; result?: string; };
-  how: { tag: string; h2: string; intro: string; steps: Step[]; closer: string[]; noNeeds?: string[]; };
+  cta: LandingCta;
+  hero: {
+    tag: string; h1: string[]; h1em: string; sub: string;
+    emailPlaceholder: string; emailLabel: string;
+  };
+  demo: {
+    ariaLabel: string;
+    stepsLabel: string;
+    pause: string; play: string;
+    stepLabels: string[];
+    stepDescriptions: string[];
+    creationSteps: string[];
+    creationStepsLong: string[];
+    progressLabel: string;
+    contextProduct: string;
+    brandHandle: string;
+    brandLogoSrc: string;
+    brandProductSrc: string;
+    productAlt: string;
+    instagramNow: string;
+    likesLabel: string;
+    commentPostCaption: string;
+    imageGenerating: string;
+    imageReady: string;
+    statusGenerating: string;
+    statusAssembling: string;
+    postPublished: string;
+    postScheduledFor: string;
+    commenterName: string;
+    commenterHandle: string;
+    commentThread: DemoDMMessage[];
+    commentBrandReply: string;
+    dmChannel: string;
+    dmBadge: string;
+    dmThread: DemoDMMessage[];
+    autoReplyLabel: string;
+    botThoughts: string[];
+    leadName: string;
+    leadHandle: string;
+    leadScore: string;
+    scoreLabel: string;
+    scoreBarLabel: string;
+    pipelineStages: string[];
+    qualifiedLabel: string;
+    linkSentLabel: string;
+    linkSentUrl: string;
+    linkSentTime: string;
+    linkSentVia: string;
+  };
+  problem: { tag: string; h2: string; pains: { num: string; t: string }[]; result: string; };
+  how: { tag: string; h2: string; steps: Step[]; closer: string[]; };
+  brand: {
+    tag: string; h2: string[]; sub: string; bullets: BrandBullet[];
+    kit: {
+      title: string; status: string; brandName: string;
+      palette: string; type: string; logo: string; tone: string; toneV: string; typeV: string;
+      applied: string; formats: string[];
+    };
+  };
+  autopilot: {
+    tag: string; h2: string[]; sub: string; bullets: ApBullet[]; closer: string;
+    togglePilot: string; toggleManual: string; modeLabel: string;
+    calendarTitle: string; schedule: CalDay[];
+  };
+  channels: { h3: string[]; sub: string; items: string[]; };
+  testi: { tag: string; h2: string; sub: string; proof: ProofPoint[]; };
+  pricing: {
+    tag: string; h2: string; sub: string;
+    trialBadge: string; trialSub: string;
+    plans: Plan[];
+    included: PlanIncluded;
+    closer: string;
+    creditTitle: string; creditItems: CreditItem[]; creditNote: string;
+    cmpFeature: string; cmpRows: CmpRow[]; cmpScrollHint: string;
+    faqTitle: string; faq: FaqItem[];
+    enterpriseTitle: string; enterpriseSub: string; enterpriseCta: string;
+    compareAll: string;
+  };
+  final: { tag: string; h2: string; sub: string; };
+  footer: { tagline: string; cols: { h: string; items: FooterItem[] }[]; origin: string; copy: string; socialLabel: string; };
+
+  // ── Secciones que ya no se montan en la página ────────────────────────────
+  // Sus componentes (Mult, Strategy, Features, AutoEngage, Killer, Who,
+  // Comparison, BilingualBand) siguen en el repo hasta que se borren; la copy
+  // se conserva solo para que compilen. No se renderiza en ninguna ruta.
+  // Ver docs/auditoria-ux.md, «Pendiente».
   mult: { tag: string; h2: string[]; sub: string; bullets: { ic: string; t: string }[]; inLbl: string; inV: string; outLbl: string; outputs: MultOutput[]; };
-  brand: { tag: string; h2: string[]; sub: string; bullets: BrandBullet[]; kit: { palette: string; type: string; logo: string; tone: string; toneV: string; typeV: string }; };
   killer: { tag: string; h2: string[]; sub: string; points: KillerPoint[]; dash: { title: string; range: string; stats: DashStat[]; posts: DashPost[] }; };
-  autopilot: { tag: string; h2: string[]; sub: string; bullets: ApBullet[]; closer: string; togglePilot: string; toggleManual: string; schedule: CalDay[]; };
   engage: {
     tag: string; h2: string; sub: string;
     bullets: { ic: string; t: string }[];
@@ -136,24 +179,8 @@ export interface KefyCopy {
   };
   features: { tag: string; h2: string; items: FeatureItem[]; layers?: FeatureLayer[]; };
   who: { tag: string; h2: string[]; segments: WhoSegment[]; };
-  channels: { h3: string[]; sub: string; items: string[]; };
   cmp: { tag: string; h2: string; cols: string[]; rows: (string | string[])[]; partial: string; simpleMode?: boolean; withoutTitle?: string; withoutItems?: string[]; withTitle?: string; withItems?: string[]; };
   lang: { h2: string[]; em: string; sub: string; more: string; };
-  pricing: {
-    tag: string; h2: string; sub: string;
-    billingToggle: { monthly: string; annual: string };
-    trialBadge: string; trialSub: string; trialCta: string; trialNote: string;
-    plans: Plan[];
-    closer: string;
-    creditTitle: string; creditItems: CreditItem[]; creditNote: string;
-    cmpFeature: string; cmpRows: CmpRow[];
-    faqTitle: string; faq: FaqItem[];
-    enterpriseTitle: string; enterpriseSub: string; enterpriseCta: string;
-    betaMode?: boolean; betaCopy?: string; betaCta?: string; betaCtaNote?: string;
-  };
-  testi: { tag: string; h2: string; sub: string; proof: ProofPoint[]; };
-  final: { tag: string; h2: string; sub: string; cta: string; note: string; };
-  footer: { tagline: string; cols: { h: string; items: FooterItem[] }[]; origin: string; copy: string; };
 }
 
 export interface CommonCopy {

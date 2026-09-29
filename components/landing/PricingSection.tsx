@@ -1,285 +1,197 @@
 'use client';
 
-import { useState } from 'react';
-import { useSignup } from '@/components/ui/SignupContext';
+// ─── Precios: una sola implementación ────────────────────────────────────────
+//
+// La home usaba PricingSimple y /precios usaba este componente, con sus propias
+// tarjetas cada uno. Ahora ambos son este: `compact` para la home (tarjetas
+// resumidas + enlace a la página completa) y completo para /precios.
+//
+// Lo que se quitó por no existir: el toggle mensual/anual (Stripe solo tiene
+// precios mensuales), el modo «beta» con precios «Gratis» y los botones que
+// decían «Hablar con ventas» pero llevaban al registro. Ahora el plan con
+// `contact` y el bloque de empresas abren un contacto real (lib/contact.ts).
+
 import type { KefyCopy, PlanFeature } from '@/types/locales';
+import { useSignup } from '@/components/ui/SignupContext';
+import { salesContactHref } from '@/lib/contact';
+import { pricingPath } from '@/lib/localized-paths';
 
 interface Props {
   copy: KefyCopy['pricing'];
+  cta: KefyCopy['cta'];
+  lang: string;
+  /** Versión resumida para la home, con enlace a la página de precios. */
+  compact?: boolean;
 }
 
-export default function PricingSection({ copy }: Props) {
-  const [annual, setAnnual] = useState(false);
+export default function PricingSection({ copy, cta, lang, compact = false }: Props) {
   const goToRegister = useSignup();
 
-  /* ── Beta closed mode ─────────────────────────────────── */
-  if (copy.betaMode) {
+  const planButton = (plan: KefyCopy['pricing']['plans'][number], size: 'sm' | 'lg') => {
+    const cls = `btn ${plan.featured ? 'btn-primary' : compact ? 'btn-ghost' : 'btn-secondary'} btn-${size}`;
+    const style = { width: '100%', justifyContent: 'center' } as const;
+    if (plan.contact) {
+      return (
+        <a className={cls} style={style} href={salesContactHref(lang, plan.name)}>
+          {plan.cta}
+        </a>
+      );
+    }
     return (
-      <section className="section" id="pricing">
-        <div className="container">
-
-          <div className="section-head reveal">
-            <span className="label">{copy.tag}</span>
-            <h2 className="h2">{copy.h2}</h2>
-          </div>
-
-          <div className="beta-pricing-copy reveal" style={{ animationDelay: '0.05s' }}>
-            {copy.sub.split('\n').map((line, i) => (
-              <p key={i}>{line}</p>
-            ))}
-          </div>
-
-          {/* ── Beta plans ─────────────────────────────────── */}
-          <div className="plans plans-3 reveal" style={{ animationDelay: '0.1s' }}>
-            {copy.plans.map((plan, i) => (
-              <div
-                key={i}
-                className={`plan${plan.featured ? ' featured' : ''}`}
-                style={{ transitionDelay: `${i * 0.08}s` }}
-              >
-                {plan.badge && <div className="plan-badge">{plan.badge}</div>}
-                <div className="plan-name">{plan.name}</div>
-                <div className="plan-price">
-                  <span className="num beta-free">Gratis</span>
-                  <span className="per">/ beta</span>
-                </div>
-                {plan.launchPrice && (
-                  <p className="plan-launch-price">Al lanzar: {plan.launchPrice}</p>
-                )}
-                <p className="plan-tagline">{plan.tagline}</p>
-                <ul className="plan-features">
-                  {plan.features.map((feat, fi) => {
-                    if (typeof feat === 'string') {
-                      return <li key={fi}>{feat}</li>;
-                    }
-                    return (
-                      <li key={fi} className="dim">
-                        {(feat as PlanFeature).t}
-                      </li>
-                    );
-                  })}
-                </ul>
-                <button
-                  className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} btn-lg`}
-                  style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={goToRegister}
-                >
-                  {plan.cta}
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* ── Beta feature table ─────────────────────────── */}
-          <div className="pricing-cmp reveal" style={{ animationDelay: '0.15s' }}>
-            <div className="pricing-cmp-scroll">
-              <table className="pricing-cmp-table">
-                <thead>
-                  <tr>
-                    <th>{copy.cmpFeature}</th>
-                    {copy.plans.map((p, i) => (
-                      <th key={i} className={p.featured ? 'featured' : ''}>{p.name}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {copy.cmpRows.map((row, i) => (
-                    <tr key={i}>
-                      <td>{row.feature}</td>
-                      {row.values.map((v, j) => (
-                        <td key={j} className={copy.plans[j]?.featured ? 'featured' : ''}>{v}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* ── Single beta CTA ────────────────────────────── */}
-          <div className="beta-pricing-cta reveal" style={{ animationDelay: '0.2s' }}>
-            <button className="btn btn-primary btn-lg" onClick={goToRegister}>
-              {copy.betaCta}
-            </button>
-            {copy.betaCtaNote && (
-              <p className="beta-cta-note">{copy.betaCtaNote}</p>
-            )}
-          </div>
-
-          {/* ── FAQ ─────────────────────────────────────────── */}
-          <div className="pricing-faq reveal" style={{ animationDelay: '0.25s' }}>
-            <h3 className="h3">{copy.faqTitle}</h3>
-            <div className="faq-list">
-              {copy.faq.map((item, i) => (
-                <div key={i} className="faq-item">
-                  <p className="faq-q">{item.q}</p>
-                  <p className="faq-a">{item.a}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Enterprise CTA ──────────────────────────────── */}
-          <div className="enterprise-cta reveal" style={{ animationDelay: '0.3s' }}>
-            <p className="enterprise-title">{copy.enterpriseTitle}</p>
-            <p className="enterprise-sub">{copy.enterpriseSub}</p>
-            <button className="btn btn-secondary btn-lg" onClick={goToRegister}>
-              {copy.enterpriseCta}
-            </button>
-          </div>
-
-        </div>
-      </section>
+      <button type="button" className={cls} style={style} onClick={goToRegister}>
+        {plan.cta}
+      </button>
     );
-  }
+  };
 
-  /* ── Standard (non-beta) mode ─────────────────────────── */
   return (
-    <section className="section" id="pricing">
+    <section className="section" id="pricing" aria-labelledby="pricing-title">
       <div className="container">
 
-        {/* ── Header ─────────────────────────────────────── */}
+        {/* ── Cabecera ───────────────────────────────────── */}
         <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
-          <h2 className="h2" style={{ whiteSpace: 'pre-line' }}>{copy.h2}</h2>
+          <h2 id="pricing-title" className="h2" style={{ whiteSpace: 'pre-line' }}>{copy.h2}</h2>
           <p className="pricing-sub">{copy.sub}</p>
         </div>
 
-        {/* ── Trial banner ───────────────────────────────── */}
+        {/* ── Mes gratis: el CTA principal, con la nota de siempre ── */}
         <div className="trial-banner reveal" style={{ animationDelay: '0.05s' }}>
           <div className="trial-text">
             <p className="trial-title">{copy.trialBadge}</p>
             <p className="trial-sub">{copy.trialSub}</p>
           </div>
           <div className="trial-action">
-            <button className="btn btn-primary btn-lg" onClick={goToRegister}>
-              {copy.trialCta}
+            <button type="button" className="btn btn-primary btn-lg" onClick={goToRegister}>
+              {cta.label}
             </button>
-            <p className="trial-note">{copy.trialNote}</p>
+            <p className="trial-note">{cta.note}</p>
           </div>
         </div>
 
-        {/* ── Billing toggle ─────────────────────────────── */}
-        <div className="billing-toggle reveal" style={{ animationDelay: '0.08s' }}>
-          <button
-            className={`toggle-opt${!annual ? ' active' : ''}`}
-            onClick={() => setAnnual(false)}
-          >
-            {copy.billingToggle.monthly}
-          </button>
-          <button
-            className={`toggle-opt${annual ? ' active' : ''}`}
-            onClick={() => setAnnual(true)}
-          >
-            {copy.billingToggle.annual}
-          </button>
-        </div>
-
-        {/* ── Plans grid ─────────────────────────────────── */}
-        <div className="plans plans-4 reveal" style={{ animationDelay: '0.1s' }}>
-          {copy.plans.map((plan, i) => (
-            <div
-              key={i}
-              className={`plan${plan.featured ? ' featured' : ''}`}
-              style={{ transitionDelay: `${i * 0.08}s` }}
-            >
-              {plan.badge && <div className="plan-badge">{plan.badge}</div>}
-              <div className="plan-name">{plan.name}</div>
-              <div className="plan-price">
-                <span className="num">${annual && plan.annualPrice ? plan.annualPrice : plan.price}</span>
-                <span className="per">{plan.per}</span>
-              </div>
-              {annual && plan.annualBilled && (
-                <p className="plan-billed">{plan.annualBilled}</p>
-              )}
-              <p className="plan-tagline">{plan.tagline}</p>
-              <ul className="plan-features">
-                {plan.features.map((feat, fi) => {
-                  if (typeof feat === 'string') {
-                    return <li key={fi}>{feat}</li>;
-                  }
-                  return (
-                    <li key={fi} className="dim">
-                      {(feat as PlanFeature).t}
-                    </li>
-                  );
-                })}
-              </ul>
-              <button
-                className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} btn-lg`}
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={goToRegister}
-              >
-                {plan.cta}
-              </button>
+        {compact ? (
+          <>
+            {/* ── Resumen de planes (home) ───────────────── */}
+            <div className="pricing-simple-plans reveal" style={{ animationDelay: '0.1s' }}>
+              {copy.plans.map((plan) => (
+                <div key={plan.name} className={`pricing-simple-plan${plan.featured ? ' featured' : ''}`}>
+                  {plan.badge && <span className="plan-badge">{plan.badge}</span>}
+                  <span className="pricing-simple-name">{plan.name}</span>
+                  <span className="pricing-simple-price">
+                    ${plan.price}<span className="pricing-simple-per">{plan.per}</span>
+                  </span>
+                  <p className="pricing-simple-tagline">{plan.tagline}</p>
+                  {planButton(plan, 'sm')}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <p className="pricing-closer">{copy.closer}</p>
+            <div className="pricing-simple-more reveal" style={{ animationDelay: '0.15s' }}>
+              <a href={pricingPath(lang)} className="btn btn-ghost btn-sm">{copy.compareAll}</a>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* ── Planes ──────────────────────────────────── */}
+            <div className="plans reveal" style={{ animationDelay: '0.1s' }}>
+              {copy.plans.map((plan, i) => (
+                <div
+                  key={plan.name}
+                  className={`plan${plan.featured ? ' featured' : ''}`}
+                  style={{ transitionDelay: `${i * 0.08}s` }}
+                >
+                  {plan.badge && <div className="plan-badge">{plan.badge}</div>}
+                  <h3 className="plan-name">{plan.name}</h3>
+                  <div className="plan-price">
+                    <span className="num">${plan.price}</span>
+                    <span className="per">{plan.per}</span>
+                  </div>
+                  <p className="plan-tagline">{plan.tagline}</p>
+                  <ul className="plan-features">
+                    {plan.features.map((feat, fi) =>
+                      typeof feat === 'string'
+                        ? <li key={fi}>{feat}</li>
+                        : <li key={fi} className="dim">{(feat as PlanFeature).t}</li>,
+                    )}
+                  </ul>
+                  {planButton(plan, 'lg')}
+                </div>
+              ))}
+            </div>
 
-        {/* ── Credits explainer ──────────────────────────── */}
-        <div className="credit-explainer reveal" style={{ animationDelay: '0.15s' }}>
-          <h3 className="h3">{copy.creditTitle}</h3>
-          <div className="credit-items">
-            {copy.creditItems.map((item, i) => (
-              <div key={i} className="credit-item">
-                <span className="credit-ic">{item.ic}</span>
-                <span>{item.label}</span>
-              </div>
-            ))}
-          </div>
-          <p className="credit-note">{copy.creditNote}</p>
-        </div>
+            <div className="plan-included reveal">
+              <p className="plan-included-title">{copy.included.title}</p>
+              <ul>
+                {copy.included.items.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
 
-        {/* ── Comparison table ───────────────────────────── */}
-        <div className="pricing-cmp reveal" style={{ animationDelay: '0.25s' }}>
-          <div className="pricing-cmp-scroll">
-            <table className="pricing-cmp-table">
-              <thead>
-                <tr>
-                  <th>{copy.cmpFeature}</th>
-                  {copy.plans.map((p, i) => (
-                    <th key={i} className={p.featured ? 'featured' : ''}>{p.name}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {copy.cmpRows.map((row, i) => (
-                  <tr key={i}>
-                    <td>{row.feature}</td>
-                    {row.values.map((v, j) => (
-                      <td key={j} className={copy.plans[j]?.featured ? 'featured' : ''}>{v}</td>
-                    ))}
-                  </tr>
+            <p className="pricing-closer">{copy.closer}</p>
+
+            {/* ── Créditos ───────────────────────────────── */}
+            <div className="credit-explainer reveal" style={{ animationDelay: '0.15s' }}>
+              <h3 className="h3">{copy.creditTitle}</h3>
+              <ul className="credit-items" style={{ listStyle: 'none', padding: 0 }}>
+                {copy.creditItems.map((item) => (
+                  <li key={item.label} className="credit-item">
+                    <span className="credit-ic" aria-hidden="true">{item.ic}</span>
+                    <span>{item.label}</span>
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </ul>
+              <p className="credit-note">{copy.creditNote}</p>
+            </div>
 
-        {/* ── FAQ ────────────────────────────────────────── */}
-        <div className="pricing-faq reveal" style={{ animationDelay: '0.3s' }}>
-          <h3 className="h3">{copy.faqTitle}</h3>
-          <div className="faq-list">
-            {copy.faq.map((item, i) => (
-              <div key={i} className="faq-item">
-                <p className="faq-q">{item.q}</p>
-                <p className="faq-a">{item.a}</p>
+            {/* ── Tabla comparativa ─────────────────────── */}
+            <div className="pricing-cmp reveal" style={{ animationDelay: '0.25s' }}>
+              <p className="pricing-cmp-hint" aria-hidden="true">{copy.cmpScrollHint} →</p>
+              <div className="pricing-cmp-scroll" role="region" aria-label={copy.cmpFeature} tabIndex={0}>
+                <table className="pricing-cmp-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">{copy.cmpFeature}</th>
+                      {copy.plans.map((p) => (
+                        <th key={p.name} scope="col" className={p.featured ? 'featured' : ''}>{p.name}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {copy.cmpRows.map((row) => (
+                      <tr key={row.feature}>
+                        <th scope="row">{row.feature}</th>
+                        {row.values.map((v, j) => (
+                          <td key={j} className={copy.plans[j]?.featured ? 'featured' : ''}>{v}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
 
-        {/* ── Enterprise CTA ─────────────────────────────── */}
-        <div className="enterprise-cta reveal" style={{ animationDelay: '0.35s' }}>
-          <p className="enterprise-title">{copy.enterpriseTitle}</p>
-          <p className="enterprise-sub">{copy.enterpriseSub}</p>
-          <button className="btn btn-secondary btn-lg" onClick={goToRegister}>
-            {copy.enterpriseCta}
-          </button>
-        </div>
+            {/* ── FAQ ────────────────────────────────────── */}
+            <div className="pricing-faq reveal" style={{ animationDelay: '0.3s' }}>
+              <h3 className="h3">{copy.faqTitle}</h3>
+              <div className="faq-list">
+                {copy.faq.map((item) => (
+                  <div key={item.q} className="faq-item">
+                    <p className="faq-q">{item.q}</p>
+                    <p className="faq-a">{item.a}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
 
+            {/* ── Más de 15 marcas ───────────────────────── */}
+            <div className="enterprise-cta reveal" style={{ animationDelay: '0.35s' }}>
+              <p className="enterprise-title">{copy.enterpriseTitle}</p>
+              <p className="enterprise-sub">{copy.enterpriseSub}</p>
+              <a className="btn btn-secondary btn-lg" href={salesContactHref(lang)}>
+                {copy.enterpriseCta}
+              </a>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );

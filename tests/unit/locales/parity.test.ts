@@ -81,9 +81,6 @@ describe('paridad es / en de la landing', () => {
 
   it('ambos idiomas anuncian los mismos precios', () => {
     expect(en.pricing.plans.map((p) => p.price)).toEqual(es.pricing.plans.map((p) => p.price));
-    expect(en.pricing.plans.map((p) => p.annualPrice)).toEqual(
-      es.pricing.plans.map((p) => p.annualPrice),
-    );
   });
 
   // Un campo vacío en los dos idiomas suele ser intencional: el diseño no usa
@@ -124,6 +121,82 @@ describe('paridad es / en de la landing', () => {
       }
     }
   });
+});
+
+// ─── Promesas sin producto detrás ────────────────────────────────────────────
+//
+// La auditoría UX (docs/auditoria-ux.md, 2.1) encontró la landing anunciando
+// facturación anual con 20% de descuento (Stripe solo tiene precios
+// mensuales), anuncios «con un clic» (no hay UI de ads), reportes white-label,
+// migración gratuita, «Multiplicador de contenido», analytics básico/completo,
+// Email como canal, «Meta Ads» como red conectable y un «plan gratuito» en los
+// datos estructurados. Esto impide que vuelvan.
+//
+// Se revisan las secciones que se montan en la página. Las demás (mult, killer,
+// engage, strategy, features, who, cmp, lang) son copy de componentes que ya
+// no se renderizan y están pendientes de borrar.
+
+const SECCIONES_MONTADAS = [
+  'nav', 'cta', 'hero', 'demo', 'problem', 'how', 'brand', 'autopilot',
+  'channels', 'testi', 'pricing', 'final', 'footer',
+] as const;
+
+function textos(valor: unknown): string[] {
+  if (typeof valor === 'string') return [valor];
+  if (Array.isArray(valor)) return valor.flatMap(textos);
+  if (valor !== null && typeof valor === 'object') return Object.values(valor).flatMap(textos);
+  return [];
+}
+
+const PROMESAS_PROHIBIDAS: Array<[RegExp, string]> = [
+  [/\d+\s*%\s*(off|dto|descuento)/i, 'descuento por pago anual'],
+  [/white[- ]?label/i, 'reportes white-label'],
+  [/multiplicador|multiplier/i, 'multiplicador de contenido'],
+  [/migraci[oó]n|migration/i, 'migración desde otras plataformas'],
+  [/analytics (b[aá]sico|completo)|(basic|full) analytics/i, 'niveles de analytics'],
+  [/\bads\b|anuncio|\bboost\b|promocionar/i, 'anuncios pagados'],
+  [/plan gratuito|free plan|gratis para siempre|free forever/i, 'plan gratuito'],
+];
+
+describe('la landing solo promete lo que existe', () => {
+  for (const [idioma, copy] of [['es', es], ['en', en]] as const) {
+    const montado = SECCIONES_MONTADAS.flatMap((k) => textos(copy[k]));
+
+    it(`[${idioma}] no anuncia funciones que no existen`, () => {
+      const hallazgos = PROMESAS_PROHIBIDAS.flatMap(([patron, que]) =>
+        montado.filter((t) => patron.test(t)).map((t) => `${que}: «${t}»`),
+      );
+      expect(hallazgos).toEqual([]);
+    });
+
+    it(`[${idioma}] no ofrece facturación anual`, () => {
+      expect('billingToggle' in copy.pricing).toBe(false);
+      for (const plan of copy.pricing.plans) {
+        expect(Object.keys(plan)).not.toContain('annualPrice');
+        expect(Object.keys(plan)).not.toContain('annualBilled');
+      }
+    });
+
+    it(`[${idioma}] el email no aparece como canal de publicación`, () => {
+      const canales = [...copy.channels.items, ...copy.pricing.plans.flatMap((p) => textos(p.features))];
+      expect(canales.filter((t) => /\bemail\b/i.test(t))).toEqual([]);
+    });
+
+    // «11 redes conectables» y la lista de canales tienen que decir lo mismo:
+    // antes eran 12 chips (con «Meta Ads») frente a «11 redes».
+    it(`[${idioma}] la cifra de redes coincide con la lista de canales`, () => {
+      expect(copy.channels.items).not.toContain('Meta Ads');
+      expect(Number(copy.testi.proof[0].k)).toBe(copy.channels.items.length);
+    });
+
+    // Un solo CTA: el mismo texto en nav, hero, precios y final (los
+    // componentes leen copy.cta), y los planes de autoservicio también.
+    it(`[${idioma}] los planes de autoservicio usan el CTA único`, () => {
+      for (const plan of copy.pricing.plans.filter((p) => !p.contact)) {
+        expect(plan.cta).toBe(copy.cta.label);
+      }
+    });
+  }
 });
 
 // ─── Dashboard: asistente y ajustes ──────────────────────────────────────────

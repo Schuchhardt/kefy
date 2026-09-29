@@ -34,12 +34,11 @@ const aboutContent: Record<string, {
         p: 'Somos un equipo distribuido en Latinoamérica. Conocemos los matices del mercado hispano, las particularidades del español de cada región, y los desafíos reales de hacer crecer un negocio en LATAM. Eso se refleja en cada decisión que tomamos.',
       },
     ],
-    teamTitle: 'El equipo',
+    // Solo personas reales: las tarjetas «Ingeniería», «Diseño» y «Tú → Únete
+    // al equipo» (sin enlace) parecían relleno (auditoría UX 2.2).
+    teamTitle: 'Quién está detrás',
     team: [
       { initials: 'SC', name: 'Sebastián', role: 'Fundador & CEO' },
-      { initials: 'Dev', name: 'Ingeniería', role: 'Desarrollo de producto' },
-      { initials: 'DS', name: 'Diseño', role: 'UX & Brand' },
-      { initials: '+', name: 'Tú', role: 'Únete al equipo →' },
     ],
   },
   en: {
@@ -68,12 +67,9 @@ const aboutContent: Record<string, {
         p: "We're a distributed team across Latin America. We know the nuances of the Hispanic market, the particularities of Spanish in each region, and the real challenges of growing a business in LATAM. That's reflected in every decision we make.",
       },
     ],
-    teamTitle: 'The team',
+    teamTitle: "Who's behind it",
     team: [
       { initials: 'SC', name: 'Sebastián', role: 'Founder & CEO' },
-      { initials: 'Dev', name: 'Engineering', role: 'Product development' },
-      { initials: 'DS', name: 'Design', role: 'UX & Brand' },
-      { initials: '+', name: 'You', role: 'Join the team →' },
     ],
   },
 };
