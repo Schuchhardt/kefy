@@ -12,6 +12,7 @@
 
 import { randomBytes } from 'crypto';
 import { hashToken } from '@/lib/auth';
+import { PLAN_LIMITS } from '@/lib/plans';
 
 /**
  * Miembros incluidos por plan, contando al dueño.
@@ -21,9 +22,9 @@ import { hashToken } from '@/lib/auth';
  * verifica contra la copy.
  */
 export const MEMBER_LIMITS: Record<string, number> = {
-  starter:  1,
-  pro:      1,
-  business: 5,
+  starter:  PLAN_LIMITS.starter.members,
+  pro:      PLAN_LIMITS.pro.members,
+  business: PLAN_LIMITS.business.members,
 };
 
 /** Duración de una invitación antes de caducar. */

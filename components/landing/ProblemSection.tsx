@@ -1,89 +1,31 @@
-'use client';
-
-import { useReveal } from '@/hooks/useReveal';
-import { useCounter } from '@/hooks/useCounter';
 import type { KefyCopy } from '@/types/locales';
 
 interface Props {
   copy: KefyCopy['problem'];
 }
 
-function StatCard({ stat, index }: { stat: CopyType; index: number }) {
-  const [ref, seen] = useReveal();
-  const decimals = stat.v % 1 !== 0 ? 1 : 0;
-  const value = useCounter(stat.v, 1800, seen, decimals);
-
-  return (
-    <div
-      ref={ref as React.RefObject<HTMLDivElement>}
-      className={`stat-card${stat.warm ? ' warm' : ''} reveal${seen ? ' is-in' : ''}`}
-      style={{ transitionDelay: `${index * 0.1}s` }}
-    >
-      <div className="big">
-        {stat.pre || ''}{value.toFixed(decimals)}{stat.suf || ''}
-      </div>
-      <p>{stat.d}</p>
-    </div>
-  );
-}
-
-type CopyType = {
-  v: number;
-  pre?: string;
-  suf?: string;
-  d: string;
-  warm?: boolean;
-};
-
+// Lista de dolores. Antes cada uno pintaba un <p> vacío (la descripción no
+// tenía texto) y el número decorativo ocupaba una columna fija de 64px que en
+// móvil se comía un sexto del ancho.
 export default function ProblemSection({ copy }: Props) {
-  const [headRef, headSeen] = useReveal();
-
   return (
-    <section className="section" id="problem">
+    <section className="section" id="problem" aria-labelledby="problem-title">
       <div className="container">
-        <div
-          ref={headRef as React.RefObject<HTMLDivElement>}
-          className={`section-head reveal${headSeen ? ' is-in' : ''}`}
-        >
+        <div className="section-head reveal">
           <span className="label">{copy.tag}</span>
-          <h2 className="h2">{copy.h2}</h2>
-          {copy.intro && <p className="intro">{copy.intro}</p>}
+          <h2 id="problem-title" className="h2">{copy.h2}</h2>
         </div>
 
-        <div className={`problem-grid${copy.stats.length === 0 ? ' no-stats' : ''}`}>
-          <div className="pain-list">
-            {copy.pains.map((pain, i) => {
-              // eslint-disable-next-line react-hooks/rules-of-hooks
-              const [painRef, painSeen] = useReveal();
-              return (
-                <div
-                  key={i}
-                  ref={painRef as React.RefObject<HTMLDivElement>}
-                  className={`pain reveal${painSeen ? ' is-in' : ''}`}
-                  style={{ transitionDelay: `${i * 0.1}s` }}
-                >
-                  <div className="pain-num">{pain.num}</div>
-                  <div>
-                    <h3>{pain.t}</h3>
-                    <p>{pain.d}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <ul className="pain-list problem-grid no-stats" style={{ listStyle: 'none', padding: 0 }}>
+          {copy.pains.map((pain, i) => (
+            <li key={pain.num} className="pain reveal" style={{ animationDelay: `${i * 0.06}s` }}>
+              <span className="pain-num" aria-hidden="true">{pain.num}</span>
+              <h3>{pain.t}</h3>
+            </li>
+          ))}
+        </ul>
 
-          {copy.stats.length > 0 && (
-            <div className="stat-cards">
-              {copy.stats.map((stat, i) => (
-                <StatCard key={i} stat={stat} index={i} />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {copy.result && (
-          <p className="problem-result reveal">{copy.result}</p>
-        )}
+        <p className="problem-result reveal">{copy.result}</p>
       </div>
     </section>
   );

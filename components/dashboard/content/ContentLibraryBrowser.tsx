@@ -2,26 +2,31 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import Button from '@/components/ui/Button';
+import { Select } from '@/components/ui/Field';
+import EmptyState from '@/components/ui/EmptyState';
+import Notice from '@/components/ui/Notice';
+import Icon, { type IconName } from '@/components/ui/icons';
+import { toLocale } from '@/lib/i18n';
 import type { ContentType } from '@/types/content';
 import type { LibraryItemWithIndustry } from '@/types/content-library';
+import styles from './ContentLibraryBrowser.module.css';
 
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
 
-const T = { es: esT, en: enT } as const;
-
-const CONTENT_TYPE_ICONS: Record<ContentType, string> = {
-  post:     '✦',
-  carousel: '▦',
-  reel:     '▶',
-  story:    '◎',
+const TYPE_ICON: Record<ContentType, IconName> = {
+  post:     'post',
+  carousel: 'carousel',
+  reel:     'video',
+  story:    'story',
 };
 
-const CONTENT_TYPE_LABELS: Record<string, Record<ContentType, string>> = {
-  es: { post: 'Post', carousel: 'Carrusel', reel: 'Reel', story: 'Story' },
-  en: { post: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' },
-};
+const TYPE_FILTERS = ['', 'post', 'carousel', 'reel', 'story'] as const;
 
+// Degradados de relleno para las ideas sin imagen (placeholders, no estados).
 const PLACEHOLDER_GRADIENTS = [
   'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
   'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
@@ -45,12 +50,16 @@ interface ContentLibraryBrowserProps {
 }
 
 export default function ContentLibraryBrowser({ lang, onSelect }: ContentLibraryBrowserProps) {
-  const t = T[lang];
+  const locale = toLocale(lang);
+  const t = locale === 'en' ? enT : esT;
+  const common = locale === 'en' ? enCommon : esCommon;
+
   const [items, setItems]           = useState<LibraryItemWithIndustry[]>([]);
   // Empieza en `true`: fetchItems recién marca `true` dentro de un useEffect
   // posterior al montaje — con `false` de partida, el primer render mostraba
   // "sin resultados" antes de que el fetch siquiera empezara.
   const [loading, setLoading]       = useState(true);
+  const [loadError, setLoadError]   = useState(false);
   const [total, setTotal]           = useState(0);
   const [offset, setOffset]         = useState(0);
   const [industries, setIndustries] = useState<Industry[]>([]);
@@ -65,34 +74,39 @@ export default function ContentLibraryBrowser({ lang, onSelect }: ContentLibrary
       setIndustries((data.industries ?? []).map((ind) => ({
         id:   ind.id,
         slug: ind.slug,
-        name: lang === 'en' ? ind.name_en : ind.name_es,
+        name: locale === 'en' ? ind.name_en : ind.name_es,
         icon: ind.icon,
       })));
     } catch { /* non-critical */ }
-  }, [lang]);
+  }, [locale]);
 
   const fetchItems = useCallback(async (newOffset: number, append: boolean) => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params = new URLSearchParams({
         limit:    '12',
         offset:   String(newOffset),
-        language: lang,
+        language: locale,
       });
       if (filterIndustry) params.set('industry_id', filterIndustry);
       if (filterType)     params.set('content_type', filterType);
 
       const res = await fetch(`/api/content-library?${params}`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json() as { items: LibraryItemWithIndustry[]; total: number };
-      setItems((prev) => append ? [...prev, ...data.items] : data.items);
-      setTotal(data.total);
+      const data = await res.json() as { items?: LibraryItemWithIndustry[]; total?: number };
+      // Una respuesta sin `items` (proxy, versión vieja del API) no debe
+      // tumbar la pantalla entera: se trata como vacía.
+      const page = Array.isArray(data.items) ? data.items : [];
+      setItems((prev) => append ? [...prev, ...page] : page);
+      setTotal(typeof data.total === 'number' ? data.total : page.length);
     } catch {
       if (!append) setItems([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
-  }, [lang, filterIndustry, filterType]);
+  }, [locale, filterIndustry, filterType]);
 
   useEffect(() => {
     fetchIndustries();
@@ -110,146 +124,121 @@ export default function ContentLibraryBrowser({ lang, onSelect }: ContentLibrary
   }
 
   const hasMore = items.length < total;
+  const filtered = !!filterIndustry || !!filterType;
 
   return (
     <div>
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select
+      <div className={styles.filters}>
+        <Select
+          aria-label={t.libraryIndustryLabel}
           value={filterIndustry}
           onChange={(e) => setFilterIndustry(e.target.value)}
-          style={{
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '8px 12px', fontSize: 13, color: 'var(--text)', outline: 'none',
-          }}
+          className={styles.industry}
         >
           <option value="">{t.libraryAllIndustries}</option>
           {industries.map((ind) => (
             <option key={ind.id} value={ind.id}>{ind.icon} {ind.name}</option>
           ))}
-        </select>
+        </Select>
 
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['', 'post', 'carousel', 'reel', 'story'] as const).map((ct) => (
+        <div className="ui-segmented" role="group" aria-label={t.libraryTypeLabel}>
+          {TYPE_FILTERS.map((ct) => (
             <button
               key={ct || 'all'}
               type="button"
-              onClick={() => setFilterType(ct as ContentType | '')}
-              style={{
-                padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                border: `1px solid ${filterType === ct ? 'var(--accent)' : 'var(--border)'}`,
-                background: filterType === ct ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
-                color: filterType === ct ? 'var(--accent)' : 'var(--text)',
-              }}
+              aria-pressed={filterType === ct}
+              onClick={() => setFilterType(ct)}
+              className={styles.typeBtn}
             >
-              {ct === '' ? (t.libraryAllTypes) : `${CONTENT_TYPE_ICONS[ct]} ${CONTENT_TYPE_LABELS[lang][ct]}`}
+              {ct === '' ? t.libraryAllTypes : (
+                <>
+                  <Icon name={TYPE_ICON[ct]} size={14} />
+                  {t.typeLabels[ct]}
+                </>
+              )}
             </button>
           ))}
         </div>
       </div>
 
+      {loadError && (
+        <div style={{ marginBottom: 16 }}>
+          <Notice tone="danger">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span>{t.libraryLoadError}</span>
+              <Button size="sm" variant="secondary" icon={<Icon name="refresh" size={14} />} onClick={() => fetchItems(0, false)}>
+                {common.actions.retry}
+              </Button>
+            </div>
+          </Notice>
+        </div>
+      )}
+
       {/* Grid */}
       {loading && items.length === 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+        <div className={styles.grid} aria-busy="true" aria-label={t.libraryLoading}>
           {[...Array(6)].map((_, i) => (
             <SkeletonBlock key={i} height={160} borderRadius={10} />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '40px 0' }}>
-          {t.libraryEmpty}
-        </p>
+        loadError ? null : (
+          <EmptyState
+            compact
+            icon={<Icon name="library" size={28} />}
+            title={t.libraryEmpty}
+            action={filtered ? (
+              <Button size="sm" variant="secondary" onClick={() => { setFilterIndustry(''); setFilterType(''); }}>
+                {t.clearFilters}
+              </Button>
+            ) : undefined}
+          />
+        )
       ) : (
         <>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-              gap: 14,
-              opacity: loading ? 0.5 : 1,
-            }}
-          >
+          <div className={styles.grid} aria-busy={loading || undefined} style={{ opacity: loading ? 0.5 : 1 }}>
             {items.map((item, idx) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => onSelect(item)}
-                style={{
-                  textAlign: 'left', background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 12, overflow: 'hidden', cursor: 'pointer', color: 'var(--text)',
-                  display: 'flex', flexDirection: 'column', transition: 'border-color 0.12s',
-                  padding: 0,
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; }}
+                className={`${styles.card} ui-link-card`}
               >
-                {/* Thumbnail */}
                 <div
+                  className={styles.thumb}
                   style={{
-                    width: '100%', height: 140, position: 'relative',
-                    background: item.image_url
-                      ? `url(${item.image_url}) center/cover`
+                    backgroundImage: item.image_url
+                      ? `url(${JSON.stringify(item.image_url)})`
                       : PLACEHOLDER_GRADIENTS[idx % PLACEHOLDER_GRADIENTS.length],
                   }}
                 >
-                  {/* Content type badge */}
-                  <span style={{
-                    position: 'absolute', top: 8, right: 8,
-                    background: 'rgba(0,0,0,0.65)', color: '#fff',
-                    fontSize: 11, fontWeight: 700, padding: '3px 8px',
-                    borderRadius: 6, backdropFilter: 'blur(4px)',
-                  }}>
-                    {CONTENT_TYPE_ICONS[item.content_type]} {CONTENT_TYPE_LABELS[lang][item.content_type]}
+                  <span className={styles.overlayBadge} style={{ top: 8, right: 8 }}>
+                    <Icon name={TYPE_ICON[item.content_type]} size={12} />
+                    {t.typeLabels[item.content_type]}
                   </span>
-                  {/* Industry badge */}
-                  <span style={{
-                    position: 'absolute', bottom: 8, left: 8,
-                    background: 'rgba(0,0,0,0.55)', color: '#fff',
-                    fontSize: 10, padding: '2px 7px', borderRadius: 6,
-                    backdropFilter: 'blur(4px)',
-                  }}>
-                    {item.industry_icon} {item.industry_name}
+                  <span className={styles.overlayBadge} style={{ bottom: 8, left: 8, fontWeight: 500, fontSize: 11 }}>
+                    <span aria-hidden="true">{item.industry_icon}</span> {item.industry_name}
                   </span>
                 </div>
 
-                {/* Text preview */}
-                <div style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <p style={{ fontSize: 13, fontWeight: 700, margin: 0, lineHeight: 1.3,
-                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                  }}>
-                    {item.title}
-                  </p>
-                  <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0, lineHeight: 1.4,
-                    display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                  }}>
-                    {item.body}
-                  </p>
-                  <span style={{
-                    marginTop: 'auto', paddingTop: 8,
-                    fontSize: 11.5, fontWeight: 700, color: 'var(--accent)',
-                  }}>
-                    {t.libraryUseBtn} →
+                <div className={styles.body}>
+                  <p className={styles.title}>{item.title}</p>
+                  <p className={styles.excerpt}>{item.body}</p>
+                  <span className={styles.use}>
+                    {t.libraryUseBtn}
+                    <Icon name="arrow-right" size={14} />
                   </span>
                 </div>
               </button>
             ))}
           </div>
 
-          {/* Load more */}
           {hasMore && (
-            <div style={{ textAlign: 'center', marginTop: 16 }}>
-              <button
-                type="button"
-                onClick={handleLoadMore}
-                disabled={loading}
-                style={{
-                  background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)',
-                  borderRadius: 8, padding: '9px 20px', fontWeight: 600, fontSize: 13,
-                  cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1,
-                }}
-              >
+            <div className={styles.more}>
+              <Button variant="secondary" loading={loading} onClick={handleLoadMore}>
                 {loading ? t.libraryLoading : t.libraryLoadMore}
-              </button>
+              </Button>
             </div>
           )}
         </>

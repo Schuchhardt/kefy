@@ -121,6 +121,7 @@ const en = {
     open_page: 'Opening page…',
     get_brand_profile: 'Reading the brand profile…',
     update_brand_profile: 'Updating the brand profile…',
+    import_brand_from_website: 'Reading your website…',
     get_strategy_catalog: 'Checking strategies…',
     preview_strategy: 'Preparing the strategy…',
     set_active_strategy: 'Activating the strategy…',
@@ -129,6 +130,7 @@ const en = {
     list_content: 'Searching content…',
     get_content: 'Reading the content…',
     create_post: 'Creating post…',
+    create_starter_posts: 'Creating your 3 starter posts…',
     create_carousel: 'Creating carousel…',
     create_reel: 'Creating reel…',
     create_manual_content: 'Saving content…',
@@ -162,6 +164,12 @@ const en = {
       const base = f ? `Update the brand profile's ${f}` : 'Update the brand profile';
       return p.sync_org_name ? `${base} and rename the organization` : base;
     },
+    import_brand_from_website: (i, p) => {
+      const url = str(p.url, str(i.url));
+      return url
+        ? `Read ${quote(url)} and fill the empty brand profile fields (1 credit)`
+        : 'Read your website and fill the empty brand profile fields (1 credit)';
+    },
     get_strategy_catalog: () => 'Check the strategy catalog',
     preview_strategy: () => 'Preview a strategy',
     set_active_strategy: (_i, p) => {
@@ -182,6 +190,12 @@ const en = {
       const topic = str(p.topic, str(i.topic));
       const img = (p.with_image ?? i.with_image) !== false ? ' with an image' : '';
       return topic ? `Create a post${img} about ${quote(topic)}` : `Create a post${img}`;
+    },
+    create_starter_posts: (i, p) => {
+      const url = str(p.url, str(i.url));
+      return url
+        ? `Read ${quote(url)}, fill the empty brand profile fields and create 3 starter posts`
+        : 'Create 3 starter posts from your business description';
     },
     create_carousel: (i, p) => {
       const topic = str(p.topic, str(i.topic));

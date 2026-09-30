@@ -1,12 +1,35 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import {
+  useCallback, useEffect, useId, useRef, useState, useSyncExternalStore,
+  type CSSProperties, type FormEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { useParams } from 'next/navigation';
 import { useBrand } from '@/lib/brand-context';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import Modal from '@/components/ui/Modal';
+import Button, { ButtonLink } from '@/components/ui/Button';
+import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import EmptyState from '@/components/ui/EmptyState';
+import Notice from '@/components/ui/Notice';
+import ArrayChips from '@/components/ui/ArrayChips';
+import ChannelIcon from '@/components/ui/ChannelIcon';
+import Icon from '@/components/ui/icons';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { TONE_COLORS, type Tone } from '@/lib/status';
+import { toLocale } from '@/lib/i18n';
 import esT from '@/locales/es/dashboard/leads';
 import enT from '@/locales/en/dashboard/leads';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
+import type { LeadsCopy } from '@/locales/es/dashboard/leads';
+import type { DashboardCommonCopy } from '@/locales/es/dashboard/common';
 import type { LeadStage, Lead } from '@/types/leads';
+import styles from './page.module.css';
+
+const T  = { es: esT, en: enT } as const;
+const TC = { es: esCommon, en: enCommon } as const;
 
 const STAGES: LeadStage[] = ['frio', 'tibio', 'caliente', 'contactado', 'convertido'];
 const NEXT_STAGE: Record<LeadStage, LeadStage | null> = {
@@ -14,51 +37,134 @@ const NEXT_STAGE: Record<LeadStage, LeadStage | null> = {
   contactado: 'convertido', convertido: null,
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function timeAgo(date: string | null, lang: string): string {
-  if (!date) return '—';
-  const diff = Date.now() - new Date(date).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1)  return lang === 'en' ? 'just now' : 'ahora';
-  if (m < 60) return lang === 'en' ? `${m}m ago` : `hace ${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return lang === 'en' ? `${h}h ago` : `hace ${h}h`;
-  const d = Math.floor(h / 24);
-  return lang === 'en' ? `${d}d ago` : `hace ${d}d`;
-}
-
-function scoreColor(score: number): string {
-  if (score >= 50) return '#FF4B4B';
-  if (score >= 20) return '#FF9B4B';
-  return '#4B9BFF';
-}
-
-const channelEmoji: Record<string, string> = {
-  instagram: '📸', facebook: '👤', twitter: '🐦', x: '🐦',
-  tiktok: '🎵', youtube: '▶️', linkedin: '💼',
-  google_business: '🗺️', yelp: '⭐', tripadvisor: '🧳',
+/** Temperatura del lead → tono semántico. Antes eran emojis (❄️ 🌡️ 🔥 📞 ✅)
+ *  y hex sueltos; ahora los mismos tokens que los estados de contenido. */
+const STAGE_TONE: Record<LeadStage, Tone> = {
+  frio: 'info', tibio: 'warning', caliente: 'danger', contactado: 'accent', convertido: 'success',
 };
 
-// ─── Modal: Add Manual Lead ───────────────────────────────────────────────────
+/** Canales del alta manual (los mismos valores que antes). */
+const CHANNEL_OPTIONS = [
+  'instagram', 'facebook', 'twitter', 'x', 'tiktok', 'youtube', 'linkedin',
+  'google_business', 'yelp', 'tripadvisor',
+];
+const CHANNEL_LABELS: Record<string, string> = {
+  instagram: 'Instagram', facebook: 'Facebook', twitter: 'Twitter', x: 'X',
+  tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn',
+  google_business: 'Google Business', yelp: 'Yelp', tripadvisor: 'Tripadvisor',
+};
+/** Nombre en ChannelIcon cuando no coincide con el valor guardado. */
+const CHANNEL_ICON: Record<string, string> = { x: 'twitter', google_business: 'googlebusiness' };
+
+const MOBILE_QUERY = '(max-width: 767px)';
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function channelLabel(channel: string): string {
+  return CHANNEL_LABELS[channel] ?? channel;
+}
+
+function scoreTone(score: number): Tone {
+  if (score >= 50) return 'danger';
+  if (score >= 20) return 'warning';
+  return 'info';
+}
+
+/** Variables de `.ui-badge` (y de `.dot`) para un tono. */
+function toneVars(tone: Tone): CSSProperties {
+  const c = TONE_COLORS[tone];
+  return { '--badge-color': c.color, '--badge-bg': c.background } as CSSProperties;
+}
+
+function timeAgo(date: string | null, t: LeadsCopy): string {
+  if (!date) return '—';
+  const m = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
+  if (m < 1) return t.timeJustNow;
+  const h = Math.floor(m / 60);
+  return t.timeAgo(m, h, Math.floor(h / 24));
+}
+
+function subscribeViewport(callback: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  const mql = window.matchMedia(MOBILE_QUERY);
+  mql.addEventListener?.('change', callback);
+  return () => mql.removeEventListener?.('change', callback);
+}
+
+function isMobileViewport(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia(MOBILE_QUERY).matches;
+}
+
+/** Móvil (<768px): el detalle se abre como hoja inferior. En el servidor, no. */
+function useIsMobile(): boolean {
+  return useSyncExternalStore(subscribeViewport, isMobileViewport, () => false);
+}
+
+// ─── Piezas pequeñas ──────────────────────────────────────────────────────────
+
+function LeadAvatar({ lead, size }: { lead: Lead; size: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={styles.avatar}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
+    >
+      {lead.avatar_url
+        // eslint-disable-next-line @next/next/no-img-element
+        ? <img src={lead.avatar_url} alt="" />
+        : (lead.username[0]?.toUpperCase() ?? '?')}
+    </span>
+  );
+}
+
+function ChannelTag({ channel }: { channel: string }) {
+  return (
+    <span className={styles.channel}>
+      <span aria-hidden="true" style={{ display: 'inline-flex' }}>
+        <ChannelIcon name={CHANNEL_ICON[channel] ?? channel} size={12} />
+      </span>
+      {channelLabel(channel)}
+    </span>
+  );
+}
+
+function StageBadge({ stage, t }: { stage: LeadStage; t: LeadsCopy }) {
+  return (
+    <span className="ui-badge" style={toneVars(STAGE_TONE[stage])}>
+      <span className={styles.dot} aria-hidden="true" />
+      {t.stages[stage]}
+    </span>
+  );
+}
+
+function ScoreBadge({ score, t }: { score: number; t: LeadsCopy }) {
+  return (
+    <span className="ui-badge" style={toneVars(scoreTone(score))}>
+      <span className="sr-only">{`${t.score}: `}</span>
+      {score}
+    </span>
+  );
+}
+
+// ─── Modal: alta manual ───────────────────────────────────────────────────────
 
 function AddLeadModal({
-  t, lang: _lang, onAdd, onClose,
+  t, onAdd, onClose,
 }: {
-  t: typeof esT;
-  lang: string;
+  t: LeadsCopy;
   onAdd: (lead: Lead) => void;
   onClose: () => void;
 }) {
+  const formId = useId();
   const [username, setUsername] = useState('');
   const [channel, setChannel]   = useState('instagram');
   const [stage, setStage]       = useState<LeadStage>('frio');
   const [loading, setLoading]   = useState(false);
   const [err, setErr]           = useState('');
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!username.trim()) return;
+    if (!username.trim() || loading) return;
     setLoading(true); setErr('');
     try {
       const res = await fetch('/api/automations/leads', {
@@ -66,389 +172,298 @@ function AddLeadModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: username.trim(), channel, stage }),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
-      const { lead } = await res.json();
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error || t.errorCreate);
+      }
+      const { lead } = await res.json() as { lead: Lead };
       onAdd(lead);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : t.errorCreate);
+      setErr(e instanceof Error && e.message ? e.message : t.errorCreate);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-    }} onClick={onClose}>
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 24, width: 360, maxWidth: '90vw',
-      }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t.addManualTitle}</h3>
-        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <input
-            placeholder={t.addManualUsername}
+    <Modal
+      open
+      onClose={onClose}
+      title={t.addManualTitle}
+      maxWidth={420}
+      padded
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>{t.addManualCancel}</Button>
+          <Button type="submit" form={formId} variant="primary" loading={loading} disabled={!username.trim()}>
+            {t.addManualSave}
+          </Button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={submit} className={styles.form} noValidate>
+        <Field label={t.addManualUsername} required>
+          <Input
             value={username}
-            onChange={e => setUsername(e.target.value)}
-            style={{
-              background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 8, padding: '8px 12px', color: 'var(--text)',
-              fontSize: 14, outline: 'none',
-            }}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
           />
-          <select
-            value={channel} onChange={e => setChannel(e.target.value)}
-            style={{
-              background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 14,
-            }}
-          >
-            {Object.keys(channelEmoji).map(c => (
-              <option key={c} value={c}>{channelEmoji[c]} {c}</option>
-            ))}
-          </select>
-          <select
-            value={stage} onChange={e => setStage(e.target.value as LeadStage)}
-            style={{
-              background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 14,
-            }}
-          >
-            {STAGES.map(s => <option key={s} value={s}>{t.stages[s]}</option>)}
-          </select>
-          {err && <p style={{ color: '#ff4b4b', fontSize: 12, margin: 0 }}>{err}</p>}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button
-              type="button" onClick={onClose}
-              style={{
-                padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)',
-                background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 13,
-              }}
-            >{t.addManualCancel}</button>
-            <button
-              type="submit" disabled={loading || !username.trim()}
-              style={{
-                padding: '8px 16px', borderRadius: 8, border: 'none',
-                background: 'var(--accent)', color: '#000', cursor: loading ? 'wait' : 'pointer',
-                fontSize: 13, fontWeight: 600,
-              }}
-            >{loading ? '...' : t.addManualSave}</button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </Field>
+        <Field label={t.addManualChannel}>
+          <Select value={channel} onChange={(e) => setChannel(e.target.value)}>
+            {CHANNEL_OPTIONS.map((c) => <option key={c} value={c}>{channelLabel(c)}</option>)}
+          </Select>
+        </Field>
+        <Field label={t.addManualStage}>
+          <Select value={stage} onChange={(e) => setStage(e.target.value as LeadStage)}>
+            {STAGES.map((s) => <option key={s} value={s}>{t.stages[s]}</option>)}
+          </Select>
+        </Field>
+        {err && <Notice tone="danger">{err}</Notice>}
+      </form>
+    </Modal>
   );
 }
 
-// ─── Lead Card ───────────────────────────────────────────────────────────────
+// ─── Tarjeta del tablero ──────────────────────────────────────────────────────
 
 function LeadCard({
-  lead, t, lang, onSelect, onMoveNext,
+  lead, t, onSelect, onMoveNext,
 }: {
   lead: Lead;
-  t: typeof esT;
-  lang: string;
-  onSelect: (l: Lead) => void;
-  onMoveNext: (l: Lead) => void;
+  t: LeadsCopy;
+  onSelect: (lead: Lead, opener: HTMLElement) => void;
+  onMoveNext: (lead: Lead) => void;
 }) {
   const nextStage = NEXT_STAGE[lead.stage];
   return (
-    <div
-      onClick={() => onSelect(lead)}
-      style={{
-        background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10,
-        padding: '12px 14px', cursor: 'pointer',
-        transition: 'border-color 0.15s, box-shadow 0.15s',
-      }}
-      onMouseEnter={e => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent)';
-        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 1px var(--accent)';
-      }}
-      onMouseLeave={e => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)';
-        (e.currentTarget as HTMLDivElement).style.boxShadow = 'none';
-      }}
-    >
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: '50%', background: 'var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 14, overflow: 'hidden', flexShrink: 0,
-        }}>
-          {lead.avatar_url
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={lead.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : lead.username[0]?.toUpperCase() ?? '?'}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-            overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
+    <article className={styles.card}>
+      <div className={styles.cardHead}>
+        <LeadAvatar lead={lead} size={32} />
+        <div className={styles.cardName}>
+          <button
+            type="button"
+            className={styles.cardOpen}
+            aria-haspopup="dialog"
+            onClick={(e) => onSelect(lead, e.currentTarget)}
+          >
             {lead.display_name || lead.username}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>@{lead.username}</div>
+          </button>
+          <div className={styles.handle}>@{lead.username}</div>
         </div>
-        <span style={{
-          fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
-          background: scoreColor(lead.score) + '20', color: scoreColor(lead.score),
-        }}>{lead.score}</span>
+        <ScoreBadge score={lead.score} t={t} />
       </div>
-      {/* Footer row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-          {channelEmoji[lead.channel] ?? '🌐'} {lead.channel} · {timeAgo(lead.last_interaction_at, lang)}
+      <div className={styles.cardFoot}>
+        <span className={styles.meta}>
+          <ChannelTag channel={lead.channel} />
+          <span aria-hidden="true">·</span>
+          <span>{timeAgo(lead.last_interaction_at, t)}</span>
         </span>
         {nextStage && (
-          <button
-            onClick={e => { e.stopPropagation(); onMoveNext(lead); }}
-            style={{
-              fontSize: 11, padding: '3px 8px', borderRadius: 6,
-              border: '1px solid var(--border)', background: 'transparent',
-              color: 'var(--muted)', cursor: 'pointer',
-            }}
-          >→ {t.stages[nextStage]}</button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className={styles.cardAction}
+            icon={<Icon name="arrow-right" size={12} />}
+            aria-label={t.moveTo(t.stages[nextStage])}
+            onClick={() => onMoveNext(lead)}
+          >
+            {t.stages[nextStage]}
+          </Button>
         )}
       </div>
-    </div>
+    </article>
   );
 }
 
-// ─── Lead Drawer ─────────────────────────────────────────────────────────────
+// ─── Detalle del lead (panel lateral o hoja inferior) ────────────────────────
 
-function LeadDrawer({
-  lead, t, lang, onClose, onUpdate, onDelete,
+function LeadDetail({
+  lead, t, common, lang, onUpdate, onDelete, confirm,
 }: {
   lead: Lead;
-  t: typeof esT;
+  t: LeadsCopy;
+  common: DashboardCommonCopy;
   lang: string;
-  onClose: () => void;
   onUpdate: (id: string, updates: Partial<Lead>) => void;
   onDelete: (id: string) => void;
+  confirm: ReturnType<typeof useConfirm>['confirm'];
 }) {
-  const [notes, setNotes]       = useState(lead.notes ?? '');
+  const uid = useId();
+  const moveLabelId = `${uid}-move`;
+  const tagsId = `${uid}-tags`;
+  const [notes, setNotes]         = useState(lead.notes ?? '');
   const [noteState, setNoteState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [tag, setTag]           = useState('');
-  const [tags, setTags]         = useState<string[]>(lead.tags ?? []);
+  const [tags, setTags]           = useState<string[]>(lead.tags ?? []);
+  const [error, setError]         = useState<string | null>(null);
+  const [deleting, setDeleting]   = useState(false);
 
-  async function patchLead(updates: Record<string, unknown>) {
-    const res = await fetch(`/api/automations/leads/${lead.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    });
-    if (res.ok) {
-      const { lead: updated } = await res.json();
+  async function patchLead(updates: Record<string, unknown>): Promise<boolean> {
+    setError(null);
+    try {
+      const res = await fetch(`/api/automations/leads/${lead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) { setError(t.errorUpdate); return false; }
+      const { lead: updated } = await res.json() as { lead: Lead };
       onUpdate(lead.id, updated);
+      return true;
+    } catch {
+      setError(t.errorUpdate);
+      return false;
     }
   }
 
   async function saveNotes() {
     setNoteState('saving');
-    await patchLead({ notes });
-    setNoteState('saved');
-    setTimeout(() => setNoteState('idle'), 1500);
+    const ok = await patchLead({ notes });
+    setNoteState(ok ? 'saved' : 'idle');
+    if (ok) setTimeout(() => setNoteState((s) => (s === 'saved' ? 'idle' : s)), 2000);
   }
 
-  async function addTag() {
-    if (!tag.trim() || tags.includes(tag.trim())) { setTag(''); return; }
-    const newTags = [...tags, tag.trim()];
-    setTags(newTags);
-    setTag('');
-    await patchLead({ tags: newTags });
-  }
-
-  async function removeTag(t2: string) {
-    const newTags = tags.filter(x => x !== t2);
-    setTags(newTags);
-    await patchLead({ tags: newTags });
+  async function changeTags(next: string[]) {
+    const previous = tags;
+    setTags(next);
+    if (!(await patchLead({ tags: next }))) setTags(previous);
   }
 
   async function handleDelete() {
-    if (!confirm(t.confirmDelete)) return;
-    await fetch(`/api/automations/leads/${lead.id}`, { method: 'DELETE' });
-    onDelete(lead.id);
-    onClose();
+    const ok = await confirm({
+      title: t.confirmDelete,
+      message: common.confirm.irreversible,
+      confirmLabel: common.actions.delete,
+      cancelLabel: common.actions.cancel,
+      danger: true,
+    });
+    if (!ok) return;
+    setDeleting(true); setError(null);
+    try {
+      const res = await fetch(`/api/automations/leads/${lead.id}`, { method: 'DELETE' });
+      if (!res.ok) { setError(t.errorDelete); return; }
+      onDelete(lead.id);
+    } catch {
+      setError(t.errorDelete);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
-    <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0, width: 360,
-      background: 'var(--surface)', borderLeft: '1px solid var(--border)',
-      zIndex: 50, overflow: 'auto', padding: 24,
-      display: 'flex', flexDirection: 'column', gap: 20,
-    }}>
-      {/* Close */}
-      <button
-        onClick={onClose}
-        style={{
-          position: 'absolute', top: 16, right: 16, background: 'transparent',
-          border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 20,
-        }}
-      >×</button>
+    <div className={styles.detail}>
+      {error && <Notice tone="danger">{error}</Notice>}
 
-      {/* Avatar + name */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 8 }}>
-        <div style={{
-          width: 48, height: 48, borderRadius: '50%', background: 'var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20, overflow: 'hidden',
-        }}>
-          {lead.avatar_url
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={lead.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : lead.username[0]?.toUpperCase() ?? '?'}
+      <dl className={styles.tiles}>
+        <div className={styles.tile}>
+          <dt className={styles.tileLabel}>{t.stageLabel}</dt>
+          <dd className={styles.tileValue}>
+            <span className={styles.dot} style={toneVars(STAGE_TONE[lead.stage])} aria-hidden="true" />
+            {t.stages[lead.stage]}
+          </dd>
         </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>{lead.display_name || lead.username}</div>
-          <div style={{ color: 'var(--muted)', fontSize: 12 }}>
-            {channelEmoji[lead.channel] ?? '🌐'} @{lead.username}
-          </div>
+        <div className={styles.tile}>
+          <dt className={styles.tileLabel}>{t.score}</dt>
+          <dd className={styles.tileValue} style={{ color: TONE_COLORS[scoreTone(lead.score)].color }}>{lead.score}</dd>
         </div>
-      </div>
+      </dl>
 
-      {/* Stage + Score */}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{
-          flex: 1, background: 'var(--bg)', border: '1px solid var(--border)',
-          borderRadius: 10, padding: '12px', textAlign: 'center',
-        }}>
-          <div style={{ fontSize: 20 }}>{t.stageIcons[lead.stage]}</div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{t.stages[lead.stage]}</div>
-        </div>
-        <div style={{
-          flex: 1, background: 'var(--bg)', border: '1px solid var(--border)',
-          borderRadius: 10, padding: '12px', textAlign: 'center',
-        }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: scoreColor(lead.score) }}>{lead.score}</div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{t.score}</div>
-        </div>
-      </div>
-
-      {/* Move stage buttons */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {STAGES.filter(s => s !== lead.stage).map(s => (
-          <button
-            key={s}
-            onClick={() => patchLead({ stage: s })}
-            style={{
-              fontSize: 12, padding: '5px 10px', borderRadius: 8,
-              border: '1px solid var(--border)', background: 'transparent',
-              color: 'var(--muted)', cursor: 'pointer',
-            }}
-          >{t.stageIcons[s]} {t.stages[s]}</button>
-        ))}
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        {!lead.contacted && (
-          <button
-            onClick={() => patchLead({ contacted: true })}
-            style={{
-              flex: 1, fontSize: 12, padding: '8px', borderRadius: 8,
-              border: '1px solid var(--accent)', background: 'var(--accent)20',
-              color: 'var(--accent)', cursor: 'pointer',
-            }}
-          >📞 {t.markContacted}</button>
-        )}
-        {!lead.converted && (
-          <button
-            onClick={() => patchLead({ converted: true, stage: 'convertido' })}
-            style={{
-              flex: 1, fontSize: 12, padding: '8px', borderRadius: 8,
-              border: '1px solid #4bff9b', background: '#4bff9b20',
-              color: '#4bff9b', cursor: 'pointer',
-            }}
-          >✅ {t.markConverted}</button>
-        )}
-      </div>
-
-      {/* Tags */}
-      <div>
-        <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-          {t.tagsLabel}
-        </label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-          {tags.map(tg => (
-            <span key={tg} style={{
-              fontSize: 12, padding: '3px 8px', borderRadius: 20,
-              background: 'var(--accent)20', color: 'var(--accent)',
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}>
-              {tg}
-              <button
-                onClick={() => removeTag(tg)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 12, padding: 0 }}
-              >×</button>
-            </span>
+      <div role="group" aria-labelledby={moveLabelId} className={styles.group}>
+        <span id={moveLabelId} className={styles.groupLabel}>{t.moveToLabel}</span>
+        <div className={styles.buttonRow}>
+          {STAGES.filter((s) => s !== lead.stage).map((s) => (
+            <Button key={s} size="sm" variant="secondary" onClick={() => void patchLead({ stage: s })}>
+              <span className={styles.dot} style={toneVars(STAGE_TONE[s])} aria-hidden="true" />
+              {t.stages[s]}
+            </Button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input
-            value={tag} onChange={e => setTag(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
-            placeholder={t.tagsPlaceholder}
-            style={{
-              flex: 1, background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, outline: 'none',
-            }}
-          />
-          <button
-            onClick={addTag}
-            style={{
-              padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)',
-              background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: 12,
-            }}
-          >+</button>
-        </div>
       </div>
 
-      {/* Notes */}
-      <div>
-        <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-          {t.notesLabel}
-        </label>
-        <textarea
-          value={notes} onChange={e => setNotes(e.target.value)}
-          placeholder={t.notesPlaceholder}
-          rows={4}
-          style={{
-            width: '100%', background: 'var(--bg)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '8px 10px', color: 'var(--text)', fontSize: 13,
-            resize: 'vertical', outline: 'none', boxSizing: 'border-box',
-          }}
+      {(!lead.contacted || !lead.converted) && (
+        <div className={styles.buttonRow}>
+          {!lead.contacted && (
+            <Button
+              variant="secondary"
+              icon={<Icon name="send" size={14} />}
+              style={{ color: 'var(--accent-text)', borderColor: 'var(--accent-border)' }}
+              onClick={() => void patchLead({ contacted: true })}
+            >
+              {t.markContacted}
+            </Button>
+          )}
+          {!lead.converted && (
+            <Button
+              variant="secondary"
+              icon={<Icon name="check-circle" size={14} />}
+              style={{ color: 'var(--success)', borderColor: 'var(--success-border)' }}
+              onClick={() => void patchLead({ converted: true, stage: 'convertido' })}
+            >
+              {t.markConverted}
+            </Button>
+          )}
+        </div>
+      )}
+
+      <div className={styles.group}>
+        <label htmlFor={tagsId} className={styles.groupLabel}>{t.tagsLabel}</label>
+        <ArrayChips
+          id={tagsId}
+          value={tags}
+          onChange={(next) => void changeTags(next)}
+          lang={lang}
+          placeholder={t.tagsPlaceholder}
+          max={50}
         />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-          <button
-            onClick={saveNotes} disabled={noteState === 'saving'}
-            style={{
-              fontSize: 12, padding: '5px 12px', borderRadius: 8,
-              border: '1px solid var(--border)', background: noteState === 'saved' ? '#4bff9b20' : 'transparent',
-              color: noteState === 'saved' ? '#4bff9b' : 'var(--text)', cursor: 'pointer',
-            }}
-          >{noteState === 'saving' ? t.savingNotes : noteState === 'saved' ? t.notesSaved : '💾'}</button>
+      </div>
+
+      <div>
+        <Field label={t.notesLabel}>
+          <Textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder={t.notesPlaceholder}
+            rows={4}
+          />
+        </Field>
+        <div className={styles.notesFoot}>
+          <span role="status" className={styles.saved}>
+            {noteState === 'saved' && <><Icon name="check" size={14} />{t.notesSaved}</>}
+          </span>
+          <Button size="sm" variant="secondary" loading={noteState === 'saving'} onClick={() => void saveNotes()}>
+            {noteState === 'saving' ? t.savingNotes : t.saveNotes}
+          </Button>
         </div>
       </div>
 
-      {/* Meta */}
-      <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.8 }}>
-        {lead.first_interaction_at && <div>Primera interacción: {new Date(lead.first_interaction_at).toLocaleDateString(lang)}</div>}
-        {lead.last_interaction_at  && <div>Última: {timeAgo(lead.last_interaction_at, lang)}</div>}
-        <div>Creado: {new Date(lead.created_at).toLocaleDateString(lang)}</div>
-      </div>
+      <dl className={styles.metaList}>
+        {lead.first_interaction_at && (
+          <>
+            <dt>{t.metaFirst}</dt>
+            <dd>{new Date(lead.first_interaction_at).toLocaleDateString(lang)}</dd>
+          </>
+        )}
+        {lead.last_interaction_at && (
+          <>
+            <dt>{t.metaLast}</dt>
+            <dd>{timeAgo(lead.last_interaction_at, t)}</dd>
+          </>
+        )}
+        <dt>{t.metaCreated}</dt>
+        <dd>{new Date(lead.created_at).toLocaleDateString(lang)}</dd>
+      </dl>
 
-      {/* Delete */}
-      <button
-        onClick={handleDelete}
-        style={{
-          marginTop: 'auto', fontSize: 12, padding: '8px', borderRadius: 8,
-          border: '1px solid #ff4b4b40', background: 'transparent',
-          color: '#ff4b4b', cursor: 'pointer',
-        }}
-      >{t.deleteBtn}</button>
+      <Button
+        variant="danger-ghost"
+        block
+        icon={<Icon name="trash" size={14} />}
+        loading={deleting}
+        onClick={() => void handleDelete()}
+      >
+        {t.deleteBtn}
+      </Button>
     </div>
   );
 }
@@ -456,14 +471,21 @@ function LeadDrawer({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function LeadsPage() {
-  const params = useParams();
-  const lang = (params.lang as string) || 'es';
-  const t = lang === 'en' ? enT : esT;
+  const params = useParams<{ lang: string }>();
+  const lang = params?.lang || 'es';
+  const locale = toLocale(lang);
+  const t = T[locale];
+  const tc = TC[locale];
   const { activeBrand } = useBrand();
+  const isMobile = useIsMobile();
+  const { confirm, dialog } = useConfirm();
+  const uid = useId();
+  const drawerTitleId = `${uid}-drawer-title`;
 
   const [leads, setLeads]             = useState<Lead[]>([]);
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState('');
+  const [actionError, setActionError] = useState('');
   const [view, setView]               = useState<'kanban' | 'list'>('kanban');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -471,25 +493,41 @@ export default function LeadsPage() {
   const [filterChannel, setFilterChannel] = useState('');
   const [filterStage, setFilterStage] = useState('');
 
+  /** Elemento que abrió el detalle: recibe el foco al cerrarlo. */
+  const openerRef = useRef<HTMLElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
   const loadLeads = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const params = new URLSearchParams({ limit: '200' });
-      if (filterStage)   params.set('stage', filterStage);
-      if (filterChannel) params.set('channel', filterChannel);
-      if (search)        params.set('search', search);
-      const res = await fetch(`/api/automations/leads?${params}`);
-      if (!res.ok) throw new Error((await res.json()).error);
-      const { leads: data } = await res.json();
-      setLeads(data);
+      const qs = new URLSearchParams({ limit: '200' });
+      if (filterStage)   qs.set('stage', filterStage);
+      if (filterChannel) qs.set('channel', filterChannel);
+      if (search)        qs.set('search', search);
+      const res = await fetch(`/api/automations/leads?${qs}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error || t.errorLoad);
+      }
+      const { leads: data } = await res.json() as { leads: Lead[] };
+      setLeads(data ?? []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : t.errorLoad);
+      setError(e instanceof Error && e.message ? e.message : t.errorLoad);
     } finally {
       setLoading(false);
     }
   }, [filterStage, filterChannel, search, t.errorLoad]);
 
-  useEffect(() => { loadLeads(); }, [loadLeads]);
+  useEffect(() => { void loadLeads(); }, [loadLeads]);
+
+  const closeLead = useCallback(() => {
+    setSelectedLead(null);
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener && document.contains(opener)) {
+      requestAnimationFrame(() => opener.focus({ preventScroll: true }));
+    }
+  }, []);
 
   // Cambiar de marca activa no disparaba por sí solo un refetch (mismo bug
   // que en /content): los leads son de la marca anterior hasta que algo más
@@ -501,310 +539,373 @@ export default function LeadsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeBrand?.id]);
 
+  // Escritorio: el panel lateral no es modal (se puede seguir usando el
+  // tablero), pero recibe el foco al abrirse y Escape lo cierra si el foco
+  // está dentro. Un diálogo encima (confirmación) se cierra antes.
+  const selectedId = selectedLead?.id ?? null;
+  useEffect(() => {
+    if (!selectedId || isMobile) return;
+    drawerRef.current?.focus({ preventScroll: true });
+  }, [selectedId, isMobile]);
+
+  useEffect(() => {
+    if (!selectedId || isMobile) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape' || e.isComposing) return;
+      if (!drawerRef.current?.contains(document.activeElement)) return;
+      closeLead();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId, isMobile, closeLead]);
+
+  function openLead(lead: Lead, opener?: HTMLElement) {
+    openerRef.current = opener ?? null;
+    setSelectedLead(lead);
+  }
+
   function updateLead(id: string, updates: Partial<Lead>) {
-    setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
-    if (selectedLead?.id === id) setSelectedLead(prev => prev ? { ...prev, ...updates } : null);
+    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...updates } : l)));
+    setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, ...updates } : prev));
   }
 
   async function moveLead(lead: Lead, newStage: LeadStage) {
-    const res = await fetch(`/api/automations/leads/${lead.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: newStage }),
-    });
-    if (res.ok) updateLead(lead.id, { stage: newStage });
+    setActionError('');
+    try {
+      const res = await fetch(`/api/automations/leads/${lead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: newStage }),
+      });
+      if (res.ok) updateLead(lead.id, { stage: newStage });
+      else setActionError(t.errorUpdate);
+    } catch {
+      setActionError(t.errorUpdate);
+    }
   }
 
   function moveToNext(lead: Lead) {
     const next = NEXT_STAGE[lead.stage];
-    if (next) moveLead(lead, next);
+    if (next) void moveLead(lead, next);
   }
 
-  function deleteLead(id: string) {
-    setLeads(prev => prev.filter(l => l.id !== id));
+  function removeLead(id: string) {
+    setLeads((prev) => prev.filter((l) => l.id !== id));
+    closeLead();
+  }
+
+  function clearFilters() {
+    setSearch(''); setFilterStage(''); setFilterChannel('');
   }
 
   // Stats
-  const hotCount       = leads.filter(l => l.stage === 'caliente').length;
-  const convertedCount = leads.filter(l => l.converted).length;
+  const hotCount       = leads.filter((l) => l.stage === 'caliente').length;
+  const convertedCount = leads.filter((l) => l.converted).length;
   const avgScore       = leads.length ? Math.round(leads.reduce((a, l) => a + l.score, 0) / leads.length) : 0;
+  const stats = [
+    { label: t.totalLeads, value: leads.length },
+    { label: t.hotLeads,   value: hotCount },
+    { label: t.converted,  value: convertedCount },
+    { label: t.avgScore,   value: avgScore },
+  ];
 
-  // Unique channels
-  const channels = Array.from(new Set(leads.map(l => l.channel))).sort();
+  // Canales presentes (y el filtrado, aunque ya no quede ninguno: si no, el
+  // selector desaparecía y no había forma de quitar el filtro).
+  const channels = Array.from(new Set([
+    ...leads.map((l) => l.channel),
+    ...(filterChannel ? [filterChannel] : []),
+  ])).sort();
+  const filtersActive = Boolean(search || filterStage || filterChannel);
+
+  const selectedName = selectedLead ? (selectedLead.display_name || selectedLead.username) : '';
+  const detail = selectedLead && (
+    <LeadDetail
+      key={selectedLead.id}
+      lead={selectedLead}
+      t={t}
+      common={tc}
+      lang={lang}
+      onUpdate={updateLead}
+      onDelete={removeLead}
+      confirm={confirm}
+    />
+  );
 
   return (
-    <div style={{ padding: '32px 48px', maxWidth: 1400, margin: '0 auto' }}>
+    <div className="page page--wide">
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 4px', fontFamily: 'Syne, sans-serif' }}>{t.title}</h1>
-          <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14 }}>{t.subtitle}</p>
+      <div className="page-header">
+        <div style={{ minWidth: 0 }}>
+          <h1 className={styles.title}>{t.title}</h1>
+          <p>{t.subtitle}</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          style={{
-            padding: '9px 18px', borderRadius: 10, border: 'none',
-            background: 'var(--accent)', color: '#000', fontWeight: 600,
-            fontSize: 13, cursor: 'pointer',
-          }}
-        >{t.addManualLead}</button>
+        <div className="page-header-actions">
+          <Button variant="primary" icon={<Icon name="plus" size={16} />} onClick={() => setShowAddModal(true)}>
+            {t.addManualLead}
+          </Button>
+        </div>
       </div>
 
-      {/* Stats bar */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-        {[
-          { label: t.totalLeads,  value: leads.length },
-          { label: t.hotLeads,    value: hotCount },
-          { label: t.converted,   value: convertedCount },
-          { label: t.avgScore,    value: avgScore },
-        ].map(stat => (
-          <div key={stat.label} style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '12px 20px', flex: 1, textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{stat.value}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stat.label}</div>
+      {/* Stats */}
+      <dl className={`auto-grid ${styles.stats}`} style={{ '--min': '140px', '--gap': '12px' } as CSSProperties}>
+        {stats.map((stat) => (
+          <div key={stat.label} className={styles.stat}>
+            <dt className={styles.statLabel}>{stat.label}</dt>
+            <dd className={styles.statValue}>{stat.value}</dd>
           </div>
         ))}
-      </div>
+      </dl>
 
       {/* Controls */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          placeholder={t.searchPlaceholder}
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '7px 12px', color: 'var(--text)', fontSize: 13,
-            outline: 'none', width: 200,
-          }}
-        />
-        <select
-          value={filterStage} onChange={e => setFilterStage(e.target.value)}
-          style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '7px 12px', color: 'var(--text)', fontSize: 13,
-          }}
-        >
-          <option value="">{t.filterAll}</option>
-          {STAGES.map(s => <option key={s} value={s}>{t.stageIcons[s]} {t.stages[s]}</option>)}
-        </select>
+      <div className={styles.controls}>
+        <Field label={t.searchLabel} hideLabel className={styles.search}>
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t.searchPlaceholder}
+          />
+        </Field>
+        <Field label={t.filterStageLabel} hideLabel className={styles.filter}>
+          <Select value={filterStage} onChange={(e) => setFilterStage(e.target.value)}>
+            <option value="">{t.allStages}</option>
+            {STAGES.map((s) => <option key={s} value={s}>{t.stages[s]}</option>)}
+          </Select>
+        </Field>
         {channels.length > 0 && (
-          <select
-            value={filterChannel} onChange={e => setFilterChannel(e.target.value)}
-            style={{
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 8, padding: '7px 12px', color: 'var(--text)', fontSize: 13,
-            }}
-          >
-            <option value="">{t.filterChannel}</option>
-            {channels.map(c => <option key={c} value={c}>{channelEmoji[c] ?? '🌐'} {c}</option>)}
-          </select>
+          <Field label={t.filterChannelLabel} hideLabel className={styles.filter}>
+            <Select value={filterChannel} onChange={(e) => setFilterChannel(e.target.value)}>
+              <option value="">{t.allChannels}</option>
+              {channels.map((c) => <option key={c} value={c}>{channelLabel(c)}</option>)}
+            </Select>
+          </Field>
         )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-          {(['kanban', 'list'] as const).map(v => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              style={{
-                padding: '7px 14px', borderRadius: 8, fontSize: 13,
-                border: '1px solid var(--border)',
-                background: view === v ? 'var(--accent)' : 'transparent',
-                color: view === v ? '#000' : 'var(--muted)',
-                fontWeight: view === v ? 600 : 400, cursor: 'pointer',
-              }}
-            >{v === 'kanban' ? t.viewKanban : t.viewList}</button>
+        <div role="group" aria-label={t.viewLabel} className={`ui-segmented ${styles.viewToggle}`}>
+          {(['kanban', 'list'] as const).map((v) => (
+            <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>
+              {v === 'kanban' ? t.viewKanban : t.viewList}
+            </button>
           ))}
         </div>
       </div>
 
-      {/* Error */}
-      {error && (
-        <div style={{ color: '#ff4b4b', background: '#ff4b4b20', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
-          {error}
-        </div>
-      )}
+      {/* Errors */}
+      {error && <div style={{ marginBottom: 16 }}><Notice tone="danger">{error}</Notice></div>}
+      {actionError && <div style={{ marginBottom: 16 }}><Notice tone="danger">{actionError}</Notice></div>}
 
       {/* Loading */}
       {loading && (
-        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 12, alignItems: 'flex-start' }}>
-          {[...Array(4)].map((_, col) => (
-            <div key={col} style={{
-              flex: '0 0 240px', minWidth: 240,
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: '12px 10px',
-            }}>
-              <SkeletonBlock width="60%" height={13} style={{ marginBottom: 12 }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {[...Array(2)].map((_, row) => (
-                  <div key={row} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <SkeletonBlock width={32} height={32} borderRadius={16} style={{ flexShrink: 0 }} />
-                      <SkeletonBlock width="60%" height={11} />
+        <>
+          <p role="status" className="sr-only">{tc.actions.loading}</p>
+          <div className={styles.board} aria-hidden="true">
+            {[...Array(4)].map((_, col) => (
+              <div key={col} className={styles.column}>
+                <SkeletonBlock width="60%" height={13} style={{ marginBottom: 12 }} />
+                <div className={styles.columnBody}>
+                  {[...Array(2)].map((_, row) => (
+                    <div key={row} className={styles.card}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <SkeletonBlock width={32} height={32} borderRadius={16} style={{ flexShrink: 0 }} />
+                        <SkeletonBlock width="60%" height={11} />
+                      </div>
+                      <SkeletonBlock width="80%" height={9} />
                     </div>
-                    <SkeletonBlock width="80%" height={9} />
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Empty */}
+      {!loading && !error && leads.length === 0 && (
+        <div className="ui-card">
+          {filtersActive ? (
+            <EmptyState
+              icon={<Icon name="search" size={32} strokeWidth={1.5} />}
+              title={t.noResults}
+              hint={t.noResultsHint}
+              action={<Button variant="secondary" onClick={clearFilters}>{t.clearFilters}</Button>}
+            />
+          ) : (
+            <EmptyState
+              icon={<Icon name="users" size={32} strokeWidth={1.5} />}
+              title={t.noLeads}
+              hint={t.noLeadsHint}
+              action={
+                <ButtonLink href={`/${lang}/dashboard/automations/engagement`} variant="primary">
+                  {t.noLeadsAction}
+                </ButtonLink>
+              }
+            />
+          )}
         </div>
       )}
 
       {/* KANBAN VIEW */}
-      {!loading && view === 'kanban' && (
-        <div style={{
-          display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 12,
-          alignItems: 'flex-start',
-        }}>
-          {STAGES.map(stage => {
-            const stageLeads = leads.filter(l => l.stage === stage);
+      {!loading && leads.length > 0 && view === 'kanban' && (
+        <div className={styles.board}>
+          {STAGES.map((stage) => {
+            const stageLeads = leads.filter((l) => l.stage === stage);
+            const titleId = `${uid}-col-${stage}`;
             return (
-              <div key={stage} style={{
-                flex: '0 0 240px', minWidth: 240,
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 12, padding: '12px 10px',
-              }}>
-                {/* Column header */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginBottom: 12, padding: '0 4px',
-                }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>
-                    {t.stageIcons[stage]} {t.stages[stage]}
+              <section key={stage} className={styles.column} aria-labelledby={titleId}>
+                <div className={styles.columnHead}>
+                  <h2 id={titleId} className={styles.columnTitle}>
+                    <span className={styles.dot} style={toneVars(STAGE_TONE[stage])} aria-hidden="true" />
+                    {t.stages[stage]}
+                  </h2>
+                  <span className={styles.count}>
+                    <span aria-hidden="true">{stageLeads.length}</span>
+                    <span className="sr-only">{t.leadsInStage(stageLeads.length)}</span>
                   </span>
-                  <span style={{
-                    fontSize: 11, background: 'var(--border)', borderRadius: 20,
-                    padding: '1px 7px', color: 'var(--muted)',
-                  }}>{stageLeads.length}</span>
                 </div>
-                {/* Cards */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className={styles.columnBody}>
                   {stageLeads.length === 0 ? (
-                    <p style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', padding: '20px 0' }}>
-                      {t.noLeadsStage}
-                    </p>
-                  ) : stageLeads.map(lead => (
+                    <p className={styles.columnEmpty}>{t.noLeadsStage}</p>
+                  ) : stageLeads.map((lead) => (
                     <LeadCard
                       key={lead.id}
                       lead={lead}
                       t={t}
-                      lang={lang}
-                      onSelect={setSelectedLead}
+                      onSelect={openLead}
                       onMoveNext={moveToNext}
                     />
                   ))}
                 </div>
-              </div>
+              </section>
             );
           })}
         </div>
       )}
 
       {/* LIST VIEW */}
-      {!loading && view === 'list' && (
-        <div style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 12, overflow: 'hidden',
-        }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      {!loading && leads.length > 0 && view === 'list' && (
+        // Seis columnas no caben en un móvil: la tabla hace scroll horizontal
+        // (con sombra de «hay más») en vez de recortarse.
+        <div className={`scroll-x ${styles.tableWrap}`} role="region" aria-label={t.viewList} tabIndex={0}>
+          <table className={styles.table}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Usuario', 'Canal', 'Etapa', 'Score', 'Última interacción', ''].map(h => (
-                  <th key={h} style={{
-                    padding: '10px 16px', textAlign: 'left', fontSize: 12,
-                    color: 'var(--muted)', fontWeight: 600,
-                  }}>{h}</th>
-                ))}
+              <tr>
+                <th scope="col">{t.colUser}</th>
+                <th scope="col">{t.colChannel}</th>
+                <th scope="col">{t.colStage}</th>
+                <th scope="col">{t.score}</th>
+                <th scope="col">{t.colLastInteraction}</th>
+                <th scope="col"><span className="sr-only">{t.colActions}</span></th>
               </tr>
             </thead>
             <tbody>
-              {leads.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 40, fontSize: 13 }}>
-                    {t.noLeads}
-                  </td>
-                </tr>
-              ) : leads.map(lead => (
-                <tr
-                  key={lead.id}
-                  onClick={() => setSelectedLead(lead)}
-                  style={{
-                    borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                    transition: 'background 0.12s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--bg)'}
-                  onMouseLeave={e => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}
-                >
-                  <td style={{ padding: '10px 16px', fontSize: 13 }}>
-                    <div style={{ fontWeight: 600 }}>{lead.display_name || lead.username}</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>@{lead.username}</div>
-                  </td>
-                  <td style={{ padding: '10px 16px', fontSize: 13 }}>
-                    {channelEmoji[lead.channel] ?? '🌐'} {lead.channel}
-                  </td>
-                  <td style={{ padding: '10px 16px', fontSize: 13 }}>
-                    {t.stageIcons[lead.stage]} {t.stages[lead.stage]}
-                  </td>
-                  <td style={{ padding: '10px 16px' }}>
-                    <span style={{
-                      fontSize: 12, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
-                      background: scoreColor(lead.score) + '20', color: scoreColor(lead.score),
-                    }}>{lead.score}</span>
-                  </td>
-                  <td style={{ padding: '10px 16px', fontSize: 12, color: 'var(--muted)' }}>
-                    {timeAgo(lead.last_interaction_at, lang)}
-                  </td>
-                  <td style={{ padding: '10px 16px' }}>
-                    {NEXT_STAGE[lead.stage] && (
+              {leads.map((lead) => {
+                const next = NEXT_STAGE[lead.stage];
+                return (
+                  <tr
+                    key={lead.id}
+                    className={styles.row}
+                    // Clic en cualquier parte de la fila; con teclado, el botón del nombre.
+                    onClick={(e) => openLead(lead, e.currentTarget.querySelector('button') ?? undefined)}
+                  >
+                    <td>
                       <button
-                        onClick={e => { e.stopPropagation(); moveToNext(lead); }}
-                        style={{
-                          fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                          border: '1px solid var(--border)', background: 'transparent',
-                          color: 'var(--muted)', cursor: 'pointer',
-                        }}
-                      >→ {t.stages[NEXT_STAGE[lead.stage]!]}</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                        type="button"
+                        className={styles.rowOpen}
+                        aria-haspopup="dialog"
+                        onClick={(e) => { e.stopPropagation(); openLead(lead, e.currentTarget); }}
+                      >
+                        {lead.display_name || lead.username}
+                      </button>
+                      <div className={styles.handle}>@{lead.username}</div>
+                    </td>
+                    <td><ChannelTag channel={lead.channel} /></td>
+                    <td><StageBadge stage={lead.stage} t={t} /></td>
+                    <td><ScoreBadge score={lead.score} t={t} /></td>
+                    <td className={styles.muted}>{timeAgo(lead.last_interaction_at, t)}</td>
+                    <td>
+                      {next && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<Icon name="arrow-right" size={12} />}
+                          aria-label={t.moveTo(t.stages[next])}
+                          onClick={(e) => { e.stopPropagation(); void moveLead(lead, next); }}
+                        >
+                          {t.stages[next]}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* No leads empty state */}
-      {!loading && leads.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--muted)' }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>👥</div>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>{t.noLeads}</div>
-          <div style={{ fontSize: 13 }}>{t.noLeadsHint}</div>
-        </div>
-      )}
-
-      {/* Lead Drawer */}
-      {selectedLead && (
-        <LeadDrawer
-          lead={selectedLead}
-          t={t}
-          lang={lang}
-          onClose={() => setSelectedLead(null)}
-          onUpdate={updateLead}
-          onDelete={deleteLead}
-        />
-      )}
+      {/* Detalle: hoja inferior en móvil, panel lateral en escritorio */}
+      {selectedLead && (isMobile ? (
+        <Modal
+          open
+          onClose={closeLead}
+          closeLabel={tc.actions.close}
+          title={
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <LeadAvatar lead={selectedLead} size={32} />
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedName}</span>
+            </span>
+          }
+          subtitle={
+            <span className={styles.meta}>
+              <ChannelTag channel={selectedLead.channel} />
+              <span>@{selectedLead.username}</span>
+            </span>
+          }
+        >
+          <div className={styles.sheetBody}>{detail}</div>
+        </Modal>
+      ) : createPortal(
+        // En <body>: dentro de .dashboard-main (z-index 1) ninguna capa del
+        // panel quedaba por encima del avatar fijo, que tapaba el botón cerrar.
+        <div
+          ref={drawerRef}
+          role="dialog"
+          aria-labelledby={drawerTitleId}
+          tabIndex={-1}
+          className={styles.drawer}
+        >
+          <div className={styles.drawerHead}>
+            <LeadAvatar lead={selectedLead} size={44} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 id={drawerTitleId} className={styles.drawerTitle}>{selectedName}</h2>
+              <div className={styles.meta}>
+                <ChannelTag channel={selectedLead.channel} />
+                <span>@{selectedLead.username}</span>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              iconOnly
+              aria-label={tc.actions.close}
+              icon={<Icon name="close" size={18} />}
+              onClick={closeLead}
+            />
+          </div>
+          <div className={styles.drawerBody}>{detail}</div>
+        </div>,
+        document.body,
+      ))}
 
       {/* Add Lead Modal */}
       {showAddModal && (
         <AddLeadModal
           t={t}
-          lang={lang}
-          onAdd={lead => { setLeads(prev => [lead, ...prev]); setShowAddModal(false); }}
+          onAdd={(lead) => { setLeads((prev) => [lead, ...prev]); setShowAddModal(false); }}
           onClose={() => setShowAddModal(false)}
         />
       )}
+
+      {dialog}
     </div>
   );
 }

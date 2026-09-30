@@ -1,0 +1,203 @@
+/* ─── Mi marca › Estrategia ─────────────────────────────────────────────────
+   Lo propio de la pestaña de recomendadas: pestañas de modo, tarjetas de
+   objetivo, industria, capas de interacción y packs. Lo que comparte con la
+   pestaña de propias vive en CustomStrategyPanel.module.css. */
+
+.eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.block { margin-bottom: 24px; }
+
+/* ── Pestañas Recomendadas / Personalizadas ── */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+.tab:hover,
+.tab:active { color: var(--text); border-color: var(--accent-border); }
+.tab[aria-selected="true"] {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* ── Objetivos ── */
+.optionCard {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.optionCard[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.optionTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.optionIcon { font-size: 24px; line-height: 1.2; }
+.optionCheck { color: var(--accent-text); }
+.optionName { font-size: 14px; font-weight: 600; color: var(--text); }
+.optionDesc { font-size: 12px; line-height: 1.5; color: var(--muted); }
+
+/* ── Industria ── */
+.industryRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.industryPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.inlineLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.inlineLink:hover,
+.inlineLink:active { color: var(--text); }
+.industryMissing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  padding: 16px 20px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+
+.loadingLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 32px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* ── Capas de interacción ── */
+.layerCard {
+  min-width: 0;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.layerNum {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.layerTitle { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: var(--text); }
+.layerList { margin: 0; padding-left: 18px; list-style: disc; font-size: 13px; line-height: 1.7; color: var(--muted); }
+
+/* ── Packs de automatización ── */
+.packCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.packCard[data-installed="true"] { border-color: var(--accent-border); }
+.packHead { display: flex; align-items: center; gap: 10px; }
+.packIcon { font-size: 22px; line-height: 1; }
+.packName { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.packDesc { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.packRules { margin: 0; padding-left: 18px; list-style: disc; font-size: 12px; line-height: 1.8; color: var(--muted); }
+.packFooter { margin-top: auto; display: grid; gap: 6px; }
+.packInstalled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--success);
+}
+
+/* ── Guardar ── */
+.saveRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+.savedOk { margin: 0; font-size: 13px; color: var(--success); }
+
+@media (pointer: coarse), (max-width: 767px) {
+  .tab { min-height: 44px; }
+  .industryPill { min-height: 44px; }
+  .inlineLink { min-height: 44px; }
+}
+
+/* Se ven de 36px y se tocan en 44px: el área extra es un pseudo-elemento, como
+   .ui-btn--sm en globals.css, para no agrandar filas compactas. */
+@media (pointer: coarse), (max-width: 767px) {
+  .inlineLink { position: relative; }
+  .inlineLink::after { content: ''; position: absolute; inset: -4px; }
+}

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Syne, DM_Sans, JetBrains_Mono } from 'next/font/google';
+import { Syne, DM_Sans } from 'next/font/google';
 import '../globals.css';
 import { locales } from '@/lib/i18n';
 import SetLang from './SetLang';
@@ -15,16 +15,13 @@ const syne = Syne({
   weight: ['600', '700', '800'],
 });
 
+// Solo los pesos que se usan (el 300 no aparecía en ningún estilo). La
+// monoespaciada ya no se descarga: JetBrains Mono solo servía para notas de
+// 12px y --font-jetbrains cae en la del sistema (ver globals.css).
 const dmSans = DM_Sans({
   subsets: ['latin'],
   variable: '--font-dm-sans',
-  weight: ['300', '400', '500', '600'],
-});
-
-const jetbrains = JetBrains_Mono({
-  subsets: ['latin'],
-  variable: '--font-jetbrains',
-  weight: ['400', '500'],
+  weight: ['400', '500', '600'],
 });
 
 export async function generateStaticParams() {
@@ -76,14 +73,9 @@ export async function generateMetadata({
       creator: '@kefyapp',
       site: '@kefyapp',
     },
-    alternates: {
-      canonical: `${BASE_URL}/${lang}`,
-      languages: {
-        es: `${BASE_URL}/es`,
-        en: `${BASE_URL}/en`,
-        'x-default': `${BASE_URL}/es`,
-      },
-    },
+    // Sin `alternates` aquí: el layout lo heredaban todas las páginas, así que
+    // precios, blog y legales declaraban la home como canónica. Cada página
+    // que se indexa define la suya (la home en app/[lang]/page.tsx).
     robots: {
       index: true,
       follow: true,
@@ -115,7 +107,7 @@ export default async function LangLayout({
   const { lang } = await params;
 
   return (
-    <div className={`${syne.variable} ${dmSans.variable} ${jetbrains.variable}`}>
+    <div className={`${syne.variable} ${dmSans.variable}`}>
       <SetLang lang={lang} />
       <ThemeProvider>
         {children}

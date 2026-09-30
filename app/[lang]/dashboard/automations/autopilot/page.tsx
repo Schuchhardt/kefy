@@ -1,73 +1,71 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useId, type CSSProperties, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { CHANNELS as ALL_CHANNELS } from '@/lib/channels';
+import { CHANNELS as ALL_CHANNELS, getChannelLabel } from '@/lib/channels';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import Button from '@/components/ui/Button';
+import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import EmptyState from '@/components/ui/EmptyState';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { TONE_COLORS, type Tone } from '@/lib/status';
+import { toLocale } from '@/lib/i18n';
 import type { Channel } from '@/types/channels';
 
 import esT from '@/locales/es/dashboard/autopilot';
 import enT from '@/locales/en/dashboard/autopilot';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
 
 import type { AIModel } from '@/types/ai';
 import type { Frequency, AutopilotRule } from '@/types/automations';
 import type { SocialAccount } from '@/types/social';
-import type { Locale } from '@/types/i18n';
 import { useDataChanged } from '@/lib/data-events';
 import { useBrand } from '@/lib/brand-context';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const T = { es: esT, en: enT } as const;
+const T  = { es: esT, en: enT } as const;
+const TC = { es: esCommon, en: enCommon } as const;
 
-// CHANNELS_BASE replaced by ALL_CHANNELS from lib/channels
+const FREQUENCIES: Frequency[] = ['daily', 'weekly', 'biweekly', 'monthly'];
+/** Frecuencias que piden día de la semana. */
+const WEEKLY: Frequency[] = ['weekly', 'biweekly'];
+const MODEL_LABELS: Record<AIModel, string> = { claude: 'Claude', gpt: 'GPT-4o' };
 
-const FREQUENCIES_BASE: { value: Frequency; label: string }[] = [
-  { value: 'daily',    label: '' },
-  { value: 'weekly',   label: '' },
-  { value: 'biweekly', label: '' },
-  { value: 'monthly',  label: '' },
-];
+function badgeTone(tone: Tone): CSSProperties {
+  const c = TONE_COLORS[tone];
+  return { '--badge-color': c.color, '--badge-bg': c.background } as CSSProperties;
+}
 
-const _DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  fontSize: 14,
-  color: 'var(--text)',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: 'var(--muted)',
-  display: 'block',
-  marginBottom: 4,
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-};
+type PageNotice = { tone: 'success' | 'danger'; text: string } | null;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AutopilotPage() {
   const { lang } = useParams<{ lang: string }>();
+  const locale = toLocale(lang);
+  const t = T[locale];
+  const tc = TC[locale];
   const { activeBrand } = useBrand();
-  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
-  const dateLocale = lang === 'en' ? 'en-US' : 'es-ES';
-  const CHANNELS   = ALL_CHANNELS.map((c) => c.value === 'generic' ? { ...c, label: t.channelGeneric } : c);
-  const FREQUENCIES = FREQUENCIES_BASE.map((f) => ({ ...f, label: t.frequencies[f.value] ?? f.value }));
+  const { confirm, dialog } = useConfirm();
+  const uid = useId();
+  const formId = `${uid}-form`;
+  const formTitleId = `${uid}-form-title`;
+  const accountsLabelId = `${uid}-accounts`;
+  const dateLocale = t.dateLocale;
+  const CHANNELS = ALL_CHANNELS.map((c) => c.value === 'generic' ? { ...c, label: t.channelGeneric } : c);
   const DAYS = t.days;
-  const [rules, setRules]       = useState<AutopilotRule[]>([]);
-  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [running, setRunning]   = useState(false);
-  const [runMsg, setRunMsg]     = useState<string | null>(null);
+
+  const [rules, setRules]           = useState<AutopilotRule[]>([]);
+  const [accounts, setAccounts]     = useState<SocialAccount[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [loadError, setLoadError]   = useState(false);
+  const [runningId, setRunningId]   = useState<string | null>(null);
+  const [notice, setNotice]         = useState<PageNotice>(null);
 
   // Form state
   const [showForm, setShowForm]         = useState(false);
@@ -84,15 +82,25 @@ export default function AutopilotPage() {
   const [formError, setFormError]       = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    const [rulesRes, accountsRes] = await Promise.all([
-      fetch('/api/autopilot/rules', { credentials: 'include' }),
-      fetch('/api/social/accounts', { credentials: 'include' }),
-    ]);
-    const { data: rulesData }   = await rulesRes.json()    as { data: AutopilotRule[] };
-    const { accounts: accsData } = await accountsRes.json() as { accounts: SocialAccount[] };
-    setRules(rulesData ?? []);
-    setAccounts(accsData ?? []);
-    setLoading(false);
+    try {
+      const [rulesRes, accountsRes] = await Promise.all([
+        fetch('/api/autopilot/rules', { credentials: 'include' }),
+        fetch('/api/social/accounts', { credentials: 'include' }),
+      ]);
+      if (!rulesRes.ok) throw new Error('rules');
+      const { data: rulesData } = await rulesRes.json() as { data: AutopilotRule[] };
+      const accountsJson = accountsRes.ok
+        ? await accountsRes.json() as { accounts: SocialAccount[] }
+        : { accounts: [] };
+      setRules(rulesData ?? []);
+      setAccounts(accountsJson.accounts ?? []);
+      setLoadError(false);
+    } catch {
+      // Antes un fallo dejaba el esqueleto de carga para siempre.
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -116,7 +124,12 @@ export default function AutopilotPage() {
     );
   }
 
-  async function handleCreate(e: React.FormEvent) {
+  function toggleForm() {
+    setShowForm((v) => !v);
+    setFormError(null);
+  }
+
+  async function handleCreate(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setFormError(null);
@@ -131,7 +144,7 @@ export default function AutopilotPage() {
           channel:            formChannel,
           social_account_ids: formAccounts,
           frequency:          formFreq,
-          day_of_week:        ['weekly', 'biweekly'].includes(formFreq) ? formDay : null,
+          day_of_week:        WEEKLY.includes(formFreq) ? formDay : null,
           time_of_day:        formTime,
           timezone:           formTz,
           ai_model:           formModel,
@@ -144,31 +157,50 @@ export default function AutopilotPage() {
       setFormName(''); setFormHint(''); setFormAccounts([]);
       fetchData();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : t.errorUnknown);
+      setFormError(err instanceof Error && err.message ? err.message : t.errorUnknown);
     } finally {
       setSaving(false);
     }
   }
 
   async function handleToggle(rule: AutopilotRule) {
-    await fetch(`/api/autopilot/rules/${rule.id}`, {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: rule.status === 'active' ? 'paused' : 'active' }),
-    });
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/autopilot/rules/${rule.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: rule.status === 'active' ? 'paused' : 'active' }),
+      });
+      if (!res.ok) setNotice({ tone: 'danger', text: t.errorToggle });
+    } catch {
+      setNotice({ tone: 'danger', text: t.errorToggle });
+    }
     fetchData();
   }
 
-  async function handleDelete(ruleId: string) {
-    if (!confirm(t.confirmDelete)) return;
-    await fetch(`/api/autopilot/rules/${ruleId}`, { method: 'DELETE', credentials: 'include' });
-    setRules((prev) => prev.filter((r) => r.id !== ruleId));
+  async function handleDelete(rule: AutopilotRule) {
+    const ok = await confirm({
+      title: t.confirmDelete,
+      message: <><strong style={{ color: 'var(--text)' }}>{rule.name}</strong><br />{tc.confirm.irreversible}</>,
+      confirmLabel: tc.actions.delete,
+      cancelLabel: tc.actions.cancel,
+      danger: true,
+    });
+    if (!ok) return;
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/autopilot/rules/${rule.id}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error('delete');
+      setRules((prev) => prev.filter((r) => r.id !== rule.id));
+    } catch {
+      setNotice({ tone: 'danger', text: t.errorDelete });
+    }
   }
 
   async function handleRun(ruleId: string) {
-    setRunning(true);
-    setRunMsg(null);
+    setRunningId(ruleId);
+    setNotice(null);
     try {
       const res = await fetch('/api/autopilot/run', {
         method: 'POST',
@@ -178,264 +210,270 @@ export default function AutopilotPage() {
       });
       const data = await res.json() as { executed?: number; error?: string };
       if (!res.ok) throw new Error(data.error ?? t.errorRun);
-      setRunMsg(t.runSuccess(data.executed ?? 0));
+      setNotice({ tone: 'success', text: t.runSuccess(data.executed ?? 0) });
       fetchData();
     } catch (err) {
-      setRunMsg(err instanceof Error ? err.message : t.errorUnknown);
+      setNotice({ tone: 'danger', text: err instanceof Error && err.message ? err.message : t.errorUnknown });
     } finally {
-      setRunning(false);
+      setRunningId(null);
     }
   }
 
   return (
-    <div style={{ padding: '40px 48px', maxWidth: 860 }}>
+    <div className="page" style={{ maxWidth: 860 }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700 }}>Autopilot</h1>
-          <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>
-            {t.subtitle}
-          </p>
+      <div className="page-header">
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontFamily: 'var(--font-syne), system-ui, sans-serif' }}>{t.title}</h1>
+          <p>{t.subtitle}</p>
         </div>
-        <button
-          onClick={() => { setShowForm(!showForm); setFormError(null); }}
-          style={{
-            background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
-            padding: '9px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer', flexShrink: 0,
-          }}
-        >
-          {showForm ? t.cancelBtn : t.newRuleBtn}
-        </button>
+        <div className="page-header-actions">
+          <Button
+            variant={showForm ? 'secondary' : 'primary'}
+            icon={showForm ? undefined : <Icon name="plus" size={16} />}
+            aria-expanded={showForm}
+            aria-controls={showForm ? formId : undefined}
+            onClick={toggleForm}
+          >
+            {showForm ? t.cancelBtn : t.newRuleBtn}
+          </Button>
+        </div>
       </div>
 
-      {runMsg && (
-        <div style={{
-          background: 'rgba(198,255,75,0.08)', border: '1px solid var(--accent)',
-          borderRadius: 8, padding: '10px 16px', marginBottom: 20, fontSize: 13, color: 'var(--accent)',
-        }}>
-          {runMsg}
+      {notice && (
+        <div style={{ marginBottom: 20 }}>
+          <Notice tone={notice.tone} icon={<Icon name={notice.tone === 'success' ? 'check-circle' : 'alert'} size={16} />}>
+            {notice.text}
+          </Notice>
         </div>
       )}
 
       {/* Create form */}
       {showForm && (
-        <form onSubmit={handleCreate} style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 12, padding: '20px 24px', marginBottom: 28,
-        }}>
-          <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 15, fontWeight: 700, marginBottom: 18 }}>
-            {t.formTitle}
-          </h2>
+        <form id={formId} onSubmit={handleCreate} className="ui-card" aria-labelledby={formTitleId} style={{ marginBottom: 28 }}>
+          <h2 id={formTitleId} className="ui-card-title" style={{ marginBottom: 18 }}>{t.formTitle}</h2>
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>{t.nameLabel}</label>
-            <input
-              style={inputStyle} value={formName} required
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder={t.namePlaceholder}
-            />
-          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Field label={t.nameLabel} required>
+              <Input
+                value={formName}
+                required
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder={t.namePlaceholder}
+              />
+            </Field>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div>
-              <label style={labelStyle}>{t.channelLabel}</label>
-              <select style={inputStyle} value={formChannel} onChange={(e) => setFormChannel(e.target.value as Channel)}>
-                {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-              </select>
+            <div className="grid-2" style={{ '--gap': '14px' } as CSSProperties}>
+              <Field label={t.channelLabel}>
+                <Select value={formChannel} onChange={(e) => setFormChannel(e.target.value as Channel)}>
+                  {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </Select>
+              </Field>
+              <Field label={t.modelLabel}>
+                <Select value={formModel} onChange={(e) => setFormModel(e.target.value as AIModel)}>
+                  <option value="claude">{MODEL_LABELS.claude}</option>
+                  <option value="gpt">{MODEL_LABELS.gpt}</option>
+                </Select>
+              </Field>
             </div>
-            <div>
-              <label style={labelStyle}>{t.modelLabel}</label>
-              <select style={inputStyle} value={formModel} onChange={(e) => setFormModel(e.target.value as AIModel)}>
-                <option value="claude">Claude</option>
-                <option value="gpt">GPT-4o</option>
-              </select>
-            </div>
-          </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>{t.accountsLabel}</label>
-            {accounts.length === 0 ? (
-              <p style={{ fontSize: 13, color: 'var(--muted)' }}>
-                {t.noAccounts}{' '}
-                <a href="settings" style={{ color: 'var(--accent)' }}>{t.connectSettings}</a>
-              </p>
-            ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {accounts.map((acc) => {
-                  const active = formAccounts.includes(acc.id);
-                  return (
+            <div role="group" aria-labelledby={accountsLabelId} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span id={accountsLabelId} className="ui-label">{t.accountsLabel}</span>
+              {accounts.length === 0 ? (
+                <Notice live={false}>
+                  {t.noAccounts}{' '}
+                  {/* Antes era <a href="settings"> relativo: resolvía a
+                      /dashboard/automations/settings (404). */}
+                  <Link
+                    href={`/${lang}/dashboard/settings#social`}
+                    style={{ color: 'var(--accent-text)', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: 3 }}
+                  >
+                    {t.connectSettings}
+                  </Link>
+                </Notice>
+              ) : (
+                <div className="ui-segmented">
+                  {accounts.map((acc) => (
                     <button
-                      key={acc.id} type="button" onClick={() => toggleAccount(acc.id)}
-                      style={{
-                        padding: '6px 14px', borderRadius: 20, fontSize: 13, cursor: 'pointer',
-                        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                        background: active ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
-                        color: active ? 'var(--accent)' : 'var(--text)',
-                        fontWeight: active ? 600 : 400,
-                      }}
+                      key={acc.id}
+                      type="button"
+                      aria-pressed={formAccounts.includes(acc.id)}
+                      onClick={() => toggleAccount(acc.id)}
                     >
-                      {acc.platform} · {acc.username}
+                      {getChannelLabel(acc.platform as Channel)} · {acc.username}
                     </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div>
-              <label style={labelStyle}>{t.freqLabel}</label>
-              <select style={inputStyle} value={formFreq} onChange={(e) => setFormFreq(e.target.value as Frequency)}>
-                {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-              </select>
+                  ))}
+                </div>
+              )}
             </div>
-            {['weekly', 'biweekly'].includes(formFreq) && (
-              <div>
-                <label style={labelStyle}>{t.dayLabel}</label>
-                <select style={inputStyle} value={formDay} onChange={(e) => setFormDay(Number(e.target.value))}>
-                  {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
-                </select>
-              </div>
-            )}
-            <div>
-              <label style={labelStyle}>{t.timeLabel}</label>
-              <input type="time" style={inputStyle} value={formTime} onChange={(e) => setFormTime(e.target.value)} />
+
+            <div className="auto-grid" style={{ '--min': '150px', '--gap': '14px' } as CSSProperties}>
+              <Field label={t.freqLabel}>
+                <Select value={formFreq} onChange={(e) => setFormFreq(e.target.value as Frequency)}>
+                  {FREQUENCIES.map((f) => <option key={f} value={f}>{t.frequencies[f] ?? f}</option>)}
+                </Select>
+              </Field>
+              {WEEKLY.includes(formFreq) && (
+                <Field label={t.dayLabel}>
+                  <Select value={formDay} onChange={(e) => setFormDay(Number(e.target.value))}>
+                    {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                  </Select>
+                </Field>
+              )}
+              <Field label={t.timeLabel}>
+                <Input type="time" value={formTime} onChange={(e) => setFormTime(e.target.value)} />
+              </Field>
             </div>
-          </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>{t.tzLabel}</label>
-            <input style={inputStyle} value={formTz} onChange={(e) => setFormTz(e.target.value)} placeholder="America/Mexico_City" />
-          </div>
+            <Field label={t.tzLabel} hint={t.tzHint}>
+              <Input
+                value={formTz}
+                onChange={(e) => setFormTz(e.target.value)}
+                placeholder="America/Mexico_City"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </Field>
 
-          <div style={{ marginBottom: 18 }}>
-            <label style={labelStyle}>{t.hintLabel}</label>
-            <textarea
-              style={{ ...inputStyle, minHeight: 64, resize: 'vertical' }}
-              value={formHint}
-              onChange={(e) => setFormHint(e.target.value)}
-              placeholder={t.hintPlaceholder}
-            />
-          </div>
+            <Field label={t.hintLabel}>
+              <Textarea
+                rows={3}
+                value={formHint}
+                onChange={(e) => setFormHint(e.target.value)}
+                placeholder={t.hintPlaceholder}
+              />
+            </Field>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              type="submit" disabled={saving}
-              style={{
-                background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8,
-                padding: '9px 20px', fontWeight: 600, fontSize: 13,
-                cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
-              }}
-            >
-              {saving ? t.saving : t.createBtn}
-            </button>
-            {formError && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{formError}</span>}
+            {formError && <Notice tone="danger">{formError}</Notice>}
+
+            <div>
+              <Button type="submit" variant="primary" loading={saving}>
+                {saving ? t.saving : t.createBtn}
+              </Button>
+            </div>
           </div>
         </form>
       )}
 
-      {/* Rules list */}
-      {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {[...Array(3)].map((_, i) => (
-            <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px' }}>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-                <SkeletonBlock width={60} height={17} borderRadius={4} />
-                <SkeletonBlock width={60} height={17} borderRadius={4} />
-              </div>
-              <SkeletonBlock width={220} height={15} style={{ marginBottom: 6 }} />
-              <SkeletonBlock width={160} height={13} />
-            </div>
-          ))}
-        </div>
-      ) : rules.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px 0' }}>
-          <p style={{ color: 'var(--muted)', fontSize: 15 }}>{t.noRules}</p>
-          <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
-            {t.noRulesHint}
-          </p>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {rules.map((rule) => (
-            <div key={rule.id} style={{
-              background: 'var(--surface)', border: `1px solid ${rule.status === 'active' ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
-              borderRadius: 12, padding: '18px 20px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, background: 'var(--bg)',
-                      border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px',
-                      textTransform: 'uppercase', letterSpacing: '0.05em',
-                    }}>
-                      {rule.channel}
-                    </span>
-                    <span style={{
-                      fontSize: 11, fontWeight: 600, borderRadius: 4, padding: '2px 8px',
-                      background: rule.status === 'active' ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
-                      color: rule.status === 'active' ? 'var(--accent)' : 'var(--muted)',
-                      border: `1px solid ${rule.status === 'active' ? 'var(--accent)' : 'var(--border)'}`,
-                    }}>
-                      {rule.status === 'active' ? t.active : t.paused}
-                    </span>
-                  </div>
-                  <p style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{rule.name}</p>
-                  <p style={{ fontSize: 13, color: 'var(--muted)' }}>
-                    {FREQUENCIES.find((f) => f.value === rule.frequency)?.label} ·{' '}
-                    {rule.day_of_week !== null ? `${DAYS[rule.day_of_week]} · ` : ''}
-                    {rule.time_of_day} ({rule.timezone}) ·{' '}
-                    {rule.ai_model === 'claude' ? 'Claude' : 'GPT-4o'}
-                  </p>
-                    {rule.next_run_at && (
-                      <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                        {t.nextRun}{' '}
-                        {new Date(rule.next_run_at).toLocaleString(dateLocale, {
-                          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                        })}
-                      </p>
-                    )}
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                  <button
-                    onClick={() => handleRun(rule.id)}
-                    disabled={running}
-                    title="Ejecutar ahora"
-                    style={{
-                      background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-                      padding: '7px 12px', fontSize: 13, cursor: running ? 'not-allowed' : 'pointer',
-                      color: 'var(--text)', opacity: running ? 0.5 : 1,
-                    }}
-                  >
-                    ▶
-                  </button>
-                  <button
-                    onClick={() => handleToggle(rule)}
-                    style={{
-                      background: 'none',
-                      border: `1px solid ${rule.status === 'active' ? 'var(--accent)' : 'var(--border)'}`,
-                      borderRadius: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer',
-                      color: rule.status === 'active' ? 'var(--accent)' : 'var(--muted)',
-                    }}
-                  >
-                    {rule.status === 'active' ? t.pauseBtn : t.activateBtn}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(rule.id)}
-                    style={{
-                      background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-                      padding: '7px 12px', fontSize: 13, cursor: 'pointer', color: '#ff6b6b',
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+      {loadError && (
+        <div style={{ marginBottom: 20 }}>
+          <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
+            {tc.errors.load}{' '}
+            <button
+              type="button"
+              onClick={() => { setLoading(true); void fetchData(); }}
+              style={{ color: 'inherit', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: 3 }}
+            >
+              {tc.actions.retry}
+            </button>
+          </Notice>
         </div>
       )}
+
+      {/* Rules list */}
+      {loading ? (
+        <>
+          <p role="status" className="sr-only">{t.loading}</p>
+          <div aria-hidden="true" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[...Array(3)].map((_, i) => (
+              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px' }}>
+                <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+                  <SkeletonBlock width={60} height={17} borderRadius={4} />
+                  <SkeletonBlock width={60} height={17} borderRadius={4} />
+                </div>
+                <SkeletonBlock width={220} height={15} style={{ marginBottom: 6, maxWidth: '100%' }} />
+                <SkeletonBlock width={160} height={13} style={{ maxWidth: '100%' }} />
+              </div>
+            ))}
+          </div>
+        </>
+      ) : rules.length === 0 ? (
+        !loadError && (
+          <div className="ui-card">
+            <EmptyState
+              icon={<Icon name="bolt" size={32} strokeWidth={1.5} />}
+              title={t.noRules}
+              hint={t.noRulesHint}
+              action={!showForm && (
+                <Button variant="primary" icon={<Icon name="plus" size={14} />} onClick={toggleForm}>
+                  {t.createFirstRule}
+                </Button>
+              )}
+            />
+          </div>
+        )
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {rules.map((rule) => {
+            const active = rule.status === 'active';
+            const nameId = `${uid}-rule-${rule.id}`;
+            return (
+              <li key={rule.id}>
+                <article
+                  className="ui-card"
+                  aria-labelledby={nameId}
+                  style={{ borderColor: active ? 'var(--accent-border)' : undefined }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                        <span className="ui-badge">{getChannelLabel(rule.channel, t.channelGeneric)}</span>
+                        <span className="ui-badge" style={badgeTone(active ? 'accent' : 'neutral')}>
+                          {active ? t.active : t.paused}
+                        </span>
+                      </div>
+                      <h2 id={nameId} style={{ fontFamily: 'inherit', fontSize: 15, fontWeight: 600, margin: '0 0 4px', overflowWrap: 'anywhere' }}>
+                        {rule.name}
+                      </h2>
+                      <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>
+                        {t.frequencies[rule.frequency] ?? rule.frequency} ·{' '}
+                        {rule.day_of_week !== null ? `${DAYS[rule.day_of_week]} · ` : ''}
+                        {rule.time_of_day} ({rule.timezone}) ·{' '}
+                        {MODEL_LABELS[rule.ai_model] ?? rule.ai_model}
+                      </p>
+                      {rule.next_run_at && (
+                        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
+                          {t.nextRun}{' '}
+                          {new Date(rule.next_run_at).toLocaleString(dateLocale, {
+                            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                          })}
+                        </p>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<Icon name="play" size={12} />}
+                        loading={runningId === rule.id}
+                        disabled={runningId !== null}
+                        onClick={() => void handleRun(rule.id)}
+                      >
+                        {t.runNow}
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => void handleToggle(rule)}>
+                        {active ? t.pauseBtn : t.activateBtn}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger-ghost"
+                        iconOnly
+                        aria-label={t.deleteRule}
+                        title={t.deleteRule}
+                        icon={<Icon name="trash" size={14} />}
+                        onClick={() => void handleDelete(rule)}
+                      />
+                    </div>
+                  </div>
+                </article>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {dialog}
     </div>
   );
 }

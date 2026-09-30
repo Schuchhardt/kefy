@@ -1,55 +1,41 @@
 'use client';
 
-import { Suspense, useEffect, useRef, useState, useCallback } from 'react';
+import { Suspense, useEffect, useRef, useState, useCallback, type CSSProperties, type KeyboardEvent } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useDataChanged } from '@/lib/data-events';
 import { useAuth } from '@/lib/auth-context';
+import { toLocale } from '@/lib/i18n';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
-import type { Locale } from '@/types/i18n';
+import Button, { ButtonLink, Spinner } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import EmptyState from '@/components/ui/EmptyState';
+import Icon from '@/components/ui/icons';
 import type { Objective, Industry, Strategy, Template, OrgSelection, CustomCalendarItem } from '@/types/strategy';
-import CustomStrategyPanel, { activeBadgeStyle } from '@/components/dashboard/strategy/CustomStrategyPanel';
-import { draftFromCatalog, generateParams, type CustomDraft } from '@/components/dashboard/strategy/custom-strategy-model';
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const cardStyle = (selected: boolean): React.CSSProperties => ({
-  background:   selected ? 'rgba(198,255,75,0.08)' : 'var(--surface)',
-  border:       `1.5px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
-  borderRadius: 12,
-  padding:      '18px 20px',
-  cursor:       'pointer',
-  transition:   'all .15s ease',
-});
-
-const sectionLabel: React.CSSProperties = {
-  fontSize:     11,
-  fontWeight:   700,
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-  color:        'var(--muted)',
-  marginBottom:  16,
-};
-
-const FORMAT_ICONS: Record<string, string> = {
-  carrusel:   '▦',
-  reel:       '▶',
-  post:       '✦',
-  story:      '⬜',
-  infografía: '◉',
-  email:      '✉',
-};
+import CustomStrategyPanel, {
+  ActiveBadge,
+  ConversionMechanic,
+  StrategyCalendar,
+  StrategyOverview,
+  StrategySection,
+  type CalendarRow,
+} from '@/components/dashboard/strategy/CustomStrategyPanel';
+import {
+  catalogFormatLabel,
+  channelName,
+  draftFromCatalog,
+  emptyDraft,
+  formatIcon,
+  generateParams,
+  type CustomDraft,
+} from '@/components/dashboard/strategy/custom-strategy-model';
 import esT from '@/locales/es/dashboard/strategy';
 import enT from '@/locales/en/dashboard/strategy';
+import styles from './page.module.css';
 
 const T = { es: esT, en: enT } as const;
-
-const tabStyle = (selected: boolean): React.CSSProperties => ({
-  display: 'inline-flex', alignItems: 'center', gap: 8,
-  padding: '9px 16px', borderRadius: 100, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-  border: `1.5px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
-  background: selected ? 'rgba(198,255,75,0.08)' : 'var(--surface)',
-  color: selected ? 'var(--text)' : 'var(--muted)',
-});
+const MODES = ['catalog', 'custom'] as const;
+type Mode = (typeof MODES)[number];
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 //
@@ -57,6 +43,10 @@ const tabStyle = (selected: boolean): React.CSSProperties => ({
 // «Personalizadas» (estrategias propias de la org). Los enlaces del asistente
 // abren esta página con ?objective=&industry= (previsualiza ese par) o
 // ?custom=<id> (abre esa estrategia propia).
+//
+// Los modos son pestañas de ARIA (flechas, Inicio y Fin las recorren); los
+// objetivos, botones con aria-pressed (antes eran <div role="button"> que no
+// se podían usar con el teclado).
 
 export default function StrategyPage() {
   // useSearchParams necesita un Suspense para el prerender.
@@ -67,22 +57,44 @@ export default function StrategyPage() {
   );
 }
 
+interface AutomationPackRule {
+  id: string;
+  trigger_type: string;
+  action_type: string;
+  name?: string | null;
+  name_es?: string | null;
+  name_en?: string | null;
+}
+
+interface AutomationPack {
+  id: string;
+  name?: string | null;
+  name_es?: string | null;
+  name_en?: string | null;
+  description?: string | null;
+  desc_es?: string | null;
+  desc_en?: string | null;
+  icon: string | null;
+  kefy_automation_pack_rules: AutomationPackRule[];
+}
+
 function StrategyPageInner() {
   const { lang } = useParams<{ lang: string }>();
   const router   = useRouter();
   const searchParams = useSearchParams();
   const { role } = useAuth();
-  const locale   = (lang === 'en' ? 'en' : 'es') as Locale;
+  const locale   = toLocale(lang);
   const t        = T[locale];
   // Solo owner/admin escriben la estrategia. Sin rol conocido todavía se deja
   // intentar: el servidor responde 403 y se explica.
   const canEdit  = !role || role === 'owner' || role === 'admin';
 
-  const [mode, setMode] = useState<'catalog' | 'custom'>('catalog');
+  const [mode, setMode] = useState<Mode>('catalog');
   const [selectedCustomId, setSelectedCustomId] = useState<string | null>(null);
   const [customReload, setCustomReload] = useState(0);
   const [prefill, setPrefill] = useState<{ id: number; draft: CustomDraft } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const tabRefs = useRef<Record<Mode, HTMLButtonElement | null>>({ catalog: null, custom: null });
 
   // Catalog
   const [objectives,  setObjectives]  = useState<Objective[]>([]);
@@ -106,29 +118,11 @@ function StrategyPageInner() {
   const [saveOk, setSaveOk] = useState(false);
 
   // Automation packs
-  interface AutomationPackRule {
-    id: string;
-    trigger_type: string;
-    action_type: string;
-    name?: string | null;
-    name_es?: string | null;
-    name_en?: string | null;
-  }
-  interface AutomationPack {
-    id: string;
-    name?: string | null;
-    name_es?: string | null;
-    name_en?: string | null;
-    description?: string | null;
-    desc_es?: string | null;
-    desc_en?: string | null;
-    icon: string | null;
-    kefy_automation_pack_rules: AutomationPackRule[];
-  }
   const [packs, setPacks]             = useState<AutomationPack[]>([]);
   const [packsLoading, setPacksLoading] = useState(false);
   const [installedPacks, setInstalledPacks] = useState<Set<string>>(new Set());
   const [installingPack, setInstallingPack] = useState<string | null>(null);
+  const [failedPacks, setFailedPacks] = useState<Set<string>>(new Set());
 
   // ── Load catalog + saved selection on mount ──────────────────────────────
   // `initial`: la primera carga muestra el estado de carga; las recargas (el
@@ -225,9 +219,9 @@ function StrategyPageInner() {
         { credentials: 'include' },
       );
       if (res.ok) {
-        const { strategy: s, templates: t, is_fallback, fallback_objective } = await res.json();
+        const { strategy: s, templates: tpls, is_fallback, fallback_objective } = await res.json();
         setStrategy(s ?? null);
-        setTemplates(t ?? []);
+        setTemplates(tpls ?? []);
         if (is_fallback && fallback_objective) {
           setIsFallback(true);
           setFallbackObjective(fallback_objective);
@@ -257,6 +251,7 @@ function StrategyPageInner() {
 
   async function installPack(packId: string) {
     setInstallingPack(packId);
+    setFailedPacks((prev) => { const next = new Set(prev); next.delete(packId); return next; });
     try {
       const res = await fetch('/api/automations/engagement/rules/bulk', {
         method: 'POST',
@@ -266,7 +261,11 @@ function StrategyPageInner() {
       });
       if (res.ok) {
         setInstalledPacks(prev => new Set([...prev, packId]));
+      } else {
+        setFailedPacks((prev) => new Set([...prev, packId]));
       }
+    } catch {
+      setFailedPacks((prev) => new Set([...prev, packId]));
     } finally {
       setInstallingPack(null);
     }
@@ -321,7 +320,7 @@ function StrategyPageInner() {
   }
 
   // «Personalizar esta estrategia»: abre el editor de propias con la del
-  // catálogo ya copiada.
+  // catálogo ya copiada. El editor se lleva el foco (y la vista) al abrirse.
   function startFromRecommended() {
     if (!strategy) return;
     const draft = draftFromCatalog(strategy, templates, {
@@ -331,7 +330,14 @@ function StrategyPageInner() {
     });
     setPrefill((prev) => ({ id: (prev?.id ?? 0) + 1, draft }));
     setMode('custom');
-    window.scrollTo?.({ top: 0, behavior: 'smooth' });
+  }
+
+  // Sin estrategia en el catálogo para este par: una propia desde cero, con el
+  // objetivo ya elegido.
+  function startCustomFromScratch() {
+    const draft = { ...emptyDraft(), objective_id: selectedObjective ?? '' };
+    setPrefill((prev) => ({ id: (prev?.id ?? 0) + 1, draft }));
+    setMode('custom');
   }
 
   const onSelectionSaved = useCallback((selection: OrgSelection) => {
@@ -341,12 +347,19 @@ function StrategyPageInner() {
     setSavedSelection((prev) => (prev ? { ...prev, custom_strategy_id: null } : prev));
   }, []);
 
-  // ── Group templates by week ───────────────────────────────────────────────
-  const weeks = templates.reduce<Record<number, Template[]>>((acc, t) => {
-    acc[t.week_num] = acc[t.week_num] ?? [];
-    acc[t.week_num].push(t);
-    return acc;
-  }, {});
+  // Pestañas de ARIA: las flechas (y Inicio/Fin) cambian de pestaña y mueven el foco.
+  function onTabsKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const index = MODES.indexOf(mode);
+    let next: Mode | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = MODES[(index + 1) % MODES.length];
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = MODES[(index - 1 + MODES.length) % MODES.length];
+    else if (e.key === 'Home') next = MODES[0];
+    else if (e.key === 'End') next = MODES[MODES.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    setMode(next);
+    tabRefs.current[next]?.focus();
+  }
 
   const localizedText = (es?: string | null, en?: string | null, fallback?: string | null) => {
     if (locale === 'en') return en || es || fallback || '';
@@ -356,17 +369,18 @@ function StrategyPageInner() {
   // ── Render ────────────────────────────────────────────────────────────────
   if (catalogLoading) {
     return (
-      <div style={{ padding: '32px', maxWidth: 900 }}>
+      <div className="page" style={{ maxWidth: 900 }} aria-busy="true">
+        <p role="status" className="sr-only">{t.loading}</p>
         <div style={{ marginBottom: 40 }}>
           <SkeletonBlock width={100} height={11} style={{ marginBottom: 10 }} />
-          <SkeletonBlock width={260} height={24} style={{ marginBottom: 10 }} />
-          <SkeletonBlock width={420} height={13} />
+          <SkeletonBlock width="min(260px, 80%)" height={24} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width="min(420px, 100%)" height={13} />
         </div>
         <div style={{ display: 'flex', gap: 10, marginBottom: 32 }}>
           <SkeletonBlock width={110} height={34} borderRadius={8} />
           <SkeletonBlock width={110} height={34} borderRadius={8} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+        <div className="auto-grid" style={{ '--min': '200px', '--gap': '14px' } as CSSProperties}>
           {[...Array(6)].map((_, i) => (
             <SkeletonBlock key={i} height={100} borderRadius={12} />
           ))}
@@ -381,50 +395,59 @@ function StrategyPageInner() {
     savedSelection?.industry_id === selectedIndustry &&
     !activeCustomId;
   const catalogActive = !!savedSelection?.strategy_id && !activeCustomId;
+  const currentIndustry = industries.find((i) => i.id === selectedIndustry);
+  const marketHref = `/${lang}/dashboard/brand/market`;
+
+  const catalogRows: CalendarRow[] = templates.map((tpl) => ({
+    key: tpl.id,
+    week: tpl.week_num,
+    icon: formatIcon(tpl.format),
+    format: catalogFormatLabel(tpl.format, t),
+    channel: channelName(tpl.channel_hint, t),
+    topic: localizedText(tpl.topic_es, tpl.topic_en),
+    detail: localizedText(tpl.copy_structure_es, tpl.copy_structure_en),
+    goal: localizedText(tpl.goal_es, tpl.goal_en),
+    onGenerate: () => handleGenerate(tpl),
+  }));
 
   return (
-    <div style={{ padding: '32px', maxWidth: 900, fontFamily: 'var(--font-geist-sans)' }}>
+    <div className="page" style={{ maxWidth: 900 }}>
 
       {/* ── Header ── */}
-      <div style={{ marginBottom: 40 }}>
-        <p style={{ ...sectionLabel, marginBottom: 8 }}>{t.sectionLabel}</p>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: 'var(--text)', margin: 0, fontFamily: 'var(--font-syne)' }}>
-          {t.heading}
-        </h1>
-        <p style={{ fontSize: 14, color: 'var(--muted)', marginTop: 8, maxWidth: 560, lineHeight: 1.6 }}>
-          {t.headingDesc}
-        </p>
-      </div>
+      <header className="page-header">
+        <div>
+          <span className={styles.eyebrow}>{t.sectionLabel}</span>
+          <h1>{t.heading}</h1>
+          <p style={{ maxWidth: 560, lineHeight: 1.6, marginTop: 8 }}>{t.headingDesc}</p>
+        </div>
+      </header>
 
       {/* ── Modos ── */}
-      <div role="tablist" aria-label={t.modesLabel} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 32 }}>
-        <button
-          type="button"
-          role="tab"
-          id="strategy-tab-catalog"
-          aria-selected={mode === 'catalog'}
-          aria-controls="strategy-panel"
-          onClick={() => setMode('catalog')}
-          style={tabStyle(mode === 'catalog')}
-        >
-          {t.modeCatalog}
-          {catalogActive && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="strategy-tab-custom"
-          aria-selected={mode === 'custom'}
-          aria-controls="strategy-panel"
-          onClick={() => setMode('custom')}
-          style={tabStyle(mode === 'custom')}
-        >
-          {t.modeCustom}
-          {activeCustomId && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
-        </button>
+      <div role="tablist" aria-label={t.modesLabel} className={styles.tabs} onKeyDown={onTabsKeyDown}>
+        {MODES.map((m) => {
+          const selected = mode === m;
+          const active = m === 'catalog' ? catalogActive : !!activeCustomId;
+          return (
+            <button
+              key={m}
+              ref={(el) => { tabRefs.current[m] = el; }}
+              type="button"
+              role="tab"
+              id={`strategy-tab-${m}`}
+              aria-selected={selected}
+              aria-controls="strategy-panel"
+              tabIndex={selected ? 0 : -1}
+              className={styles.tab}
+              onClick={() => setMode(m)}
+            >
+              {m === 'catalog' ? t.modeCatalog : t.modeCustom}
+              {active && <ActiveBadge label={t.activeBadge} />}
+            </button>
+          );
+        })}
       </div>
 
-      <div role="tabpanel" id="strategy-panel" aria-labelledby={mode === 'catalog' ? 'strategy-tab-catalog' : 'strategy-tab-custom'}>
+      <div role="tabpanel" id="strategy-panel" aria-labelledby={`strategy-tab-${mode}`}>
       {mode === 'custom' ? (
         <CustomStrategyPanel
           lang={locale}
@@ -442,313 +465,126 @@ function StrategyPageInner() {
       ) : (
       <>
       {activeCustomId && (
-        <div role="status" style={{
-          background: 'rgba(198,255,75,0.07)', border: '1px solid rgba(198,255,75,0.25)',
-          borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text)', lineHeight: 1.5, marginBottom: 24,
-        }}>
-          {t.customActiveElsewhere}
+        <div className={styles.block}>
+          <Notice tone="accent" live={false} icon={<Icon name="info" size={16} />}>{t.customActiveElsewhere}</Notice>
         </div>
       )}
 
       {/* ── Step 1: Objective ── */}
-      <div style={{ marginBottom: 40 }}>
-        <p style={sectionLabel}>{t.step1}</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-          {objectives.map((obj) => (
-            <div
-              key={obj.id}
-              style={cardStyle(selectedObjective === obj.id)}
-              onClick={() => setSelectedObjective(obj.id)}
-              role="button"
-              aria-pressed={selectedObjective === obj.id}
-            >
-              <div style={{ fontSize: 24, marginBottom: 8 }}>{obj.icon}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-                {locale === 'en' ? obj.name_en : obj.name_es}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
-                {locale === 'en' ? obj.desc_en : obj.desc_es}
-              </div>
-            </div>
-          ))}
+      <StrategySection label={t.step1}>
+        <div className="auto-grid" style={{ '--min': '200px', '--gap': '12px' } as CSSProperties}>
+          {objectives.map((obj) => {
+            const selected = selectedObjective === obj.id;
+            return (
+              <button
+                key={obj.id}
+                type="button"
+                aria-pressed={selected}
+                className={`${styles.optionCard} ui-link-card`}
+                onClick={() => setSelectedObjective(obj.id)}
+              >
+                <span className={styles.optionTop}>
+                  <span className={styles.optionIcon} aria-hidden="true">{obj.icon}</span>
+                  {selected && <Icon name="check-circle" size={18} className={styles.optionCheck} />}
+                </span>
+                <span className={styles.optionName}>{locale === 'en' ? obj.name_en : obj.name_es}</span>
+                <span className={styles.optionDesc}>{locale === 'en' ? obj.desc_en : obj.desc_es}</span>
+              </button>
+            );
+          })}
         </div>
-      </div>
+      </StrategySection>
 
-      {/* ── Industria (read-only, configurada en Mercado) ── */}
-      {(() => {
-        const currentIndustry = industries.find((i) => i.id === selectedIndustry);
-        return currentIndustry ? (
-          <div style={{ marginBottom: 32, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 100, padding: '8px 16px', fontSize: 13, color: 'var(--text)',
-            }}>
-              <span style={{ fontSize: 16 }}>{currentIndustry.icon}</span>
-              <span style={{ fontWeight: 600 }}>
-                {locale === 'en' ? currentIndustry.name_en : currentIndustry.name_es}
-              </span>
-            </div>
-            <a
-              href={`/${lang}/dashboard/brand/market`}
-              style={{ fontSize: 12, color: 'var(--muted)', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
-            >
-              {locale === 'es' ? 'Cambiar en Mercado →' : 'Change in Market →'}
-            </a>
+      {/* ── Step 2: Industria (se define en Mercado) ── */}
+      <StrategySection label={t.step2}>
+        {currentIndustry ? (
+          <div className={styles.industryRow}>
+            <span className={styles.industryPill}>
+              {currentIndustry.icon && <span aria-hidden="true">{currentIndustry.icon}</span>}
+              <span>{locale === 'en' ? (currentIndustry.name_en || currentIndustry.name_es) : currentIndustry.name_es}</span>
+            </span>
+            <Link href={marketHref} className={styles.inlineLink}>
+              {t.industry.change}
+              <Icon name="arrow-right" size={14} />
+            </Link>
           </div>
         ) : (
-          <div style={{
-            marginBottom: 32,
-            background: 'var(--surface)', border: '1px dashed var(--border)',
-            borderRadius: 10, padding: '16px 20px',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
-          }}>
-            <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-              {locale === 'es'
-                ? 'Define tu industria para ver la estrategia recomendada.'
-                : 'Set your industry to see the recommended strategy.'}
-            </span>
-            <a
-              href={`/${lang}/dashboard/brand/market`}
-              style={{
-                padding: '8px 16px', borderRadius: 8,
-                background: 'var(--accent)', color: '#000',
-                fontSize: 13, fontWeight: 700, textDecoration: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {locale === 'es' ? 'Ir a Mercado →' : 'Go to Market →'}
-            </a>
+          <div className={styles.industryMissing}>
+            <span>{t.industry.missing}</span>
+            <ButtonLink href={marketHref} variant="primary" size="sm">
+              {t.industry.goToMarket}
+              <Icon name="arrow-right" size={14} />
+            </ButtonLink>
           </div>
-        );
-      })()}
+        )}
+      </StrategySection>
 
       {/* ── Strategy recommendation ── */}
       {selectedObjective && selectedIndustry && (
         <>
           {recLoading && (
-            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 32 }}>
-              {t.recLoading}
-            </div>
+            <p role="status" className={styles.loadingLine}>
+              <Spinner size={14} /> {t.recLoading}
+            </p>
           )}
 
           {!recLoading && !strategy && (
-            <div
-              style={{
-                background: 'var(--surface)',
-                border: '1px dashed var(--border)',
-                borderRadius: 12,
-                padding: '32px 24px',
-                textAlign: 'center',
-                color: 'var(--muted)',
-                fontSize: 14,
-                marginBottom: 32,
-              }}
-            >
-              {t.noStrategy}
+            <div className={`ui-card ${styles.block}`} style={{ padding: 0, borderStyle: 'dashed' }}>
+              <EmptyState
+                icon={<Icon name="target" size={32} />}
+                title={t.noStrategy}
+                hint={canEdit ? t.noStrategyHint : undefined}
+                action={canEdit && (
+                  <Button variant="primary" icon={<Icon name="plus" size={16} />} onClick={startCustomFromScratch}>
+                    {t.noStrategyAction}
+                  </Button>
+                )}
+              />
             </div>
           )}
 
           {!recLoading && strategy && (
             <>
               {/* ── Framework ── */}
-              <div style={{ marginBottom: 40 }}>
-                <p style={sectionLabel}>{t.step3}</p>
-
+              <StrategySection label={t.step3}>
                 {isFallback && fallbackObjective && (
-                  <div style={{
-                    background: 'rgba(198,255,75,0.07)',
-                    border: '1px solid rgba(198,255,75,0.25)',
-                    borderRadius: 8,
-                    padding: '10px 14px',
-                    fontSize: 12,
-                    color: 'var(--muted)',
-                    marginBottom: 16,
-                    lineHeight: 1.5,
-                  }}>
-                    {t.fallbackHint}{' '}
-                    <strong style={{ color: 'var(--text)' }}>
-                      {locale === 'en' ? fallbackObjective.name_en : fallbackObjective.name_es}
-                    </strong>
+                  <div className={styles.block} style={{ marginBottom: 16 }}>
+                    <Notice tone="accent" live={false} icon={<Icon name="info" size={16} />}>
+                      {t.fallbackHint}{' '}
+                      <strong style={{ color: 'var(--text)' }}>
+                        {locale === 'en' ? fallbackObjective.name_en : fallbackObjective.name_es}
+                      </strong>
+                    </Notice>
                   </div>
                 )}
-                <div
-                  style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 14,
-                    padding: '24px 28px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-                    <div style={{ fontFamily: 'var(--font-syne)', fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>
-                      {locale === 'en' ? strategy.framework_name_en : strategy.framework_name_es}
-                    </div>
-                    {isSelectionSaved && <span style={activeBadgeStyle}>{t.activeBadge}</span>}
-                  </div>
-                  <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 20 }}>
-                    {locale === 'en' ? strategy.framework_desc_en : strategy.framework_desc_es}
-                  </p>
-                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--muted)', marginBottom: 4 }}>
-                        {t.kpiPrimary}
-                      </div>
-                      <div style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>
-                        {locale === 'en' ? (strategy.kpi_primary_en || strategy.kpi_primary_es) : strategy.kpi_primary_es}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--muted)', marginBottom: 4 }}>
-                        {t.kpiSecondary}
-                      </div>
-                      <div style={{ fontSize: 14, color: 'var(--text)' }}>
-                        {locale === 'en' ? (strategy.kpi_secondary_en || strategy.kpi_secondary_es) : strategy.kpi_secondary_es}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                <StrategyOverview
+                  t={t}
+                  headingAs="h3"
+                  name={locale === 'en' ? strategy.framework_name_en : strategy.framework_name_es}
+                  active={isSelectionSaved}
+                  meta={isSelectionSaved ? t.catalogActiveHint : undefined}
+                  description={locale === 'en' ? strategy.framework_desc_en : strategy.framework_desc_es}
+                  kpiPrimary={locale === 'en' ? (strategy.kpi_primary_en || strategy.kpi_primary_es) : strategy.kpi_primary_es}
+                  kpiSecondary={locale === 'en' ? (strategy.kpi_secondary_en || strategy.kpi_secondary_es) : strategy.kpi_secondary_es}
+                />
+              </StrategySection>
 
               {/* ── Weekly calendar ── */}
-              <div style={{ marginBottom: 40 }}>
-                <p style={sectionLabel}>{t.step4}</p>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1.5px solid var(--border)' }}>
-                        {t.tableHeaders.map((h) => (
-                          <th
-                            key={h}
-                            style={{
-                              padding: '8px 12px',
-                              textAlign: 'left',
-                              fontWeight: 700,
-                              color: 'var(--muted)',
-                              fontSize: 11,
-                              letterSpacing: '0.08em',
-                              textTransform: 'uppercase',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.entries(weeks)
-                        .sort(([a], [b]) => Number(a) - Number(b))
-                        .map(([week, tpls]) =>
-                          tpls.map((t2, idx) => (
-                            <tr
-                              key={t2.id}
-                              style={{
-                                borderBottom: '1px solid var(--border)',
-                                background: 'transparent',
-                                transition: 'background .1s',
-                              }}
-                              onMouseEnter={(e) =>
-                                ((e.currentTarget as HTMLTableRowElement).style.background = 'var(--surface)')
-                              }
-                              onMouseLeave={(e) =>
-                                ((e.currentTarget as HTMLTableRowElement).style.background = 'transparent')
-                              }
-                            >
-                              {idx === 0 && (
-                                <td
-                                  rowSpan={tpls.length}
-                                  style={{
-                                    padding: '12px',
-                                    fontWeight: 700,
-                                    color: 'var(--accent)',
-                                    fontSize: 13,
-                                    verticalAlign: 'top',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  S{week}
-                                </td>
-                              )}
-                              <td style={{ padding: '12px', whiteSpace: 'nowrap' }}>
-                                <span style={{ fontSize: 16, marginRight: 6 }}>
-                                  {FORMAT_ICONS[t2.format] ?? '◉'}
-                                </span>
-                                <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                                  {t2.format}
-                                </span>
-                              </td>
-                              <td style={{ padding: '12px', color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                                {t2.channel_hint}
-                              </td>
-                              <td style={{ padding: '12px', color: 'var(--text)', lineHeight: 1.5, maxWidth: 300 }}>
-                                {locale === 'en' ? (t2.topic_en || t2.topic_es) : t2.topic_es}
-                                {(locale === 'en' ? (t2.copy_structure_en || t2.copy_structure_es) : t2.copy_structure_es) && (
-                                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>
-                                    {locale === 'en' ? (t2.copy_structure_en || t2.copy_structure_es) : t2.copy_structure_es}
-                                  </div>
-                                )}
-                              </td>
-                              <td style={{ padding: '12px', color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                                {locale === 'en' ? (t2.goal_en || t2.goal_es) : t2.goal_es}
-                              </td>
-                              <td style={{ padding: '12px', whiteSpace: 'nowrap' }}>
-                                <button
-                                  onClick={() => handleGenerate(t2)}
-                                  style={{
-                                    background: 'var(--accent)',
-                                    color: '#000',
-                                    border: 'none',
-                                    borderRadius: 8,
-                                    padding: '7px 14px',
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  {t.generateBtn}
-                                </button>
-                              </td>
-                            </tr>
-                          )),
-                        )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {catalogRows.length > 0 && (
+                <StrategySection label={t.step4} headingId="strategy-catalog-calendar">
+                  <StrategyCalendar t={t} rows={catalogRows} labelledBy="strategy-catalog-calendar" />
+                </StrategySection>
+              )}
 
               {/* ── Interaction layers ── */}
               {strategy.interaction_layers?.length > 0 && (
-                <div style={{ marginBottom: 40 }}>
-                  <p style={sectionLabel}>{t.step5}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+                <StrategySection label={t.step5}>
+                  <div className="auto-grid" style={{ '--min': '240px', '--gap': '16px' } as CSSProperties}>
                     {strategy.interaction_layers.map((layer, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          background: 'var(--surface)',
-                          border: '1px solid var(--border)',
-                          borderRadius: 12,
-                          padding: '20px 20px',
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            letterSpacing: '0.12em',
-                            textTransform: 'uppercase',
-                            color: 'var(--accent)',
-                            marginBottom: 6,
-                          }}
-                        >
-                          {locale === 'en' ? layer.num_en : layer.num_es}
-                        </div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>
-                          {locale === 'en' ? layer.title_en : layer.title_es}
-                        </div>
-                        <ul style={{ margin: 0, paddingLeft: 16, color: 'var(--muted)', fontSize: 13, lineHeight: 1.7 }}>
+                      <div key={idx} className={styles.layerCard}>
+                        <p className={styles.layerNum}>{locale === 'en' ? layer.num_en : layer.num_es}</p>
+                        <h3 className={styles.layerTitle}>{locale === 'en' ? layer.title_en : layer.title_es}</h3>
+                        <ul className={styles.layerList}>
                           {(locale === 'en' ? layer.items_en : layer.items_es).map((item, i) => (
                             <li key={i}>{item}</li>
                           ))}
@@ -756,131 +592,93 @@ function StrategyPageInner() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </StrategySection>
               )}
 
               {/* ── CTA mechanic ── */}
               {strategy.cta_mechanic_es && (
-                <div
-                  style={{
-                    background: 'rgba(198,255,75,0.06)',
-                    border: '1px solid rgba(198,255,75,0.25)',
-                    borderRadius: 12,
-                    padding: '20px 24px',
-                    marginBottom: 40,
-                  }}
-                >
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 8 }}>
-                    {t.conversionMechanic}
-                  </div>
-                  <p style={{ margin: 0, fontSize: 14, color: 'var(--text)', lineHeight: 1.7 }}>
-                    {locale === 'en' ? (strategy.cta_mechanic_en || strategy.cta_mechanic_es) : strategy.cta_mechanic_es}
-                  </p>
-                </div>
+                <ConversionMechanic
+                  t={t}
+                  text={locale === 'en' ? (strategy.cta_mechanic_en || strategy.cta_mechanic_es) : strategy.cta_mechanic_es}
+                />
               )}
 
               {/* ── Automation packs ── */}
               {(packsLoading || packs.length > 0) && (
-                <div style={{ marginBottom: 40 }}>
-                  <p style={sectionLabel}>
-                    {locale === 'es' ? 'Automatizaciones recomendadas' : 'Recommended automations'}
-                  </p>
+                <StrategySection label={t.packs.title}>
                   {packsLoading ? (
-                    <div style={{ color: 'var(--muted)', fontSize: 13 }}>⏳</div>
+                    <p role="status" className={styles.loadingLine} style={{ marginBottom: 0 }}>
+                      <Spinner size={14} /> {t.packs.loading}
+                    </p>
                   ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+                    <div className="auto-grid" style={{ '--min': '260px', '--gap': '14px' } as CSSProperties}>
                       {packs.map(pack => {
                         const installed = installedPacks.has(pack.id);
                         const installing = installingPack === pack.id;
                         const packName = localizedText(pack.name_es, pack.name_en, pack.name);
                         const packDescription = localizedText(pack.desc_es, pack.desc_en, pack.description);
                         return (
-                          <div key={pack.id} style={{
-                            background: 'var(--surface)', border: `1px solid ${installed ? 'var(--accent)' : 'var(--border)'}`,
-                            borderRadius: 12, padding: '18px 20px',
-                          }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                              {pack.icon && <span style={{ fontSize: 22 }}>{pack.icon}</span>}
-                              <div style={{ fontWeight: 600, fontSize: 14 }}>{packName}</div>
+                          <div key={pack.id} className={styles.packCard} data-installed={installed}>
+                            <div className={styles.packHead}>
+                              {pack.icon && <span className={styles.packIcon} aria-hidden="true">{pack.icon}</span>}
+                              <h3 className={styles.packName}>{packName}</h3>
                             </div>
-                            {packDescription && (
-                              <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, margin: '0 0 12px' }}>
-                                {packDescription}
-                              </p>
-                            )}
+                            {packDescription && <p className={styles.packDesc}>{packDescription}</p>}
                             {pack.kefy_automation_pack_rules?.length > 0 && (
-                              <ul style={{ margin: '0 0 14px', paddingLeft: 16, listStyle: 'disc', color: 'var(--muted)', fontSize: 12, lineHeight: 1.8 }}>
+                              <ul className={styles.packRules}>
                                 {pack.kefy_automation_pack_rules.map(r => (
                                   <li key={r.id}>{localizedText(r.name_es, r.name_en, r.name)}</li>
                                 ))}
                               </ul>
                             )}
-                            <button
-                              onClick={() => installPack(pack.id)}
-                              disabled={installed || installing}
-                              style={{
-                                width: '100%', padding: '8px', borderRadius: 8,
-                                border: installed ? '1px solid var(--accent)' : 'none',
-                                background: installed ? 'transparent' : 'var(--accent)',
-                                color: installed ? 'var(--accent)' : '#000',
-                                fontWeight: 600, fontSize: 13,
-                                cursor: (installed || installing) ? 'default' : 'pointer',
-                              }}
-                            >
-                              {installing ? '⏳' : installed
-                                ? (locale === 'es' ? '✓ Pack instalado' : '✓ Pack installed')
-                                : (locale === 'es' ? 'Instalar pack' : 'Install pack')}
-                            </button>
+                            <div className={styles.packFooter}>
+                              {installed ? (
+                                <p role="status" className={styles.packInstalled}>
+                                  <Icon name="check-circle" size={16} /> {t.packs.installed}
+                                </p>
+                              ) : (
+                                <Button
+                                  block
+                                  variant="primary"
+                                  loading={installing}
+                                  onClick={() => { void installPack(pack.id); }}
+                                >
+                                  {installing ? t.packs.installing : t.packs.install}
+                                </Button>
+                              )}
+                              {failedPacks.has(pack.id) && <p role="alert" className="ui-error">{t.packs.installError}</p>}
+                            </div>
                           </div>
                         );
                       })}
                     </div>
                   )}
-                </div>
+                </StrategySection>
               )}
 
               {/* ── Save button ── */}
               {saveError && (
-                <div role="alert" style={{
-                  background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.35)',
-                  borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text)', marginBottom: 16,
-                }}>
-                  {saveError}
+                <div style={{ marginBottom: 16 }}>
+                  <Notice tone="danger" icon={<Icon name="alert" size={16} />}>{saveError}</Notice>
                 </div>
               )}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                <button
-                  onClick={handleSave}
-                  disabled={saving || isSelectionSaved}
-                  style={{
-                    background:    isSelectionSaved ? 'var(--surface)' : 'var(--accent)',
-                    color:         isSelectionSaved ? 'var(--muted)' : '#000',
-                    border:        isSelectionSaved ? '1px solid var(--border)' : 'none',
-                    borderRadius:  10,
-                    padding:       '12px 28px',
-                    fontSize:      14,
-                    fontWeight:    700,
-                    cursor:        isSelectionSaved ? 'default' : 'pointer',
-                    transition:    'all .15s ease',
-                  }}
+              <div className={styles.saveRow}>
+                <Button
+                  variant={isSelectionSaved ? 'secondary' : 'primary'}
+                  size="lg"
+                  icon={isSelectionSaved ? <Icon name="check" size={16} /> : undefined}
+                  loading={saving}
+                  disabled={isSelectionSaved}
+                  onClick={() => { void handleSave(); }}
                 >
                   {saving ? t.saving : isSelectionSaved ? t.strategySaved : t.saveStrategy}
-                </button>
+                </Button>
                 {canEdit && (
-                  <button
-                    type="button"
-                    onClick={startFromRecommended}
-                    style={{
-                      background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)',
-                      borderRadius: 10, padding: '12px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                    }}
-                  >
+                  <Button variant="secondary" size="lg" icon={<Icon name="edit" size={16} />} onClick={startFromRecommended}>
                     {t.startFromRecommended}
-                  </button>
+                  </Button>
                 )}
-                {saveOk && (
-                  <span style={{ fontSize: 13, color: 'var(--accent)' }}>{t.savedOk}</span>
-                )}
+                <p role="status" className={saveOk ? styles.savedOk : 'sr-only'}>{saveOk ? t.savedOk : ''}</p>
               </div>
             </>
           )}

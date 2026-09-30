@@ -42,7 +42,7 @@ export default async function BlogPage({ params }: { params: Promise<{ lang: str
 
   return (
     <>
-      <BlogNav lang={lang} nav={copy.nav} />
+      <BlogNav lang={lang} nav={copy.nav} cta={copy.cta} />
       <div className="page-layout">
       <div className="container" style={{ maxWidth: '960px' }}>
         <Link href={`/${lang}`} className="back-link">

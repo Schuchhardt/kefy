@@ -1,37 +1,55 @@
 'use client';
 
-import BrandImageField from '@/components/dashboard/BrandImageField';
+// ─── Mi marca › Identidad ────────────────────────────────────────────────────
+//
+// El Brand Kit: quién eres, cómo hablas y cómo te ves. Guardar es explícito,
+// pero la barra de guardado va pegada al pie de la vista y dice en todo
+// momento si hay cambios sin guardar, si se está guardando o si ya se guardó.
+// Antes había un solo «Guardar» al final de seis tarjetas y el «Guardado»
+// aparecía junto a él, fuera de vista. Sin cambios, el botón está desactivado.
+//
+// Solo se envían los campos que cambiaron respecto de lo último que se cargó o
+// guardó (PATCH parcial): así Identidad, Mercado y el asistente no se pisan.
+// Si el asistente edita la marca mientras hay cambios pendientes, se toma lo
+// del servidor y se conservan los campos que el usuario tocó.
+//
+// La validación es la del servidor (lib/brand-kit.ts) hecha antes de enviar y
+// con mensajes en el idioma de la app, en lugar de los globos nativos del
+// navegador (que salen en el idioma del navegador y no nombran el campo).
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { useBrand } from '@/lib/brand-context';
 import { useDataChanged } from '@/lib/data-events';
+import { CHANNEL_LABELS } from '@/lib/channels';
+import { toLocale } from '@/lib/i18n';
 import type { BrandKit, BrandTone } from '@/types/brand-kit';
-import type { Locale } from '@/types/i18n';
+import BrandImageField from '@/components/dashboard/BrandImageField';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
 import { SkeletonBlock, FormSectionSkeleton } from '@/components/ui/Skeleton';
-
-// ─── i18n ─────────────────────────────────────────────────────────────────────
-
-import esT from '@/locales/es/dashboard/brand';
+import SectionCard from '@/components/ui/SectionCard';
+import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import ArrayChips from '@/components/ui/ArrayChips';
+import Button, { Spinner } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
+import esT, { type BrandCopy } from '@/locales/es/dashboard/brand';
 import enT from '@/locales/en/dashboard/brand';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
+import styles from '../brand-form.module.css';
 
-const T = { es: esT, en: enT } as const;
+// ─── Constantes ───────────────────────────────────────────────────────────────
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const TONES: { value: BrandTone; label: Record<Locale, string> }[] = [
-  { value: 'professional',  label: { es: 'Profesional',   en: 'Professional'  } },
-  { value: 'friendly',      label: { es: 'Amigable',      en: 'Friendly'      } },
-  { value: 'authoritative', label: { es: 'Autoritativo',  en: 'Authoritative' } },
-  { value: 'playful',       label: { es: 'Divertido',     en: 'Playful'       } },
-  { value: 'inspirational', label: { es: 'Inspiracional', en: 'Inspirational' } },
-  { value: 'educational',   label: { es: 'Educativo',     en: 'Educational'   } },
-  { value: 'casual',        label: { es: 'Casual',        en: 'Casual'        } },
-  { value: 'formal',        label: { es: 'Formal',        en: 'Formal'        } },
+const TONES: BrandTone[] = [
+  'professional', 'friendly', 'authoritative', 'playful',
+  'inspirational', 'educational', 'casual', 'formal',
 ];
 
-const SOCIAL_CHANNELS = ['instagram', 'linkedin', 'twitter', 'facebook', 'tiktok', 'youtube'];
+const SOCIAL_CHANNELS = ['instagram', 'linkedin', 'twitter', 'facebook', 'tiktok', 'youtube'] as const;
 
+// Cada idioma con su nombre en ese idioma: no se traducen.
 const LANGUAGES = [
   { value: 'es', label: 'Español' },
   { value: 'en', label: 'English' },
@@ -39,327 +57,389 @@ const LANGUAGES = [
   { value: 'fr', label: 'Français' },
 ];
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+const HEX = /^#[0-9A-Fa-f]{6}$/;
 
-const inputStyle: React.CSSProperties = {
-  width: '100%', background: 'var(--bg)', border: '1px solid var(--border)',
-  borderRadius: 8, padding: '10px 14px', fontSize: 14, color: 'var(--text)',
-  outline: 'none', boxSizing: 'border-box',
+// Colores por defecto del selector cuando la marca no eligió ninguno.
+const COLOR_FIELDS = [
+  { key: 'primary_color', label: 'primaryColor', fallback: '#000000' },
+  { key: 'secondary_color', label: 'secondaryColor', fallback: '#ffffff' },
+  { key: 'accent_color', label: 'accentColor', fallback: '#c6ff4b' },
+] as const;
+
+// Lo mismo que acepta /api/brand-kit/assets (lib/brand-kit.ts).
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'image/gif'];
+const MAX_LOGO_BYTES = 5 * 1024 * 1024;
+
+/** Campos que edita esta página. */
+const IDENTITY_FIELDS = [
+  'name', 'tagline', 'industry', 'website_url', 'social_urls', 'language',
+  'customer_locations', 'uses_emojis', 'communication_style', 'mission', 'tone',
+  'primary_color', 'secondary_color', 'accent_color', 'font_heading', 'font_body',
+  'logo_url', 'notes',
+] as const;
+/** Son de Mercado, pero el análisis de la web también los trae y se muestran al confirmarlo. */
+const ENRICHED_MARKET_FIELDS = ['niche', 'target_audience', 'competitors'] as const;
+const FIELDS: readonly FieldKey[] = [...IDENTITY_FIELDS, ...ENRICHED_MARKET_FIELDS];
+
+type FieldKey = (typeof IDENTITY_FIELDS)[number] | (typeof ENRICHED_MARKET_FIELDS)[number];
+type Kit = Partial<BrandKit>;
+type ValidatedKey = 'name' | 'website_url' | 'logo_url' | 'primary_color' | 'secondary_color' | 'accent_color';
+type Errors = Partial<Record<ValidatedKey, string>>;
+
+/** Etiqueta de cada campo del Brand Kit (resultado del análisis, errores del servidor). */
+const LABEL_KEYS: Record<string, keyof BrandCopy> = {
+  name: 'name', tagline: 'tagline', industry: 'industry', website_url: 'websiteUrl',
+  social_urls: 'socialUrls', language: 'language', customer_locations: 'customerLocations',
+  uses_emojis: 'usesEmojis', communication_style: 'communicationStyle', mission: 'mission',
+  tone: 'tone', primary_color: 'primaryColor', secondary_color: 'secondaryColor',
+  accent_color: 'accentColor', font_heading: 'fontHeading', font_body: 'fontBody',
+  logo_url: 'logo', notes: 'notes', niche: 'niche', target_audience: 'targetAudience',
+  competitors: 'competitors',
 };
 
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--muted)',
-  marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em',
-};
+// ─── Comparar, fusionar y validar ─────────────────────────────────────────────
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <label style={labelStyle}>{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 24, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '20px 24px' }}>
-      <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 15, fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
-}
-
-function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <Field label={label}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <input type="color" value={value} onChange={(e) => onChange(e.target.value)}
-          style={{ width: 40, height: 38, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', padding: 2, background: 'var(--bg)' }} />
-        <input style={{ ...inputStyle, flex: 1 }} value={value}
-          onChange={(e) => onChange(e.target.value)} placeholder="#000000" maxLength={7} />
-      </div>
-    </Field>
-  );
-}
-
-// ─── ArrayChips ───────────────────────────────────────────────────────────────
-
-function ArrayChips({
-  value, onChange, placeholder, suggestions, loadingSugg, onLoadSuggestions,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-  placeholder: string;
-  suggestions?: string[];
-  loadingSugg?: boolean;
-  onLoadSuggestions?: () => void;
-}) {
-  const [input, setInput] = useState('');
-
-  function add(item: string) {
-    const trimmed = item.trim();
-    if (!trimmed || value.includes(trimmed) || value.length >= 10) return;
-    onChange([...value, trimmed]);
-    setInput('');
+/** Valor de un campo tal como se guarda: vacío → null, listas y objetos limpios. */
+function normalized(kit: Kit, key: FieldKey): unknown {
+  const v = kit[key];
+  switch (key) {
+    case 'name':
+      return typeof v === 'string' ? v : '';
+    case 'language':
+      return (v as string | undefined) || 'es';
+    case 'uses_emojis':
+      return v ?? false;
+    case 'tone':
+    case 'customer_locations':
+    case 'competitors':
+      return Array.isArray(v) ? v : [];
+    case 'social_urls': {
+      const out: Record<string, string> = {};
+      const entries = Object.entries((v ?? {}) as Record<string, string | undefined>)
+        .sort(([a], [b]) => a.localeCompare(b));
+      for (const [network, url] of entries) if (typeof url === 'string' && url.trim()) out[network] = url;
+      return out;
+    }
+    default:
+      return typeof v === 'string' ? (v.trim() ? v : null) : (v ?? null);
   }
-
-  return (
-    <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        {value.map((v) => (
-          <span key={v} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(198,255,75,0.12)', border: '1px solid var(--accent)', borderRadius: 20, padding: '4px 10px', fontSize: 13, color: 'var(--accent)' }}>
-            {v}
-            <button type="button" onClick={() => onChange(value.filter((x) => x !== v))}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
-          </span>
-        ))}
-      </div>
-      {suggestions !== undefined && (
-        <div style={{ marginBottom: 8 }}>
-          {loadingSugg ? (
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando sugerencias...</span>
-          ) : suggestions.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {suggestions.filter((s) => !value.includes(s)).map((s) => (
-                <button key={s} type="button" onClick={() => add(s)}
-                  style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>
-                  + {s}
-                </button>
-              ))}
-            </div>
-          ) : onLoadSuggestions ? (
-            <button type="button" onClick={onLoadSuggestions}
-              style={{ fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-              Cargar sugerencias IA
-            </button>
-          ) : null}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input style={{ ...inputStyle, flex: 1 }} value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(input); } }}
-          placeholder={placeholder} />
-        <button type="button" onClick={() => add(input)}
-          style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>+</button>
-      </div>
-    </div>
-  );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+function sameField(key: FieldKey, a: Kit, b: Kit): boolean {
+  let x = normalized(a, key);
+  let y = normalized(b, key);
+  // El orden de los tonos no significa nada.
+  if (key === 'tone') { x = [...(x as string[])].sort(); y = [...(y as string[])].sort(); }
+  return JSON.stringify(x) === JSON.stringify(y);
+}
 
-export default function BrandKitPage({ params }: { params: Promise<{ lang: string }> }) {
-  const { loading: authLoading, org } = useAuth();
-  const [locale, setLocale] = useState<Locale>('es');
+/** Campos de `form` que difieren de `base`, con el valor que se envía. */
+function changes(form: Kit, base: Kit): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of FIELDS) if (!sameField(key, form, base)) out[key] = normalized(form, key);
+  return out;
+}
 
-  useEffect(() => {
-    params.then(({ lang }) => {
-      if (lang === 'en' || lang === 'es') setLocale(lang as Locale);
-    });
-  }, [params]);
+/**
+ * Lo nuevo del servidor sin perder lo que el usuario cambió: los campos de
+ * `local` que difieren de `base` (lo que había cuando empezó a editar) se
+ * quedan como están.
+ */
+function mergeKit(server: Kit, base: Kit, local: Kit): Kit {
+  const merged: Record<string, unknown> = { ...server };
+  for (const key of FIELDS) if (!sameField(key, local, base)) merged[key] = local[key];
+  return merged as Kit;
+}
 
-  const t = T[locale];
+/** `tuempresa.com` → `https://tuempresa.com`; null si no es una URL. */
+function normalizeWebsiteUrl(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withProtocol);
+    return parsed.hostname ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
-  const [form, setForm] = useState<Partial<BrandKit>>({});
+function isUrl(value: string): boolean {
+  try { new URL(value); return true; } catch { return false; }
+}
+
+/**
+ * Las mismas reglas que valida el servidor, con mensajes para cada campo. En
+ * el orden de la página: al guardar, el foco va al primer campo con error.
+ */
+function validate(form: Kit, t: BrandCopy): Errors {
+  const errors: Errors = {};
+  if (!(form.name ?? '').trim()) errors.name = t.identity.nameRequired;
+  // El servidor le añade https:// a la web, pero no al logo.
+  if (form.website_url?.trim() && !normalizeWebsiteUrl(form.website_url)) errors.website_url = t.identity.urlInvalid;
+  for (const { key } of COLOR_FIELDS) {
+    const value = form[key];
+    if (value && !HEX.test(value)) errors[key] = t.identity.colorInvalid;
+  }
+  if (form.logo_url?.trim() && !isUrl(form.logo_url.trim())) errors.logo_url = t.identity.urlInvalid;
+  return errors;
+}
+
+// ─── Página ───────────────────────────────────────────────────────────────────
+
+type EnrichState =
+  | { status: 'idle' | 'loading' | 'error' | 'applied' }
+  | { status: 'result'; data: Kit };
+
+type LogoState = { status: 'idle' | 'uploading' | 'uploaded' } | { status: 'error'; message: string };
+
+export default function BrandIdentityPage() {
+  const params = useParams<{ lang: string }>();
+  const locale = toLocale(params?.lang);
+  const t = locale === 'en' ? enT : esT;
+  const ti = t.identity;
+  const common = locale === 'en' ? enCommon : esCommon;
+
+  const { loading: authLoading, org, role } = useAuth();
+  const { refresh: refreshBrands } = useBrand();
+  // Solo owner/admin escriben el Brand Kit. Sin rol conocido se deja intentar:
+  // el servidor responde 403 y se explica.
+  const canEdit = !role || role === 'owner' || role === 'admin';
+
+  const uid = useId().replace(/:/g, '');
+  const formId = `identity-form-${uid}`;
+  const fid = (key: string) => `identity-${uid}-${key}`;
+
+  // `baseline` es lo último que se cargó o guardó; `form`, lo que se edita.
+  const [{ form, baseline }, setKit] = useState<{ form: Kit; baseline: Kit }>({ form: {}, baseline: {} });
   const [fetching, setFetching] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const localeRef = useRef<Locale>('es');
+  const [justSaved, setJustSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
 
-  // Enrichment state
-  const [enrichUrl, setEnrichUrl] = useState('');
-  const [enriching, setEnriching] = useState(false);
-  const [enrichResult, setEnrichResult] = useState<Partial<BrandKit> | null>(null);
-  const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
-
-  // Logo upload state
-  const [logoUploading, setLogoUploading] = useState(false);
+  const [enrich, setEnrich] = useState<EnrichState>({ status: 'idle' });
+  const [logo, setLogo] = useState<LogoState>({ status: 'idle' });
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const [sugg, setSugg] = useState<{ items?: string[]; loading: boolean; error: string | null }>({ loading: false, error: null });
 
-  // Array field suggestions
-  const [arraySugg, setArraySugg] = useState<Record<string, string[]>>({});
-  const [arraySuggLoading, setArraySuggLoading] = useState<Record<string, boolean>>({});
-
-  // Load brand kit
+  // ── Carga ────────────────────────────────────────────────────────────────
+  // `initial`: la primera carga muestra el esqueleto; las recargas (el
+  // asistente editó la marca) son silenciosas y conservan lo que se editó.
   const orgName = org?.name;
-  const loadKit = useCallback(() => {
-    fetch('/api/brand-kit', { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Failed to load');
-        const { kit: k } = await res.json() as { kit: BrandKit };
-        // Pre-fill name with org name if not yet customized
-        if ((!k.name || k.name === 'Mi marca') && orgName) k.name = orgName;
-        setForm(k);
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setFetching(false));
+  const loadKit = useCallback(async (initial: boolean) => {
+    if (initial) { setFetching(true); setLoadError(false); }
+    try {
+      const res = await fetch('/api/brand-kit', { credentials: 'include' });
+      if (!res.ok) throw new Error('load');
+      const { kit } = await res.json() as { kit: BrandKit };
+      setKit((prev) => {
+        if (!initial) return { baseline: kit, form: mergeKit(kit, prev.baseline, prev.form) };
+        const next: Kit = { ...kit };
+        // Sin nombre propio todavía: se propone el de la organización (queda
+        // como cambio sin guardar hasta que se confirme).
+        if ((!kit.name || kit.name === 'Mi marca') && orgName) next.name = orgName;
+        return { baseline: kit, form: next };
+      });
+    } catch {
+      if (initial) setLoadError(true);
+    } finally {
+      if (initial) setFetching(false);
+    }
   }, [orgName]);
 
+  const loadedOnce = useRef(false);
   useEffect(() => {
-    if (authLoading) return;
-    loadKit();
+    if (authLoading || loadedOnce.current) return;
+    loadedOnce.current = true;
+    void loadKit(true);
   }, [authLoading, loadKit]);
 
-  // El asistente editó el perfil de marca: se recarga el formulario.
-  useDataChanged(['brand-kit'], () => { if (!authLoading) loadKit(); });
+  // El asistente editó el perfil de marca: se recarga sin perder lo editado.
+  useDataChanged(['brand-kit'], () => { if (!authLoading && !fetching) void loadKit(false); });
 
+  const pending = changes(form, baseline);
+  const dirty = Object.keys(pending).length > 0;
+
+  // Cerrar o recargar la pestaña con cambios sin guardar pide confirmación.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  function updateField<K extends keyof BrandKit>(key: K, value: BrandKit[K] | null) {
+    setKit((prev) => ({ ...prev, form: { ...prev.form, [key]: value } }));
+    setSaveError(null);
+  }
+
+  function touch(key: ValidatedKey) {
+    setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }
+
+  const errors = validate(form, t);
+  const errorFor = (key: ValidatedKey) => (submitted || touched.has(key) ? errors[key] : undefined);
+
+  // ── Guardar ──────────────────────────────────────────────────────────────
+  async function saveErrorMessage(res: Response): Promise<string> {
+    if (res.status === 403) return t.errors.forbidden;
+    if (res.status === 422) {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      const field = /^([a-z_]+) (?:must|items)/.exec(body.error ?? '')?.[1];
+      const labelKey = field ? LABEL_KEYS[field] : undefined;
+      if (labelKey) return t.errors.invalidField(t[labelKey] as string);
+    }
+    return t.errors.save;
+  }
+
+  async function handleSave(e?: FormEvent) {
+    e?.preventDefault();
+    if (saving || !canEdit) return;
+
+    const invalid = (Object.keys(errors) as ValidatedKey[]);
+    if (invalid.length > 0) {
+      setSubmitted(true);
+      setSaveError(t.saveBar.invalid);
+      document.getElementById(fid(invalid[0]))?.focus();
+      return;
+    }
+    if (!dirty) return;
+
+    const sent = form;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await fetch('/api/brand-kit', {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pending),
+      });
+      if (!res.ok) { setSaveError(await saveErrorMessage(res)); return; }
+      const { kit } = await res.json() as { kit: BrandKit };
+      // Lo que se editó mientras se guardaba sigue pendiente.
+      setKit((prev) => ({ baseline: kit, form: mergeKit(kit, sent, prev.form) }));
+      setJustSaved(true);
+      setSubmitted(false);
+      setTouched(new Set());
+      // El nombre y el logo se ven en el selector de marca.
+      if ('name' in pending || 'logo_url' in pending) void refreshBrands();
+    } catch {
+      setSaveError(common.errors.network);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Analizar la web ──────────────────────────────────────────────────────
+  async function handleEnrich() {
+    const raw = form.website_url ?? '';
+    const url = normalizeWebsiteUrl(raw);
+    if (!url) { setEnrich({ status: 'error' }); return; }
+    if (url !== raw.trim()) updateField('website_url', url);
+
+    setEnrich({ status: 'loading' });
+    try {
+      const res = await fetch('/api/brand-kit/enrich-url', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, lang: locale }),
+      });
+      if (!res.ok) throw new Error('enrich');
+      const { extracted } = await res.json() as { extracted: Kit };
+      const useful = Object.entries(extracted ?? {}).filter(([key, value]) =>
+        (FIELDS as readonly string[]).includes(key) && hasValue(value));
+      if (useful.length === 0) throw new Error('empty');
+      setEnrich({ status: 'result', data: Object.fromEntries(useful) as Kit });
+    } catch {
+      setEnrich({ status: 'error' });
+    }
+  }
+
+  function applyEnriched() {
+    if (enrich.status !== 'result') return;
+    const data = enrich.data;
+    setKit((prev) => ({ ...prev, form: { ...prev.form, ...data } }));
+    setEnrich({ status: 'applied' });
+  }
+
+  function display(key: string, value: unknown): string {
+    if (Array.isArray(value)) {
+      return key === 'tone'
+        ? value.map((v) => t.tones[v as BrandTone] ?? String(v)).join(', ')
+        : value.join(', ');
+    }
+    if (typeof value === 'boolean') return value ? t.yes : t.no;
+    if (value && typeof value === 'object') {
+      return Object.entries(value as Record<string, string>)
+        .map(([network, url]) => `${CHANNEL_LABELS[network as keyof typeof CHANNEL_LABELS] ?? network}: ${url}`)
+        .join(' · ');
+    }
+    if (key === 'language') return LANGUAGES.find((l) => l.value === value)?.label ?? String(value);
+    return String(value);
+  }
+
+  // ── Logo ─────────────────────────────────────────────────────────────────
   async function handleLogoUpload(file: File) {
-    setLogoUploading(true);
+    const reset = () => { if (logoInputRef.current) logoInputRef.current.value = ''; };
+    if (!LOGO_TYPES.includes(file.type)) { setLogo({ status: 'error', message: ti.logoBadType }); reset(); return; }
+    if (file.size > MAX_LOGO_BYTES) { setLogo({ status: 'error', message: ti.logoTooBig }); reset(); return; }
+
+    setLogo({ status: 'uploading' });
     try {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('type', 'logo');
       fd.append('label', 'Logo');
       const res = await fetch('/api/brand-kit/assets', { method: 'POST', credentials: 'include', body: fd });
-      if (!res.ok) throw new Error('upload failed');
+      if (!res.ok) {
+        setLogo({ status: 'error', message: res.status === 403 ? t.errors.forbidden : ti.logoFailed });
+        return;
+      }
       const { asset } = await res.json() as { asset: { public_url: string } };
       updateField('logo_url', asset.public_url);
+      setLogo({ status: 'uploaded' });
     } catch {
-      // silently ignore — user can retry
+      setLogo({ status: 'error', message: ti.logoFailed });
     } finally {
-      setLogoUploading(false);
+      reset();
     }
   }
 
-  // Sync refs after every render so callbacks always see latest values without re-creating
-  useEffect(() => {
-    localeRef.current = locale;
-  }); // intentionally no deps — runs after every render
-
-  function updateField<K extends keyof BrandKit>(key: K, value: BrandKit[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    setSaved(false);
-  }
-
-  function normalizeWebsiteUrl(input: string): string | null {
-    const trimmed = input.trim();
-    if (!trimmed) return null;
-
-    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-
-    try {
-      const parsed = new URL(withProtocol);
-      if (!parsed.hostname) return null;
-      return parsed.toString();
-    } catch {
-      return null;
-    }
-  }
-
-  // Enrich from URL
-  async function handleEnrich(urlOverride?: string) {
-    const rawUrl = urlOverride ?? enrichUrl;
-    const normalizedUrl = normalizeWebsiteUrl(rawUrl);
-    if (!normalizedUrl) {
-      setEnrichResult(null);
-      setEnrichMsg(t.enrichError);
-      return;
-    }
-
-    setEnrichUrl(normalizedUrl);
-    if ((form.website_url ?? '').trim() === rawUrl.trim()) {
-      updateField('website_url', normalizedUrl);
-    }
-
-    setEnriching(true);
-    setEnrichResult(null);
-    setEnrichMsg(null);
-    try {
-      const res = await fetch('/api/brand-kit/enrich-url', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: normalizedUrl, lang: localeRef.current }),
-      });
-      if (!res.ok) throw new Error();
-      const { extracted } = await res.json() as { extracted: Partial<BrandKit> };
-      if (Object.keys(extracted).length === 0) throw new Error('empty');
-      setEnrichResult(extracted);
-      setEnrichMsg(t.enrichSuccess);
-    } catch {
-      setEnrichMsg(t.enrichError);
-    } finally {
-      setEnriching(false);
-    }
-  }
-
-  function applyEnriched() {
-    if (!enrichResult) return;
-    setForm((prev) => ({ ...prev, ...enrichResult }));
-    setEnrichResult(null);
-    setEnrichMsg(null);
-    setEnrichUrl('');
-  }
-
-  async function loadArraySugg(field: string) {
-    if (arraySugg[field]) return;
-    setArraySuggLoading((p) => ({ ...p, [field]: true }));
+  // ── Sugerencias (1 crédito cada vez: solo con el botón) ──────────────────
+  async function requestSuggestions() {
+    setSugg({ loading: true, error: null });
     try {
       const res = await fetch('/api/brand-kit/ai-suggest', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, context: form, lang: locale }),
+        body: JSON.stringify({ field: 'customer_locations', context: form, lang: locale }),
       });
-      if (!res.ok) throw new Error();
-      const { suggestions: sugg } = await res.json() as { suggestions: string[] };
-      setArraySugg((p) => ({ ...p, [field]: sugg }));
-    } catch {
-      setArraySugg((p) => ({ ...p, [field]: [] }));
-    } finally {
-      setArraySuggLoading((p) => ({ ...p, [field]: false }));
-    }
-  }
-
-  // Save
-  async function handleSave(e?: React.FormEvent) {
-    e?.preventDefault();
-    if (saving) return;
-    setSaving(true);
-    setError(null);
-    const payload = {
-      name: form.name ?? org?.name ?? null,
-      tagline: form.tagline ?? null, industry: form.industry ?? null,
-      website_url: form.website_url ?? null, social_urls: form.social_urls ?? {},
-      language: form.language ?? 'es', customer_locations: form.customer_locations ?? [],
-      uses_emojis: form.uses_emojis ?? false, communication_style: form.communication_style ?? null,
-      mission: form.mission ?? null, tone: form.tone ?? [],
-      primary_color: form.primary_color ?? null, secondary_color: form.secondary_color ?? null,
-      accent_color: form.accent_color ?? null, font_heading: form.font_heading ?? null,
-      font_body: form.font_body ?? null, logo_url: form.logo_url ?? null, notes: form.notes ?? null,
-    };
-    try {
-      const res = await fetch('/api/brand-kit', {
-        method: 'PATCH', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const body = await res.json().catch(() => ({})) as { suggestions?: unknown; error?: unknown };
       if (!res.ok) {
-        const { error: msg } = await res.json() as { error?: string };
-        throw new Error(msg ?? 'Error al guardar');
+        // Sin créditos o con el límite alcanzado, el servidor ya explica por
+        // qué en el idioma pedido.
+        const explained = (res.status === 402 || res.status === 429) && typeof body.error === 'string';
+        setSugg({ loading: false, error: explained ? body.error as string : t.errors.suggestions });
+        return;
       }
-      const { kit: updated } = await res.json() as { kit: BrandKit };
-      setForm(updated);
-      setSaved(true);
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-      saveTimeout.current = setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido');
-    } finally {
-      setSaving(false);
+      const items = Array.isArray(body.suggestions) ? body.suggestions.filter((s): s is string => typeof s === 'string') : [];
+      setSugg({ items, loading: false, error: null });
+    } catch {
+      setSugg({ loading: false, error: t.errors.suggestions });
     }
   }
 
+  // ── Render ───────────────────────────────────────────────────────────────
   if (authLoading || fetching) {
     return (
-      <div style={{ padding: '40px 48px', maxWidth: 840 }}>
+      <div className="page" style={{ maxWidth: 840 }} aria-busy="true">
+        <p role="status" className="sr-only">{t.loading}</p>
         <div style={{ marginBottom: 28 }}>
-          <SkeletonBlock width={220} height={26} style={{ marginBottom: 10 }} />
-          <SkeletonBlock width={340} height={14} />
+          <SkeletonBlock width="min(220px, 70%)" height={26} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width="min(340px, 100%)" height={14} />
         </div>
         <FormSectionSkeleton fields={2} />
         <FormSectionSkeleton fields={2} />
@@ -368,211 +448,417 @@ export default function BrandKitPage({ params }: { params: Promise<{ lang: strin
     );
   }
 
-  if (error && !form.name) {
+  if (loadError) {
     return (
-      <div style={{ padding: '40px 48px' }}>
-        <p style={{ color: '#ff6b6b', fontSize: 14 }}>{t.loadError}</p>
+      <div className="page" style={{ maxWidth: 840 }}>
+        <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
+          <p style={{ margin: '0 0 10px' }}>{t.loadError}</p>
+          <Button size="sm" variant="secondary" icon={<Icon name="refresh" size={14} />} onClick={() => { void loadKit(true); }}>
+            {common.actions.retry}
+          </Button>
+        </Notice>
       </div>
     );
   }
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  const social = (form.social_urls ?? {}) as Record<string, string | undefined>;
+  const tones = form.tone ?? [];
+  const status = saving ? 'saving' : dirty ? 'dirty' : justSaved ? 'saved' : 'clean';
+  const enrichAnnouncement =
+    enrich.status === 'loading' ? t.enriching
+      : enrich.status === 'result' ? t.enrichSuccess
+        : enrich.status === 'applied' ? ti.enrichApplied
+          : '';
+  const logoStatus = logo.status === 'uploading' ? ti.logoUploading : logo.status === 'uploaded' ? ti.logoUploaded : '';
 
   return (
-    <div style={{ padding: '40px 48px', maxWidth: 840 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700, marginBottom: 6 }}>{t.title}</h1>
-          <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.subtitle}</p>
+    <div className="page" style={{ maxWidth: 840 }}>
+      <header className="page-header">
+        <div>
+          <h1>{ti.title}</h1>
+          <p>{ti.subtitle}</p>
         </div>
+      </header>
 
+      {!canEdit && (
+        <div className={styles.block}>
+          <Notice tone="info" live={false} icon={<Icon name="lock" size={16} />}>{t.errors.readOnly}</Notice>
+        </div>
+      )}
 
       {/* La imagen de la marca identifica a la marca dentro de la app (el
           selector), no en el contenido generado — eso lo hace el logo del
           Brand Kit, más abajo. Va fuera del <form> porque se guarda sola al
           subirla, sin esperar a que se envíe el formulario. */}
-      <div style={{ marginBottom: 28 }}>
-        <SectionCard title={locale === 'es' ? 'Imagen de la marca' : 'Brand image'}>
-          <BrandImageField locale={locale} />
-        </SectionCard>
+      <div className={styles.block}>
+        <BrandImageField locale={locale} />
       </div>
 
-      <form onSubmit={handleSave}>
-          <div style={{ marginBottom: 12 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)' }}>1. {t.sec1}</span>
-          </div>
-
-          <SectionCard title={`${t.name} & ${t.industry}`}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <Field label={t.name}>
-                <input style={inputStyle} value={form.name ?? ''} onChange={(e) => updateField('name', e.target.value)} placeholder="Mi empresa" required />
-              </Field>
-              <Field label={t.industry}>
-                <input style={inputStyle} value={form.industry ?? ''} onChange={(e) => updateField('industry', e.target.value || null)} placeholder="SaaS, E-commerce..." />
-              </Field>
-            </div>
-            <Field label={t.tagline}>
-              <input style={inputStyle} value={form.tagline ?? ''} onChange={(e) => updateField('tagline', e.target.value || null)} placeholder="Tu eslogan..." />
-            </Field>
-            <Field label={t.mission}>
-              <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={form.mission ?? ''} onChange={(e) => updateField('mission', e.target.value || null)} placeholder={locale === 'es' ? '¿Qué hace tu empresa?' : 'What does your company do?'} />
-            </Field>
-          </SectionCard>
-
-          <SectionCard title={`${t.websiteUrl} & ${t.socialUrls}`}>
-            <Field label={t.websiteUrl}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input style={{ ...inputStyle, flex: 1 }} value={form.website_url ?? ''} onChange={(e) => updateField('website_url', e.target.value || null)} placeholder="https://..." type="url" />
-                <button type="button" disabled={!form.website_url || enriching}
-                  onClick={() => { void handleEnrich(form.website_url ?? undefined); }}
-                  style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: !form.website_url ? 'not-allowed' : 'pointer', opacity: !form.website_url ? 0.5 : 1, whiteSpace: 'nowrap' }}>
-                  {enriching ? t.enriching : t.enrichBtn}
-                </button>
+      <form id={formId} onSubmit={handleSave} noValidate aria-label={ti.title}>
+        <fieldset className={styles.fieldset} disabled={!canEdit}>
+          {/* ── Datos básicos ── */}
+          <SectionCard title={ti.sections.basics}>
+            <div className={styles.stack}>
+              <div className="grid-2">
+                <Field id={fid('name')} label={t.name} required error={errorFor('name')}>
+                  <Input
+                    value={form.name ?? ''}
+                    onChange={(e) => updateField('name', e.target.value)}
+                    onBlur={() => touch('name')}
+                    placeholder={ti.namePlaceholder}
+                    maxLength={100}
+                    autoComplete="organization"
+                  />
+                </Field>
+                <Field label={t.industry}>
+                  <Input
+                    value={form.industry ?? ''}
+                    onChange={(e) => updateField('industry', e.target.value || null)}
+                    placeholder={ti.industryPlaceholder}
+                  />
+                </Field>
               </div>
-            </Field>
-            {enrichMsg && (
-              <p style={{ fontSize: 13, color: enrichResult ? 'var(--accent)' : '#ff6b6b', marginBottom: 12 }}>{enrichMsg}</p>
-            )}
-            {enrichResult && (
-              <div style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 8 }}>{t.confirmEnriched}</p>
-                {Object.entries(enrichResult).map(([k, v]) => {
-                  if (!v || (Array.isArray(v) && v.length === 0)) return null;
-                  return (
-                    <div key={k} style={{ fontSize: 13, display: 'flex', gap: 8, marginBottom: 4 }}>
-                      <span style={{ color: 'var(--muted)', minWidth: 140, flexShrink: 0 }}>{k}</span>
-                      <span style={{ color: 'var(--text)' }}>{Array.isArray(v) ? (v as string[]).join(', ') : String(v)}</span>
-                    </div>
-                  );
-                })}
-                <button type="button" onClick={applyEnriched}
-                  style={{ marginTop: 10, padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#000', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                  {t.applyEnriched}
-                </button>
-              </div>
-            )}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {SOCIAL_CHANNELS.map((ch) => (
-                <div key={ch} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 68, textTransform: 'capitalize' }}>{ch}</span>
-                  <input style={{ ...inputStyle, fontSize: 13 }}
-                    value={(form.social_urls as Record<string, string> | undefined)?.[ch] ?? ''}
-                    onChange={(e) => updateField('social_urls', { ...(form.social_urls ?? {}), [ch]: e.target.value || undefined })}
-                    placeholder="URL" />
-                </div>
-              ))}
+              <Field label={t.tagline}>
+                <Input
+                  value={form.tagline ?? ''}
+                  onChange={(e) => updateField('tagline', e.target.value || null)}
+                  placeholder={ti.taglinePlaceholder}
+                />
+              </Field>
+              <Field label={t.mission}>
+                <Textarea
+                  value={form.mission ?? ''}
+                  onChange={(e) => updateField('mission', e.target.value || null)}
+                  placeholder={ti.missionPlaceholder}
+                  rows={3}
+                />
+              </Field>
             </div>
           </SectionCard>
 
-          <SectionCard title={`${t.language} & ${t.customerLocations}`}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <Field label={t.language}>
-                <select style={inputStyle} value={form.language ?? 'es'} onChange={(e) => updateField('language', e.target.value)}>
-                  {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-                </select>
+          {/* ── Web y redes ── */}
+          <SectionCard title={ti.sections.web}>
+            <div className={styles.stack}>
+              <Field id={fid('website_url')} label={t.websiteUrl} hint={ti.websiteHint} error={errorFor('website_url')}>
+                {(p) => (
+                  <div className={styles.inlineRow}>
+                    <Input
+                      {...p}
+                      className={styles.grow}
+                      type="url"
+                      inputMode="url"
+                      autoComplete="url"
+                      value={form.website_url ?? ''}
+                      onChange={(e) => updateField('website_url', e.target.value || null)}
+                      onBlur={() => touch('website_url')}
+                      placeholder="https://…"
+                    />
+                    <Button
+                      variant="secondary"
+                      icon={<Icon name="sparkles" size={16} />}
+                      loading={enrich.status === 'loading'}
+                      disabled={!form.website_url?.trim()}
+                      onClick={() => { void handleEnrich(); }}
+                    >
+                      {enrich.status === 'loading' ? t.enriching : t.enrichBtn}
+                    </Button>
+                  </div>
+                )}
               </Field>
-              <Field label={t.usesEmojis}>
-                <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
-                  {([true, false] as const).map((v) => (
-                    <button key={String(v)} type="button" onClick={() => updateField('uses_emojis', v)}
-                      style={{ padding: '9px 20px', borderRadius: 8, fontSize: 13, fontWeight: form.uses_emojis === v ? 600 : 400, border: `1px solid ${form.uses_emojis === v ? 'var(--accent)' : 'var(--border)'}`, background: form.uses_emojis === v ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: form.uses_emojis === v ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-                      {v ? t.yes : t.no}
-                    </button>
+
+              <p role="status" className="sr-only">{enrichAnnouncement}</p>
+              {enrich.status === 'error' && (
+                <Notice tone="danger" icon={<Icon name="alert" size={16} />}>{t.enrichError}</Notice>
+              )}
+              {enrich.status === 'applied' && (
+                <Notice tone="success" live={false} icon={<Icon name="check-circle" size={16} />}>{ti.enrichApplied}</Notice>
+              )}
+              {enrich.status === 'result' && (
+                <section className={styles.enrichBox} aria-labelledby={`${fid('enrich')}-title`}>
+                  <p id={`${fid('enrich')}-title`} className={styles.enrichTitle}>{t.confirmEnriched}</p>
+                  <dl className={styles.enrichList}>
+                    {Object.entries(enrich.data).map(([key, value]) => (
+                      <div key={key} style={{ display: 'contents' }}>
+                        <dt>{LABEL_KEYS[key] ? t[LABEL_KEYS[key]] as string : key}</dt>
+                        <dd>
+                          {key.endsWith('_color') && typeof value === 'string' && HEX.test(value) && (
+                            <span className={styles.enrichSwatch} style={{ background: value }} aria-hidden="true" />
+                          )}
+                          {display(key, value)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <div className={styles.actions}>
+                    <Button variant="primary" icon={<Icon name="check" size={16} />} onClick={applyEnriched}>
+                      {ti.enrichApply}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setEnrich({ status: 'idle' })}>{ti.enrichDiscard}</Button>
+                  </div>
+                </section>
+              )}
+
+              <div className="ui-field">
+                <span className="ui-label" id={fid('social-label')}>{t.socialUrls}</span>
+                <p className="ui-hint" id={fid('social-hint')}>{ti.socialHint}</p>
+                <div
+                  role="group"
+                  aria-labelledby={fid('social-label')}
+                  aria-describedby={fid('social-hint')}
+                  className="auto-grid"
+                  style={{ '--min': '220px', '--gap': '12px', marginTop: 4 } as CSSProperties}
+                >
+                  {SOCIAL_CHANNELS.map((channel) => (
+                    <Field key={channel} label={CHANNEL_LABELS[channel]}>
+                      <Input
+                        inputMode="url"
+                        autoComplete="off"
+                        value={social[channel] ?? ''}
+                        onChange={(e) => updateField('social_urls', { ...social, [channel]: e.target.value || undefined })}
+                        placeholder={ti.socialPlaceholder}
+                      />
+                    </Field>
                   ))}
                 </div>
-              </Field>
+              </div>
             </div>
-            <Field label={t.customerLocations}>
-              <ArrayChips value={form.customer_locations ?? []} onChange={(v) => updateField('customer_locations', v)} placeholder={locale === 'es' ? 'País o ciudad...' : 'Country or city...'}
-                suggestions={arraySugg['customer_locations']} loadingSugg={arraySuggLoading['customer_locations']}
-                onLoadSuggestions={() => void loadArraySugg('customer_locations')} />
-            </Field>
           </SectionCard>
 
-          <SectionCard title={`${t.communicationStyle} & ${t.tone}`}>
-            <Field label={t.communicationStyle}>
-              <input style={inputStyle} value={form.communication_style ?? ''} onChange={(e) => updateField('communication_style', e.target.value || null)} placeholder={locale === 'es' ? 'Ej: Directo y cercano, sin tecnicismos...' : 'E.g. Direct and friendly, no jargon...'} />
-            </Field>
-            <Field label={t.tone}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {TONES.map(({ value, label }) => {
-                  const active = (form.tone ?? []).includes(value);
+          {/* ── Idioma y clientes ── */}
+          <SectionCard title={ti.sections.audience}>
+            <div className={styles.stack}>
+              <div className="grid-2">
+                <Field label={t.language}>
+                  <Select value={form.language ?? 'es'} onChange={(e) => updateField('language', e.target.value)}>
+                    {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+                  </Select>
+                </Field>
+                <div className="ui-field">
+                  <span className="ui-label" id={fid('emojis')}>{t.usesEmojis}</span>
+                  <div className="ui-segmented" role="group" aria-labelledby={fid('emojis')}>
+                    {([true, false] as const).map((v) => (
+                      <button
+                        key={String(v)}
+                        type="button"
+                        aria-pressed={(form.uses_emojis ?? false) === v}
+                        onClick={() => updateField('uses_emojis', v)}
+                      >
+                        {v ? t.yes : t.no}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <Field label={t.customerLocations}>
+                {(p) => (
+                  <div>
+                    <ArrayChips
+                      id={p.id}
+                      aria-describedby={p['aria-describedby']}
+                      lang={locale}
+                      value={form.customer_locations ?? []}
+                      onChange={(v) => updateField('customer_locations', v)}
+                      placeholder={ti.locationsPlaceholder}
+                      suggestions={sugg.items}
+                      loadingSuggestions={sugg.loading}
+                      onRequestSuggestions={canEdit ? () => { void requestSuggestions(); } : undefined}
+                    />
+                    {sugg.error && <p role="alert" className="ui-error" style={{ marginTop: 6 }}>{sugg.error}</p>}
+                    {sugg.items?.length === 0 && <p role="status" className="ui-hint" style={{ marginTop: 6 }}>{t.errors.noSuggestions}</p>}
+                  </div>
+                )}
+              </Field>
+            </div>
+          </SectionCard>
+
+          {/* ── Voz de la marca ── */}
+          <SectionCard title={ti.sections.voice}>
+            <div className={styles.stack}>
+              <Field label={t.communicationStyle}>
+                <Input
+                  value={form.communication_style ?? ''}
+                  onChange={(e) => updateField('communication_style', e.target.value || null)}
+                  placeholder={ti.communicationPlaceholder}
+                />
+              </Field>
+              <div className="ui-field">
+                <span className="ui-label" id={fid('tone')}>{t.tone}</span>
+                <div
+                  className="ui-segmented"
+                  role="group"
+                  aria-labelledby={fid('tone')}
+                  aria-describedby={fid('tone-hint')}
+                >
+                  {TONES.map((tone) => {
+                    const active = tones.includes(tone);
+                    return (
+                      <button
+                        key={tone}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => updateField('tone', active ? tones.filter((x) => x !== tone) : [...tones, tone])}
+                      >
+                        {t.tones[tone]}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="ui-hint" id={fid('tone-hint')}>{ti.toneHint}</p>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* ── Identidad visual ── */}
+          <SectionCard title={ti.sections.visual}>
+            <div className={styles.stack}>
+              <div className="auto-grid" style={{ '--min': '200px', '--gap': '16px' } as CSSProperties}>
+                {COLOR_FIELDS.map(({ key, label, fallback }) => {
+                  const value = form[key] ?? '';
                   return (
-                    <button key={value} type="button"
-                      onClick={() => { const next = active ? (form.tone ?? []).filter((x) => x !== value) : [...(form.tone ?? []), value]; updateField('tone', next); }}
-                      style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, fontWeight: active ? 600 : 400, border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'rgba(198,255,75,0.1)' : 'var(--bg)', color: active ? 'var(--accent)' : 'var(--text)', cursor: 'pointer' }}>
-                      {label[locale]}
-                    </button>
+                    <Field key={key} id={fid(key)} label={t[label]} error={errorFor(key)}>
+                      {(p) => (
+                        <div className={styles.colorRow}>
+                          <input
+                            type="color"
+                            className={styles.swatch}
+                            value={HEX.test(value) ? value.toLowerCase() : fallback}
+                            onChange={(e) => updateField(key, e.target.value)}
+                            aria-label={ti.colorPicker(t[label])}
+                          />
+                          <Input
+                            {...p}
+                            value={value}
+                            onChange={(e) => updateField(key, e.target.value.trim() || null)}
+                            onBlur={() => touch(key)}
+                            placeholder={fallback.toUpperCase()}
+                            maxLength={7}
+                            spellCheck={false}
+                            autoCapitalize="off"
+                            autoComplete="off"
+                          />
+                        </div>
+                      )}
+                    </Field>
                   );
                 })}
               </div>
-            </Field>
-          </SectionCard>
 
-          <SectionCard title={`${t.primaryColor} / ${t.fontHeading}`}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
-              <ColorField label={t.primaryColor} value={form.primary_color ?? '#000000'} onChange={(v) => updateField('primary_color', v)} />
-              <ColorField label={t.secondaryColor} value={form.secondary_color ?? '#ffffff'} onChange={(v) => updateField('secondary_color', v)} />
-              <ColorField label={t.accentColor} value={form.accent_color ?? '#c6ff4b'} onChange={(v) => updateField('accent_color', v)} />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-              <Field label={t.fontHeading}>
-                <GoogleFontSelect
-                  value={form.font_heading}
-                  onChange={(value) => updateField('font_heading', value)}
-                  placeholder={locale === 'es' ? 'Selecciona fuente para títulos' : 'Select heading font'}
-                  previewText={locale === 'es' ? 'Titulares con estilo' : 'Headlines with style'}
-                />
-              </Field>
-              <Field label={t.fontBody}>
-                <GoogleFontSelect
-                  value={form.font_body}
-                  onChange={(value) => updateField('font_body', value)}
-                  placeholder={locale === 'es' ? 'Selecciona fuente de texto' : 'Select body font'}
-                  previewText={locale === 'es' ? 'Texto claro y legible' : 'Readable body copy'}
-                />
-              </Field>
-            </div>
-            <Field label={t.logo}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-                {form.logo_url && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={form.logo_url} alt="Logo" style={{ height: 56, maxWidth: 140, objectFit: 'contain', borderRadius: 6, border: '1px solid var(--border)', padding: 6, background: '#fff' }} />
-                )}
-                <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLogoUpload(f); }} />
-                <button type="button" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}
-                  style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, cursor: logoUploading ? 'not-allowed' : 'pointer', opacity: logoUploading ? 0.7 : 1 }}>
-                  {logoUploading ? (locale === 'es' ? 'Subiendo...' : 'Uploading...') : (locale === 'es' ? '↑ Subir logo' : '↑ Upload logo')}
-                </button>
-                {form.logo_url && (
-                  <button type="button" onClick={() => updateField('logo_url', null)}
-                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: '#ff6b6b', fontSize: 13, cursor: 'pointer' }}>
-                    {locale === 'es' ? 'Quitar' : 'Remove'}
-                  </button>
-                )}
-                <input style={{ ...inputStyle, flex: 1, minWidth: 200 }} value={form.logo_url ?? ''}
-                  onChange={(e) => updateField('logo_url', e.target.value || null)}
-                  placeholder="https://..." type="url" />
+              <div className="grid-2">
+                <Field label={t.fontHeading}>
+                  {(p) => (
+                    <GoogleFontSelect
+                      {...p}
+                      lang={locale}
+                      value={form.font_heading}
+                      onChange={(value) => updateField('font_heading', value)}
+                      placeholder={ti.fontHeadingPlaceholder}
+                      previewText={ti.fontHeadingPreview}
+                    />
+                  )}
+                </Field>
+                <Field label={t.fontBody}>
+                  {(p) => (
+                    <GoogleFontSelect
+                      {...p}
+                      lang={locale}
+                      value={form.font_body}
+                      onChange={(value) => updateField('font_body', value)}
+                      placeholder={ti.fontBodyPlaceholder}
+                      previewText={ti.fontBodyPreview}
+                    />
+                  )}
+                </Field>
               </div>
+
+              <div className="ui-field">
+                <span className="ui-label">{t.logo}</span>
+                <div className={styles.logoRow}>
+                  {form.logo_url && !errors.logo_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={form.logo_url} alt={ti.logoAlt} className={styles.logoPreview} />
+                  )}
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    hidden
+                    accept={LOGO_TYPES.join(',')}
+                    aria-label={ti.logoFile}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLogoUpload(f); }}
+                  />
+                  <Button
+                    variant="secondary"
+                    icon={<Icon name="upload" size={16} />}
+                    loading={logo.status === 'uploading'}
+                    aria-describedby={fid('logo-hint')}
+                    onClick={() => logoInputRef.current?.click()}
+                  >
+                    {ti.logoUpload}
+                  </Button>
+                  {form.logo_url && (
+                    <Button variant="danger-ghost" icon={<Icon name="trash" size={16} />} onClick={() => updateField('logo_url', null)}>
+                      {ti.logoRemove}
+                    </Button>
+                  )}
+                </div>
+                <p className="ui-hint" id={fid('logo-hint')}>{ti.logoHint}</p>
+                <p role="status" className={logoStatus ? 'ui-hint' : 'sr-only'}>{logoStatus}</p>
+                {logo.status === 'error' && <p role="alert" className="ui-error">{logo.message}</p>}
+              </div>
+
+              <Field id={fid('logo_url')} label={ti.logoUrl} error={errorFor('logo_url')}>
+                <Input
+                  type="url"
+                  inputMode="url"
+                  value={form.logo_url ?? ''}
+                  onChange={(e) => updateField('logo_url', e.target.value || null)}
+                  onBlur={() => touch('logo_url')}
+                  placeholder="https://…"
+                />
+              </Field>
+            </div>
+          </SectionCard>
+
+          {/* ── Notas para la IA ── */}
+          <SectionCard title={ti.sections.notes} subtitle={ti.notesHint}>
+            <Field label={t.notes} hideLabel>
+              <Textarea
+                value={form.notes ?? ''}
+                onChange={(e) => updateField('notes', e.target.value || null)}
+                placeholder={ti.notesPlaceholder}
+                rows={4}
+              />
             </Field>
           </SectionCard>
+        </fieldset>
+      </form>
 
-          <SectionCard title={t.notes}>
-            <textarea style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }} value={form.notes ?? ''} onChange={(e) => updateField('notes', e.target.value || null)} placeholder={locale === 'es' ? 'Guías de estilo, instrucciones para la IA...' : 'Style guides, AI instructions...'} />
-          </SectionCard>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, paddingTop: 8 }}>
-            <button type="submit" disabled={saving}
-              style={{ background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
-              {saving ? t.saving : t.save}
-            </button>
-            {saved && <span style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}>{t.saved}</span>}
-            {error && <span style={{ color: '#ff6b6b', fontSize: 13 }}>{error}</span>}
-          </div>
-        </form>
-
+      {/* ── Barra de guardado: siempre a la vista ── */}
+      {canEdit && (
+        <div className={styles.saveBar}>
+          <p role="status" className={styles.saveStatus} data-state={status}>
+            {status === 'saving' && <Spinner size={14} />}
+            {status === 'dirty' && <span className={styles.dot} aria-hidden="true" />}
+            {status === 'saved' && <Icon name="check-circle" size={16} />}
+            <span>{t.saveBar[status]}</span>
+          </p>
+          <Button type="submit" form={formId} variant="primary" loading={saving} disabled={!dirty}>
+            {t.saveBar.save}
+          </Button>
+          {saveError && (
+            <p role="alert" className={styles.saveError}>
+              <Icon name="alert" size={16} />
+              <span>{saveError}</span>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
+function hasValue(value: unknown): boolean {
+  if (value === null || value === undefined || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value as object).length > 0;
+  return true;
+}

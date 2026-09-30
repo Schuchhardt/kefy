@@ -3,15 +3,16 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { ACTIVE_BRAND_COOKIE, activeBrandCookieOptions } from '@/lib/auth';
 import type { JWTPayload } from '@/types/auth';
 import type { Brand } from '@/types/brands';
+import { PLAN_LIMITS } from '@/lib/plans';
 
 // ─── Plan limits ──────────────────────────────────────────────────────────────
 
 // Los topes son los que anuncia la página de precios. Antes el código decía
 // otra cosa (pro: 3, business: ilimitado) y vendíamos 5 y 15.
 export const BRAND_LIMITS: Record<string, number> = {
-  starter:  1,
-  pro:      5,
-  business: 15,
+  starter:  PLAN_LIMITS.starter.brands,
+  pro:      PLAN_LIMITS.pro.brands,
+  business: PLAN_LIMITS.business.brands,
 };
 
 // ─── Slug helper ──────────────────────────────────────────────────────────────

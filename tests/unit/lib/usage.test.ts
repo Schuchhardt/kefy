@@ -21,6 +21,7 @@ import {
   getAssistantUsage,
   assistantQuotaExhaustedBody,
 } from '@/lib/usage';
+import { formatPlanNumber } from '@/lib/plans';
 import es from '@/locales/es/landing';
 import en from '@/locales/en/landing';
 
@@ -230,8 +231,8 @@ describe('creditsExhaustedBody', () => {
 // ─── Cuota del asistente ──────────────────────────────────────────────────────
 
 /** Formato de miles de la landing: 1500 → '1,500'. */
-function formatoLanding(n: number): string {
-  return n.toLocaleString('en-US');
+function formatoLanding(n: number, idioma: 'es' | 'en' = 'en'): string {
+  return formatPlanNumber(n, idioma);
 }
 
 describe('PLAN_ASSISTANT_MESSAGES', () => {
@@ -240,14 +241,15 @@ describe('PLAN_ASSISTANT_MESSAGES', () => {
   it('coincide con lo que anuncia la lista de cada plan, en ambos idiomas', () => {
     const planes = ['starter', 'pro', 'business'] as const;
     for (const [idioma, copy] of [['es', es], ['en', en]] as const) {
-      const patron = idioma === 'es' ? /^Asistente IA: ([\d,]+) mensajes \/ mes$/ : /^AI assistant: ([\d,]+) messages \/ month$/;
+      // El español separa los miles con punto (1.500) y el inglés con coma (1,500).
+      const patron = idioma === 'es' ? /^Asistente IA: ([\d.]+) mensajes \/ mes$/ : /^AI assistant: ([\d,]+) messages \/ month$/;
       copy.pricing.plans.forEach((plan, i) => {
         const lineas = plan.features
           .map((f) => (typeof f === 'string' ? f : f.t))
           .filter((t) => patron.test(t));
         expect(lineas, `[${idioma}] ${plan.name}: falta la línea del asistente`).toHaveLength(1);
         const numero = lineas[0].match(patron)![1];
-        expect(numero, `[${idioma}] ${plan.name}`).toBe(formatoLanding(PLAN_ASSISTANT_MESSAGES[planes[i]]));
+        expect(numero, `[${idioma}] ${plan.name}`).toBe(formatoLanding(PLAN_ASSISTANT_MESSAGES[planes[i]], idioma));
       });
     }
   });

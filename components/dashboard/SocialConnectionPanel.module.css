@@ -1,0 +1,53 @@
+/* Panel de cuentas sociales (Ajustes y onboarding del inicio).
+   La rejilla de redes usa .auto-grid (globals.css) con --min: antes era
+   repeat(3, 1fr) y a 360px «Google Business» quedaba en 75px. */
+
+.notices { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.notices:empty { display: none; }
+
+.heading {
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin: 0 0 10px;
+}
+.block { margin-bottom: 20px; }
+
+/* ─── Onboarding ─────────────────────────────────────────────────────────── */
+.title { font-weight: 600; font-size: 15px; margin: 0 0 6px; }
+.desc { color: var(--muted); font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
+.cta { text-align: center; display: flex; flex-direction: column; align-items: center; }
+
+/* ─── Botones de cada red ────────────────────────────────────────────────── */
+.platforms { list-style: none; margin: 0; padding: 0; }
+.platform {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-height: 44px; padding: 8px 12px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: 13px; font-weight: 500; line-height: 1.25; text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.platform[data-connected] { border-color: var(--accent-border); background: var(--accent-soft); }
+.platform:hover:not(:disabled),
+.platform:active:not(:disabled) { border-color: var(--accent-border); background: var(--surface-2); }
+.platform:disabled { opacity: 0.6; cursor: not-allowed; }
+.platformIcon { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; }
+/* El nombre puede partirse en dos líneas en vez de desbordar. */
+.platformName { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.platformCheck { color: var(--accent-text); }
+
+/* ─── Cuentas conectadas ─────────────────────────────────────────────────── */
+.accounts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.account {
+  padding: 10px 14px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg);
+}
+.accountRow { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.accountIcon { width: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.accountInfo { flex: 1 1 160px; min-width: 0; }
+.accountName { font-weight: 600; font-size: 14px; margin: 0; overflow-wrap: anywhere; }
+.accountMeta { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
+/* Si no cabe en la fila, baja alineado a la derecha. */
+.accountAction { margin-left: auto; }
+.hint { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 8px 0 0; }
+.link { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }

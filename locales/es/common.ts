@@ -6,9 +6,10 @@ const es: CommonCopy = {
     cta: 'Volver al inicio',
   },
   metadata: {
-    title: 'Kefy — Tu equipo de marketing en piloto automático',
+    title: 'Kefy — Contenido para tus redes con IA, listo para aprobar',
+    // Alineada con el h1 y sin «ads»: no hay UI de anuncios (auditoría UX 2.1).
     description:
-      'Kefy unifica generación de texto, imagen, video, programación, analytics y ads en una sola plataforma para startups, pymes y tiendas online.',
+      'Kefy crea posts, carruseles, reels y stories con tu marca y los publica en Instagram, Facebook, LinkedIn, TikTok y más. Tú los apruebas en un toque. 30 días gratis, sin tarjeta.',
     keywords: [
       'marketing automation',
       'creación de contenido',

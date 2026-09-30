@@ -1,0 +1,125 @@
+/* ─── Cuerpo del modal ─────────────────────────────────────────────────────── */
+.body { display: flex; flex-direction: column; gap: 20px; padding: 20px 24px 24px; min-width: 0; }
+@media (max-width: 767px) {
+  .body { padding: 16px; gap: 18px; }
+}
+
+.section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.sectionHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.label {
+  margin: 0; padding: 0;
+  font-size: 12px; font-weight: 700; color: var(--muted);
+  letter-spacing: 0.05em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.muted { margin: 0; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+
+/* ─── Selector de formato ─────────────────────────────────────────────────
+   Antes: 4 botones en una fila de 76px cada uno a 360px. Ahora 4 columnas en
+   escritorio y 2×2 en el móvil, con 44px de alto táctil. */
+.formatPicker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 479px) {
+  .formatPicker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.formatBtn {
+  min-height: 40px; min-width: 0; padding: 8px 10px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text);
+  font-size: 13px; font-weight: 500;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.formatBtn:hover, .formatBtn:active { border-color: var(--accent-border); }
+.formatBtn[aria-pressed="true"] {
+  border-color: var(--accent-border); background: var(--accent-soft);
+  color: var(--accent-text); font-weight: 700;
+}
+.readyDot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+/* ─── Vista previa ─────────────────────────────────────────────────────────
+   Los marcos verticales (reel, story, TikTok) se acotan en alto con
+   PREVIEW_MAX_H: «Publicar» ya no queda a tres pantallas en el móvil. */
+.preview { min-width: 0; }
+.verticalCap {
+  width: 100%;
+  max-width: calc(560px * 9 / 16);
+  max-width: calc(min(560px, 50vh) * 9 / 16);
+  max-width: calc(min(560px, 50dvh) * 9 / 16);
+  margin-inline: auto;
+}
+.generate {
+  border: 1px dashed var(--border); border-radius: 12px; padding: 20px 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+
+/* ─── Selector de contenido ────────────────────────────────────────────── */
+.picker {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
+}
+.pickItem {
+  display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden;
+  text-align: left; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.pickThumb { width: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.pickThumb img { width: 100%; height: 100%; object-fit: cover; }
+.pickTitle {
+  margin: 0; padding: 8px; font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ─── Cuentas ──────────────────────────────────────────────────────────── */
+.accounts { display: flex; flex-wrap: wrap; gap: 8px; }
+.account {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  min-height: 40px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font-size: 13px; font-weight: 600;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.account:hover, .account:active { border-color: var(--accent-border); }
+.account[aria-pressed="true"] { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-text); }
+.accountName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── Ahora / programar ────────────────────────────────────────────────── */
+.modeToggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.modeBtn {
+  min-height: 44px; padding: 8px 10px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--muted);
+  font-size: 13px; font-weight: 600;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.modeBtn:hover, .modeBtn:active { color: var(--text); }
+.modeBtn[aria-pressed="true"] { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-text); }
+
+@media (pointer: coarse), (max-width: 767px) {
+  .formatBtn, .account { min-height: 44px; }
+}
+
+/* ─── Pie: motivo de «Publicar» deshabilitado ─────────────────────────── */
+.reason {
+  flex: 1 1 220px; min-width: 0; margin: 0;
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 12px; line-height: 1.45; color: var(--muted);
+}
+.reason svg { margin-top: 1px; }
+@media (max-width: 767px) {
+  .reason { flex-basis: 100%; }
+  /* En la hoja inferior ya está el cierre de 44px arriba: sin «Cancelar» la
+     acción principal no baja a una tercera fila. */
+  .footerCancel { display: none !important; }
+}
+
+/* ─── Éxito ────────────────────────────────────────────────────────────── */
+.success {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 36px 24px; text-align: center;
+}
+.successIcon { color: var(--success); display: flex; margin-bottom: 4px; }
+.successTitle { margin: 0; font-family: var(--font-syne), system-ui, sans-serif; font-size: 18px; font-weight: 700; }
+.successDetail { margin: 0; font-size: 14px; color: var(--muted); max-width: 420px; }
+.success :global(.ui-notice) { margin-top: 8px; text-align: left; }

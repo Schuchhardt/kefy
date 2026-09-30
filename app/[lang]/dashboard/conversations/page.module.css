@@ -1,0 +1,517 @@
+/* ─── Conversaciones ──────────────────────────────────────────────────────────
+   Alto fijo = alto útil del dashboard (en móvil ya descuenta la franja
+   superior y el BottomNav): la página no hace scroll, solo la lista y el hilo.
+   Antes era `100vh` dentro de un main que ya sumaba 56+64px, y el compositor
+   quedaba debajo del BottomNav.
+
+   En móvil (<768px) es master-detail: `data-view="list"` muestra la lista a
+   ancho completo y `data-view="thread"` el hilo a pantalla completa con un
+   botón «Volver». En escritorio, lista y panel a la vez. */
+
+.root {
+  /* Contenedor de los .sr-only (position: absolute): sin esto su bloque
+     contenedor es .dashboard-main y se escapan de las listas con scroll,
+     alargando la página (volvía el doble scroll con muchos hilos). */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: var(--dashboard-content-h);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── Cabecera: título, pestañas y filtros ─────────────────────────────── */
+
+.header {
+  flex-shrink: 0;
+  padding: 24px 32px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  /* En escritorio el avatar de usuario flota arriba a la derecha (36px a
+     16px del borde): el botón de sincronizar no se mete debajo. */
+  padding-right: 40px;
+}
+
+.title {
+  font-family: var(--font-syne), system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+.tab:hover, .tab:active { color: var(--text); }
+.tab[aria-selected="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-text);
+}
+
+.platforms { margin-left: auto; }
+/* Botones de icono: menos relleno lateral que las pastillas con texto. */
+.platforms > .platformBtn {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  padding: 5px 9px;
+}
+
+.notice {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+.notice:not(:empty) { margin-top: 10px; }
+.noticeOk { color: var(--accent-text); }
+.noticeError { color: var(--danger); }
+
+/* ─── Mensajes directos: lista + hilo ──────────────────────────────────── */
+
+.split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.list {
+  position: relative;
+  width: 320px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.threadList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.threadItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 18px 12px 16px;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  transition: background-color 0.15s;
+}
+.threadItem:hover, .threadItem:active { background: var(--surface-2); }
+.threadItem[aria-current="true"] {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.threadText { flex: 1; min-width: 0; }
+.threadTop, .threadBottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.threadTop { justify-content: space-between; }
+.threadBottom { margin-top: 2px; color: var(--muted); }
+.threadName {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.threadItem[data-unread="true"] .threadName { font-weight: 700; }
+.threadTime { font-size: 12px; color: var(--muted); flex-shrink: 0; }
+.threadPreview {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.unreadDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: var(--border);
+  background-size: cover;
+  background-position: center;
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.platformTag {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.platformTagBoxed {
+  padding: 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panelEmpty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+}
+
+.threadHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 24px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+/* «Volver» solo existe en móvil, donde la lista queda oculta. */
+.threadHeader .back { display: none; }
+.threadHeading { min-width: 0; }
+.threadHeadingName {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.threadHeadingMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.messages {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.statusText { color: var(--muted); font-size: 13px; margin: 0; }
+
+.bubbleRow { display: flex; justify-content: flex-start; }
+.bubbleRow[data-dir="out"] { justify-content: flex-end; }
+
+.bubble {
+  max-width: 70%;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 12px 4px;
+}
+.bubble[data-dir="out"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  border-radius: 12px 12px 4px 12px;
+}
+.bubbleInbound { background: var(--bg); }
+.bubbleAuthor {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 4px;
+}
+.bubbleReplyLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+  margin: 0 0 4px;
+}
+.bubbleText {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.bubbleTime {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+.bubbleRow[data-dir="out"] .bubbleTime { text-align: right; }
+
+/* Compositor. El relleno derecho deja sitio al lanzador del asistente, que
+   flota abajo a la derecha (56px a 24px del borde en escritorio): sin él
+   tapaba el botón «Enviar». */
+.composer {
+  flex-shrink: 0;
+  padding: 12px 96px 12px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.composerRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.composer .composerInput {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+}
+.errorText {
+  font-size: 12px;
+  color: var(--danger);
+  margin: 0 0 8px;
+}
+
+/* ─── Comentarios ──────────────────────────────────────────────────────── */
+
+.commentsScroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px 32px 96px;
+}
+
+.commentsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 860px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.commentCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.commentHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  min-width: 0;
+}
+.commentAuthor {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commentTime {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.linkBtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0;
+  margin-bottom: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bubbleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bubbles .bubble { max-width: 85%; }
+
+.commentActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.commentActions .pushRight { margin-left: auto; }
+
+.replyBox { flex: 1 1 100%; min-width: 0; }
+.replyRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.replyRow .replyInput { flex: 1 1 200px; min-width: 0; }
+
+.emptyCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.skeletonCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+.skeletonRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modalBody {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modalTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.modalReply { flex: 1 1 100%; min-width: 0; }
+
+@media (pointer: coarse), (max-width: 767px) {
+  .linkBtn { min-height: 36px; }
+}
+
+/* ─── Móvil ────────────────────────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  .header { padding: 14px 16px 12px; }
+  .titleRow { margin-bottom: 12px; padding-right: 0; }
+  .title { font-size: 20px; }
+  /* Pestañas y «Solo no leídos» caben en una fila a 360px. */
+  .filters { gap: 8px; }
+  .tab { padding: 6px 12px; }
+  .platforms { margin-left: 0; }
+
+  .list {
+    width: 100%;
+    border-right: none;
+    /* El lanzador del asistente flota sobre el último elemento. */
+    padding-bottom: 72px;
+  }
+  .threadItem { padding: 12px 16px; }
+
+  .root[data-view="list"] .panel { display: none; }
+  .root[data-view="thread"] .header,
+  .root[data-view="thread"] .list { display: none; }
+
+  .threadHeader {
+    gap: 8px;
+    min-height: 56px;
+    padding: 6px 12px 6px 4px;
+  }
+  .threadHeader .back { display: inline-flex; }
+
+  .messages { padding: 14px 12px; }
+  .bubble { max-width: 85%; }
+
+  /* El lanzador del asistente (50px a 16px del borde) queda a la altura del
+     compositor, justo encima del BottomNav. */
+  .composer { padding: 10px 74px 10px 12px; }
+  .composer .sendLabel { display: none; }
+
+  .commentsScroll { padding: 12px 12px 88px; }
+  .commentCard { padding: 14px; }
+  .modalBody { padding: 14px 16px; }
+}
+
+/* Se ven de 36px y se tocan en 44px: el área extra es un pseudo-elemento, como
+   .ui-btn--sm en globals.css, para no agrandar filas compactas. */
+@media (pointer: coarse), (max-width: 767px) {
+  .tab, .linkBtn { position: relative; }
+  .tab::after, .linkBtn::after { content: ''; position: absolute; inset: -4px; }
+}

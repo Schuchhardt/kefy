@@ -30,17 +30,17 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
   }
 
   const { email, lang } = body as Record<string, unknown>;
 
   if (typeof email !== 'string' || !isValidEmail(email)) {
-    return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
+    return NextResponse.json({ error: 'Valid email is required', code: 'invalid_email' }, { status: 400 });
   }
 
   const sanitizedEmail = email.trim().toLowerCase();
@@ -70,6 +70,22 @@ export async function POST(req: NextRequest) {
     const { error: insertError } = await db
       .from('kefy_password_reset_tokens')
       .insert({ user_id: user.id, token_hash: tokenHash, expires_at: expiresAt.toISOString() });
+
+    // Sin token guardado o sin Resend el correo no sale, pero la respuesta
+    // tiene que ser la misma (no revela si el email existe). Antes ambos casos
+    // fallaban en silencio: la persona esperaba un correo que nunca llegaría y
+    // nadie se enteraba. Ahora queda en Sentry.
+    if (insertError) {
+      reportError(new Error(insertError.message), {
+        route: 'POST /api/auth/forgot-password',
+        service: 'supabase',
+      });
+    } else if (!resendApiKey) {
+      reportError(new Error('RESEND_API_KEY no configurada: no se envió el correo de recuperación'), {
+        route: 'POST /api/auth/forgot-password',
+        service: 'resend',
+      });
+    }
 
     if (!insertError && resendApiKey) {
       try {

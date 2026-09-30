@@ -6,10 +6,10 @@
 // puede ser la cuota de mensajes del asistente, los créditos de IA del mes o
 // el rate limiting, y cada uno pide algo distinto al usuario.
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import esT from '@/locales/es/dashboard/assistant';
 import enT from '@/locales/en/dashboard/assistant';
+import Button, { ButtonLink } from '@/components/ui/Button';
 
 const T = { es: esT, en: enT } as const;
 
@@ -82,14 +82,14 @@ export default function SpendErrorCard({
       {(showPlans || (retry && onRetry)) && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {showPlans && (
-            <Link href={`/${lang}/dashboard/settings`} className="btn btn-primary btn-sm" onClick={() => onNavigate?.()}>
+            <ButtonLink href={`/${lang}/dashboard/settings`} variant="primary" size="sm" onClick={() => onNavigate?.()}>
               {t.viewPlans}
-            </Link>
+            </ButtonLink>
           )}
           {retry && onRetry && (
-            <button type="button" className="btn btn-ghost btn-sm" disabled={disabled || left > 0} onClick={onRetry}>
+            <Button variant="ghost" size="sm" disabled={disabled || left > 0} onClick={onRetry}>
               {t.retry}
-            </button>
+            </Button>
           )}
         </div>
       )}

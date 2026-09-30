@@ -1,252 +1,256 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+// ─── Mi marca › Mercado ──────────────────────────────────────────────────────
+//
+// Tamaño, nicho, público, diferenciadores, competidores y retos. Mismo patrón
+// que Identidad: barra de guardado pegada al pie con el estado («Cambios sin
+// guardar» / «Guardando…» / «Guardado») y PATCH solo de los campos que
+// cambiaron. Antes esta página enviaba el Brand Kit entero y pisaba lo que se
+// hubiera guardado en Identidad (o lo que el asistente cambió) desde que se
+// abrió.
+//
+// La industria es otra cosa: vive en la selección de estrategia de la org
+// (/api/strategies/org) y se guarda al elegirla, con su propio estado.
+//
+// Las sugerencias con IA cuestan un crédito cada vez: solo se piden con el
+// botón de cada lista (antes esta página llamaba a una ruta que no existe).
+
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useDataChanged } from '@/lib/data-events';
-import { SkeletonBlock, FormSectionSkeleton } from '@/components/ui/Skeleton';
+import { toLocale } from '@/lib/i18n';
 import type { BrandKit, CompanySize } from '@/types/brand-kit';
 import type { Industry } from '@/types/strategy';
-
-import esT from '@/locales/es/dashboard/brand';
+import { SkeletonBlock, FormSectionSkeleton } from '@/components/ui/Skeleton';
+import SectionCard from '@/components/ui/SectionCard';
+import { Field, Input, Textarea } from '@/components/ui/Field';
+import ArrayChips from '@/components/ui/ArrayChips';
+import Button, { Spinner } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
+import esT, { type BrandCopy } from '@/locales/es/dashboard/brand';
 import enT from '@/locales/en/dashboard/brand';
-
-const T = { es: esT, en: enT } as const;
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
+import styles from '../brand-form.module.css';
 
 const COMPANY_SIZES: CompanySize[] = ['1-10', '11-50', '51-200', '201-500', '500+'];
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+/** Campos que edita esta página. */
+const FIELDS = ['company_size', 'niche', 'target_audience', 'differentiators', 'competitors', 'challenges'] as const;
+type FieldKey = (typeof FIELDS)[number];
+type ListKey = 'differentiators' | 'competitors' | 'challenges';
+type Kit = Partial<BrandKit>;
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  fontSize: 14,
-  color: 'var(--text)',
-  outline: 'none',
-  boxSizing: 'border-box',
+const LIST_FIELDS: { key: ListKey; label: keyof BrandCopy; placeholder: 'differentiatorsPlaceholder' | 'competitorsPlaceholder' | 'challengesPlaceholder' }[] = [
+  { key: 'differentiators', label: 'differentiators', placeholder: 'differentiatorsPlaceholder' },
+  { key: 'competitors', label: 'competitors', placeholder: 'competitorsPlaceholder' },
+  { key: 'challenges', label: 'challenges', placeholder: 'challengesPlaceholder' },
+];
+
+/** Etiquetas para los errores de validación del servidor. */
+const LABEL_KEYS: Record<string, keyof BrandCopy> = {
+  company_size: 'companySize', niche: 'niche', target_audience: 'targetAudience',
+  differentiators: 'differentiators', competitors: 'competitors', challenges: 'challenges',
 };
 
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 13,
-  fontWeight: 600,
-  color: 'var(--muted)',
-  marginBottom: 6,
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-};
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <label style={labelStyle}>{label}</label>
-      {children}
-    </div>
-  );
+/** Valor de un campo tal como se guarda: vacío → null, listas limpias. */
+function normalized(kit: Kit, key: FieldKey): unknown {
+  const v = kit[key];
+  if (key === 'differentiators' || key === 'competitors' || key === 'challenges') return Array.isArray(v) ? v : [];
+  return typeof v === 'string' ? (v.trim() ? v : null) : (v ?? null);
 }
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 24, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '20px 24px' }}>
-      <h2 style={{ fontFamily: 'var(--font-syne)', fontSize: 15, fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
+const sameField = (key: FieldKey, a: Kit, b: Kit) => JSON.stringify(normalized(a, key)) === JSON.stringify(normalized(b, key));
+
+function changes(form: Kit, base: Kit): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of FIELDS) if (!sameField(key, form, base)) out[key] = normalized(form, key);
+  return out;
 }
 
-function ArrayChips({
-  value, onChange, placeholder, suggestions, loadingSugg, onLoadSuggestions,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-  placeholder: string;
-  suggestions?: string[];
-  loadingSugg?: boolean;
-  onLoadSuggestions?: () => void;
-}) {
-  const [input, setInput] = useState('');
-
-  function add(item: string) {
-    const trimmed = item.trim();
-    if (!trimmed || value.includes(trimmed) || value.length >= 10) return;
-    onChange([...value, trimmed]);
-    setInput('');
-  }
-
-  return (
-    <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        {value.map((v) => (
-          <span key={v} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(198,255,75,0.12)', border: '1px solid var(--accent)', borderRadius: 20, padding: '4px 10px', fontSize: 13, color: 'var(--accent)' }}>
-            {v}
-            <button type="button" onClick={() => onChange(value.filter((x) => x !== v))}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
-          </span>
-        ))}
-      </div>
-      {suggestions !== undefined && (
-        <div style={{ marginBottom: 8 }}>
-          {loadingSugg ? (
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando sugerencias...</span>
-          ) : suggestions.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {suggestions.filter((s) => !value.includes(s)).map((s) => (
-                <button key={s} type="button" onClick={() => add(s)}
-                  style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>
-                  + {s}
-                </button>
-              ))}
-            </div>
-          ) : onLoadSuggestions ? (
-            <button type="button" onClick={onLoadSuggestions}
-              style={{ fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-              {loadingSugg ? '...' : 'Sugerencias IA'}
-            </button>
-          ) : null}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input style={{ ...inputStyle, flex: 1 }} value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(input); } }}
-          placeholder={placeholder} />
-        <button type="button" onClick={() => add(input)}
-          style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>+</button>
-      </div>
-    </div>
-  );
+/** Lo nuevo del servidor sin perder los campos que el usuario cambió desde `base`. */
+function mergeKit(server: Kit, base: Kit, local: Kit): Kit {
+  const merged: Record<string, unknown> = { ...server };
+  for (const key of FIELDS) if (!sameField(key, local, base)) merged[key] = local[key];
+  return merged as Kit;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+type SuggState = { items?: string[]; loading: boolean; error: string | null };
+type IndustryState = 'idle' | 'saving' | 'saved' | 'error';
 
-export default function BrandMarketPage({ params }: { params: Promise<{ lang: string }> }) {
-  const { org, loading: authLoading } = useAuth();
-  const [locale, setLocale] = useState<'es' | 'en'>('es');
-  const [form, setForm] = useState<Partial<BrandKit>>({});
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export default function BrandMarketPage() {
+  const params = useParams<{ lang: string }>();
+  const locale = toLocale(params?.lang);
+  const t = locale === 'en' ? enT : esT;
+  const tm = t.market;
+  const common = locale === 'en' ? enCommon : esCommon;
+
+  const { org, role, loading: authLoading } = useAuth();
+  const canEdit = !role || role === 'owner' || role === 'admin';
+
+  const uid = useId().replace(/:/g, '');
+  const formId = `market-form-${uid}`;
+  const fid = (key: string) => `market-${uid}-${key}`;
+
+  const [{ form, baseline }, setKit] = useState<{ form: Kit; baseline: Kit }>({ form: {}, baseline: {} });
   const [loadingData, setLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const [arraySugg, setArraySugg] = useState<Record<string, string[]>>({});
-  const [arraySuggLoading, setArraySuggLoading] = useState<Record<string, boolean>>({});
+  const [sugg, setSugg] = useState<Partial<Record<ListKey, SuggState>>>({});
   const [industries, setIndustries] = useState<Industry[]>([]);
   const [selectedIndustryId, setSelectedIndustryId] = useState<string | null>(null);
-  const [industryLoading, setIndustryLoading] = useState(false);
+  const [industryState, setIndustryState] = useState<IndustryState>('idle');
 
-  // Load locale from params
-  useEffect(() => {
-    void params.then(({ lang }) => {
-      setLocale(lang === 'en' ? 'en' : 'es');
-    });
-  }, [params]);
-
-  // Load brand kit + industries catalog + saved industry selection
-  const loadBrandKit = useCallback(async () => {
+  // ── Carga: Brand Kit + catálogo de industrias + industria elegida ────────
+  // Las recargas (el asistente cambió la marca o la estrategia) no vuelven a
+  // mostrar el esqueleto y conservan lo que se estaba editando.
+  const load = useCallback(async (initial: boolean) => {
+    if (initial) { setLoadingData(true); setLoadError(false); }
     try {
-      setLoadingData(true);
       const [bkRes, catRes, orgRes] = await Promise.all([
-        fetch('/api/brand-kit'),
-        fetch('/api/strategies'),
-        fetch('/api/strategies/org'),
+        fetch('/api/brand-kit', { credentials: 'include' }),
+        fetch('/api/strategies', { credentials: 'include' }),
+        fetch('/api/strategies/org', { credentials: 'include' }),
       ]);
-      if (bkRes.ok) {
-        const { kit } = (await bkRes.json()) as { kit: BrandKit | null };
-        if (kit) setForm(kit);
-      }
+      if (!bkRes.ok) throw new Error('brand-kit');
+      const { kit } = (await bkRes.json()) as { kit: BrandKit | null };
+      const server: Kit = kit ?? {};
+      setKit((prev) => (initial
+        ? { baseline: server, form: server }
+        : { baseline: server, form: mergeKit(server, prev.baseline, prev.form) }));
       if (catRes.ok) {
-        const { industries: inds } = (await catRes.json()) as { industries: Industry[] };
+        const { industries: inds } = (await catRes.json()) as { industries?: Industry[] };
         setIndustries(inds ?? []);
       }
       if (orgRes.ok) {
         const { selection } = (await orgRes.json()) as { selection: { industry_id: string | null } | null };
-        if (selection?.industry_id) setSelectedIndustryId(selection.industry_id);
+        setSelectedIndustryId(selection?.industry_id ?? null);
       }
+    } catch {
+      if (initial) setLoadError(true);
     } finally {
-      setLoadingData(false);
+      if (initial) setLoadingData(false);
     }
   }, []);
 
+  const loadedOnce = useRef(false);
   useEffect(() => {
-    if (!authLoading && org) void loadBrandKit();
-  }, [authLoading, org, loadBrandKit]);
+    if (authLoading || !org || loadedOnce.current) return;
+    loadedOnce.current = true;
+    void load(true);
+  }, [authLoading, org, load]);
 
   // El asistente editó la marca o cambió la estrategia: se recarga.
-  useDataChanged(['brand-kit', 'strategy'], () => { if (!authLoading && org) void loadBrandKit(); });
+  useDataChanged(['brand-kit', 'strategy'], () => { if (!authLoading && org && !loadingData) void load(false); });
 
+  const pending = changes(form, baseline);
+  const dirty = Object.keys(pending).length > 0;
+
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  function updateField<K extends FieldKey>(key: K, value: BrandKit[K] | null) {
+    setKit((prev) => ({ ...prev, form: { ...prev.form, [key]: value } }));
+    setSaveError(null);
+  }
+
+  // ── Industria: se guarda al elegirla ─────────────────────────────────────
   async function handleSelectIndustry(id: string) {
-    const next = selectedIndustryId === id ? null : id;
+    const previous = selectedIndustryId;
+    const next = previous === id ? null : id;
     setSelectedIndustryId(next);
-    setIndustryLoading(true);
+    setIndustryState('saving');
     try {
-      await fetch('/api/strategies/org', {
+      const res = await fetch('/api/strategies/org', {
         method: 'PATCH',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ industry_id: next }),
       });
-    } finally {
-      setIndustryLoading(false);
+      if (!res.ok) throw new Error(String(res.status));
+      setIndustryState('saved');
+    } catch {
+      setSelectedIndustryId(previous);
+      setIndustryState('error');
     }
   }
 
-  function updateField<K extends keyof BrandKit>(key: K, value: BrandKit[K] | null) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+  // ── Guardar ──────────────────────────────────────────────────────────────
+  async function handleSave(e?: FormEvent) {
+    e?.preventDefault();
+    if (saving || !canEdit || !dirty) return;
+    const sent = form;
+    setSaving(true);
+    setSaveError(null);
     try {
-      setSaving(true);
       const res = await fetch('/api/brand-kit', {
         method: 'PATCH',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(pending),
       });
       if (!res.ok) {
-        const { error: msg } = (await res.json()) as { error?: string };
-        throw new Error(msg ?? (locale === 'es' ? 'Error al guardar' : 'Failed to save'));
+        let message = t.errors.save;
+        if (res.status === 403) message = t.errors.forbidden;
+        else if (res.status === 422) {
+          const body = await res.json().catch(() => ({})) as { error?: string };
+          const field = /^([a-z_]+) (?:must|items)/.exec(body.error ?? '')?.[1];
+          const labelKey = field ? LABEL_KEYS[field] : undefined;
+          if (labelKey) message = t.errors.invalidField(t[labelKey] as string);
+        }
+        setSaveError(message);
+        return;
       }
       const { kit } = (await res.json()) as { kit: BrandKit };
-      setForm(kit);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : (locale === 'es' ? 'Error al guardar' : 'Failed to save'));
+      setKit((prev) => ({ baseline: kit, form: mergeKit(kit, sent, prev.form) }));
+      setJustSaved(true);
+    } catch {
+      setSaveError(common.errors.network);
     } finally {
       setSaving(false);
     }
   }
 
-  async function loadArraySugg(field: string) {
-    setArraySuggLoading((prev) => ({ ...prev, [field]: true }));
+  // ── Sugerencias (1 crédito cada vez: solo con el botón) ──────────────────
+  async function requestSuggestions(field: ListKey) {
+    setSugg((prev) => ({ ...prev, [field]: { loading: true, error: null } }));
     try {
-      const res = await fetch('/api/brand-kit/suggest-array', {
+      const res = await fetch('/api/brand-kit/ai-suggest', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, brandKit: form }),
+        body: JSON.stringify({ field, context: form, lang: locale }),
       });
-      if (res.ok) {
-        const data = (await res.json()) as { suggestions: string[] };
-        setArraySugg((prev) => ({ ...prev, [field]: data.suggestions ?? [] }));
+      const body = await res.json().catch(() => ({})) as { suggestions?: unknown; error?: unknown };
+      if (!res.ok) {
+        const explained = (res.status === 402 || res.status === 429) && typeof body.error === 'string';
+        setSugg((prev) => ({ ...prev, [field]: { loading: false, error: explained ? body.error as string : t.errors.suggestions } }));
+        return;
       }
-    } finally {
-      setArraySuggLoading((prev) => ({ ...prev, [field]: false }));
+      const items = Array.isArray(body.suggestions) ? body.suggestions.filter((s): s is string => typeof s === 'string') : [];
+      setSugg((prev) => ({ ...prev, [field]: { items, loading: false, error: null } }));
+    } catch {
+      setSugg((prev) => ({ ...prev, [field]: { loading: false, error: t.errors.suggestions } }));
     }
   }
 
-  const t = T[locale];
-
+  // ── Render ───────────────────────────────────────────────────────────────
   if (authLoading || loadingData) {
     return (
-      <div style={{ padding: '40px 48px', maxWidth: 840 }}>
+      <div className="page" style={{ maxWidth: 840 }} aria-busy="true">
+        <p role="status" className="sr-only">{t.loading}</p>
         <div style={{ marginBottom: 28 }}>
-          <SkeletonBlock width={220} height={26} style={{ marginBottom: 10 }} />
-          <SkeletonBlock width={340} height={14} />
+          <SkeletonBlock width="min(220px, 70%)" height={26} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width="min(340px, 100%)" height={14} />
         </div>
         <FormSectionSkeleton fields={3} />
         <FormSectionSkeleton fields={2} />
@@ -254,181 +258,165 @@ export default function BrandMarketPage({ params }: { params: Promise<{ lang: st
     );
   }
 
-  return (
-    <div style={{ padding: '40px 48px', maxWidth: 840 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 26, fontWeight: 700, marginBottom: 6 }}>
-          {locale === 'es' ? 'Mercado & Audiencia' : 'Market & Audience'}
-        </h1>
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>
-          {locale === 'es'
-            ? 'Define tu posicionamiento, público objetivo y competencia.'
-            : 'Define your positioning, target audience, and competition.'}
-        </p>
+  if (loadError) {
+    return (
+      <div className="page" style={{ maxWidth: 840 }}>
+        <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
+          <p style={{ margin: '0 0 10px' }}>{t.loadError}</p>
+          <Button size="sm" variant="secondary" icon={<Icon name="refresh" size={14} />} onClick={() => { void load(true); }}>
+            {common.actions.retry}
+          </Button>
+        </Notice>
       </div>
+    );
+  }
 
-      <form onSubmit={handleSave}>
+  const status = saving ? 'saving' : dirty ? 'dirty' : justSaved ? 'saved' : 'clean';
+  const industryStatus = industryState === 'saving' ? tm.industrySaving : industryState === 'saved' ? tm.industrySaved : '';
 
-        {/* Empresa */}
-        <SectionCard title={locale === 'es' ? 'Empresa' : 'Company'}>
-          <Field label={t.companySize}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {COMPANY_SIZES.map((size) => (
-                <button
-                  key={size}
-                  type="button"
-                  onClick={() => updateField('company_size', size)}
-                  style={{
-                    padding: '10px 20px',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: form.company_size === size ? 600 : 400,
-                    border: `1px solid ${form.company_size === size ? 'var(--accent)' : 'var(--border)'}`,
-                    background: form.company_size === size ? 'rgba(198,255,75,0.1)' : 'var(--bg)',
-                    color: form.company_size === size ? 'var(--accent)' : 'var(--text)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {size} {locale === 'es' ? 'empleados' : 'employees'}
-                </button>
-              ))}
-            </div>
-          </Field>
-
-          <Field label={locale === 'es' ? 'Industria' : 'Industry'}>
-            {industries.length === 0 ? (
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                {locale === 'es' ? 'Cargando industrias...' : 'Loading industries...'}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {industries.map((ind) => {
-                  const active = selectedIndustryId === ind.id;
-                  return (
-                    <button
-                      key={ind.id}
-                      type="button"
-                      disabled={industryLoading}
-                      onClick={() => void handleSelectIndustry(ind.id)}
-                      style={{
-                        display:    'inline-flex',
-                        alignItems: 'center',
-                        gap:         6,
-                        padding:    '8px 16px',
-                        borderRadius: 100,
-                        fontSize:   13,
-                        fontWeight: active ? 700 : 400,
-                        border:     `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                        background: active ? 'rgba(198,255,75,0.12)' : 'var(--bg)',
-                        color:      active ? 'var(--accent)' : 'var(--text)',
-                        cursor:     industryLoading ? 'not-allowed' : 'pointer',
-                        transition: 'all .15s ease',
-                        opacity:    industryLoading ? 0.6 : 1,
-                      }}
-                    >
-                      <span>{ind.icon}</span>
-                      <span>{locale === 'es' ? ind.name_es : (ind as Industry & { name_en?: string }).name_en ?? ind.name_es}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </Field>
-
-          <Field label={t.niche}>
-            <input
-              style={inputStyle}
-              value={form.niche ?? ''}
-              onChange={(e) => updateField('niche', e.target.value || null)}
-              placeholder={locale === 'es' ? 'ej. SaaS para restaurantes pequeños' : 'e.g. SaaS for small restaurants'}
-            />
-          </Field>
-        </SectionCard>
-
-        {/* Audiencia */}
-        <SectionCard title={locale === 'es' ? 'Audiencia' : 'Audience'}>
-          <Field label={t.targetAudience}>
-            <textarea
-              style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }}
-              value={form.target_audience ?? ''}
-              onChange={(e) => updateField('target_audience', e.target.value || null)}
-              placeholder={locale === 'es'
-                ? 'Describe a tu cliente ideal: quiénes son, qué necesitan, qué les preocupa...'
-                : 'Describe your ideal customer: who they are, what they need, what they worry about...'}
-            />
-          </Field>
-        </SectionCard>
-
-        {/* Posicionamiento */}
-        <SectionCard title={locale === 'es' ? 'Posicionamiento' : 'Positioning'}>
-          <Field label={t.differentiators}>
-            <ArrayChips
-              value={(form.differentiators as string[] | undefined) ?? []}
-              onChange={(v) => updateField('differentiators', v as never)}
-              placeholder={locale === 'es' ? 'Añadir diferenciador...' : 'Add differentiator...'}
-              suggestions={arraySugg['differentiators']}
-              loadingSugg={arraySuggLoading['differentiators']}
-              onLoadSuggestions={() => void loadArraySugg('differentiators')}
-            />
-          </Field>
-
-          <Field label={t.competitors}>
-            <ArrayChips
-              value={(form.competitors as string[] | undefined) ?? []}
-              onChange={(v) => updateField('competitors', v as never)}
-              placeholder={locale === 'es' ? 'Añadir competidor...' : 'Add competitor...'}
-              suggestions={arraySugg['competitors']}
-              loadingSugg={arraySuggLoading['competitors']}
-              onLoadSuggestions={() => void loadArraySugg('competitors')}
-            />
-          </Field>
-
-          <Field label={t.challenges}>
-            <ArrayChips
-              value={(form.challenges as string[] | undefined) ?? []}
-              onChange={(v) => updateField('challenges', v as never)}
-              placeholder={locale === 'es' ? 'Añadir reto...' : 'Add challenge...'}
-              suggestions={arraySugg['challenges']}
-              loadingSugg={arraySuggLoading['challenges']}
-              onLoadSuggestions={() => void loadArraySugg('challenges')}
-            />
-          </Field>
-        </SectionCard>
-
-        {/* Save button */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
-          {error && (
-            <span style={{ fontSize: 13, color: '#ff6b6b', alignSelf: 'center' }}>
-              {error}
-            </span>
-          )}
-          {saved && (
-            <span style={{ fontSize: 13, color: 'var(--accent)', alignSelf: 'center' }}>
-              {locale === 'es' ? '✓ Guardado' : '✓ Saved'}
-            </span>
-          )}
-          <button
-            type="submit"
-            disabled={saving}
-            style={{
-              padding: '11px 28px',
-              borderRadius: 8,
-              border: 'none',
-              background: saving ? 'var(--border)' : 'var(--accent)',
-              color: saving ? 'var(--muted)' : '#000',
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: saving ? 'not-allowed' : 'pointer',
-              transition: 'background 0.15s',
-            }}
-          >
-            {saving
-              ? (locale === 'es' ? 'Guardando...' : 'Saving...')
-              : (locale === 'es' ? 'Guardar cambios' : 'Save changes')}
-          </button>
+  return (
+    <div className="page" style={{ maxWidth: 840 }}>
+      <header className="page-header">
+        <div>
+          <h1>{tm.title}</h1>
+          <p>{tm.subtitle}</p>
         </div>
+      </header>
+
+      {!canEdit && (
+        <div className={styles.block}>
+          <Notice tone="info" live={false} icon={<Icon name="lock" size={16} />}>{t.errors.readOnly}</Notice>
+        </div>
+      )}
+
+      <form id={formId} onSubmit={handleSave} noValidate aria-label={tm.title}>
+        <fieldset className={styles.fieldset} disabled={!canEdit}>
+          {/* ── Empresa ── */}
+          <SectionCard title={tm.sections.company}>
+            <div className={styles.stack}>
+              <div className="ui-field">
+                <span className="ui-label" id={fid('size')}>{t.companySize}</span>
+                <div className="ui-segmented" role="group" aria-labelledby={fid('size')}>
+                  {COMPANY_SIZES.map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      aria-pressed={form.company_size === size}
+                      onClick={() => updateField('company_size', size)}
+                    >
+                      {tm.employees(size)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="ui-field">
+                <span className="ui-label" id={fid('industry')}>{t.industry}</span>
+                <p className="ui-hint" id={fid('industry-hint')}>{tm.industryHint}</p>
+                {industries.length === 0 ? (
+                  <p className="ui-hint">{tm.industriesEmpty}</p>
+                ) : (
+                  <div
+                    className="ui-segmented"
+                    role="group"
+                    aria-labelledby={fid('industry')}
+                    aria-describedby={fid('industry-hint')}
+                    style={{ marginTop: 4 }}
+                  >
+                    {industries.map((ind) => (
+                      <button
+                        key={ind.id}
+                        type="button"
+                        aria-pressed={selectedIndustryId === ind.id}
+                        disabled={industryState === 'saving'}
+                        onClick={() => { void handleSelectIndustry(ind.id); }}
+                      >
+                        {ind.icon && <span className={styles.choiceIcon} aria-hidden="true">{ind.icon}</span>}
+                        <span>{locale === 'en' ? (ind.name_en || ind.name_es) : ind.name_es}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p role="status" className={industryStatus ? 'ui-hint' : 'sr-only'}>
+                  {industryState === 'saving' && <Spinner size={12} />} {industryStatus}
+                </p>
+                {industryState === 'error' && <p role="alert" className="ui-error">{tm.industryError}</p>}
+              </div>
+
+              <Field label={t.niche}>
+                <Input
+                  value={form.niche ?? ''}
+                  onChange={(e) => updateField('niche', e.target.value || null)}
+                  placeholder={tm.nichePlaceholder}
+                />
+              </Field>
+            </div>
+          </SectionCard>
+
+          {/* ── Audiencia ── */}
+          <SectionCard title={tm.sections.audience}>
+            <Field label={t.targetAudience}>
+              <Textarea
+                value={form.target_audience ?? ''}
+                onChange={(e) => updateField('target_audience', e.target.value || null)}
+                placeholder={tm.audiencePlaceholder}
+                rows={4}
+              />
+            </Field>
+          </SectionCard>
+
+          {/* ── Posicionamiento ── */}
+          <SectionCard title={tm.sections.positioning}>
+            <div className={styles.stack}>
+              {LIST_FIELDS.map(({ key, label, placeholder }) => {
+                const state = sugg[key];
+                return (
+                  <Field key={key} label={t[label] as string}>
+                    {(p) => (
+                      <div>
+                        <ArrayChips
+                          id={p.id}
+                          aria-describedby={p['aria-describedby']}
+                          lang={locale}
+                          value={(form[key] as string[] | undefined) ?? []}
+                          onChange={(v) => updateField(key, v)}
+                          placeholder={tm[placeholder]}
+                          suggestions={state?.items}
+                          loadingSuggestions={state?.loading}
+                          onRequestSuggestions={canEdit ? () => { void requestSuggestions(key); } : undefined}
+                        />
+                        {state?.error && <p role="alert" className="ui-error" style={{ marginTop: 6 }}>{state.error}</p>}
+                        {state?.items?.length === 0 && <p role="status" className="ui-hint" style={{ marginTop: 6 }}>{t.errors.noSuggestions}</p>}
+                      </div>
+                    )}
+                  </Field>
+                );
+              })}
+            </div>
+          </SectionCard>
+        </fieldset>
       </form>
+
+      {/* ── Barra de guardado: siempre a la vista ── */}
+      {canEdit && (
+        <div className={styles.saveBar}>
+          <p role="status" className={styles.saveStatus} data-state={status}>
+            {status === 'saving' && <Spinner size={14} />}
+            {status === 'dirty' && <span className={styles.dot} aria-hidden="true" />}
+            {status === 'saved' && <Icon name="check-circle" size={16} />}
+            <span>{t.saveBar[status]}</span>
+          </p>
+          <Button type="submit" form={formId} variant="primary" loading={saving} disabled={!dirty}>
+            {t.saveBar.save}
+          </Button>
+          {saveError && (
+            <p role="alert" className={styles.saveError}>
+              <Icon name="alert" size={16} />
+              <span>{saveError}</span>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

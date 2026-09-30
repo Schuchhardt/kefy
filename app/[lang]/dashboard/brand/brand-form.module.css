@@ -1,0 +1,187 @@
+/* ─── Formularios de Mi marca (Identidad y Mercado) ─────────────────────────
+   Estilos que las dos páginas comparten: la barra de guardado fija al pie, el
+   reinicio del <fieldset> que desactiva el formulario para quien no puede
+   editar y las filas de controles que tienen que plegarse en 360px. */
+
+.block { margin-bottom: 16px; }
+
+/* <fieldset disabled> desactiva todos los controles de golpe (miembros sin
+   permiso de edición); sin su borde ni su relleno por defecto. */
+.fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Campo + botón en la misma fila; el botón baja de línea si no cabe. */
+.inlineRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.grow {
+  flex: 1 1 220px;
+  min-width: 0;
+  width: auto;
+}
+
+/* Icono (emoji del catálogo) dentro de un botón de industria. */
+.choiceIcon { font-size: 14px; line-height: 1; margin-right: 6px; }
+
+/* ── Colores ── */
+.colorRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.swatch {
+  flex: none;
+  width: 44px;
+  height: 40px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* ── Logo ── */
+.logoRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+/* Fondo blanco a propósito: es el lienzo neutro del logo del usuario (un logo
+   oscuro desaparecería sobre la superficie del tema oscuro). */
+.logoPreview {
+  height: 56px;
+  max-width: 140px;
+  object-fit: contain;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ── Resultado del análisis de la web ── */
+.enrichBox {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+}
+.enrichTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+.enrichList {
+  display: grid;
+  grid-template-columns: minmax(0, 170px) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.enrichList dt { color: var(--muted); }
+.enrichList dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.enrichSwatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ─── Barra de guardado ─────────────────────────────────────────────────────
+   Pegada al pie de la vista dentro del scroll de .dashboard-main. En móvil
+   .dashboard-main reserva abajo el alto del BottomNav con su padding, y el
+   `bottom: 0` de un sticky se mide desde ese padding: la barra queda justo
+   encima del BottomNav, no debajo. */
+.saveBar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  /* Estado a la izquierda (su texto baja de línea si no cabe) y botón a la
+     derecha, siempre en la misma fila: la barra no crece en 360px. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 24px;
+  padding: 12px 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+.saveStatus {
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.saveStatus[data-state="dirty"] { color: var(--warning); }
+.saveStatus[data-state="saving"] { color: var(--text-soft); }
+.saveStatus[data-state="saved"] { color: var(--success); }
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.saveError {
+  grid-column: 1 / -1;
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+/* El lanzador del asistente es fijo abajo a la derecha (56px a 24px del
+   borde): cuando la página llega a ese borde, tapaba el botón de guardar. */
+@media (max-width: 1100px) {
+  .saveBar { padding-right: 40px; }
+}
+
+@media (max-width: 767px) {
+  .swatch { height: 44px; }
+  .enrichList { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .enrichList dd { margin-bottom: 8px; }
+  /* En móvil el lanzador (50px, a 16px del borde) queda a la altura de la
+     barra: 58px de hueco a la derecha. */
+  .saveBar {
+    margin-top: 20px;
+    padding: 10px 58px 10px 0;
+  }
+}

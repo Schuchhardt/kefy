@@ -251,7 +251,7 @@ test.describe('Estrategia de contenido', () => {
     const save = page.getByRole('button', { name: 'Guardar estrategia' });
     await expect(save).toBeEnabled();
     await save.click();
-    await expect(page.getByRole('button', { name: '✓ Estrategia guardada' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Estrategia guardada', exact: true })).toBeVisible();
     expect(state.orgPatches).toEqual([{ objective_id: OBJ_COMMUNITY, industry_id: IND_FOOD, strategy_id: STRAT_COMMUNITY }]);
   });
 
@@ -262,7 +262,7 @@ test.describe('Estrategia de contenido', () => {
     await expect(page.getByText('Embudo de ventas', { exact: true })).toBeVisible({ timeout: 20000 });
     await expect(tab(page, /Recomendadas/)).toContainText('Activa');
     await expect(tab(page, /Personalizadas/)).not.toContainText('Activa');
-    await expect(page.getByRole('button', { name: '✓ Estrategia guardada' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Estrategia guardada', exact: true })).toBeDisabled();
   });
 
   test('?custom=<id> abre la pestaña de personalizadas con esa estrategia', async ({ authenticatedPage: page }) => {
@@ -285,7 +285,8 @@ test.describe('Estrategia de contenido', () => {
     await expect(customList(page).getByRole('button', { name: /Otra estrategia/ })).not.toContainText('Creada por el asistente');
 
     // «Generar» de una pieza lleva al generador con el formato y el canal.
-    await detail.getByRole('row', { name: /Receta de limonada/ }).getByRole('button', { name: '❆ Generar' }).click();
+    // El botón nombra su pieza: «Generar «Receta de limonada»».
+    await detail.getByRole('button', { name: 'Generar «Receta de limonada»' }).click();
     await expect(page).toHaveURL(/\/dashboard\/content\/create\?.*type=reel/, { timeout: 20000 });
     expect(new URL(page.url()).searchParams.get('channel')).toBe('tiktok');
     expect(new URL(page.url()).searchParams.get('topic')).toBe('Receta de limonada');
@@ -297,7 +298,7 @@ test.describe('Estrategia de contenido', () => {
     await tab(page, /Personalizadas/).click();
     await expect(page.getByText('Todavía no tienes estrategias personalizadas', { exact: false })).toBeVisible({ timeout: 20000 });
 
-    await page.getByRole('button', { name: '+ Nueva estrategia' }).click();
+    await page.getByRole('button', { name: 'Nueva estrategia', exact: true }).click();
     const form = page.getByRole('form', { name: 'Nueva estrategia personalizada' });
 
     // Sin nombre ni tema no se envía.
@@ -305,17 +306,17 @@ test.describe('Estrategia de contenido', () => {
     await expect(form.getByRole('alert')).toContainText('Ponle un nombre a la estrategia.');
     expect(state.posts).toHaveLength(0);
 
-    await form.getByLabel('Nombre *').fill('Lanzamiento de otoño');
+    await form.getByRole('textbox', { name: 'Nombre', exact: true }).fill('Lanzamiento de otoño');
     await form.getByLabel('Objetivo (opcional)').selectOption(OBJ_SALES);
     await form.getByLabel('Enfoque').fill('Contar la historia del nuevo menú.');
     await form.getByLabel('KPI principal').fill('Reservas');
     const rows = form.getByTestId('custom-calendar-row');
-    await rows.nth(0).getByLabel('Tema *').fill('Presentamos el menú');
+    await rows.nth(0).getByRole('textbox', { name: 'Tema', exact: true }).fill('Presentamos el menú');
     await rows.nth(0).getByLabel('Formato').selectOption('carousel');
-    await form.getByRole('button', { name: '+ Añadir pieza' }).click();
+    await form.getByRole('button', { name: 'Añadir pieza', exact: true }).click();
     await rows.nth(1).getByLabel('Semana').selectOption('2');
     await rows.nth(1).getByLabel('Canal').selectOption('tiktok');
-    await rows.nth(1).getByLabel('Tema *').fill('Cocina en vivo');
+    await rows.nth(1).getByRole('textbox', { name: 'Tema', exact: true }).fill('Cocina en vivo');
     await rows.nth(1).getByLabel('Ángulo').fill('Plano cenital');
 
     await form.getByRole('button', { name: 'Guardar', exact: true }).click();
@@ -347,11 +348,11 @@ test.describe('Estrategia de contenido', () => {
     const state = await mockStrategies(page);
     await page.goto(STRATEGY_URL);
     await tab(page, /Personalizadas/).click();
-    await page.getByRole('button', { name: '+ Nueva estrategia' }).click({ timeout: 20000 });
+    await page.getByRole('button', { name: 'Nueva estrategia', exact: true }).click({ timeout: 20000 });
 
     const form = page.getByRole('form', { name: 'Nueva estrategia personalizada' });
-    await form.getByLabel('Nombre *').fill('Plan de fidelidad');
-    await form.getByLabel('Tema *').fill('Tarjeta de puntos');
+    await form.getByRole('textbox', { name: 'Nombre', exact: true }).fill('Plan de fidelidad');
+    await form.getByRole('textbox', { name: 'Tema', exact: true }).fill('Tarjeta de puntos');
     await form.getByRole('button', { name: 'Guardar y activar' }).click();
 
     await expect(form).toHaveCount(0);
@@ -374,15 +375,15 @@ test.describe('Estrategia de contenido', () => {
     await page.goto(`${STRATEGY_URL}?custom=${CUSTOM_1}`);
 
     await page.getByRole('button', { name: 'Activar' }).click({ timeout: 20000 });
-    await expect(page.getByRole('status').filter({ hasText: '✓ Estrategia activada' })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: 'Estrategia activada' })).toBeVisible();
     expect(state.orgPatches).toEqual([{ custom_strategy_id: CUSTOM_1 }]);
     await expect(tab(page, /Personalizadas/)).toContainText('Activa');
 
     await page.getByRole('button', { name: 'Editar' }).click();
     const form = page.getByRole('form', { name: 'Editar estrategia' });
-    await expect(form.getByLabel('Nombre *')).toHaveValue('Temporada de verano');
+    await expect(form.getByRole('textbox', { name: 'Nombre', exact: true })).toHaveValue('Temporada de verano');
     await expect(form.getByTestId('custom-calendar-row')).toHaveCount(2);
-    await form.getByLabel('Nombre *').fill('Verano 2027');
+    await form.getByRole('textbox', { name: 'Nombre', exact: true }).fill('Verano 2027');
     await form.getByRole('button', { name: 'Quitar pieza 2' }).click();
     await form.getByRole('button', { name: 'Guardar', exact: true }).click();
 
@@ -431,10 +432,10 @@ test.describe('Estrategia de contenido', () => {
     const state = await mockStrategies(page);
     await page.goto(STRATEGY_URL);
 
-    await page.getByRole('button', { name: '✎ Personalizar esta estrategia' }).click({ timeout: 20000 });
+    await page.getByRole('button', { name: 'Personalizar esta estrategia', exact: true }).click({ timeout: 20000 });
     await expect(tab(page, /Personalizadas/)).toHaveAttribute('aria-selected', 'true');
     const form = page.getByRole('form', { name: 'Nueva estrategia personalizada' });
-    await expect(form.getByLabel('Nombre *')).toHaveValue('Embudo de ventas (personalizada)');
+    await expect(form.getByRole('textbox', { name: 'Nombre', exact: true })).toHaveValue('Embudo de ventas (personalizada)');
     await expect(form.getByText('Basada en la estrategia recomendada')).toBeVisible();
     const rows = form.getByTestId('custom-calendar-row');
     await expect(rows).toHaveCount(2);
@@ -459,7 +460,7 @@ test.describe('Estrategia de contenido', () => {
     await page.route('/api/assistant/chat', (route) => { chats += 1; return route.abort(); });
     await page.goto(STRATEGY_URL);
     await tab(page, /Personalizadas/).click({ timeout: 20000 });
-    await page.getByRole('button', { name: '❆ Pedirle una al asistente' }).click();
+    await page.getByRole('button', { name: 'Pedirle una al asistente', exact: true }).click();
 
     const dialog = page.getByRole('dialog', { name: 'Asistente Kefy' });
     await expect(dialog).toBeVisible();
@@ -472,10 +473,10 @@ test.describe('Estrategia de contenido', () => {
     const state = await mockStrategies(page, { forbidWrites: true });
     await page.goto(STRATEGY_URL);
     await tab(page, /Personalizadas/).click({ timeout: 20000 });
-    await page.getByRole('button', { name: '+ Nueva estrategia' }).click();
+    await page.getByRole('button', { name: 'Nueva estrategia', exact: true }).click();
     const form = page.getByRole('form', { name: 'Nueva estrategia personalizada' });
-    await form.getByLabel('Nombre *').fill('X');
-    await form.getByLabel('Tema *').fill('Y');
+    await form.getByRole('textbox', { name: 'Nombre', exact: true }).fill('X');
+    await form.getByRole('textbox', { name: 'Tema', exact: true }).fill('Y');
     await form.getByRole('button', { name: 'Guardar y activar' }).click();
 
     await expect(form.getByRole('alert')).toContainText('Solo el dueño o un administrador');
@@ -493,14 +494,14 @@ test.describe('Estrategia de contenido — miembro', () => {
     const detail = page.getByTestId('custom-strategy-detail');
     await expect(detail.getByRole('heading', { name: 'Temporada de verano' })).toBeVisible({ timeout: 20000 });
     await expect(page.getByText('Solo el dueño o un administrador de la organización puede crear, editar o activar estrategias.')).toBeVisible();
-    await expect(page.getByRole('button', { name: '+ Nueva estrategia' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Nueva estrategia', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Activar' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Editar' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Eliminar' })).toHaveCount(0);
 
     // En las recomendadas, guardar responde 403 y se explica.
     await tab(page, /Recomendadas/).click();
-    await expect(page.getByRole('button', { name: '✎ Personalizar esta estrategia' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Personalizar esta estrategia', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: /Comunidad/ }).click();
     await page.getByRole('button', { name: 'Guardar estrategia' }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'Solo el dueño o un administrador' })).toBeVisible();
@@ -519,7 +520,7 @@ test.describe('Estrategia de contenido — inglés', () => {
     const card = page.getByRole('list', { name: 'Custom strategies' }).getByRole('button', { name: /Temporada de verano/ });
     await expect(card).toContainText('2 weeks · 2 pieces');
     await expect(card).toContainText('Created by the assistant');
-    await expect(page.getByTestId('custom-strategy-detail').getByText('W1')).toBeVisible();
+    await expect(page.getByTestId('custom-strategy-detail').getByText('Week 1', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Activate' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
 
@@ -527,7 +528,7 @@ test.describe('Estrategia de contenido — inglés', () => {
     await expect(page.getByRole('alertdialog')).toContainText('Delete “Temporada de verano”?');
     await page.getByRole('button', { name: 'Cancel' }).click();
 
-    await page.getByRole('button', { name: '+ New strategy' }).click();
+    await page.getByRole('button', { name: 'New strategy', exact: true }).click();
     const form = page.getByRole('form', { name: 'New custom strategy' });
     await form.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(form.getByRole('alert')).toContainText('Give the strategy a name.');
@@ -535,8 +536,8 @@ test.describe('Estrategia de contenido — inglés', () => {
     expect(state.posts).toHaveLength(0);
 
     // Los errores de la API se piden en inglés.
-    await form.getByLabel('Name *').fill('Autumn');
-    await form.getByLabel('Topic *').fill('New menu');
+    await form.getByRole('textbox', { name: 'Name', exact: true }).fill('Autumn');
+    await form.getByRole('textbox', { name: 'Topic', exact: true }).fill('New menu');
     await form.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(form).toHaveCount(0);
     expect(state.posts).toHaveLength(1);

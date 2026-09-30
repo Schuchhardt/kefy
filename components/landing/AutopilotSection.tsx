@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useReveal } from '@/hooks/useReveal';
 import type { KefyCopy } from '@/types/locales';
 
 interface Props {
@@ -10,23 +9,17 @@ interface Props {
 
 export default function AutopilotSection({ copy }: Props) {
   const [mode, setMode] = useState<'pilot' | 'manual'>('pilot');
-  const [headRef, headSeen] = useReveal();
-  const [calRef, calSeen] = useReveal();
   const isPilot = mode === 'pilot';
 
   return (
-    <section className="section autopilot-section" id="autopilot">
-      <div className="autopilot-bg" />
+    <section className="section autopilot-section" id="autopilot" aria-labelledby="autopilot-title">
+      <div className="autopilot-bg" aria-hidden="true" />
       <div className="container" style={{ position: 'relative', zIndex: 1 }}>
         <div className="autopilot-grid">
-          {/* Left */}
           <div>
-            <div
-              ref={headRef as React.RefObject<HTMLDivElement>}
-              className={`reveal${headSeen ? ' is-in' : ''}`}
-            >
+            <div className="reveal">
               <span className="label">{copy.tag}</span>
-              <h2 className="h2" style={{ marginTop: '18px', marginBottom: '16px' }}>
+              <h2 id="autopilot-title" className="h2" style={{ marginTop: '18px', marginBottom: '16px' }}>
                 {copy.h2[0]}
                 <br />
                 <em className="em">{copy.h2[1]}</em>
@@ -35,43 +28,44 @@ export default function AutopilotSection({ copy }: Props) {
             </div>
 
             <div className="autopilot-bullets" style={{ marginTop: '28px' }}>
-              {/* Toggle */}
-              <div className="ap-toggle">
+              <div className="ap-toggle" role="group" aria-label={copy.modeLabel}>
                 <button
+                  type="button"
                   className={`ap-toggle-btn${isPilot ? ' active' : ''}`}
                   onClick={() => setMode('pilot')}
+                  aria-pressed={isPilot}
                 >
-                  {isPilot && <span className="ap-toggle-dot" />}
+                  {isPilot && <span className="ap-toggle-dot" aria-hidden="true" />}
                   {copy.togglePilot}
                 </button>
                 <button
+                  type="button"
                   className={`ap-toggle-btn${!isPilot ? ' active' : ''}`}
                   onClick={() => setMode('manual')}
+                  aria-pressed={!isPilot}
                 >
-                  {!isPilot && <span className="ap-toggle-dot" />}
+                  {!isPilot && <span className="ap-toggle-dot" aria-hidden="true" />}
                   {copy.toggleManual}
                 </button>
               </div>
 
-              {copy.bullets.map((b, i) => (
-                <div key={i} className="autopilot-bullet">
-                  <div className="ic">{b.ic}</div>
-                  {b.t}
-                </div>
-              ))}
+              <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {copy.bullets.map((b) => (
+                  <li key={b.t} className="autopilot-bullet">
+                    <span className="ic" aria-hidden="true">{b.ic}</span>
+                    {b.t}
+                  </li>
+                ))}
+              </ul>
 
               <p className="autopilot-closer">{copy.closer}</p>
             </div>
           </div>
 
-          {/* Right: Calendar */}
-          <div
-            ref={calRef as React.RefObject<HTMLDivElement>}
-            className={`autopilot-cal reveal${calSeen ? ' is-in' : ''}`}
-            style={{ transitionDelay: '0.15s' }}
-          >
+          {/* Calendario de ejemplo: decorativo. */}
+          <div className="autopilot-cal reveal" style={{ animationDelay: '0.15s' }} aria-hidden="true">
             <div className="autopilot-cal-head">
-              <div className="ac-title">Content calendar</div>
+              <div className="ac-title">{copy.calendarTitle}</div>
               <div className="ac-mode">
                 <div className={`ac-pulse${isPilot ? ' on' : ''}`} />
                 {isPilot ? copy.togglePilot : copy.toggleManual}
@@ -79,15 +73,12 @@ export default function AutopilotSection({ copy }: Props) {
             </div>
 
             <div className="autopilot-cal-grid">
-              {copy.schedule.map((day, di) => (
-                <div key={di} className="autopilot-cal-day">
+              {copy.schedule.map((day) => (
+                <div key={day.day} className="autopilot-cal-day">
                   <div className="acd-day">{day.day}</div>
                   <div className="acd-items">
-                    {day.items.map((item, ii) => (
-                      <div
-                        key={ii}
-                        className={`acd-item${isPilot ? ' auto' : ''}`}
-                      >
+                    {day.items.map((item) => (
+                      <div key={item.t} className={`acd-item${isPilot ? ' auto' : ''}`} title={item.t}>
                         <span className="acd-ic">{item.ic}</span>
                       </div>
                     ))}

@@ -1,166 +1,77 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useId, useState } from 'react';
 import { useSignupWithEmail } from '@/components/ui/SignupContext';
+import VideoBackdrop from '@/components/ui/VideoBackdrop';
 import HeroDemo from './HeroDemo';
 import type { KefyCopy } from '@/types/locales';
-
-const VIDEO_SRC =
-  'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260328_065045_c44942da-53c6-4804-b734-f9e07fc22e08.mp4';
-const FADE = 0.5; // seconds fade-in / fade-out
 
 interface HeroProps {
   lang: string;
   copy: KefyCopy['hero'];
+  cta: KefyCopy['cta'];
   demoCopy: KefyCopy['demo'];
 }
 
-export default function Hero({ lang: _lang, copy, demoCopy }: HeroProps) {
+export default function Hero({ copy, cta, demoCopy }: HeroProps) {
   const goToRegisterWithEmail = useSignupWithEmail();
-  const videoRef = useRef<HTMLVideoElement>(null);
   const [heroEmail, setHeroEmail] = useState('');
+  const emailId = useId();
+  const noteId = useId();
 
   function handleHeroSubmit(e: React.FormEvent) {
     e.preventDefault();
     goToRegisterWithEmail(heroEmail.trim());
   }
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    let rafId: number;
-
-    const tick = () => {
-      const { duration, currentTime } = video;
-      if (duration && !isNaN(duration)) {
-        let opacity = 1;
-        if (currentTime < FADE) {
-          opacity = currentTime / FADE;
-        } else if (currentTime > duration - FADE) {
-          opacity = (duration - currentTime) / FADE;
-        }
-        video.style.opacity = String(Math.max(0, Math.min(1, opacity)));
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-
-    const handleEnded = () => {
-      video.style.opacity = '0';
-      setTimeout(() => {
-        video.currentTime = 0;
-        video.play().catch(() => {});
-      }, 100);
-    };
-
-    video.style.opacity = '0';
-    video.play().catch(() => {});
-    rafId = requestAnimationFrame(tick);
-    video.addEventListener('ended', handleEnded);
-
-    return () => {
-      cancelAnimationFrame(rafId);
-      video.removeEventListener('ended', handleEnded);
-    };
-  }, []);
-
   return (
     <section className="hero">
-      {/* Background video — fondo negro con líneas azules */}
-      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', zIndex: -2, pointerEvents: 'none' }}>
-        <video
-          ref={videoRef}
-          src={VIDEO_SRC}
-          autoPlay
-          muted
-          playsInline
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0 }}
-        />
-      </div>
-      {/* Dark blur shape centrada detrás del contenido para legibilidad */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          top: '42%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '984px',
-          height: '527px',
-          background: 'rgba(3,7,18,0.90)',
-          filter: 'blur(82px)',
-          pointerEvents: 'none',
-          zIndex: -1,
-        }}
-      />
+      {/* Vídeo de fondo: póster estático siempre; el vídeo solo en escritorio,
+          sin movimiento reducido ni ahorro de datos (ver VideoBackdrop). */}
+      <VideoBackdrop zIndex={-2} />
+      {/* Sombra detrás del texto para que se lea sobre el vídeo. Acotada al
+          ancho de la pantalla: con 984px fijos la página se desbordaba 297px
+          a 390px de ancho. */}
+      <div aria-hidden="true" className="hero-shade" />
+
       <div className="container hero-inner">
         <div className="hero-tag reveal">
-          <span className="dot" />
+          <span className="dot" aria-hidden="true" />
           {copy.tag}
         </div>
 
-        <h1
-          className="h1 reveal"
-          style={{ animationDelay: '0.08s' }}
-        >
+        <h1 className="h1 reveal" style={{ animationDelay: '0.08s' }}>
           {copy.h1[0]}
           {copy.h1[1] && <><br />{copy.h1[1]}</>}
           {copy.h1em && <><br /><em className="em">{copy.h1em}</em></>}
         </h1>
 
-        <p
-          className="hero-sub reveal"
-          style={{ animationDelay: '0.16s' }}
-        >
+        <p className="hero-sub reveal" style={{ animationDelay: '0.16s' }}>
           {copy.sub}
         </p>
 
-        <div
-          className="hero-ctas reveal"
-          style={{ animationDelay: '0.22s', flexDirection: 'column', alignItems: 'center' }}
-        >
-          <form
-            onSubmit={handleHeroSubmit}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.14)',
-              borderRadius: 999,
-              padding: '5px 5px 5px 22px',
-              maxWidth: 460,
-              width: '100%',
-            }}
-          >
+        <div className="hero-ctas reveal" style={{ animationDelay: '0.22s' }}>
+          <form onSubmit={handleHeroSubmit} className="hero-form">
+            <label htmlFor={emailId} className="sr-only">{copy.emailLabel}</label>
             <input
+              id={emailId}
               type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
               value={heroEmail}
-              onChange={e => setHeroEmail(e.target.value)}
-              placeholder={copy.emailPlaceholder ?? 'tu@correo.com'}
-              style={{
-                flex: 1,
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                color: 'var(--text)',
-                fontSize: 15,
-                minWidth: 0,
-              }}
+              onChange={(e) => setHeroEmail(e.target.value)}
+              placeholder={copy.emailPlaceholder}
+              aria-describedby={noteId}
+              className="hero-form-input"
             />
-            <button
-              type="submit"
-              className="btn btn-primary"
-              style={{ borderRadius: 999, whiteSpace: 'nowrap', flexShrink: 0 }}
-            >
-              {copy.cta2} →
+            <button type="submit" className="btn btn-primary hero-form-btn">
+              {cta.label} <span aria-hidden="true">→</span>
             </button>
           </form>
-          {copy.ctaNote && (
-            <p className="hero-cta-note" style={{ textAlign: 'center', marginTop: 12 }}>{copy.ctaNote}</p>
-          )}
+          <p id={noteId} className="hero-cta-note">{cta.note}</p>
         </div>
-
-        
 
         <HeroDemo copy={demoCopy} />
       </div>

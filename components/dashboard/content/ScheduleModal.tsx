@@ -1,20 +1,41 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+// ─── Publicar / programar ────────────────────────────────────────────────────
+// Elegir contenido → formato → cuentas → ahora o fecha → confirmar.
+//
+// - «Publicar» explica por qué no se puede pulsar (sin cuentas, sin cuenta
+//   elegida, video sin terminar, fecha pasada…) junto al botón. El botón queda
+//   con `aria-disabled` y no `disabled`: así sigue siendo enfocable y el motivo
+//   se anuncia como su descripción.
+// - Al terminar no se cierra solo: muestra el resultado y el usuario decide
+//   (cerrar o ir al calendario).
+// - Las acciones viven en el pie fijo del modal, y el cuerpo es un <form>.
+
+import { useEffect, useState, useMemo, useId, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import Modal from './Modal';
-import DateTimePicker from './DateTimePicker';
+import Modal from '@/components/ui/Modal';
+import Button, { ButtonLink, Spinner } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import EmptyState from '@/components/ui/EmptyState';
+import Icon, { type IconName } from '@/components/ui/icons';
 import ChannelIcon from '@/components/ui/ChannelIcon';
+import DateTimePicker from './DateTimePicker';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
 import FormatExample from './FormatExample';
 import { RenditionGenerating } from './RenditionGenerating';
 import { notifyLocal, requestNotificationPermission, shouldNotify } from '@/lib/notify';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ContentType, ContentRendition, ReelScene } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
-import esT from '@/locales/es/dashboard/content';
-import enT from '@/locales/en/dashboard/content';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
+import styles from './ScheduleModal.module.css';
 
 const ALL_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
+
+const FORMAT_ICONS: Record<ContentType, IconName> = { post: 'post', carousel: 'carousel', reel: 'video', story: 'story' };
+
+/** Alto máximo de las vistas previas verticales (reel, story, TikTok). */
+const PREVIEW_MAX_H = 'min(560px, 50dvh)';
 
 /** Only an http(s) URL is a video we can actually publish (a Mux playback id is not). */
 function isVideoUrl(url: string | null | undefined): url is string {
@@ -25,6 +46,9 @@ const MuxReelPlayer = dynamic(
   () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
   { ssr: false, loading: () => null },
 );
+
+type Copy = typeof esPublish;
+const COPY: Record<'es' | 'en', Copy> = { es: esPublish, en: enPublish };
 
 interface ScheduleModalProps {
   open:             boolean;
@@ -39,15 +63,38 @@ interface ScheduleModalProps {
   initialPlatform?: string;
   brandKit?:        BrandKitInfo | null;
   lang:             'es' | 'en';
+  /** Se llama en cuanto la publicación o programación sale bien (para que el
+   *  padre recargue sus datos). El modal sigue abierto mostrando el resultado. */
   onSuccess?:       (mode: 'now' | 'scheduled') => void;
+  /** Ofrece «Ver en el calendario» tras programar. `false` desde el propio
+   *  calendario. */
+  showCalendarLink?: boolean;
 }
 
-const T = { es: esT.scheduleModal, en: enT.scheduleModal } as const;
+/** Resultado de /api/social/publish y /api/social/schedule por cuenta. */
+interface PublishResult {
+  social_account_id: string;
+  platform?:         string | null;
+  status:            'published' | 'scheduled' | 'failed' | string;
+  error?:            string;
+}
+
+interface SuccessState {
+  mode:   'now' | 'scheduled';
+  ok:     number;
+  failed: string[];
+  when:   Date | null;
+}
 
 export default function ScheduleModal({
   open, onClose, initialItem, initialDate, initialPlatform, brandKit, lang, onSuccess,
+  showCalendarLink = true,
 }: ScheduleModalProps) {
-  const t = T[lang];
+  const copy = COPY[lang];
+  const t = copy.schedule;
+  const formId = useId();
+  const reasonId = useId();
+  const accountsLabelId = useId();
 
   const [selectedItem,  setSelectedItem]  = useState<ContentItem | null>(initialItem ?? null);
   const [availableItems, setAvailableItems] = useState<ContentItem[] | null>(null);
@@ -58,7 +105,7 @@ export default function ScheduleModal({
   const [scheduledAt, setScheduledAt] = useState<Date | null>(initialDate ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<SuccessState | null>(null);
   // Track video_url for reels rendered inside this modal
   const [reelVideoUrl, setReelVideoUrl] = useState<string | null>(null);
 
@@ -70,15 +117,20 @@ export default function ScheduleModal({
   const [renditionGenerating, setRenditionGenerating] = useState(false);
   const [renditionError, setRenditionError]   = useState<string | null>(null);
 
-  // Reset state when reopened
+  // Reset state each time the modal opens. Only on the closed → open edge: the
+  // parent may refetch the item after a successful publish (new object, same
+  // content) and that must not wipe the success view.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    const opening = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!opening) return;
     setSelectedItem(initialItem ?? null);
     setSelectedAccountIds([]);
     setMode(initialDate ? 'scheduled' : 'now');
     setScheduledAt(initialDate ?? null);
     setError(null);
-    setSuccess(false);
+    setSuccess(null);
     setReelVideoUrl(null);
     setSelectedFormat(initialItem?.content_type ?? null);
     setRenditions([]);
@@ -133,13 +185,13 @@ export default function ScheduleModal({
         body: JSON.stringify({ format }),
       });
       const d = await res.json() as { rendition?: ContentRendition; error?: string };
-      if (!res.ok || !d.rendition) throw new Error(d.error ?? 'Error');
+      if (!res.ok || !d.rendition) throw new Error(d.error ?? t.errors.rendition);
       setRenditions((prev) => [...prev.filter((r) => r.format !== format), d.rendition as ContentRendition]);
-      notify(t.renditionDoneTitle(FORMAT_LABELS[lang][format]), t.renditionDoneBody);
+      notify(t.renditionDoneTitle(copy.formats[format]), t.renditionDoneBody);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error';
+      const msg = err instanceof Error && err.message ? err.message : t.errors.rendition;
       setRenditionError(msg);
-      notify(t.renditionFailedTitle(FORMAT_LABELS[lang][format]), msg);
+      notify(t.renditionFailedTitle(copy.formats[format]), msg);
     } finally {
       setRenditionGenerating(false);
     }
@@ -194,73 +246,123 @@ export default function ScheduleModal({
   const isPrimaryFormat = !!selectedItem && selectedFormat === selectedItem.content_type;
   const renditionReady  = isPrimaryFormat || activeRendition?.status === 'ready';
 
-  /* eslint-disable react-hooks/purity */
-  const canSubmit = !!selectedItem
-    && !!selectedFormat
-    && renditionReady
-    && selectedAccountIds.length > 0
-    && (mode === 'now' || (mode === 'scheduled' && scheduledAt && scheduledAt.getTime() > Date.now()));
-  /* eslint-enable react-hooks/purity */
+  // Reels always need a finished video. Stories can be image-only, so only
+  // block them while a video render is actively in progress.
+  // Only a real http(s) video URL counts: a legacy Mux playback id is not
+  // publishable, and letting it through made the server publish the reel
+  // *cover image* instead of the video.
+  const activeVideoUrl     = isPrimaryFormat ? selectedItem?.video_url     : (activeRendition?.video_url ?? null);
+  const activeRenderStatus = isPrimaryFormat ? selectedItem?.render_status : (activeRendition?.render_status ?? null);
+  const hasVideo   = isVideoUrl(activeVideoUrl) || isVideoUrl(reelVideoUrl);
+  const videoReady = selectedFormat === 'reel' ? hasVideo
+    : selectedFormat === 'story' ? activeRenderStatus !== 'rendering'
+    : true;
 
-  const handleSubmit = useCallback(async () => {
-    if (!selectedItem || !selectedFormat || !canSubmit) return;
+  // Motivo por el que todavía no se puede publicar, en el orden en que el
+  // usuario recorre el formulario. `null` = se puede.
+  const formatLabel = selectedFormat ? copy.formats[selectedFormat] : '';
+  /* eslint-disable react-hooks/purity */
+  const blockReason: string | null = !selectedItem || !selectedFormat ? null
+    : renditionGenerating ? t.reasons.renditionPending(formatLabel)
+    : !renditionReady ? t.reasons.needsRendition(formatLabel)
+    : !videoReady ? t.reasons.videoPending
+    : loadingAccounts && activeAccounts.length === 0 ? t.reasons.loadingAccounts
+    : activeAccounts.length === 0 ? t.reasons.noAccounts
+    : selectedAccountIds.length === 0 ? t.reasons.noSelection
+    : mode === 'scheduled' && !scheduledAt ? t.reasons.noDate
+    : mode === 'scheduled' && scheduledAt && scheduledAt.getTime() <= Date.now() ? t.reasons.pastDate
+    : null;
+  /* eslint-enable react-hooks/purity */
+  const canSubmit = !!selectedItem && !!selectedFormat && blockReason === null;
+
+  function accountLabel(id: string, platform?: string | null): string {
+    const acc = accounts.find((a) => a.id === id);
+    return acc ? `@${acc.username}` : (platform ?? id);
+  }
+
+  async function handleSubmit() {
+    if (!selectedItem || !selectedFormat || !canSubmit || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      // Reels always need a finished video. Stories can be image-only, so only
-      // block them while a video render is actively in progress.
-      // Only a real http(s) video URL counts: a legacy Mux playback id is not
-      // publishable, and letting it through made the server publish the reel
-      // *cover image* instead of the video.
-      const activeVideoUrl     = isPrimaryFormat ? selectedItem.video_url     : (activeRendition?.video_url ?? null);
-      const activeRenderStatus = isPrimaryFormat ? selectedItem.render_status : (activeRendition?.render_status ?? null);
-      const hasVideo  = isVideoUrl(activeVideoUrl) || isVideoUrl(reelVideoUrl);
-      const reelReady = selectedFormat === 'reel' ? hasVideo
-        : selectedFormat === 'story' ? activeRenderStatus !== 'rendering'
-        : true;
-      if (!reelReady) {
-        throw new Error(lang === 'en'
-          ? 'The video is still being generated. Please wait until it finishes.'
-          : 'El video se está generando, espera a que termine antes de publicar.');
+      const scheduling = mode === 'scheduled' && !!scheduledAt;
+      const res = await fetch(scheduling ? '/api/social/schedule' : '/api/social/publish', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content_item_id:    selectedItem.id,
+          social_account_ids: selectedAccountIds,
+          ...(scheduling ? { scheduled_at: scheduledAt!.toISOString() } : {}),
+          format:             selectedFormat,
+        }),
+      });
+      const d = await res.json().catch(() => ({})) as { error?: string; results?: PublishResult[] };
+      if (!res.ok) {
+        // Si fallaron todas las cuentas el servidor responde 502 con el motivo
+        // de cada una en `results` y sin `error`.
+        const firstFailure = d.results?.find((r) => r.status === 'failed')?.error;
+        throw new Error(d.error ?? firstFailure ?? (scheduling ? t.errors.schedule : t.errors.publish));
       }
 
-      if (mode === 'scheduled' && scheduledAt) {
-        const res = await fetch('/api/social/schedule', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content_item_id:    selectedItem.id,
-            social_account_ids: selectedAccountIds,
-            scheduled_at:       scheduledAt.toISOString(),
-            format:             selectedFormat,
-          }),
-        });
-        const d = await res.json() as { error?: string };
-        if (!res.ok) throw new Error(d.error ?? 'Error scheduling');
-      } else {
-        const res = await fetch('/api/social/publish', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content_item_id:    selectedItem.id,
-            social_account_ids: selectedAccountIds,
-            format:             selectedFormat,
-          }),
-        });
-        const d = await res.json() as { error?: string };
-        if (!res.ok) throw new Error(d.error ?? 'Error publishing');
-      }
-
-      setSuccess(true);
-      onSuccess?.(mode);
-      // Close after a short delay so the user sees the success state
-      setTimeout(() => onClose(), 1200);
+      const results = d.results ?? [];
+      const failed  = results.filter((r) => r.status === 'failed');
+      setSuccess({
+        mode:   scheduling ? 'scheduled' : 'now',
+        ok:     results.length > 0 ? results.length - failed.length : selectedAccountIds.length,
+        failed: failed.map((r) => accountLabel(r.social_account_id, r.platform)),
+        when:   scheduling ? scheduledAt : null,
+      });
+      onSuccess?.(scheduling ? 'scheduled' : 'now');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error');
+      setError(err instanceof Error && err.message ? err.message : (mode === 'scheduled' ? t.errors.schedule : t.errors.publish));
     } finally {
       setSubmitting(false);
     }
-  }, [selectedItem, selectedFormat, isPrimaryFormat, activeRendition, canSubmit, mode, scheduledAt, selectedAccountIds, lang, reelVideoUrl, onClose, onSuccess]);
+  }
+
+  // ── Pie fijo del modal ─────────────────────────────────────────────────────
+  let footer: React.ReactNode;
+  if (success) {
+    footer = (
+      <>
+        {success.mode === 'scheduled' && showCalendarLink && (
+          <ButtonLink
+            href={`/${lang}/dashboard/content/calendar`}
+            variant="secondary"
+            icon={<Icon name="calendar" size={16} />}
+          >
+            {t.success.viewCalendar}
+          </ButtonLink>
+        )}
+        <Button variant="primary" onClick={onClose}>{t.success.close}</Button>
+      </>
+    );
+  } else if (!selectedItem) {
+    footer = <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>;
+  } else {
+    footer = (
+      <>
+        {blockReason && (
+          <p id={reasonId} className={styles.reason} aria-live="polite">
+            <Icon name="info" size={14} />
+            <span>{blockReason}</span>
+          </p>
+        )}
+        <Button variant="ghost" className={styles.footerCancel} onClick={onClose} disabled={submitting}>{t.cancel}</Button>
+        <Button
+          type="submit"
+          form={formId}
+          variant="primary"
+          icon={<Icon name={mode === 'now' ? 'send' : 'calendar'} size={16} />}
+          loading={submitting}
+          aria-disabled={!canSubmit || undefined}
+          aria-describedby={blockReason ? reasonId : undefined}
+        >
+          {mode === 'now' ? t.confirmNow : t.confirmSched}
+        </Button>
+      </>
+    );
+  }
 
   return (
     <Modal
@@ -269,51 +371,55 @@ export default function ScheduleModal({
       title={mode === 'now' ? t.titleNow : t.titleSched}
       maxWidth={620}
       dismissable={!submitting}
+      footer={footer}
     >
-      <div style={{ padding: '20px 24px 24px' }}>
-        {success ? (
-          <p style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, color: 'var(--accent)', padding: '24px 0' }}>
-            {mode === 'now' ? t.successNow : t.successSched}
-          </p>
-        ) : !selectedItem ? (
-          <ContentPicker items={availableItems} brandKit={brandKit} onPick={setSelectedItem} lang={lang} />
-        ) : (
-          <>
-            {/* Preview */}
-            <div style={{ marginBottom: 18 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase', margin: 0 }}>
-                  {t.preview}
-                </p>
-                {!initialItem && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedItem(null)}
-                    style={{
-                      background: 'none', border: 'none', color: 'var(--accent)',
-                      fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0,
-                    }}
-                  >
-                    {t.back}
-                  </button>
-                )}
-              </div>
+      {success ? (
+        <SuccessView success={success} copy={copy} lang={lang} />
+      ) : !selectedItem ? (
+        <div className={styles.body}>
+          <ContentPicker items={availableItems} brandKit={brandKit} onPick={setSelectedItem} lang={lang} copy={copy} />
+        </div>
+      ) : (
+        <form
+          id={formId}
+          className={styles.body}
+          noValidate
+          onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}
+        >
+          {/* Preview + format */}
+          <section className={styles.section}>
+            <div className={styles.sectionHead}>
+              <h3 className={styles.label}>
+                {t.preview}
+                {renditionsLoading && <Spinner size={12} />}
+              </h3>
+              {!initialItem && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Icon name="arrow-left" size={14} />}
+                  onClick={() => setSelectedItem(null)}
+                >
+                  {t.changeContent}
+                </Button>
+              )}
+            </div>
 
-              {/* Format — publish this same topic as post/carousel/reel/story */}
-              <FormatPicker
-                lang={lang}
-                selected={selectedFormat}
-                primaryFormat={selectedItem.content_type}
-                renditions={renditions}
-                loading={renditionsLoading}
-                onSelect={(f) => {
-                  // A render result belongs to the format it was rendered for.
-                  if (f !== selectedFormat) setReelVideoUrl(null);
-                  setSelectedFormat(f);
-                }}
-              />
+            {/* Format — publish this same topic as post/carousel/reel/story */}
+            <FormatPicker
+              copy={copy}
+              selected={selectedFormat}
+              primaryFormat={selectedItem.content_type}
+              renditions={renditions}
+              onSelect={(f) => {
+                // A render result belongs to the format it was rendered for.
+                if (f !== selectedFormat) setReelVideoUrl(null);
+                setSelectedFormat(f);
+              }}
+            />
 
-              {selectedFormat && (
+            {selectedFormat && (
+              <div className={styles.preview}>
                 <FormatPreview
                   item={selectedItem}
                   format={selectedFormat}
@@ -322,6 +428,7 @@ export default function ScheduleModal({
                   generating={renditionGenerating}
                   error={renditionError}
                   lang={lang}
+                  copy={copy}
                   networks={selectedPlatforms}
                   onGenerate={() => handleGenerateRendition(selectedFormat)}
                   onReelRenderDone={(_id, url) => {
@@ -336,186 +443,169 @@ export default function ScheduleModal({
                     }
                   }}
                 />
-              )}
-            </div>
-
-            {/* Accounts — choose where to publish before picking now/schedule */}
-            <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 10, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-              {t.accounts}
-            </p>
-            {loadingAccounts ? (
-              <p style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', padding: '12px 0' }}>{t.loadingAccounts}</p>
-            ) : activeAccounts.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '14px 0', fontSize: 13, color: 'var(--muted)' }}>
-                {t.noAccounts}{' '}
-                <a href={`/${lang}/dashboard/social`} style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
-                  {t.connectAccounts}
-                </a>
               </div>
+            )}
+          </section>
+
+          {/* Accounts — choose where to publish before picking now/schedule */}
+          <fieldset className={styles.fieldset}>
+            <legend id={accountsLabelId} className={styles.label}>{t.accounts}</legend>
+            {loadingAccounts && activeAccounts.length === 0 ? (
+              <p className={styles.muted}><Spinner size={12} /> {t.loadingAccounts}</p>
+            ) : activeAccounts.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<Icon name="link" size={24} />}
+                title={t.noAccounts}
+                hint={t.noAccountsHint}
+                action={(
+                  <ButtonLink
+                    href={`/${lang}/dashboard/settings#social`}
+                    variant="secondary"
+                    size="sm"
+                    icon={<Icon name="plus" size={14} />}
+                  >
+                    {t.connectAccounts}
+                  </ButtonLink>
+                )}
+              />
             ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+              <div className={styles.accounts}>
                 {activeAccounts.map((acc) => {
                   const isSelected = selectedAccountIds.includes(acc.id);
                   return (
                     <button
                       key={acc.id}
                       type="button"
+                      className={styles.account}
+                      aria-pressed={isSelected}
                       onClick={() => setSelectedAccountIds((prev) =>
                         isSelected ? prev.filter((id) => id !== acc.id) : [...prev, acc.id],
                       )}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 8,
-                        padding: '8px 12px', borderRadius: 999, cursor: 'pointer',
-                        border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
-                        background: isSelected ? 'rgba(198,255,75,0.10)' : 'var(--surface)',
-                        transition: 'all 0.12s',
-                        color: isSelected ? 'var(--accent)' : 'var(--text)',
-                      }}
                     >
                       <ChannelIcon name={acc.platform} size={18} />
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>@{acc.username}</span>
-                      {isSelected && <span style={{ fontSize: 13 }}>✓</span>}
+                      <span className={styles.accountName}>@{acc.username}</span>
+                      {isSelected && <Icon name="check" size={14} strokeWidth={2.4} />}
                     </button>
                   );
                 })}
               </div>
             )}
+          </fieldset>
 
-            {/* Mode toggle — only relevant once at least one account is picked */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <ToggleBtn active={mode === 'now'}      onClick={() => setMode('now')}      label={t.publishNow} />
-              <ToggleBtn active={mode === 'scheduled'} onClick={() => setMode('scheduled')} label={t.schedule} />
+          {/* When: now or at a date */}
+          <fieldset className={styles.fieldset}>
+            <legend className={styles.label}>{t.when}</legend>
+            <div className={styles.modeToggle}>
+              <button type="button" className={styles.modeBtn} aria-pressed={mode === 'now'} onClick={() => setMode('now')}>
+                <Icon name="send" size={16} />
+                {t.publishNow}
+              </button>
+              <button type="button" className={styles.modeBtn} aria-pressed={mode === 'scheduled'} onClick={() => setMode('scheduled')}>
+                <Icon name="clock" size={16} />
+                {t.schedule}
+              </button>
             </div>
-
             {mode === 'scheduled' && (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  {t.when}
-                </label>
-                <DateTimePicker value={scheduledAt} onChange={setScheduledAt} lang={lang} />
-              </div>
+              <DateTimePicker value={scheduledAt} onChange={setScheduledAt} lang={lang} />
             )}
+          </fieldset>
 
-            {error && (
-              <p style={{ fontSize: 13, color: '#ff6b6b', marginBottom: 12 }}>{error}</p>
-            )}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!canSubmit || submitting}
-                style={{
-                  flex: 1, background: 'var(--accent)', color: '#000', border: 'none',
-                  borderRadius: 10, padding: '12px 0', fontSize: 14, fontWeight: 700,
-                  cursor: (!canSubmit || submitting) ? 'not-allowed' : 'pointer',
-                  opacity: (!canSubmit || submitting) ? 0.55 : 1,
-                }}
-              >
-                {submitting ? t.publishing : (mode === 'now' ? t.confirmNow : t.confirmSched)}
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={submitting}
-                style={{
-                  padding: '12px 20px', borderRadius: 10, border: '1px solid var(--border)',
-                  background: 'var(--bg)', color: 'var(--muted)', fontSize: 13, fontWeight: 600,
-                  cursor: submitting ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {t.cancel}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+          {error && <Notice tone="danger">{error}</Notice>}
+        </form>
+      )}
     </Modal>
   );
 }
 
-function ToggleBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+// ─── Resultado ──────────────────────────────────────────────────────────────
+
+function SuccessView({ success, copy, lang }: { success: SuccessState; copy: Copy; lang: 'es' | 'en' }) {
+  const t = copy.schedule.success;
+  const when = success.when?.toLocaleString(lang === 'en' ? 'en-US' : 'es-ES', {
+    weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+  });
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        flex: 1, padding: '10px 0', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-        background: active ? 'rgba(198,255,75,0.12)' : 'var(--bg)',
-        color: active ? 'var(--accent)' : 'var(--muted)',
-      }}
-    >
-      {label}
-    </button>
+    <div className={styles.success} role="status">
+      <span className={styles.successIcon}><Icon name="check-circle" size={44} strokeWidth={1.6} /></span>
+      <p className={styles.successTitle}>{success.mode === 'now' ? t.nowTitle : t.schedTitle}</p>
+      <p className={styles.successDetail}>
+        {success.mode === 'scheduled' && when ? t.schedDetail(when, success.ok) : t.nowDetail(success.ok)}
+      </p>
+      {success.failed.length > 0 && (
+        <Notice tone="warning" live={false} icon={<Icon name="alert" size={16} />}>
+          {t.partial(success.failed.join(', '))}
+        </Notice>
+      )}
+    </div>
   );
 }
 
 // ─── ContentPicker (when no item preselected) ───────────────────────────────
 
 function ContentPicker({
-  items, brandKit, onPick, lang,
+  items, brandKit, onPick, lang, copy,
 }: {
   items: ContentItem[] | null;
   brandKit?: BrandKitInfo | null;
   onPick: (item: ContentItem) => void;
   lang: 'es' | 'en';
+  copy: Copy;
 }) {
-  const t = T[lang];
-  if (items === null) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>…</p>;
-  if (items.length === 0) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t.noItems}</p>;
+  const t = copy.schedule;
+  if (items === null) {
+    return <p className={styles.muted}><Spinner size={12} /> {t.loadingItems}</p>;
+  }
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={<Icon name="content" size={28} />}
+        title={t.noItems}
+        hint={t.noItemsHint}
+        action={(
+          <ButtonLink href={`/${lang}/dashboard/content/create?new=1`} variant="primary" icon={<Icon name="plus" size={16} />}>
+            {t.createContent}
+          </ButtonLink>
+        )}
+      />
+    );
+  }
 
   return (
-    <div>
-      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 10, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-        {t.pickContent}
-      </p>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8,
-        maxHeight: 360, overflowY: 'auto', paddingRight: 4,
-      }}>
+    <section className={styles.section}>
+      <h3 className={styles.label}>{t.pickContent}</h3>
+      <div className={styles.picker}>
         {items.map((item) => {
           const thumb = itemThumbnail(item);
           return (
             <button
               key={item.id}
               type="button"
+              className={`${styles.pickItem} ui-link-card`}
               onClick={() => onPick(item)}
-              style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 8, padding: 0, cursor: 'pointer', overflow: 'hidden',
-                textAlign: 'left',
-              }}
             >
-              <div style={{
-                width: '100%',
-                aspectRatio: item.content_type === 'reel' ? '3/4' : item.content_type === 'story' ? '2/3' : '1/1',
-                overflow: 'hidden',
-                background: `linear-gradient(135deg, ${brandKit?.accent_color ?? '#c6ff4b'}20, ${brandKit?.primary_color ?? '#888'}10)`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
+              <span
+                className={styles.pickThumb}
+                style={{
+                  aspectRatio: item.content_type === 'reel' ? '3/4' : item.content_type === 'story' ? '2/3' : '1/1',
+                  background: `linear-gradient(135deg, ${brandKit?.accent_color ?? '#c6ff4b'}20, ${brandKit?.primary_color ?? '#888'}10)`,
+                }}
+              >
                 {thumb ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <img src={thumb} alt="" />
                 ) : (
-                  <span style={{ fontSize: 24, opacity: 0.5 }}>
-                    {item.content_type === 'reel' ? '▶' : item.content_type === 'carousel' ? '▦' : item.content_type === 'story' ? '◎' : '✦'}
-                  </span>
+                  <Icon name={FORMAT_ICONS[item.content_type]} size={24} />
                 )}
-              </div>
-              <div style={{ padding: '6px 8px' }}>
-                <p style={{
-                  fontSize: 11, margin: 0, color: 'var(--text)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {item.title ?? item.body?.slice(0, 30) ?? '—'}
-                </p>
-              </div>
+              </span>
+              <span className={styles.pickTitle}>
+                {item.title || item.body?.slice(0, 40) || t.untitled}
+              </span>
             </button>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -534,47 +624,38 @@ function itemThumbnail(item: ContentItem): string | null {
 // format it was originally generated as — pick a format, and it's generated
 // on demand (via FormatPreview/GenerateFormatPrompt below) if missing.
 
-const FORMAT_ICONS: Record<ContentType, string> = { post: '✦', carousel: '▦', reel: '▶', story: '◎' };
-const FORMAT_LABELS: Record<'es' | 'en', Record<ContentType, string>> = {
-  es: { post: 'Post', carousel: 'Carrusel', reel: 'Reel', story: 'Story' },
-  en: { post: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' },
-};
-
 function FormatPicker({
-  lang, selected, primaryFormat, renditions, loading, onSelect,
+  copy, selected, primaryFormat, renditions, onSelect,
 }: {
-  lang:          'es' | 'en';
+  copy:          Copy;
   selected:      ContentType | null;
   primaryFormat: ContentType;
   renditions:    ContentRendition[];
-  loading:       boolean;
   onSelect:      (f: ContentType) => void;
 }) {
   return (
-    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+    <div className={styles.formatPicker} role="group" aria-label={copy.schedule.formatLabel}>
       {ALL_FORMATS.map((f) => {
-        const isSelected = selected === f;
         const isReady = f === primaryFormat || renditions.some((r) => r.format === f && r.status === 'ready');
         return (
           <button
             key={f}
             type="button"
+            className={styles.formatBtn}
+            aria-pressed={selected === f}
             onClick={() => onSelect(f)}
-            style={{
-              flex: 1, padding: '8px 6px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-              border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
-              background: isSelected ? 'rgba(198,255,75,0.10)' : 'var(--bg)',
-              color: isSelected ? 'var(--accent)' : 'var(--text)',
-              fontWeight: isSelected ? 700 : 500,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-            }}
           >
-            {FORMAT_ICONS[f]} {FORMAT_LABELS[lang][f]}
-            {isReady && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)' }} />}
+            <Icon name={FORMAT_ICONS[f]} size={16} />
+            {copy.formats[f]}
+            {isReady && (
+              <>
+                <span className={styles.readyDot} aria-hidden="true" />
+                <span className="sr-only">({copy.schedule.formatReady})</span>
+              </>
+            )}
           </button>
         );
       })}
-      {loading && <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>…</span>}
     </div>
   );
 }
@@ -585,7 +666,7 @@ function FormatPicker({
 // "generate this format" prompt when that rendition doesn't exist yet.
 
 function FormatPreview({
-  item, format, rendition, brandKit, generating, error, lang, networks, onGenerate, onReelRenderDone,
+  item, format, rendition, brandKit, generating, error, lang, copy, networks, onGenerate, onReelRenderDone,
 }: {
   item:       ContentItem;
   format:     ContentType;
@@ -594,6 +675,7 @@ function FormatPreview({
   generating: boolean;
   error:      string | null;
   lang:       'es' | 'en';
+  copy:       Copy;
   /** Plataformas de las cuentas elegidas; vacío = todas las del formato. */
   networks:   string[];
   onGenerate: () => void;
@@ -608,37 +690,33 @@ function FormatPreview({
   const videoUrl = isPrimary ? item.video_url       : rendition?.video_url ?? null;
   const muxId    = (isPrimary ? item.mux_playback_id : rendition?.mux_playback_id) ?? null;
   const hashtags = isPrimary ? item.hashtags        : rendition?.hashtags ?? [];
+  const vertical = format === 'reel' || format === 'story';
 
   // Mientras se genera manda el esqueleto: la petición tarda minutos y el
   // usuario necesita ver que está pasando algo, no un botón deshabilitado.
   if (generating) {
     return (
-      <RenditionGenerating
-        format={format}
-        lang={lang}
-        accentColor={brandKit?.accent_color ?? undefined}
-      />
+      <div className={vertical ? styles.verticalCap : undefined}>
+        <RenditionGenerating
+          format={format}
+          lang={lang}
+          accentColor={brandKit?.accent_color ?? undefined}
+        />
+      </div>
     );
   }
 
   const needsGeneration = !isPrimary && (!rendition || rendition.status === 'error');
+  const prompt = (err: string | null) => (
+    <GenerateFormatPrompt format={format} lang={lang} copy={copy} generating={generating} error={err} onGenerate={onGenerate} />
+  );
 
-  if (needsGeneration) {
-    return (
-      <GenerateFormatPrompt
-        format={format} lang={lang} generating={generating}
-        error={error ?? rendition?.error_message ?? null}
-        onGenerate={onGenerate}
-      />
-    );
-  }
+  if (needsGeneration) return prompt(error ?? rendition?.error_message ?? null);
 
   const previewSlides = (Array.isArray(slides) ? slides : []) as Array<CarouselSlide | ReelScene>;
 
   if (format === 'post' || format === 'carousel' || format === 'story') {
-    if (format === 'carousel' && previewSlides.length === 0) {
-      return <GenerateFormatPrompt format={format} lang={lang} generating={generating} error={error} onGenerate={onGenerate} />;
-    }
+    if (format === 'carousel' && previewSlides.length === 0) return prompt(error);
     return (
       <NetworkPreview
         contentType={format}
@@ -651,98 +729,65 @@ function FormatPreview({
         slides={previewSlides}
         activeSlide={activeSlide}
         onActiveSlideChange={setActiveSlide}
-        username={brandKit?.name ?? 'tu_marca'}
+        username={brandKit?.name ?? copy.preview.defaultUsername}
         logoUrl={brandKit?.logo_url ?? undefined}
         imagePending={isPrimary && !imageUrl && item.image_status === 'generating'}
         accentColor={brandKit?.accent_color ?? undefined}
         brandFont={brandKit?.font_heading}
+        lang={lang}
+        frameMaxHeight={PREVIEW_MAX_H}
       />
     );
   }
 
   if (format === 'reel') {
-    if (!Array.isArray(slides) || slides.length === 0) {
-      return <GenerateFormatPrompt format={format} lang={lang} generating={generating} error={error} onGenerate={onGenerate} />;
-    }
+    if (!Array.isArray(slides) || slides.length === 0) return prompt(error);
+    const hasVideo = !!(videoUrl || muxId);
     return (
-      <ReelSlider
-        videoUrl={videoUrl}
-        muxPlaybackId={!videoUrl ? muxId : null}
-        itemId={item.id}
-        renderFormat={isPrimary ? undefined : 'reel'}
-        brandKit={brandKit}
-        onRenderDone={onReelRenderDone}
-      />
+      <div style={{ borderRadius: 10, overflow: 'hidden' }}>
+        <MuxReelPlayer
+          itemId={item.id}
+          format={isPrimary ? undefined : 'reel'}
+          videoUrl={videoUrl}
+          muxPlaybackId={!videoUrl ? muxId : null}
+          renderStatus={hasVideo ? 'ready' : 'not_rendered'}
+          height={560}
+          maxHeight="50dvh"
+          autoPlay={hasVideo}
+          accentColor={brandKit?.accent_color ?? brandKit?.primary_color ?? undefined}
+          lang={lang}
+          onRenderDone={onReelRenderDone}
+        />
+      </div>
     );
   }
 
   return null;
 }
 
-const GENERATE_PROMPT_T = {
-  es: { cta: (label: string) => `Generar versión de ${label}`, loading: 'Generando…' },
-  en: { cta: (label: string) => `Generate ${label} version`, loading: 'Generating…' },
-};
-
 function GenerateFormatPrompt({
-  format, lang, generating, error, onGenerate,
+  format, lang, copy, generating, error, onGenerate,
 }: {
   format:     ContentType;
   lang:       'es' | 'en';
+  copy:       Copy;
   generating: boolean;
   error:      string | null;
   onGenerate: () => void;
 }) {
-  const gt = GENERATE_PROMPT_T[lang];
+  const t = copy.schedule;
   return (
-    <div style={{
-      border: '1px dashed var(--border)', borderRadius: 12, padding: '20px 16px',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-    }}>
+    <div className={styles.generate}>
       <FormatExample format={format} lang={lang} />
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        icon={<Icon name="sparkles" size={16} />}
+        loading={generating}
         onClick={onGenerate}
-        disabled={generating}
-        style={{
-          background: 'rgba(198,255,75,0.08)', border: '1px solid var(--accent)',
-          color: 'var(--accent)', borderRadius: 8, padding: '9px 18px',
-          fontSize: 13, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer',
-          opacity: generating ? 0.6 : 1,
-        }}
       >
-        {generating ? gt.loading : gt.cta(FORMAT_LABELS[lang][format])}
-      </button>
-      {error && <p style={{ fontSize: 12, color: '#ff6b6b', margin: 0, textAlign: 'center' }}>{error}</p>}
-    </div>
-  );
-}
-
-function ReelSlider({
-  videoUrl, muxPlaybackId, itemId, renderFormat, brandKit, onRenderDone,
-}: {
-  videoUrl:        string | null;
-  muxPlaybackId:   string | null;
-  itemId:          string;
-  /** Set when rendering an alternate-format rendition (e.g. a 'reel' rendition of a 'post'-primary item). */
-  renderFormat?:   'reel' | 'story';
-  brandKit?:       BrandKitInfo | null;
-  onRenderDone?:   (itemId: string, url: string) => void;
-}) {
-  const hasVideo = !!(videoUrl || muxPlaybackId);
-  return (
-    <div style={{ borderRadius: 10, overflow: 'hidden' }}>
-      <MuxReelPlayer
-        itemId={itemId}
-        format={renderFormat}
-        videoUrl={videoUrl}
-        muxPlaybackId={muxPlaybackId}
-        renderStatus={hasVideo ? 'ready' : 'not_rendered'}
-        height={560}
-        autoPlay={hasVideo}
-        accentColor={brandKit?.accent_color ?? brandKit?.primary_color ?? undefined}
-        onRenderDone={onRenderDone}
-      />
+        {generating ? t.generating : t.generateVersion(copy.formats[format])}
+      </Button>
+      {error && <Notice tone="danger">{error}</Notice>}
     </div>
   );
 }

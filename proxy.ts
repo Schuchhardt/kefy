@@ -53,9 +53,9 @@ async function verifyToken(token: string) {
 
 
 /**
- * Login con `?next=` para volver a la página del dashboard que se pidió (p. ej.
- * el link del asistente para conectar una red). La portada del dashboard no
- * lo necesita. El login solo acepta rutas del dashboard (lib/safe-redirect).
+ * Login con `?next=` para volver a la página que se pidió (p. ej. el link del
+ * asistente para conectar una red). La portada del dashboard no lo necesita.
+ * El login solo acepta rutas propias (lib/safe-redirect).
  */
 function loginRedirectUrl(req: NextRequest, lang: string): URL {
   const loginUrl = new URL(`/${lang}/login`, req.url);
@@ -68,7 +68,9 @@ export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // ── Auth protection ─────────────────────────────────────────────────────────
-  const isDashboard    = /^\/[a-z]{2}\/dashboard/.test(pathname);
+  // El onboarding («pega tu web → 3 posts») también exige sesión: sin ella la
+  // página cargaba y fallaba al primer fetch.
+  const isDashboard    = /^\/[a-z]{2}\/(dashboard|onboarding)(\/|$)/.test(pathname);
   const isProtectedApi = pathname.startsWith('/api/') && !isPublicApiPath(pathname);
 
   if (isDashboard || isProtectedApi) {

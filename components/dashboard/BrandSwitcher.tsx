@@ -1,9 +1,15 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { useBrand } from '@/lib/brand-context';
 import BrandAvatar from '@/components/dashboard/BrandAvatar';
 import BrandMenu from '@/components/dashboard/BrandMenu';
+import Icon from '@/components/ui/icons';
+import esT from '@/locales/es/dashboard/brand-menu';
+import enT from '@/locales/en/dashboard/brand-menu';
+import styles from './BrandSwitcher.module.css';
+
+const T = { es: esT, en: enT } as const;
 
 /* ─── BrandSwitcher ──────────────────────────────────────────────────────── */
 
@@ -15,91 +21,83 @@ export default function BrandSwitcher({
   lang?: 'es' | 'en';
 }) {
   const { activeBrand, loading } = useBrand();
+  const t = T[lang] ?? T.es;
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
 
-  // Close dropdown when clicking outside
+  // Cerrar al tocar fuera o con Escape (y devolver el foco al botón).
   useEffect(() => {
+    if (!open) return;
     function onPointerDown(e: PointerEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    }
     document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, []);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   if (loading) {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
-        gap: 8, padding: collapsed ? '18px 0' : '18px 16px',
-        borderBottom: '1px solid var(--border)', minHeight: 60, flexShrink: 0,
-      }}>
-        <span style={{
-          width: 28, height: 28, borderRadius: 7, background: 'var(--border)', flexShrink: 0,
-          animation: 'pulse 1.5s infinite',
-        }} />
+      <div className={`${styles.skeleton}${collapsed ? ` ${styles.isCollapsed}` : ''}`} aria-hidden="true">
+        <span className={styles.skeletonBox} />
+      </div>
+    );
+  }
+
+  const name = activeBrand?.name ?? t.noBrand;
+
+  // Colapsado (64px) no hay sitio para la lista: solo se muestra la marca
+  // activa. Antes era un botón que no hacía nada al pulsarlo.
+  if (collapsed) {
+    return (
+      <div className={styles.collapsed} title={name}>
+        <BrandAvatar brand={activeBrand} size={28} />
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', flexShrink: 0 }}>
+    <div ref={containerRef} className={styles.root}>
       {/* ── Trigger ── */}
       <button
-        onClick={() => { if (!collapsed) setOpen((v) => !v); }}
-        title={collapsed ? (activeBrand?.name ?? 'Marca') : undefined}
-        style={{
-          display: 'flex', alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'space-between',
-          gap: 8, width: '100%',
-          padding: collapsed ? '18px 0' : '12px 16px',
-          borderBottom: '1px solid var(--border)', minHeight: 60,
-          background: 'none', border: 'none', cursor: collapsed ? 'default' : 'pointer',
-          fontFamily: 'var(--font-syne), system-ui, sans-serif',
-          transition: 'background 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          if (!collapsed) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
-        }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={t.switchBrand(name)}
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        className={`ui-hoverable ${styles.trigger}`}
       >
-        <div style={{
-          display: 'flex', alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'flex-start',
-          gap: 8, overflow: 'hidden', flex: 1, minWidth: 0,
-        }}>
-          <BrandAvatar brand={activeBrand} size={28} />
-          {!collapsed && (
-            <span style={{
-              fontWeight: 700, fontSize: 13, color: 'var(--text)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              textAlign: 'left',
-            }}>
-              {activeBrand?.name ?? 'Sin marca'}
-            </span>
-          )}
-        </div>
-        {!collapsed && (
-          <svg
-            width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="var(--muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            style={{ flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        )}
+        <span className={styles.triggerMain}>
+          <span className={styles.avatar} aria-hidden="true">
+            <BrandAvatar brand={activeBrand} size={28} />
+          </span>
+          <span className={styles.name}>{name}</span>
+        </span>
+        <Icon
+          name="chevron-down"
+          size={14}
+          strokeWidth={2}
+          className={`${styles.chevron}${open ? ` ${styles.chevronOpen}` : ''}`}
+        />
       </button>
 
       {/* ── Dropdown ── */}
-      {open && !collapsed && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
-          overflow: 'hidden', marginTop: 4,
-        }}>
+      {open && (
+        <div id={menuId} className={styles.menu}>
           <BrandMenu lang={lang} onDone={() => setOpen(false)} />
         </div>
       )}

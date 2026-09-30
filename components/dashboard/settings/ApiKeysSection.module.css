@@ -1,0 +1,95 @@
+/* Ajustes → API y MCP. Los botones, campos y avisos son los compartidos
+   (components/ui); aquí solo va la maquetación propia de la sección. */
+
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.intro { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; flex: 1 1 300px; }
+.loading { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin: 0; }
+.inline { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+.more { margin-top: 12px; }
+.more > .list { margin-top: 10px; }
+
+.mono { font-family: var(--font-jetbrains), monospace; font-size: 12px; }
+.prefix { color: var(--muted); }
+
+/* ─── Filas de keys ──────────────────────────────────────────────────────── */
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.key {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--border);
+}
+/* Revocadas y expiradas: borde discontinuo en vez de bajar la opacidad, que
+   dejaba el texto gris por debajo del contraste mínimo. */
+.key[data-inactive] { background: transparent; border-style: dashed; }
+.keyMain { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.keyTitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.keyName { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.meta { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; }
+/* Si no cabe en la fila, baja alineado a la derecha. */
+.keyAction { margin-left: auto; }
+
+/* ─── Código copiable ────────────────────────────────────────────────────── */
+.code {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 8px 8px 14px;
+}
+.codeText {
+  margin: 0; padding-top: 6px; flex: 1; min-width: 0;
+  white-space: pre-wrap; word-break: break-all; color: var(--text); line-height: 1.6;
+}
+.secret {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--accent-border); border-radius: 8px;
+  padding: 8px 8px 8px 14px;
+}
+.secretText { font-size: 13px; flex: 1; min-width: 0; word-break: break-all; user-select: all; color: var(--text); }
+
+/* ─── Formulario de creación ─────────────────────────────────────────────── */
+.form { display: flex; flex-direction: column; gap: 18px; }
+.fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+/* float + clear: la única forma fiable de separar la leyenda del contenido. */
+.legend { float: left; width: 100%; padding: 0; margin: 0 0 6px; }
+.scopes { clear: both; display: flex; flex-direction: column; gap: 8px; }
+.scope {
+  display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+  padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: transparent;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.scope[data-checked] { border-color: var(--accent-border); background: var(--accent-soft); }
+.scope input { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.scopeText { display: flex; flex-direction: column; gap: 2px; }
+.scopeLabel { font-size: 13px; font-weight: 600; }
+.scopeHint { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.warning { margin-top: 10px; }
+.actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+
+/* ─── Conexión MCP ───────────────────────────────────────────────────────── */
+.connect { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.connectTitle { font-family: var(--font-syne), system-ui, sans-serif; font-size: 14px; font-weight: 700; margin: 0 0 6px; }
+.connectIntro { font-size: 13px; color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
+.label { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 18px 0 10px; }
+.tab {
+  min-height: 32px; padding: 5px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+  font-size: 12px; font-weight: 600;
+}
+.tab:hover, .tab:active { color: var(--text); }
+.tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text); }
+.snippetHint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+
+@media (pointer: coarse), (max-width: 767px) {
+  .tab { min-height: 36px; }
+}
+
+/* Se ven de 36px y se tocan en 44px: el área extra es un pseudo-elemento, como
+   .ui-btn--sm en globals.css, para no agrandar filas compactas. */
+@media (pointer: coarse), (max-width: 767px) {
+  .tab { position: relative; }
+  .tab::after { content: ''; position: absolute; inset: -4px; }
+}

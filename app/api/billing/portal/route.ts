@@ -31,7 +31,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const returnUrl = `${appUrl()}/es/dashboard/settings`;
+  // Idioma al que vuelve el portal: lo manda la página ({ lang }). El cuerpo
+  // es opcional: sin él (o con otro valor) se vuelve a /es/, como antes.
+  const body = await req.json().catch(() => null) as { lang?: unknown } | null;
+  const lang = body?.lang === 'en' ? 'en' : 'es';
+  const returnUrl = `${appUrl()}/${lang}/dashboard/settings#billing`;
 
   const portalSession = await stripe.billingPortal.sessions.create({
     customer:   org.stripe_customer_id,

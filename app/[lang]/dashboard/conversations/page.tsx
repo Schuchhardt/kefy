@@ -1,26 +1,91 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, useMemo, Suspense } from 'react';
-import type { ReactNode } from 'react';
+import {
+  Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
+  type FormEvent, type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import Modal from '@/components/ui/Modal';
+import EmptyState from '@/components/ui/EmptyState';
+import Button from '@/components/ui/Button';
+import Icon from '@/components/ui/icons';
+import { Input, Textarea } from '@/components/ui/Field';
 import { useDataChanged } from '@/lib/data-events';
 import { useBrand } from '@/lib/brand-context';
+import { toLocale } from '@/lib/i18n';
+import { refreshUnreadCount } from '@/hooks/useUnreadCount';
 
 import esInbox from '@/locales/es/dashboard/inbox';
 import enInbox from '@/locales/en/dashboard/inbox';
 import esEngage from '@/locales/es/dashboard/engage';
 import enEngage from '@/locales/en/dashboard/engage';
+import esCommon from '@/locales/es/dashboard/common';
+import enCommon from '@/locales/en/dashboard/common';
 
 import type { MessagingPlatform, ThreadPreview, Message, CommentItem, FilterType } from '@/types/conversations';
 import type { SocialAccount } from '@/types/social';
-import type { Locale } from '@/types/i18n';
+import type { InboxCopy } from '@/locales/es/dashboard/inbox';
+import type { EngageCopy } from '@/locales/es/dashboard/engage';
+
+import styles from './page.module.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TI = { es: esInbox,  en: enInbox  } as const;
 const TE = { es: esEngage, en: enEngage } as const;
+const TC = { es: esCommon, en: enCommon } as const;
+
+/** Mismo corte que el resto del dashboard (BottomNav, `.page`, CSS del módulo). */
+const MOBILE_QUERY = '(max-width: 767px)';
+
+const TABS: FilterType[] = ['dms', 'comments'];
+
+const PLATFORMS: MessagingPlatform[] = ['linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads'];
+const PLATFORM_LABELS: Record<MessagingPlatform, string> = {
+  linkedin:  'LinkedIn',
+  instagram: 'Instagram',
+  facebook:  'Facebook',
+  twitter:   'X/Twitter',
+  tiktok:    'TikTok',
+  threads:   'Threads',
+};
+
+function platformLabel(platform: string): string {
+  return PLATFORM_LABELS[platform as MessagingPlatform] ?? platform;
+}
+
+function isMobileViewport(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia(MOBILE_QUERY).matches;
+}
+
+function threadKey(accountId: string, platformThreadId: string): string {
+  return `${accountId}:${platformThreadId}`;
+}
+
+function keyOfThread(thread: ThreadPreview): string {
+  return threadKey(thread.kefy_social_accounts.id, thread.platform_thread_id);
+}
+
+function timeAgo(iso: string, t: InboxCopy): string {
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (m < 1) return t.timeNow;
+  const h = Math.floor(m / 60);
+  return t.timeAgo(m, h, Math.floor(h / 24));
+}
+
+/** URL actual con otros parámetros de conversación (el resto se conserva). */
+function urlWith(changes: Record<string, string | null>): string {
+  const qs = new URLSearchParams(window.location.search);
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === null) qs.delete(key); else qs.set(key, value);
+  }
+  const query = qs.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ''}`;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,132 +100,118 @@ type CommentThread = {
   externalAuthor: { id: string; name: string | null; avatar: string | null } | null;
 };
 
+/** Resultado de sincronizar: éxito (role=status) o error (role=alert). */
+type SyncNotice = { tone: 'success' | 'danger'; text: string } | null;
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+function Avatar({ name, src, size = 36 }: { name?: string | null; src?: string | null; size?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={styles.avatar}
+      style={{
+        width: size, height: size, fontSize: Math.round(size * 0.42),
+        backgroundImage: src ? `url(${JSON.stringify(src)})` : undefined,
+      }}
+    >
+      {!src && (name?.trim()[0]?.toUpperCase() ?? '?')}
+    </span>
+  );
+}
+
+/** Icono de la red con nombre accesible (el `title` es solo un extra). */
+function PlatformTag({ platform, size = 12, boxed = false }: { platform: string; size?: number; boxed?: boolean }) {
+  const label = platformLabel(platform);
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={boxed ? `${styles.platformTag} ${styles.platformTagBoxed}` : styles.platformTag}
+    >
+      <ChannelIcon name={platform} size={size} />
+    </span>
+  );
+}
+
 function ReplyBox({
-  onSend, disabled, placeholder, sendLabel, errorFallback,
+  onSend, onCancel, te, cancelLabel,
 }: {
   onSend: (text: string) => Promise<{ error?: string } | void>;
-  disabled?: boolean; placeholder?: string; sendLabel?: string; errorFallback?: string;
+  onCancel?: () => void;
+  te: EngageCopy;
+  cancelLabel: string;
 }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handle() {
-    if (!text.trim()) return;
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const value = text.trim();
+    if (!value || sending) return;
     setSending(true); setError(null);
-    const result = await onSend(text.trim());
-    if (result && 'error' in result) {
-      setError(result.error ?? (errorFallback ?? 'Error'));
-    } else {
-      setText('');
+    try {
+      const result = await onSend(value);
+      if (result && 'error' in result) setError(result.error ?? te.errorSend);
+      else setText('');
+    } catch {
+      // Antes un fallo de red dejaba el botón en «...» para siempre.
+      setError(te.errorSend);
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   }
 
   return (
-    <div style={{ marginTop: 10 }}>
-      {error && <p style={{ fontSize: 11, color: '#ff6b6b', marginBottom: 4 }}>{error}</p>}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input value={text} onChange={(e) => setText(e.target.value)}
-          placeholder={placeholder ?? 'Reply...'} disabled={disabled || sending}
-          onKeyDown={(e) => { if (e.key === 'Enter') void handle(); }}
-          style={{ flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 13,
-            border: '1px solid var(--border)', background: 'var(--bg)',
-            color: 'var(--text)', outline: 'none', fontFamily: 'inherit' }} />
-        <button onClick={handle} disabled={!text.trim() || sending || disabled}
-          style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-            background: text.trim() && !disabled ? 'var(--accent)' : 'var(--border)',
-            color: text.trim() && !disabled ? '#000' : 'var(--muted)',
-            border: 'none', cursor: text.trim() && !disabled ? 'pointer' : 'default',
-            opacity: sending ? 0.6 : 1 }}>
-          {sending ? '...' : (sendLabel ?? 'Reply')}
-        </button>
+    <form className={styles.replyBox} onSubmit={handleSubmit}>
+      {error && <p role="alert" className={styles.errorText}>{error}</p>}
+      <div className={styles.replyRow}>
+        <Input
+          className={styles.replyInput}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={te.replyPlaceholder}
+          aria-label={te.yourReply}
+          disabled={sending}
+          // Aparece al pulsar «Responder»: el foco va directo al campo.
+          autoFocus
+        />
+        <Button type="submit" variant="primary" size="sm" loading={sending} disabled={!text.trim()}>
+          {te.replyBtnSend}
+        </Button>
+        {onCancel && (
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={sending}>{cancelLabel}</Button>
+        )}
       </div>
-    </div>
+    </form>
   );
 }
-
-/** Estado vacío de una lista (hilos de DMs o comentarios): icono + título +
- *  una línea de contexto. Nada de nombres de plataforma ni de proveedor —
- *  solo lo que le importa a quien mira la pantalla. */
-function EmptyState({ icon, title, hint }: { icon: ReactNode; title: string; hint?: string }) {
-  return (
-    <div style={{ padding: '48px 24px', textAlign: 'center',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-      <div style={{ color: 'var(--muted)', opacity: 0.6 }}>{icon}</div>
-      <p style={{ color: 'var(--text)', fontSize: 14, fontWeight: 600 }}>{title}</p>
-      {hint && <p style={{ color: 'var(--muted)', fontSize: 12, maxWidth: 240, lineHeight: 1.5 }}>{hint}</p>}
-    </div>
-  );
-}
-
-const InboxIcon = (
-  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="5" width="18" height="14" rx="2" />
-    <path d="M3 7l9 6 9-6" />
-  </svg>
-);
-
-const CommentsIcon = (
-  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-  </svg>
-);
-
-const CaughtUpIcon = (
-  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="9" />
-    <path d="M8.5 12.5l2.5 2.5 5-5" />
-  </svg>
-);
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function ConversationsPageInner() {
   const { lang } = useParams<{ lang: string }>();
-  const { activeBrand } = useBrand();
-  const searchParams = useSearchParams();
-  const locale: Locale = (lang as Locale) === 'en' ? 'en' : 'es';
+  const locale = toLocale(lang);
   const ti = TI[locale];
   const te = TE[locale];
+  const tc = TC[locale];
+  const { activeBrand } = useBrand();
+  const searchParams = useSearchParams();
 
-  const PLATFORMS: { value: MessagingPlatform | 'all'; label: string }[] = [
-    { value: 'all',       label: locale === 'es' ? 'Todos'     : 'All'       },
-    { value: 'linkedin',  label: 'LinkedIn'  },
-    { value: 'instagram', label: 'Instagram' },
-    { value: 'facebook',  label: 'Facebook'  },
-    { value: 'twitter',   label: 'X/Twitter' },
-    { value: 'tiktok',    label: 'TikTok'    },
-    { value: 'threads',   label: 'Threads'   },
-  ];
-  const PLATFORM_LABELS: Record<string, string> = Object.fromEntries(
-    PLATFORMS.map(({ value, label }) => [value, label]),
-  );
-
-  const FILTER_LABELS: Record<FilterType, string> = {
-    dms:      locale === 'es' ? 'DMs'         : 'DMs',
-    comments: locale === 'es' ? 'Comentarios' : 'Comments',
-  };
-
-  function timeAgo(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
-    const m = Math.floor(diff / 60_000);
-    if (m < 1) return ti.timeNow;
-    const h = Math.floor(m / 60);
-    const d = Math.floor(h / 24);
-    return ti.timeAgo(m, h, d);
-  }
+  const uid = useId();
+  const tabId = (key: FilterType) => `${uid}-tab-${key}`;
+  const panelId = `${uid}-panel`;
+  const threadTitleId = `${uid}-thread-title`;
 
   // ── Global filters ──
-  // ?tab=dms|comments, ?thread y ?account: enlaces profundos del asistente.
+  // ?tab=dms|comments, ?thread y ?account: enlaces profundos del asistente, y
+  // también el hilo abierto (así el botón atrás del navegador vuelve a la lista).
   const deepTab     = searchParams?.get('tab');
   const deepThread  = searchParams?.get('thread') ?? null;
   const deepAccount = searchParams?.get('account') ?? null;
+  const deepKey     = deepThread && deepAccount ? threadKey(deepAccount, deepThread) : null;
   const [filterType, setFilterType] = useState<FilterType>(() => (deepTab === 'comments' ? 'comments' : 'dms'));
   const [platformFilter, setPlatformFilter] = useState<MessagingPlatform | 'all'>('all');
 
@@ -179,8 +230,21 @@ function ConversationsPageInner() {
   const [sending, setSending]             = useState(false);
   const [sendError, setSendError]         = useState<string | null>(null);
   const [syncing, setSyncing]             = useState(false);
-  const [syncMsg, setSyncMsg]             = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [dmNotice, setDmNotice]           = useState<SyncNotice>(null);
+
+  const listRef     = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const headingRef  = useRef<HTMLHeadingElement>(null);
+  /** El hilo abierto tiene su propia entrada en el historial (se abrió en
+   *  móvil): «Volver» hace history.back() en vez de reemplazar la URL. */
+  const pushedThread = useRef(false);
+  /** Móvil: posición de la lista y el hilo del que se salió, para volver a
+   *  dejar la lista como estaba (la lista se oculta mientras se lee un hilo). */
+  const listReturn = useRef<{ scrollTop: number; key: string } | null>(null);
+  /** Descarta respuestas de un hilo que ya no es el abierto. */
+  const openSeq = useRef(0);
+  /** Último enlace ?thread&account ya abierto (se abre una vez por enlace). */
+  const openedDeepLink = useRef<string | null>(null);
 
   // ── Comments state ──
   const [comments, setComments]           = useState<CommentItem[]>([]);
@@ -189,7 +253,7 @@ function ConversationsPageInner() {
   const [replyingComment, setReplyingComment] = useState<string | null>(null);
   const [showReplied, setShowReplied]     = useState(true);
   const [syncingComments, setSyncingComments] = useState(false);
-  const [syncCommentsMsg, setSyncCommentsMsg] = useState<string | null>(null);
+  const [commentsNotice, setCommentsNotice] = useState<SyncNotice>(null);
   const [commentModal, setCommentModal]   = useState<CommentThread | null>(null);
 
   // ── Data fetching ──
@@ -233,39 +297,86 @@ function ConversationsPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterType, fetchThreads, fetchComments]);
 
+  // ── Hilo abierto ↔ URL ──
+
+  /** Cierra el hilo y vuelve a la lista. Si abrirlo creó una entrada de
+   *  historial, se vuelve atrás; si no (escritorio, enlace del asistente), se
+   *  quita ?thread de la URL sin salir de la página. */
+  const closeThread = useCallback(() => {
+    setActiveThread(null);
+    openedDeepLink.current = null;
+    if (pushedThread.current) {
+      pushedThread.current = false;
+      window.history.back();
+    } else if (new URLSearchParams(window.location.search).has('thread')) {
+      window.history.replaceState(null, '', urlWith({ thread: null, account: null }));
+    }
+  }, []);
+
   // Cambiar de marca activa no disparaba por sí solo un refetch (mismo bug
   // que en /content): los DMs/comentarios son de las cuentas sociales de la
   // marca anterior hasta que algo más refresque. Más sensible acá que en
   // contenido — es bandeja de mensajes de otra marca, no solo un thumbnail.
-  // Cierra el hilo/comentario abierto por la misma razón que en /content.
+  // Al cambiar de una marca a otra se cierra el hilo/comentario abierto (la
+  // primera vez que se resuelve la marca no: cerraría un enlace profundo).
+  const brandId = activeBrand?.id;
+  const previousBrand = useRef(brandId);
   useEffect(() => {
-    if (!activeBrand?.id) return;
+    const previous = previousBrand.current;
+    previousBrand.current = brandId;
+    if (!brandId) return;
     if (filterType === 'dms') fetchThreads(); else if (filterType === 'comments') fetchComments();
-    setActiveThread(null);
     setCommentModal(null);
+    if (previous && previous !== brandId) closeThread();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeBrand?.id]);
+  }, [brandId]);
 
   // Si el enlace cambia con la página ya abierta (el asistente navega a otra
-  // conversación), se sigue la pestaña pedida.
+  // conversación, o atrás/adelante del navegador), se sigue la pestaña pedida.
   useEffect(() => {
     if (deepTab === 'dms' || deepTab === 'comments') setFilterType(deepTab);
   }, [deepTab]);
 
   // Con ?thread y ?account, al cargar los hilos se abre esa conversación (una
   // vez por enlace).
-  const openedDeepLink = useRef<string | null>(null);
   useEffect(() => {
-    if (!deepThread || !deepAccount || filterType !== 'dms') return;
-    const key = `${deepAccount}:${deepThread}`;
-    if (openedDeepLink.current === key) return;
-    const match = threads.find((th) =>
-      th.platform_thread_id === deepThread && th.kefy_social_accounts?.id === deepAccount,
-    );
+    if (!deepKey || filterType !== 'dms') return;
+    if (openedDeepLink.current === deepKey) return;
+    const match = threads.find((th) => keyOfThread(th) === deepKey);
     if (!match) return;
-    openedDeepLink.current = key;
+    openedDeepLink.current = deepKey;
     openThread(match);
-  }, [threads, deepThread, deepAccount, filterType]);
+  }, [threads, deepKey, filterType]);
+
+  // Si ?thread desaparece de la URL (atrás del navegador), se vuelve a la
+  // lista: en móvil el botón atrás no saca de la página.
+  const lastDeepKey = useRef(deepKey);
+  useEffect(() => {
+    const previous = lastDeepKey.current;
+    lastDeepKey.current = deepKey;
+    if (previous && !deepKey) {
+      pushedThread.current = false;
+      openedDeepLink.current = null;
+      setActiveThread(null);
+    }
+  }, [deepKey]);
+
+  // Al volver a la lista en móvil: misma posición y el foco en el hilo que se
+  // estaba leyendo (la lista estuvo oculta y el navegador pierde ambos).
+  useLayoutEffect(() => {
+    const back = listReturn.current;
+    if (activeThread || !back || !listRef.current) return;
+    listReturn.current = null;
+    listRef.current.scrollTop = back.scrollTop;
+    const items = listRef.current.querySelectorAll<HTMLElement>('[data-thread-key]');
+    Array.from(items).find((el) => el.dataset.threadKey === back.key)?.focus({ preventScroll: true });
+  }, [activeThread]);
+
+  // Siempre al último mensaje: al abrir el hilo, al enviar y al recargar.
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el && !threadLoading) el.scrollTop = el.scrollHeight;
+  }, [messages, threadLoading]);
 
   // El asistente respondió o sincronizó: se recargan la lista y el hilo abierto.
   useDataChanged(['inbox'], () => {
@@ -284,47 +395,91 @@ function ConversationsPageInner() {
     }
   });
 
+  // ── Tabs ──
+  function selectTab(key: FilterType) {
+    setFilterType(key);
+    // La pestaña va a la URL: recargar o volver atrás no la pierde.
+    if (new URLSearchParams(window.location.search).get('tab') !== key) {
+      window.history.replaceState(null, '', urlWith({ tab: key }));
+    }
+  }
+
+  function onTabKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>) {
+    const index = TABS.indexOf(filterType);
+    let next: FilterType | undefined;
+    if (e.key === 'ArrowRight') next = TABS[(index + 1) % TABS.length];
+    else if (e.key === 'ArrowLeft') next = TABS[(index - 1 + TABS.length) % TABS.length];
+    else if (e.key === 'Home') next = TABS[0];
+    else if (e.key === 'End') next = TABS[TABS.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    selectTab(next);
+    document.getElementById(tabId(next))?.focus();
+  }
+
   // ── DM actions ──
   async function handleSync() {
-    setSyncing(true); setSyncMsg(null);
+    setSyncing(true); setDmNotice(null);
     try {
       const res = await fetch('/api/messaging/sync', { method: 'POST', credentials: 'include' });
       if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        setSyncMsg(err.error ?? ti.syncError); return;
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        setDmNotice({ tone: 'danger', text: err.error ?? ti.syncError }); return;
       }
       const json = await res.json() as { synced: number };
-      setSyncMsg(ti.syncDone(json.synced));
+      setDmNotice({ tone: 'success', text: ti.syncDone(json.synced) });
       fetchThreads();
-      setTimeout(() => setSyncMsg(null), 4000);
-    } catch { setSyncMsg(ti.syncError); }
+      setTimeout(() => setDmNotice((n) => (n?.tone === 'success' ? null : n)), 4000);
+    } catch { setDmNotice({ tone: 'danger', text: ti.syncError }); }
     finally { setSyncing(false); }
   }
 
   function openThread(thread: ThreadPreview) {
+    const seq = ++openSeq.current;
     setActiveThread(thread); setMessages([]); setThreadLoading(true);
     setSendError(null); setReplyText('');
     const accountId = thread.kefy_social_accounts.id;
     fetch(`/api/messaging/${encodeURIComponent(thread.platform_thread_id)}?account_id=${accountId}`,
       { credentials: 'include' })
       .then(async (res) => {
-        if (!res.ok) return;
+        if (!res.ok || seq !== openSeq.current) return;
         const json = await res.json() as { messages: Message[]; account: SocialAccount };
-        setMessages(json.messages); setActiveAccount(json.account);
+        setMessages(json.messages ?? []); setActiveAccount(json.account);
         setThreads((prev) => prev.map((t) =>
           t.platform_thread_id === thread.platform_thread_id && t.kefy_social_accounts.id === accountId
             ? { ...t, read_at: new Date().toISOString() } : t,
         ));
+        // Abrirlo lo marcó como leído: el aviso de la navegación se actualiza ya.
+        void refreshUnreadCount();
       })
       .catch(() => { /* ignore */ })
       .finally(() => {
-        setThreadLoading(false);
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        if (seq === openSeq.current) setThreadLoading(false);
       });
   }
 
+  /** Abrir un hilo desde la lista. En móvil crea una entrada de historial: el
+   *  botón atrás del navegador (igual que «Volver») regresa a la lista sin
+   *  salir de la página. En escritorio solo actualiza la URL. */
+  function selectThread(thread: ThreadPreview) {
+    const key = keyOfThread(thread);
+    const mobile = isMobileViewport();
+    if (mobile) listReturn.current = { scrollTop: listRef.current?.scrollTop ?? 0, key };
+    openedDeepLink.current = key;
+    openThread(thread);
+    const url = urlWith({ tab: 'dms', thread: thread.platform_thread_id, account: thread.kefy_social_accounts.id });
+    if (mobile && !pushedThread.current) {
+      window.history.pushState(null, '', url);
+      pushedThread.current = true;
+    } else {
+      window.history.replaceState(null, '', url);
+    }
+    // La lista se oculta: el foco pasa al encabezado del hilo.
+    if (mobile) requestAnimationFrame(() => headingRef.current?.focus({ preventScroll: true }));
+  }
+
   async function handleSend() {
-    if (!activeThread || !replyText.trim()) return;
+    if (!activeThread || !replyText.trim() || sending) return;
     setSending(true); setSendError(null);
     const accountId = activeThread.kefy_social_accounts.id;
     const threadId = activeThread.platform_thread_id;
@@ -335,7 +490,7 @@ function ConversationsPageInner() {
         body: JSON.stringify({ account_id: accountId, text: replyText.trim() }),
       });
       if (!res.ok) {
-        const err = await res.json() as { error?: string };
+        const err = await res.json().catch(() => ({})) as { error?: string };
         setSendError(err.error ?? ti.errorSend); return;
       }
       setReplyText('');
@@ -347,25 +502,24 @@ function ConversationsPageInner() {
         const refreshed = await messagesRes.json() as { messages: Message[] };
         setMessages(refreshed.messages ?? []);
       }
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     } catch { setSendError(ti.errorConn); }
     finally { setSending(false); }
   }
 
   // ── Comment/Review reply actions ──
   async function handleSyncComments() {
-    setSyncingComments(true); setSyncCommentsMsg(null);
+    setSyncingComments(true); setCommentsNotice(null);
     try {
       const res = await fetch('/api/comments/sync', { method: 'POST', credentials: 'include' });
       if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        setSyncCommentsMsg(err.error ?? te.syncError); return;
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        setCommentsNotice({ tone: 'danger', text: err.error ?? te.syncError }); return;
       }
       const json = await res.json() as { synced: number };
-      setSyncCommentsMsg(te.syncDone(json.synced));
+      setCommentsNotice({ tone: 'success', text: te.syncDone(json.synced) });
       fetchComments();
-      setTimeout(() => setSyncCommentsMsg(null), 4000);
-    } catch { setSyncCommentsMsg(te.syncError); }
+      setTimeout(() => setCommentsNotice((n) => (n?.tone === 'success' ? null : n)), 4000);
+    } catch { setCommentsNotice({ tone: 'danger', text: te.syncError }); }
     finally { setSyncingComments(false); }
   }
 
@@ -375,13 +529,14 @@ function ConversationsPageInner() {
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
     });
     if (!res.ok) {
-      const err = await res.json() as { error?: string };
+      const err = await res.json().catch(() => ({})) as { error?: string };
       return { error: err.error ?? te.errorSend };
     }
     setComments((prev) => prev.map((c) =>
       c.id === commentId ? { ...c, replied_at: new Date().toISOString(), reply_body: text } : c,
     ));
     setReplyingComment(null);
+    void refreshUnreadCount();
   }
 
   const dmUnread = threads.filter((t) => !t.read_at && t.direction === 'inbound').length;
@@ -426,281 +581,268 @@ function ConversationsPageInner() {
     }
 
     // When filter is active, only show threads with unanswered inbound comments
-    let threads = Array.from(map.values());
-    if (!showReplied) threads = threads.filter((t) => t.hasUnanswered);
+    let list = Array.from(map.values());
+    if (!showReplied) list = list.filter((t) => t.hasUnanswered);
 
-    return threads.sort((a, b) =>
+    return list.sort((a, b) =>
       new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime(),
     );
   }, [comments, showReplied]);
 
   // ─── Shared header ─────────────────────────────────────────────────────────
 
-  const HeaderBar = (
-    <div style={{ padding: '24px 32px 0', background: 'var(--bg)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-      <div style={{ marginBottom: 14 }}>
-        <h1 style={{ fontFamily: 'var(--font-syne)', fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-          {locale === 'es' ? 'Conversaciones' : 'Conversations'}
-        </h1>
+  const isDms = filterType === 'dms';
+  const notice = isDms ? dmNotice : commentsNotice;
+  const isSyncing = isDms ? syncing : syncingComments;
+
+  const header = (
+    <div className={styles.header}>
+      <div className={styles.titleRow}>
+        <h1 className={styles.title}>{ti.title}</h1>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<Icon name="refresh" size={14} />}
+          loading={isSyncing}
+          disabled={isDms ? threadsLoading : commentsLoading}
+          onClick={() => void (isDms ? handleSync() : handleSyncComments())}
+        >
+          {isDms ? (syncing ? ti.syncing : ti.syncBtn) : (syncingComments ? te.syncing : te.syncBtn)}
+        </Button>
       </div>
 
-      {/* Type filter pills */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 14 }}>
-        {(Object.entries(FILTER_LABELS) as [FilterType, string][]).map(([key, label]) => {
-          const active = filterType === key;
-          const badge = key === 'dms' && dmUnread > 0 ? dmUnread : null;
-          return (
-            <button key={key} onClick={() => setFilterType(key)}
-              style={{ display: 'flex', alignItems: 'center', gap: 5,
-                padding: '6px 16px', borderRadius: 20, fontSize: 13, fontWeight: active ? 600 : 400, cursor: 'pointer',
-                border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                background: active ? 'rgba(198,255,75,0.12)' : 'var(--surface)',
-                color: active ? 'var(--accent)' : 'var(--muted)', transition: 'all 0.12s' }}>
-              {label}
-              {badge && (
-                <span style={{ background: 'var(--accent)', color: '#fff', fontSize: 10,
-                  fontWeight: 700, borderRadius: 10, padding: '0 5px', minWidth: 16, textAlign: 'center' }}>
-                  {badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <div className={styles.filters}>
+        {/* DMs / Comentarios cambian el panel de abajo: pestañas de verdad. */}
+        <div role="tablist" aria-label={ti.tabsLabel} className={styles.tabs}>
+          {TABS.map((key) => {
+            const selected = filterType === key;
+            const badge = key === 'dms' ? dmUnread : 0;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                id={tabId(key)}
+                aria-selected={selected}
+                aria-controls={panelId}
+                tabIndex={selected ? 0 : -1}
+                className={styles.tab}
+                onClick={() => selectTab(key)}
+                onKeyDown={onTabKeyDown}
+              >
+                {key === 'dms' ? ti.tabDms : te.tabComments}
+                {badge > 0 && (
+                  <>
+                    <span className="ui-count" aria-hidden="true">{badge}</span>
+                    <span className="sr-only">{`, ${ti.unreadCount(badge)}`}</span>
+                  </>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
-        <div style={{ flex: 1 }} />
-
-        {/* Platform filter */}
-        {PLATFORMS.map(({ value, label }) => (
-          <button key={value} onClick={() => setPlatformFilter(value as MessagingPlatform | 'all')}
-            title={label} aria-label={label}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, padding: value === 'all' ? '4px 10px' : 6, borderRadius: 6, cursor: 'pointer',
-              border: `1px solid ${platformFilter === value ? 'var(--accent)' : 'var(--border)'}`,
-              background: platformFilter === value ? 'rgba(198,255,75,0.1)' : 'var(--surface)',
-              color: platformFilter === value ? 'var(--accent)' : 'var(--muted)' }}>
-            {value === 'all' ? label : <ChannelIcon name={value} size={13} />}
-          </button>
-        ))}
-
-        {/* Extra toggles depending on type */}
-        {filterType === 'dms' && (
-          <>
-            <button onClick={() => setUnreadOnly((v) => !v)}
-              style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                border: `1px solid ${unreadOnly ? 'var(--accent)' : 'var(--border)'}`,
-                background: unreadOnly ? 'rgba(198,255,75,0.1)' : 'var(--surface)',
-                color: unreadOnly ? 'var(--accent)' : 'var(--muted)' }}>
+        <div className="ui-segmented">
+          {isDms ? (
+            <button type="button" aria-pressed={unreadOnly} onClick={() => setUnreadOnly((v) => !v)}>
               {ti.unreadOnly}
             </button>
-            <button onClick={() => void handleSync()} disabled={syncing || threadsLoading}
-              style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: syncing ? 'not-allowed' : 'pointer',
-                border: `1px solid ${syncing ? 'var(--border)' : 'var(--accent)'}`,
-                background: syncing ? 'var(--surface)' : 'var(--accent)',
-                color: syncing ? 'var(--muted)' : '#000', fontWeight: 600, opacity: syncing ? 0.6 : 1 }}>
-              {syncing ? ti.syncing : ti.syncBtn}
+          ) : (
+            <button type="button" aria-pressed={!showReplied} onClick={() => setShowReplied((v) => !v)}>
+              {te.unansweredOnly}
             </button>
-          </>
-        )}
-        {filterType === 'comments' && (
-          <button onClick={() => setShowReplied((v) => !v)}
-            style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-              border: `1px solid ${!showReplied ? 'var(--accent)' : 'var(--border)'}`,
-              background: !showReplied ? 'rgba(198,255,75,0.1)' : 'var(--surface)',
-              color: !showReplied ? 'var(--accent)' : 'var(--muted)' }}>
-            {!showReplied ? te.showAll : te.unansweredOnly}
+          )}
+        </div>
+
+        <div role="group" aria-label={ti.platformFilterLabel} className={`ui-segmented ${styles.platforms}`}>
+          <button type="button" aria-pressed={platformFilter === 'all'} onClick={() => setPlatformFilter('all')}>
+            {ti.all}
           </button>
-        )}
-        {filterType === 'comments' && (
-          <button onClick={() => void handleSyncComments()} disabled={syncingComments || commentsLoading}
-            title={syncingComments ? te.syncing : te.syncBtn}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 28, height: 28, borderRadius: 6, padding: 0,
-              cursor: syncingComments ? 'not-allowed' : 'pointer',
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--muted)', opacity: syncingComments ? 0.4 : 1,
-              transition: 'opacity 0.15s' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-              style={{ animation: syncingComments ? 'spin 0.8s linear infinite' : 'none' }}>
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-          </button>
-        )}
+          {PLATFORMS.map((platform) => (
+            <button
+              key={platform}
+              type="button"
+              className={styles.platformBtn}
+              aria-pressed={platformFilter === platform}
+              aria-label={platformLabel(platform)}
+              title={platformLabel(platform)}
+              onClick={() => setPlatformFilter(platform)}
+            >
+              <ChannelIcon name={platform} size={14} />
+            </button>
+          ))}
+        </div>
       </div>
 
-      {syncMsg && (
-        <p style={{ fontSize: 11, paddingBottom: 8,
-          color: syncMsg === ti.syncError ? '#ff6b6b' : 'var(--accent)' }}>{syncMsg}</p>
-      )}
-      {syncCommentsMsg && (
-        <p style={{ fontSize: 11, paddingBottom: 8,
-          color: syncCommentsMsg === te.syncError ? '#ff6b6b' : 'var(--accent)' }}>{syncCommentsMsg}</p>
-      )}
+      {/* Regiones vivas siempre montadas: así el lector de pantalla anuncia el
+          resultado de sincronizar. */}
+      <p role="status" className={`${styles.notice} ${styles.noticeOk}`}>
+        {notice?.tone === 'success' ? notice.text : ''}
+      </p>
+      <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>
+        {notice?.tone === 'danger' ? notice.text : ''}
+      </p>
     </div>
   );
 
-  // ─── DMs view (split panel) ────────────────────────────────────────────────
+  // ─── DMs view (master-detail) ──────────────────────────────────────────────
 
   if (filterType === 'dms') {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        {HeaderBar}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className={styles.root} data-view={activeThread ? 'thread' : 'list'}>
+        {header}
+        <div role="tabpanel" id={panelId} aria-labelledby={tabId('dms')} className={styles.split}>
           {/* Thread list */}
-          <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)',
-            display: 'flex', flexDirection: 'column', background: 'var(--surface)', overflowY: 'auto' }}>
-            {threadsLoading && [...Array(6)].map((_, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
-                <SkeletonBlock width={36} height={36} borderRadius={18} style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <SkeletonBlock width="50%" height={11} style={{ marginBottom: 6 }} />
-                  <SkeletonBlock width="80%" height={10} />
+          <div ref={listRef} className={styles.list} aria-busy={threadsLoading}>
+            {threadsLoading && threads.length === 0 && (
+              <>
+                <p role="status" className="sr-only">{ti.loading}</p>
+                <div aria-hidden="true">
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className={styles.skeletonRow}>
+                      <SkeletonBlock width={36} height={36} borderRadius={18} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <SkeletonBlock width="50%" height={11} style={{ marginBottom: 6 }} />
+                        <SkeletonBlock width="80%" height={10} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))}
+              </>
+            )}
             {!threadsLoading && threads.length === 0 && (
               unreadOnly
-                ? <EmptyState icon={CaughtUpIcon} title={ti.noUnread} hint={ti.noUnreadHint} />
-                : <EmptyState icon={InboxIcon} title={ti.noMessages} hint={ti.noMessagesHint} />
+                ? <EmptyState icon={<Icon name="check-circle" size={36} strokeWidth={1.5} />} title={ti.noUnread} hint={ti.noUnreadHint} />
+                : <EmptyState icon={<Icon name="mail" size={36} strokeWidth={1.5} />} title={ti.noMessages} hint={ti.noMessagesHint} />
             )}
-            {threads.map((thread) => {
-              const isUnread = !thread.read_at && thread.direction === 'inbound';
-              const isActive = activeThread?.platform_thread_id === thread.platform_thread_id
-                && activeThread?.kefy_social_accounts.id === thread.kefy_social_accounts.id;
-              return (
-                <button key={`${thread.kefy_social_accounts.id}::${thread.platform_thread_id}`}
-                  onClick={() => openThread(thread)}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '14px 18px',
-                    background: isActive ? 'rgba(198,255,75,0.06)' : 'transparent',
-                    borderTop: 'none', borderRight: 'none',
-                    borderBottom: '1px solid var(--border)',
-                    borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                    cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                      background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 15, fontWeight: 700, color: 'var(--text)',
-                      backgroundImage: thread.sender_avatar ? `url(${thread.sender_avatar})` : undefined,
-                      backgroundSize: 'cover' }}>
-                      {!thread.sender_avatar && (thread.sender_name?.[0]?.toUpperCase() ?? '?')}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                        <span style={{ fontSize: 13, fontWeight: isUnread ? 700 : 500,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {thread.sender_name ?? thread.sender_id}
+            {threads.length > 0 && (
+              <ul className={styles.threadList} aria-label={ti.threadListLabel}>
+                {threads.map((thread) => {
+                  const key = keyOfThread(thread);
+                  const isUnread = !thread.read_at && thread.direction === 'inbound';
+                  const isActive = activeThread !== null && keyOfThread(activeThread) === key;
+                  return (
+                    <li key={key}>
+                      <button
+                        type="button"
+                        className={styles.threadItem}
+                        data-thread-key={key}
+                        data-unread={isUnread ? 'true' : undefined}
+                        aria-current={isActive ? 'true' : undefined}
+                        onClick={() => selectThread(thread)}
+                      >
+                        <Avatar name={thread.sender_name} src={thread.sender_avatar} />
+                        <span className={styles.threadText}>
+                          <span className={styles.threadTop}>
+                            <span className={styles.threadName}>{thread.sender_name ?? thread.sender_id}</span>
+                            <span className={styles.threadTime}>{timeAgo(thread.created_at, ti)}</span>
+                          </span>
+                          <span className={styles.threadBottom}>
+                            <span aria-hidden="true" className={styles.platformTag}>
+                              <ChannelIcon name={thread.platform} size={12} />
+                            </span>
+                            <span className="sr-only">{`${platformLabel(thread.platform)}: `}</span>
+                            <span className={styles.threadPreview}>
+                              {thread.body.slice(0, 50)}{thread.body.length > 50 ? '…' : ''}
+                            </span>
+                            {isUnread && (
+                              <>
+                                <span className={styles.unreadDot} aria-hidden="true" />
+                                <span className="sr-only">{`, ${ti.unread}`}</span>
+                              </>
+                            )}
+                          </span>
                         </span>
-                        <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>
-                          {timeAgo(thread.created_at)}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', fontSize: 11, color: 'var(--muted)' }}>
-                          <ChannelIcon name={thread.platform} size={11} />
-                        </span>
-                        <span style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden',
-                          textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                          {thread.body.slice(0, 50)}{thread.body.length > 50 ? '…' : ''}
-                        </span>
-                        {isUnread && (
-                          <span style={{ width: 7, height: 7, borderRadius: '50%',
-                            background: 'var(--accent)', flexShrink: 0 }} />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
           {/* Conversation panel */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <section className={styles.panel} aria-labelledby={activeThread ? threadTitleId : undefined}>
             {!activeThread ? (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexDirection: 'column', gap: 10 }}>
-                <p style={{ fontSize: 32 }}>✉</p>
-                <p style={{ color: 'var(--muted)', fontSize: 14 }}>{ti.selectMessage}</p>
+              <div className={styles.panelEmpty}>
+                <EmptyState icon={<Icon name="inbox" size={32} strokeWidth={1.5} />} title={ti.selectMessage} compact />
               </div>
             ) : (
               <>
-                <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)',
-                  background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--border)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700,
-                    backgroundImage: activeThread.sender_avatar ? `url(${activeThread.sender_avatar})` : undefined,
-                    backgroundSize: 'cover' }}>
-                    {!activeThread.sender_avatar && (activeThread.sender_name?.[0]?.toUpperCase() ?? '?')}
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 600 }}>{activeThread.sender_name ?? activeThread.sender_id}</p>
-                    <p style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span role="img" aria-label={PLATFORM_LABELS[activeThread.platform] ?? activeThread.platform}
-                        title={PLATFORM_LABELS[activeThread.platform] ?? activeThread.platform}
-                        style={{ display: 'flex', alignItems: 'center' }}>
-                        <ChannelIcon name={activeThread.platform} size={12} />
-                      </span>
-                      {activeAccount && `@${activeAccount.username}`}
+                <div className={styles.threadHeader}>
+                  <Button
+                    variant="ghost"
+                    iconOnly
+                    className={styles.back}
+                    aria-label={ti.backToList}
+                    icon={<Icon name="arrow-left" size={20} />}
+                    onClick={closeThread}
+                  />
+                  <Avatar name={activeThread.sender_name} src={activeThread.sender_avatar} />
+                  <div className={styles.threadHeading}>
+                    <h2 id={threadTitleId} ref={headingRef} tabIndex={-1} className={styles.threadHeadingName}>
+                      {activeThread.sender_name ?? activeThread.sender_id}
+                    </h2>
+                    <p className={styles.threadHeadingMeta}>
+                      <PlatformTag platform={activeThread.platform} />
+                      {activeAccount && <span>@{activeAccount.username}</span>}
                     </p>
                   </div>
                 </div>
 
-                <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px',
-                  display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {threadLoading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>{ti.loadingConvo}</p>}
+                <div ref={messagesRef} className={styles.messages}>
+                  {threadLoading && <p role="status" className={styles.statusText}>{ti.loadingConvo}</p>}
                   {!threadLoading && messages.map((msg) => {
-                    const isOut = msg.direction === 'outbound';
+                    const dir = msg.direction === 'outbound' ? 'out' : 'in';
                     return (
-                      <div key={msg.id} style={{ display: 'flex', justifyContent: isOut ? 'flex-end' : 'flex-start' }}>
-                        <div style={{ maxWidth: '70%',
-                          background: isOut ? 'rgba(198,255,75,0.15)' : 'var(--surface)',
-                          border: `1px solid ${isOut ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
-                          borderRadius: isOut ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
-                          padding: '10px 14px' }}>
-                          {!isOut && msg.sender_name && (
-                            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
-                              {msg.sender_name}
-                            </p>
+                      <div key={msg.id} className={styles.bubbleRow} data-dir={dir}>
+                        <div className={styles.bubble} data-dir={dir}>
+                          {dir === 'in' && msg.sender_name && (
+                            <p className={styles.bubbleAuthor}>{msg.sender_name}</p>
                           )}
-                          <p style={{ fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                            {msg.body}
-                          </p>
-                          <p style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4,
-                            textAlign: isOut ? 'right' : 'left' }}>
-                            {timeAgo(msg.created_at)}
-                          </p>
+                          <p className={styles.bubbleText}>{msg.body}</p>
+                          <p className={styles.bubbleTime}>{timeAgo(msg.created_at, ti)}</p>
                         </div>
                       </div>
                     );
                   })}
-                  <div ref={messagesEndRef} />
                 </div>
 
-                <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
-                  {sendError && <p style={{ fontSize: 12, color: '#ff6b6b', marginBottom: 8 }}>{sendError}</p>}
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <textarea value={replyText} onChange={(e) => setReplyText(e.target.value)}
-                      placeholder={ti.replyPlaceholder} rows={2}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
-                      style={{ flex: 1, resize: 'none', background: 'var(--bg)', border: '1px solid var(--border)',
-                        borderRadius: 10, padding: '10px 14px', fontSize: 14, color: 'var(--text)',
-                        outline: 'none', fontFamily: 'inherit' }} />
-                    <button onClick={() => void handleSend()} disabled={sending || !replyText.trim()}
-                      style={{ padding: '10px 20px', borderRadius: 10,
-                        background: replyText.trim() ? 'var(--accent)' : 'var(--border)',
-                        color: replyText.trim() ? '#000' : 'var(--muted)',
-                        border: 'none', cursor: replyText.trim() ? 'pointer' : 'default',
-                        fontWeight: 600, fontSize: 14, alignSelf: 'flex-end', opacity: sending ? 0.6 : 1 }}>
-                      {sending ? '...' : ti.sendBtn}
-                    </button>
+                <form
+                  className={styles.composer}
+                  onSubmit={(e) => { e.preventDefault(); void handleSend(); }}
+                >
+                  {sendError && <p role="alert" className={styles.errorText}>{sendError}</p>}
+                  <div className={styles.composerRow}>
+                    <Textarea
+                      className={styles.composerInput}
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          void handleSend();
+                        }
+                      }}
+                      placeholder={ti.replyPlaceholder}
+                      aria-label={ti.replyLabel}
+                      rows={2}
+                    />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      loading={sending}
+                      disabled={!replyText.trim()}
+                      aria-label={ti.sendBtn}
+                      icon={<Icon name="send" size={16} />}
+                    >
+                      <span className={styles.sendLabel}>{ti.sendBtn}</span>
+                    </Button>
                   </div>
-                </div>
+                </form>
               </>
             )}
-          </div>
+          </section>
         </div>
       </div>
     );
@@ -711,251 +853,217 @@ function ConversationsPageInner() {
   // Render conversation bubbles.
   // Outbound (brand) comments skip if their body already appears as an inline reply_body
   // to avoid showing the same message twice.
-  function renderBubbles(messages: CommentItem[], socialAccountUsername: string) {
+  function renderBubbles(list: CommentItem[], socialAccountUsername: string) {
     // Collect reply bodies already shown inline so we can dedup outbound comments
     const inlineReplied = new Set(
-      messages.flatMap((c) => (c.reply_body ? [c.reply_body.trim()] : [])),
+      list.flatMap((c) => (c.reply_body ? [c.reply_body.trim()] : [])),
     );
 
-    return messages.map((c) => {
+    return list.map((c) => {
       const isOutbound = c.author_name === socialAccountUsername;
 
       // Skip outbound comment if it's a duplicate of an inline reply already shown
       if (isOutbound && inlineReplied.has(c.body.trim())) return null;
 
+      if (isOutbound) {
+        /* Outbound (brand) bubble — right-aligned */
+        return (
+          <div key={c.id} className={styles.bubbleRow} data-dir="out">
+            <div className={styles.bubble} data-dir="out">
+              {list.length > 1 && (
+                <p className={styles.bubbleReplyLabel}>{te.yourReply} · {timeAgo(c.created_at, ti)}</p>
+              )}
+              <p className={styles.bubbleText}>{c.body}</p>
+            </div>
+          </div>
+        );
+      }
+
+      /* Inbound (external user) bubble — left-aligned */
       return (
-        <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {isOutbound ? (
-            /* Outbound (brand) bubble — right-aligned green */
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <div style={{ maxWidth: '85%',
-                background: 'rgba(198,255,75,0.12)',
-                border: '1px solid rgba(198,255,75,0.3)',
-                borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
-                {messages.length > 1 && (
-                  <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
-                    {te.yourReply} · {timeAgo(c.created_at)}
-                  </p>
-                )}
-                <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.body}</p>
+        <div key={c.id} className={styles.bubbleGroup}>
+          <div className={styles.bubbleRow}>
+            <div className={`${styles.bubble} ${styles.bubbleInbound}`}>
+              {list.length > 1 && (
+                <p className={styles.bubbleTime} style={{ margin: '0 0 4px' }}>{timeAgo(c.created_at, ti)}</p>
+              )}
+              <p className={styles.bubbleText}>{c.body}</p>
+            </div>
+          </div>
+          {/* Inline reply (stored in DB, no matching outbound comment synced yet) */}
+          {c.replied_at && c.reply_body && (
+            <div className={styles.bubbleRow} data-dir="out">
+              <div className={styles.bubble} data-dir="out">
+                <p className={styles.bubbleReplyLabel}>{te.yourReply} · {timeAgo(c.replied_at, ti)}</p>
+                <p className={styles.bubbleText}>{c.reply_body}</p>
               </div>
             </div>
-          ) : (
-            /* Inbound (external user) bubble — left-aligned */
-            <>
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                <div style={{ maxWidth: '85%', background: 'var(--bg)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '12px 12px 12px 4px', padding: '10px 14px' }}>
-                  {messages.length > 1 && (
-                    <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{timeAgo(c.created_at)}</p>
-                  )}
-                  <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.body}</p>
-                </div>
-              </div>
-              {/* Inline reply (stored in DB, no matching outbound comment synced yet) */}
-              {c.replied_at && c.reply_body && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <div style={{ maxWidth: '85%',
-                    background: 'rgba(198,255,75,0.12)',
-                    border: '1px solid rgba(198,255,75,0.3)',
-                    borderRadius: '12px 12px 4px 12px', padding: '10px 14px' }}>
-                    <p style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
-                      {te.yourReply} · {timeAgo(c.replied_at)}
-                    </p>
-                    <p style={{ fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word', margin: 0 }}>{c.reply_body}</p>
-                  </div>
-                </div>
-              )}
-            </>
           )}
         </div>
       );
     });
   }
 
-  if (filterType === 'comments') {
-    const modalLastUnanswered = commentModal
-      ? ([...commentModal.messages].reverse().find((c) => !c.replied_at) ?? null)
-      : null;
-    const modalIsReplying = modalLastUnanswered && replyingComment === modalLastUnanswered.id;
+  const modalUsername = commentModal?.socialAccount.username ?? '';
+  const modalName = commentModal ? (commentModal.externalAuthor?.name ?? commentModal.socialAccount.username) : '';
+  // «Responder» apunta al último comentario entrante sin respuesta (nunca a
+  // uno de la propia marca), igual que en la tarjeta.
+  const modalLastUnanswered = commentModal
+    ? ([...commentModal.messages].reverse().find((c) => c.author_name !== modalUsername && !c.replied_at) ?? null)
+    : null;
+  const modalIsReplying = modalLastUnanswered !== null && replyingComment === modalLastUnanswered.id;
 
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        {HeaderBar}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
-          <div style={{ maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {commentsLoading && [...Array(4)].map((_, i) => (
-              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                  <SkeletonBlock width={32} height={32} borderRadius={16} style={{ flexShrink: 0 }} />
-                  <SkeletonBlock width={120} height={11} />
+  return (
+    <div className={styles.root} data-view="list">
+      {header}
+      <div
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={tabId('comments')}
+        aria-busy={commentsLoading}
+        className={styles.commentsScroll}
+      >
+        {commentsLoading && commentThreads.length === 0 && (
+          <>
+            <p role="status" className="sr-only">{te.loadingComments}</p>
+            <div aria-hidden="true" className={styles.commentsList}>
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className={styles.skeletonCard}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <SkeletonBlock width={32} height={32} borderRadius={16} style={{ flexShrink: 0 }} />
+                    <SkeletonBlock width={120} height={11} />
+                  </div>
+                  <SkeletonBlock width="90%" height={10} style={{ marginBottom: 6 }} />
+                  <SkeletonBlock width="60%" height={10} />
                 </div>
-                <SkeletonBlock width="90%" height={10} style={{ marginBottom: 6 }} />
-                <SkeletonBlock width="60%" height={10} />
-              </div>
-            ))}
-            {!commentsLoading && commentThreads.length === 0 && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
-                {showReplied
-                  ? <EmptyState icon={CommentsIcon} title={te.noComments} hint={te.noCommentsHint} />
-                  : <EmptyState icon={CaughtUpIcon} title={te.noCommentsCaughtUp} hint={te.noCommentsCaughtUpHint} />}
-              </div>
-            )}
-            {commentThreads.map((thread) => {
+              ))}
+            </div>
+          </>
+        )}
+        {!commentsLoading && commentThreads.length === 0 && (
+          <div className={styles.emptyCard} style={{ maxWidth: 860 }}>
+            {showReplied
+              ? <EmptyState icon={<Icon name="comment" size={36} strokeWidth={1.5} />} title={te.noComments} hint={te.noCommentsHint} />
+              : <EmptyState icon={<Icon name="check-circle" size={36} strokeWidth={1.5} />} title={te.noCommentsCaughtUp} hint={te.noCommentsCaughtUpHint} />}
+          </div>
+        )}
+        {commentThreads.length > 0 && (
+          <ul className={styles.commentsList} aria-label={te.commentsListLabel}>
+            {commentThreads.map((thread, index) => {
               const username = thread.socialAccount.username ?? '';
               // Build visible messages: outbound dedup is handled inside renderBubbles
-              const allVisible = thread.messages;
-              const preview = allVisible.slice(-2);
-              const hiddenCount = allVisible.length - preview.length;
+              const preview = thread.messages.slice(-2);
+              const hiddenCount = thread.messages.length - preview.length;
               // "Responder" targets the last unanswered inbound comment
               const lastUnanswered = [...thread.messages]
                 .reverse()
                 .find((c) => c.author_name !== username && !c.replied_at) ?? null;
-              const isReplying = lastUnanswered && replyingComment === lastUnanswered.id;
+              const isReplying = lastUnanswered !== null && replyingComment === lastUnanswered.id;
               const headerName = thread.externalAuthor?.name ?? username;
-              const headerAvatar = thread.externalAuthor?.avatar ?? null;
+              const headingId = `${uid}-comment-${index}`;
               return (
-                <div key={thread.key} style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 12, padding: '16px 20px' }}>
-                  {/* Header */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                      background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 13, fontWeight: 700,
-                      backgroundImage: headerAvatar ? `url(${headerAvatar})` : undefined,
-                      backgroundSize: 'cover' }}>
-                      {!headerAvatar && (headerName?.[0]?.toUpperCase() ?? '?')}
+                <li key={thread.key}>
+                  <article className={styles.commentCard} aria-labelledby={headingId}>
+                    <div className={styles.commentHead}>
+                      <Avatar name={headerName} src={thread.externalAuthor?.avatar} size={32} />
+                      <h2 id={headingId} className={styles.commentAuthor}>{headerName}</h2>
+                      <PlatformTag platform={thread.platform} size={11} boxed />
+                      <span className={styles.commentTime}>{timeAgo(thread.latestAt, ti)}</span>
                     </div>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>{headerName}</span>
-                    <span role="img" aria-label={PLATFORM_LABELS[thread.platform] ?? thread.platform}
-                      title={PLATFORM_LABELS[thread.platform] ?? thread.platform}
-                      style={{ display: 'inline-flex', alignItems: 'center', padding: 4, borderRadius: 4,
-                        background: 'var(--border)', color: 'var(--muted)' }}>
-                      <ChannelIcon name={thread.platform} size={11} />
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{timeAgo(thread.latestAt)}</span>
-                  </div>
 
-                  {/* "Ver X más" link */}
-                  {hiddenCount > 0 && (
-                    <button onClick={() => setCommentModal(thread)}
-                      style={{ fontSize: 12, color: 'var(--accent)', background: 'none',
-                        border: 'none', cursor: 'pointer', padding: 0, marginBottom: 8, display: 'block' }}>
-                      {locale === 'es'
-                        ? `Ver ${hiddenCount} mensaje${hiddenCount > 1 ? 's' : ''} anterior${hiddenCount > 1 ? 'es' : ''}`
-                        : `View ${hiddenCount} earlier message${hiddenCount > 1 ? 's' : ''}`}
-                    </button>
-                  )}
-
-                  {/* Last 2 message bubbles */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {renderBubbles(preview, username)}
-                  </div>
-
-                  {/* Reply action + "Ver conversación" */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                    {lastUnanswered && (
-                      isReplying ? (
-                        <div style={{ flex: 1 }}>
-                          <ReplyBox onSend={(text) => replyComment(lastUnanswered.id, text)}
-                            placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
-                        </div>
-                      ) : (
-                        <button onClick={() => setReplyingComment(lastUnanswered.id)}
-                          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                            border: '1px solid var(--border)', background: 'transparent',
-                            color: 'var(--muted)', cursor: 'pointer' }}>
-                          {te.replyBtn}
-                        </button>
-                      )
+                    {hiddenCount > 0 && (
+                      <button type="button" className={styles.linkBtn} onClick={() => setCommentModal(thread)}>
+                        {te.viewEarlier(hiddenCount)}
+                      </button>
                     )}
-                    <button onClick={() => setCommentModal(thread)}
-                      style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                        border: '1px solid var(--border)', background: 'transparent',
-                        color: 'var(--muted)', cursor: 'pointer', marginLeft: 'auto' }}>
-                      {locale === 'es' ? 'Ver conversación' : 'View conversation'}
-                    </button>
-                  </div>
-                </div>
+
+                    {/* Last 2 message bubbles */}
+                    <div className={styles.bubbles}>
+                      {renderBubbles(preview, username)}
+                    </div>
+
+                    <div className={styles.commentActions}>
+                      {lastUnanswered && (
+                        isReplying ? (
+                          <ReplyBox
+                            te={te}
+                            cancelLabel={tc.actions.cancel}
+                            onCancel={() => setReplyingComment(null)}
+                            onSend={(text) => replyComment(lastUnanswered.id, text)}
+                          />
+                        ) : (
+                          <Button variant="secondary" size="sm" onClick={() => setReplyingComment(lastUnanswered.id)}>
+                            {te.replyBtn}
+                          </Button>
+                        )
+                      )}
+                      <Button variant="ghost" size="sm" className={styles.pushRight} onClick={() => setCommentModal(thread)}>
+                        {te.viewConversation}
+                      </Button>
+                    </div>
+                  </article>
+                </li>
               );
             })}
-          </div>
-        </div>
-
-        {/* ── Conversation modal ── */}
-        {commentModal && (
-          <div onClick={(e) => { if (e.target === e.currentTarget) setCommentModal(null); }}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-              zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 16, width: '100%', maxWidth: 600,
-              maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {/* Modal header */}
-              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)',
-                display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
-                  background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 12, fontWeight: 700,
-                  backgroundImage: commentModal.externalAuthor?.avatar ? `url(${commentModal.externalAuthor.avatar})` : undefined,
-                  backgroundSize: 'cover' }}>
-                  {!commentModal.externalAuthor?.avatar && ((commentModal.externalAuthor?.name ?? commentModal.socialAccount.username ?? '?')[0]?.toUpperCase())}
-                </div>
-                <span style={{ fontWeight: 600, fontSize: 14 }}>{commentModal.externalAuthor?.name ?? commentModal.socialAccount.username}</span>
-                <span role="img" aria-label={PLATFORM_LABELS[commentModal.platform] ?? commentModal.platform}
-                  title={PLATFORM_LABELS[commentModal.platform] ?? commentModal.platform}
-                  style={{ display: 'inline-flex', alignItems: 'center', padding: 4, borderRadius: 4,
-                    background: 'var(--border)', color: 'var(--muted)' }}>
-                  <ChannelIcon name={commentModal.platform} size={11} />
-                </span>
-                <button onClick={() => setCommentModal(null)}
-                  style={{ marginLeft: 'auto', background: 'none', border: 'none',
-                    cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1, padding: 4 }}>
-                  ×
-                </button>
-              </div>
-              {/* Modal body — full conversation */}
-              <div style={{ overflowY: 'auto', padding: '16px 20px',
-                display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                {renderBubbles(commentModal.messages, commentModal.socialAccount.username ?? '')}
-              </div>
-              {/* Modal reply action */}
-              {modalLastUnanswered && (
-                <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
-                  {modalIsReplying ? (
-                    <ReplyBox onSend={async (text) => {
-                      const result = await replyComment(modalLastUnanswered.id, text);
-                      if (!result) {
-                        // Update modal thread messages optimistically
-                        setCommentModal((prev) => prev
-                          ? { ...prev, messages: prev.messages.map((c) =>
-                              c.id === modalLastUnanswered.id
-                                ? { ...c, replied_at: new Date().toISOString(), reply_body: text }
-                                : c,
-                            ), hasUnanswered: false }
-                          : null,
-                        );
-                      }
-                      return result;
-                    }}
-                      placeholder={te.replyPlaceholder} sendLabel={te.replyBtnSend} errorFallback={te.errorSend} />
-                  ) : (
-                    <button onClick={() => setReplyingComment(modalLastUnanswered.id)}
-                      style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6,
-                        border: '1px solid var(--border)', background: 'transparent',
-                        color: 'var(--muted)', cursor: 'pointer' }}>
-                      {te.replyBtn}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          </ul>
         )}
       </div>
-    );
-  }
 
+      {/* ── Conversation modal ── */}
+      <Modal
+        open={commentModal !== null}
+        onClose={() => setCommentModal(null)}
+        maxWidth={600}
+        closeLabel={tc.actions.close}
+        title={commentModal && (
+          <span className={styles.modalTitle}>
+            <Avatar name={modalName} src={commentModal.externalAuthor?.avatar} size={30} />
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modalName}</span>
+          </span>
+        )}
+        subtitle={commentModal && (
+          <span className={styles.threadHeadingMeta}>
+            <span aria-hidden="true" style={{ display: 'inline-flex' }}><ChannelIcon name={commentModal.platform} size={12} /></span>
+            {platformLabel(commentModal.platform)}
+          </span>
+        )}
+        footer={modalLastUnanswered ? (
+          modalIsReplying ? (
+            <div className={styles.modalReply}>
+              <ReplyBox
+                te={te}
+                cancelLabel={tc.actions.cancel}
+                onCancel={() => setReplyingComment(null)}
+                onSend={async (text) => {
+                  const result = await replyComment(modalLastUnanswered.id, text);
+                  if (!result) {
+                    // Update modal thread messages optimistically
+                    setCommentModal((prev) => prev
+                      ? { ...prev, messages: prev.messages.map((c) =>
+                          c.id === modalLastUnanswered.id
+                            ? { ...c, replied_at: new Date().toISOString(), reply_body: text }
+                            : c,
+                        ), hasUnanswered: false }
+                      : null,
+                    );
+                  }
+                  return result;
+                }}
+              />
+            </div>
+          ) : (
+            <Button variant="secondary" onClick={() => setReplyingComment(modalLastUnanswered.id)}>
+              {te.replyBtn}
+            </Button>
+          )
+        ) : undefined}
+      >
+        <div className={styles.modalBody}>
+          {commentModal && renderBubbles(commentModal.messages, modalUsername)}
+        </div>
+      </Modal>
+    </div>
+  );
 }
 
 export default function ConversationsPage() {

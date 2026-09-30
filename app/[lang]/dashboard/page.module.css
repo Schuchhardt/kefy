@@ -1,0 +1,92 @@
+/* Home del dashboard (app/[lang]/dashboard/page.tsx). */
+
+.home { max-width: 1040px; }
+.loading { display: grid; place-items: center; min-height: 40vh; color: var(--muted); font-size: 14px; }
+
+/* ── Aviso de plan ── */
+.plan {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 16px 20px; border-radius: 12px; margin-bottom: 24px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--info);
+}
+.plan[data-urgent='true'] { background: var(--warning-soft); border-color: var(--warning-border); color: var(--warning); }
+.planText { flex: 1 1 260px; min-width: 0; }
+.planTitle { font-size: 15px; font-weight: 600; color: var(--text); margin: 0 0 2px; }
+.planDesc { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; }
+
+/* ── Secciones ── */
+.section { margin-bottom: 36px; }
+.sectionHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.sectionTitle { font-size: 16px; font-weight: 600; margin: 0; }
+.more {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 44px;
+  font-size: 13px; font-weight: 600; color: var(--accent-text);
+}
+.more:hover { text-decoration: underline; text-underline-offset: 3px; }
+.inlineNotice {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 14px; color: var(--muted); margin: 0 0 32px;
+}
+.inlineNotice a { color: var(--accent-text); font-weight: 600; display: inline-flex; align-items: center; min-height: 44px; }
+
+/* ── Métricas ── */
+.metric { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+.metricIcon { color: var(--muted); display: block; margin-bottom: 8px; }
+.metricValue { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 2px; font-variant-numeric: tabular-nums; }
+.metricLabel { font-size: 13px; color: var(--muted); margin: 0; }
+
+/* ── Contenido reciente ── */
+.list {
+  list-style: none; margin: 0; padding: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+}
+.list > li + li, .list > div + div { border-top: 1px solid var(--border); }
+.row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px; min-height: 60px;
+  color: inherit; text-decoration: none;
+}
+.thumb {
+  width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0; position: relative; overflow: hidden;
+  background: var(--surface-2) center / cover no-repeat;
+  display: grid; place-items: center; color: var(--muted);
+}
+.play { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.35); color: #fff; }
+.body {
+  flex: 1; min-width: 0; font-size: 14px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.perf { font-size: 12px; color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+.empty { color: var(--muted); font-size: 14px; margin: 0; }
+
+/* ── Mejor rendimiento ── */
+.top {
+  display: flex; flex-direction: column; height: 100%;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  color: inherit; text-decoration: none;
+}
+.topImage {
+  display: block; width: 100%; aspect-ratio: 1 / 1; position: relative;
+  background: var(--surface-2) center / cover no-repeat;
+}
+.topChannel {
+  position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 6px;
+  display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); color: #fff;
+}
+.topText { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; min-width: 0; }
+.topBody { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topPerf { font-size: 12px; color: var(--accent-text); font-weight: 600; }
+
+/* ── Accesos rápidos ── */
+.quick {
+  display: flex; flex-direction: column; gap: 4px; height: 100%;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  color: inherit; text-decoration: none;
+}
+.quickIcon { color: var(--accent-text); margin-bottom: 6px; }
+.quickLabel { font-size: 14px; font-weight: 600; color: var(--text); }
+.quickDesc { font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+@media (max-width: 600px) {
+  .perf { display: none; }
+  .row { padding: 10px 12px; }
+}

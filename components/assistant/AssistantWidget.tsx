@@ -135,7 +135,9 @@ export default function AssistantWidget({ lang }: { lang: string }) {
           // según el ancho del sidebar.
           position: 'fixed', bottom: 24, ...(alignLeft ? {} : { right: 24 }),
           width: 56, height: 56, borderRadius: '50%', border: 0, cursor: 'pointer',
-          background: 'var(--accent)', color: '#0A0A0C', zIndex: 400,
+          // Justo por debajo del panel: en móvil el panel ocupa la pantalla y
+          // tapa el lanzador (se cierra con la X del encabezado).
+          background: 'var(--accent)', color: 'var(--on-accent)', zIndex: 'calc(var(--z-assistant) - 1)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.08)',
           transition: 'transform 0.15s ease',

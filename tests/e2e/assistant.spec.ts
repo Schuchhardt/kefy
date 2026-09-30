@@ -1188,14 +1188,17 @@ test.describe('Asistente IA: stream en curso, errores y persistencia', () => {
     expect(bodies).toHaveLength(0);
   });
 
-  test('no aparece mientras el onboarding está abierto', async ({ authenticatedPage: page }) => {
+  // El onboarding ya no es un modal sobre el dashboard: ?onboarding=1 lleva a
+  // /es/onboarding («pega tu web → 3 posts»), que va fuera del dashboard y no
+  // monta el asistente. Al volver al dashboard, el asistente sigue ahí.
+  test('no aparece en el onboarding', async ({ authenticatedPage: page }) => {
     await page.goto('/es/dashboard?onboarding=1');
-    const onboarding = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Empezar' }) });
-    await expect(onboarding).toBeVisible({ timeout: 15000 });
+    await expect(page).toHaveURL(/\/es\/onboarding$/, { timeout: 15000 });
+    await expect(page.getByRole('button', { name: 'Crear mis 3 posts' })).toBeVisible();
     await expect(page.getByRole('button', { name: ES.launcher })).toHaveCount(0);
 
-    await onboarding.getByRole('button', { name: 'Empezar' }).click();
-    await expect(onboarding).toBeHidden();
+    await page.getByRole('link', { name: 'Saltar por ahora' }).click();
+    await expect(page).toHaveURL(/\/es\/dashboard$/);
     await expect(page.getByRole('button', { name: ES.launcher })).toBeVisible();
   });
 });

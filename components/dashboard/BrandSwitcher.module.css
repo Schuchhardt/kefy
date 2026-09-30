@@ -1,0 +1,40 @@
+/* Selector de marca del sidebar (escritorio). El borde inferior lo pone el
+   contenedor del Sidebar. */
+
+.root { position: relative; flex-shrink: 0; }
+
+.trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; min-height: 60px; padding: 12px 16px;
+  background: none; border: 0; cursor: pointer; text-align: left;
+  font-family: var(--font-syne), system-ui, sans-serif;
+}
+.triggerMain { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; overflow: hidden; }
+.avatar { display: flex; flex-shrink: 0; }
+.name {
+  font-weight: 700; font-size: 13px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chevron { color: var(--muted); transition: transform 0.15s; }
+.chevronOpen { transform: rotate(180deg); }
+
+/* Sidebar colapsado (64px): solo el avatar, que ya se anuncia con el nombre. */
+.collapsed { display: flex; align-items: center; justify-content: center; min-height: 60px; padding: 16px 0; }
+
+.skeleton {
+  display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 16px;
+}
+.skeleton.isCollapsed { justify-content: center; padding: 16px 0; }
+.skeletonBox {
+  width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0;
+  background: var(--border);
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+@keyframes skeletonPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.menu {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: var(--z-dropdown);
+  margin-top: 4px; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+}

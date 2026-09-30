@@ -14,9 +14,12 @@
 
 import { useEffect, useState } from 'react';
 import GenerationLoader from '@/components/ui/GenerationLoader';
+import { toLocale } from '@/lib/i18n';
 import { networkFrame } from '@/lib/preview-layout';
 import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
+import esT from '@/locales/es/dashboard/content';
+import enT from '@/locales/en/dashboard/content';
 
 /** Duración típica de cada conversión, medida sobre generaciones reales. */
 export const ESTIMATED_MS: Record<ContentType, number> = {
@@ -28,21 +31,6 @@ export const ESTIMATED_MS: Record<ContentType, number> = {
 
 /** Tope hasta el que sube la barra mientras no haya respuesta del servidor. */
 const MAX_ESTIMATED = 0.95;
-
-const STEPS: Record<'es' | 'en', Record<ContentType, string[]>> = {
-  es: {
-    post:     ['Adaptando el texto…', 'Generando la imagen…', 'Afinando detalles…'],
-    story:    ['Adaptando el texto…', 'Generando la imagen vertical…', 'Afinando detalles…'],
-    carousel: ['Escribiendo los slides…', 'Generando las imágenes…', 'Armando el carrusel…'],
-    reel:     ['Escribiendo el guion…', 'Generando las escenas…', 'Armando el reel…'],
-  },
-  en: {
-    post:     ['Adapting the copy…', 'Generating the image…', 'Finishing touches…'],
-    story:    ['Adapting the copy…', 'Generating the vertical image…', 'Finishing touches…'],
-    carousel: ['Writing the slides…', 'Generating the images…', 'Assembling the carousel…'],
-    reel:     ['Writing the script…', 'Generating the scenes…', 'Assembling the reel…'],
-  },
-};
 
 /**
  * Progreso estimado a partir del tiempo transcurrido.
@@ -62,7 +50,9 @@ export function stepIndexFor(progress: number, stepCount: number): number {
 function Shimmer({ style }: { style?: React.CSSProperties }) {
   return (
     <div style={{
-      background: 'linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.10) 37%, rgba(255,255,255,0.04) 63%)',
+      // Con --text: el brillo se ve en tema oscuro y en claro (antes era
+      // blanco sobre un marco casi negro fijo, una mancha oscura en claro).
+      background: 'linear-gradient(90deg, color-mix(in srgb, var(--text) 5%, transparent) 25%, color-mix(in srgb, var(--text) 12%, transparent) 37%, color-mix(in srgb, var(--text) 5%, transparent) 63%)',
       backgroundSize: '400% 100%',
       animation: 'kefy-shimmer 1.4s ease infinite',
       borderRadius: 6,
@@ -80,7 +70,7 @@ function FormatSkeleton({ format, channel }: { format: ContentType; channel: Con
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{
         position: 'relative', width: '100%', aspectRatio: frame.css,
-        background: '#0a0a0f', borderRadius: 10, overflow: 'hidden',
+        background: 'var(--surface-2)', borderRadius: 10, overflow: 'hidden',
       }}>
         <Shimmer style={{ position: 'absolute', inset: 0, borderRadius: 0 }} />
         {/* Bloque de texto donde va a ir el título/cuerpo del slide */}
@@ -130,14 +120,13 @@ export function RenditionGenerating({
     return () => window.clearInterval(id);
   }, [format]);
 
+  const t        = toLocale(lang) === 'en' ? enT : esT;
   const progress = estimateProgress(elapsed, total);
-  const steps    = STEPS[lang][format];
+  const steps    = t.renditionSteps[format];
   const step     = steps[stepIndexFor(progress, steps.length)];
 
   const remaining = Math.max(0, Math.ceil((total - elapsed) / 1000));
-  const hint = remaining > 0
-    ? (lang === 'en' ? `~${remaining}s left` : `~${remaining}s`)
-    : (lang === 'en' ? 'almost there' : 'casi listo');
+  const hint = remaining > 0 ? t.renditionEta(remaining) : t.renditionAlmost;
 
   return (
     <div

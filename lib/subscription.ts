@@ -14,9 +14,10 @@
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
 import { NextResponse } from 'next/server';
+import { TRIAL_DAYS } from '@/lib/plans';
 
-/** Duración del mes gratis que recibe toda cuenta nueva. */
-export const TRIAL_DAYS = 30;
+/** Duración del mes gratis que recibe toda cuenta nueva (vive en lib/plans). */
+export { TRIAL_DAYS };
 
 export type SubscriptionStatus =
   | 'active' | 'trialing' | 'past_due' | 'canceled' | 'unpaid';

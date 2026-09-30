@@ -20,6 +20,105 @@ Convención de severidad:
 
 ---
 
+## 0. Estado: implementada (septiembre 2026)
+
+Todo el roadmap de la sección 7 (sprints 0 a 5) está implementado. Lo que
+queda fuera y por qué está al final de esta sección. Las cifras son de un render
+real con Playwright (Chromium) contra `next dev`, no estimaciones.
+
+### Métricas
+
+| Métrica | Antes | Objetivo | Ahora |
+|---|---|---|---|
+| Ancho del documento a 390px (landing) | 687px | 390px | **390px** (también 320 y 360: sin desborde) |
+| Alto de la landing en móvil | ~16.000px | <8.000px | **7.862px** (es) · 7.839px (en) |
+| Interacciones hasta el primer post generado | ≥25 | ≤5 | **2** desde la cuenta creada (web o frase + «Crear mis 3 posts»); 8 contando el registro |
+| Elementos interactivos <44px en landing | 31/34 | <5 | **0** |
+| Inputs <16px | 100% | 0 | **0** (landing, auth y las 16 pantallas del dashboard) |
+| Animaciones simultáneas en landing | 33 | <10 (0 con reduced-motion) | **5** por tiempo al cargar, **1** en reposo, **0** con reduced-motion (las entradas son por scroll: `animation-timeline: view()`) |
+| Pantallas de auth traducidas | 1/5 | 5/5 | **5/5** (+ onboarding) |
+| Promesas de precios sin flujo detrás | 8 | 0 | **0** (vigilado por `tests/unit/locales/parity.test.ts`) |
+| Dashboard: desborde horizontal a 390px | varias pantallas | 0 | **0** en las 16 pantallas |
+| Violaciones de axe (WCAG 2.x A/AA) | sin medir | 0 | **0** en 21 pantallas, tema claro y oscuro |
+
+Lo vigilan: `tests/e2e/mobile-a11y.spec.ts` (sin scroll horizontal a 390 y
+320px y axe en landing, auth y dashboard, en los dos temas),
+`tests/unit/locales/all-locales.test.ts` (paridad es/en de todos los locales) y
+`parity.test.ts` (promesas de la landing).
+
+### Qué se hizo, por sprint
+
+- **Sprint 0.** Sin desborde (blur acotado, `overflow-x: clip`), enlaces rotos
+  del dashboard arreglados (`/settings#social`), anclas y selector de idioma
+  que conservan la página, JSON-LD con precios reales y `<title>` por pantalla
+  de auth, precios sin nada que no exista, inputs a 16px y `:focus-visible`
+  global, `viewportFit: 'cover'` con safe-area, escala de z-index
+  (`--z-*`), ruido del fondo detrás del contenido y fuera en móvil.
+- **Sprint 1.** Landing en móvil: nada de vídeo (póster en SVG), sin el blur
+  de 82px del hero (en escritorio, acotado al ancho), `prefers-reduced-motion`
+  respetado, demo del hero honesta y ligera, objetivos táctiles de 44px, textos
+  de 12px o más.
+- **Sprint 2.** Una sola promesa y un solo CTA («Probar gratis» · «30 días
+  gratis · Sin tarjeta · Cancela cuando quieras»), 8 secciones en vez de 14,
+  11 redes en todos lados, precios con una sola implementación (`compact` en la
+  home), `lib/plans.ts` como única fuente de precios y topes (también Ajustes),
+  «Hablar con ventas» con contacto real.
+- **Sprint 3.** Auth traducida con `locales/*/auth.ts` y `AuthShell` único;
+  errores por código (`lib/auth-errors.ts`), ver contraseña, reglas en vivo,
+  `inputMode`/`autoComplete`/`autoFocus`, `role="alert"`, spinner; ante un
+  email ya registrado ofrece entrar o recuperar. `?next=` en login y registro.
+  Registrarse desde una invitación entra en el equipo que invitó (sin
+  organización ni trial propios). Reset valida el enlace al abrirse. El
+  **onboarding «pega tu web o describe tu negocio → 3 posts»**
+  (`/{lang}/onboarding`, `lib/services/onboarding.ts`) sustituye al modal y al
+  wizard como primera pantalla; el wizard pasa a **«Completa tu marca»**
+  (`/dashboard/brand/setup`): 5 pantallas, «Terminar más tarde», sugerencias
+  de IA solo con botón. El home tiene **«Primeros pasos»** con estado real.
+- **Sprint 4.** `.page`/`.page-header`, `SectionTabs`, `Modal` único (hoja
+  inferior, foco atrapado, Escape solo cierra el de arriba), rejillas que
+  colapsan, calendario en agenda en móvil, conversaciones master-detail, leads
+  como hoja inferior, BottomNav con los nombres del sidebar y no leídos,
+  Ajustes accesible en móvil.
+- **Sprint 5.** Tokens semánticos con contraste AA en los dos temas,
+  componentes compartidos (`components/ui`), iconos SVG, i18n del dashboard
+  sin ternarios, tema claro por defecto según el sistema con `theme-color`
+  dinámico, tests de paridad, desborde y axe.
+
+### Decisiones tomadas (revisables)
+
+- **Leer una web cuesta 1 crédito.** `POST /api/brand-kit/enrich-url` llamaba a
+  Firecrawl sin guardia; ahora pasa por `chargeOrThrow` (ver
+  `docs/beta-abierta.md`). Las sugerencias con IA del Brand Kit ya costaban 1
+  crédito, pero se pedían solas: ahora solo con botón.
+- **El onboarding genera 3 posts con imagen**: ~12 créditos (13 con web) de
+  los 150 del mes gratis, dicho antes de gastar. Texto primero (segundos) e
+  imágenes después, una por post.
+- **Contacto de ventas**: `mailto:ventas@kefy.app` o
+  `NEXT_PUBLIC_SALES_CONTACT_URL` si está definido (`lib/contact.ts`).
+- **Quitado de precios por no existir**: facturación anual, «Soporte
+  prioritario», ads, white-label, migración, «Email» como canal. Los topes de
+  cuentas sociales por plan (`socialConnections` en `lib/plans.ts`) se
+  anuncian pero todavía no se hacen cumplir en el API.
+- **La landing es siempre oscura** (está diseñada sobre negro); el dashboard
+  sigue la preferencia guardada o la del sistema.
+
+### Pendiente
+
+- **Borrar el código muerto** del punto 7 del resumen (secciones de landing no
+  montadas, `ColorBends` + three.js, copy `mult/killer/engage/strategy/
+  features/who/cmp/lang`, `locales/*/dashboard/{ads,analytics}.ts`). Está
+  aislado y no se carga, pero sigue en el repo: borrarlo necesita una
+  aprobación explícita que esta sesión no tenía.
+- **Respuestas automáticas con `{nombre}`**: la UI prometía sustituir el nombre
+  y `lib/engagement-executor.ts` envía el texto literal. Se cambió el texto de
+  la UI; implementar la sustitución es una decisión de producto.
+- **Cambio de plan de un cliente que ya paga**: hoy pasa por un checkout nuevo
+  y podría acabar con dos suscripciones; conviene llevarlo al portal de Stripe.
+- **Reels antiguos solo con `mux_playback_id`** siguen mostrando «El video se
+  está generando…» sin forma de regenerarlos desde la interfaz.
+
+---
+
 ## 1. Resumen ejecutivo
 
 1. **La landing no cabe en un móvil.** A 390px el documento mide 687px de

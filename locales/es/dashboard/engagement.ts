@@ -1,13 +1,17 @@
 const es = {
-  title: 'Reglas de Engagement',
-  subtitle: 'Automatiza respuestas a comentarios, reseñas y mensajes',
-  newRuleBtn: '+ Nueva regla',
+  title: 'Respuestas automáticas',
+  /** Formato de fechas (toLocaleDateString). */
+  dateLocale: 'es-ES',
+  subtitle: 'Automatiza respuestas a comentarios y mensajes',
+  newRuleBtn: 'Nueva regla',
+  createFirstRule: 'Crear primera regla',
+  formTitle: 'Nueva regla de respuesta',
   cancelBtn: 'Cancelar',
   saveBtn: 'Guardar regla',
-  saving: 'Guardando...',
-  loading: 'Cargando reglas...',
-  noRules: 'Sin reglas de engagement',
-  noRulesHint: 'Crea tu primera regla para responder automáticamente',
+  saving: 'Guardando…',
+  loading: 'Cargando reglas…',
+  noRules: 'Aún no tienes reglas de respuesta',
+  noRulesHint: 'Crea tu primera regla para responder automáticamente.',
   active: 'Activa',
   inactive: 'Inactiva',
   toggleActivate: 'Activar',
@@ -16,11 +20,12 @@ const es = {
   confirmDelete: '¿Eliminar esta regla?',
   errorLoad: 'Error al cargar reglas',
   errorCreate: 'Error al crear regla',
-  errorToggle: 'Error al actualizar',
-  errorDelete: 'Error al eliminar',
+  errorToggle: 'No se pudo actualizar la regla',
+  errorDelete: 'No se pudo eliminar la regla',
   // Form
   nameLabel: 'Nombre de la regla',
-  namePlaceholder: 'Ej: Auto-responder comentarios positivos',
+  nameRequired: 'Ponle un nombre a la regla.',
+  namePlaceholder: 'Ej.: Auto-responder comentarios positivos',
   triggerLabel: 'Disparador',
   triggers: {
     new_comment:              'Nuevo comentario',
@@ -36,7 +41,7 @@ const es = {
   platformLabel: 'Plataforma',
   platformAll: 'Todas las plataformas',
   keywordLabel: 'Filtrar por keyword (opcional)',
-  keywordPlaceholder: 'Ej: precio, envío, gracias...',
+  keywordPlaceholder: 'Ej.: precio, envío, gracias…',
   actionLabel: 'Acción',
   actions: {
     reply_comment:        'Responder comentario',
@@ -45,14 +50,20 @@ const es = {
     reply_comment_ai:     'Responder comentario con IA',
   } as Record<string, string>,
   templateLabel: 'Plantilla de respuesta',
-  templatePlaceholder: 'Escribe la respuesta automática...\nPuedes usar {nombre} para personalizar.',
-  templateHint: 'Usa {nombre} para incluir el nombre del usuario.',
+  templatePlaceholder: 'Escribe la respuesta automática…',
+  templateHint: 'Se envía exactamente este texto a cada persona.',
   // AI & Delay
   aiContextLabel:       'Contexto para IA',
-  aiContextPlaceholder: 'Instrucciones adicionales para personalizar la respuesta de IA...',
+  aiContextPlaceholder: 'Instrucciones adicionales para personalizar la respuesta de IA…',
+  aiContextHint:        'La IA usará la información de tu marca y este contexto para generar la respuesta.',
   delayLabel:           'Esperar antes de ejecutar',
   delayMinutes:         'minutos',
   delayNone:            'Sin espera',
+  delayBadge:           (min: number) => `+${min} min`,
+  // Tarjeta de regla
+  then:                 'entonces',
+  timesTriggered:       (n: number) => (n === 1 ? 'Ejecutada 1 vez' : `Ejecutada ${n} veces`),
+  lastTriggered:        (date: string) => `última vez: ${date}`,
   // Lead action
   leadActionLabel:      'Acción sobre lead',
   leadActionNone:       'Ninguna',
@@ -63,3 +74,4 @@ const es = {
 };
 
 export default es;
+export type EngagementCopy = typeof es;

@@ -2,6 +2,17 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
 
 const nextConfig: NextConfig = {
+  // Un slug por idioma (lib/localized-paths.ts): el del otro idioma redirige.
+  // Antes /en/precios y /en/pricing servían lo mismo y los enlaces internos
+  // mezclaban ambos.
+  async redirects() {
+    return [
+      { source: '/en/precios', destination: '/en/pricing', permanent: true },
+      { source: '/es/pricing', destination: '/es/precios', permanent: true },
+      { source: '/en/invitacion', destination: '/en/invitation', permanent: true },
+      { source: '/es/invitation', destination: '/es/invitacion', permanent: true },
+    ];
+  },
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },

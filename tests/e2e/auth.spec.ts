@@ -12,7 +12,7 @@ test.describe('Flujo de autenticación', () => {
     test('muestra el formulario de login en /es/login', async ({ page }) => {
       await page.goto('/es/login');
       await expect(page.getByLabel(/email/i)).toBeVisible();
-      await expect(page.getByLabel(/contraseña|password/i)).toBeVisible();
+      await expect(page.getByLabel(/^(contraseña|password)$/i)).toBeVisible();
     });
 
     test('muestra error al enviar credenciales inválidas', async ({ page }) => {
@@ -27,7 +27,7 @@ test.describe('Flujo de autenticación', () => {
 
       await page.goto('/es/login');
       await page.getByLabel(/email/i).fill('wrong@example.com');
-      await page.getByLabel(/contraseña|password/i).fill('wrongpass');
+      await page.getByLabel(/^(contraseña|password)$/i).fill('wrongpass');
       await page.getByRole('button', { name: /entrar|iniciar|login|sign in/i }).click();
 
       await expect(page.getByText(/inválid|incorrect|error/i)).toBeVisible({ timeout: 5000 });
@@ -36,7 +36,7 @@ test.describe('Flujo de autenticación', () => {
     test('redirige al dashboard tras login exitoso', async ({ page }) => {
       await page.goto('/es/login');
       await page.getByLabel(/email/i).fill('test@kefy.com');
-      await page.getByLabel(/contraseña|password/i).fill('password123');
+      await page.getByLabel(/^(contraseña|password)$/i).fill('password123');
       await page.getByRole('button', { name: /entrar|iniciar|login|sign in/i }).click();
 
       await expect(page).toHaveURL(/\/dashboard/, { timeout: 10000 });
@@ -45,7 +45,7 @@ test.describe('Flujo de autenticación', () => {
     test('muestra error de validación con email inválido', async ({ page }) => {
       await page.goto('/es/login');
       await page.getByLabel(/email/i).fill('no-es-email');
-      await page.getByLabel(/contraseña|password/i).fill('password123');
+      await page.getByLabel(/^(contraseña|password)$/i).fill('password123');
       await page.getByRole('button', { name: /entrar|iniciar|login|sign in/i }).click();
 
       // Puede ser validación HTML5 o mensaje de la app
@@ -77,7 +77,7 @@ test.describe('Flujo de autenticación', () => {
       await page.getByLabel(/tu nombre/i).fill('Nuevo Usuario');
       await page.getByLabel(/nombre del negocio/i).fill('Mi Empresa');
       await page.getByLabel(/email/i).fill('newuser@kefy.com');
-      await page.getByLabel(/contraseña|password/i).fill('password123');
+      await page.getByLabel(/^(contraseña|password)$/i).fill('password123');
 
       await page.getByRole('button', { name: /registrar|crear|sign up|register/i }).click();
       await expect(page).toHaveURL(/\/dashboard|\/onboarding/, { timeout: 10000 });

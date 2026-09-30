@@ -29,6 +29,9 @@ function setup(initial: CustomDraft = emptyDraft(), lang: 'es' | 'en' = 'es') {
 }
 
 const rows = () => screen.getAllByTestId('custom-calendar-row');
+// El asterisco de «obligatorio» es visual (aria-hidden): el nombre accesible es solo la etiqueta.
+const nameInput = () => screen.getByRole('textbox', { name: 'Nombre' });
+const topicInput = (scope: HTMLElement = document.body) => within(scope).getByRole('textbox', { name: 'Tema' });
 
 describe('CustomStrategyEditor — validación', () => {
   it('no guarda sin nombre ni tema y explica por qué', () => {
@@ -39,13 +42,14 @@ describe('CustomStrategyEditor — validación', () => {
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('Ponle un nombre a la estrategia.');
     expect(alert).toHaveTextContent('Cada pieza necesita un tema.');
-    expect(screen.getByLabelText('Nombre *')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByLabelText('Tema *')).toHaveAttribute('aria-invalid', 'true');
+    expect(nameInput()).toHaveAttribute('aria-invalid', 'true');
+    expect(nameInput()).toHaveAttribute('aria-required', 'true');
+    expect(topicInput()).toHaveAttribute('aria-invalid', 'true');
   });
 
   it('con nombre pero una pieza sin tema tampoco guarda', () => {
     const { onSave } = setup();
-    fireEvent.change(screen.getByLabelText('Nombre *'), { target: { value: 'Lanzamiento' } });
+    fireEvent.change(nameInput(), { target: { value: 'Lanzamiento' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar y activar' }));
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).not.toHaveTextContent('Ponle un nombre');
@@ -54,9 +58,9 @@ describe('CustomStrategyEditor — validación', () => {
 
   it('guarda con nombre y tema; «Guardar y activar» pide activarla', () => {
     const { onSave } = setup();
-    fireEvent.change(screen.getByLabelText('Nombre *'), { target: { value: 'Lanzamiento' } });
+    fireEvent.change(nameInput(), { target: { value: 'Lanzamiento' } });
     fireEvent.change(screen.getByLabelText('Objetivo (opcional)'), { target: { value: OBJECTIVES[0].id } });
-    fireEvent.change(screen.getByLabelText('Tema *'), { target: { value: 'Detrás de cámaras' } });
+    fireEvent.change(topicInput(), { target: { value: 'Detrás de cámaras' } });
     fireEvent.change(screen.getByLabelText('Formato'), { target: { value: 'reel' } });
     fireEvent.change(screen.getByLabelText('Canal'), { target: { value: 'tiktok' } });
     fireEvent.change(screen.getByLabelText('Semana'), { target: { value: '3' } });
@@ -74,8 +78,8 @@ describe('CustomStrategyEditor — validación', () => {
 
   it('«Guardar» (submit) no activa', () => {
     const { onSave } = setup();
-    fireEvent.change(screen.getByLabelText('Nombre *'), { target: { value: 'X' } });
-    fireEvent.change(screen.getByLabelText('Tema *'), { target: { value: 'Y' } });
+    fireEvent.change(nameInput(), { target: { value: 'X' } });
+    fireEvent.change(topicInput(), { target: { value: 'Y' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
     expect(onSave.mock.calls[0][1]).toBe(false);
   });
@@ -94,16 +98,16 @@ describe('CustomStrategyEditor — calendario', () => {
     // Con una sola pieza no se puede quitar.
     expect(screen.queryByRole('button', { name: 'Quitar pieza 1' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '+ Añadir pieza' }));
-    fireEvent.click(screen.getByRole('button', { name: '+ Añadir pieza' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Añadir pieza' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Añadir pieza' }));
     expect(rows()).toHaveLength(3);
 
-    fireEvent.change(within(rows()[1]).getByLabelText('Tema *'), { target: { value: 'Segunda' } });
-    fireEvent.change(within(rows()[2]).getByLabelText('Tema *'), { target: { value: 'Tercera' } });
+    fireEvent.change(topicInput(rows()[1]), { target: { value: 'Segunda' } });
+    fireEvent.change(topicInput(rows()[2]), { target: { value: 'Tercera' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Quitar pieza 2' }));
     expect(rows()).toHaveLength(2);
-    expect(within(rows()[1]).getByLabelText('Tema *')).toHaveValue('Tercera');
+    expect(topicInput(rows()[1])).toHaveValue('Tercera');
 
     fireEvent.click(screen.getByRole('button', { name: 'Quitar pieza 1' }));
     expect(rows()).toHaveLength(1);
@@ -113,7 +117,7 @@ describe('CustomStrategyEditor — calendario', () => {
   it('una pieza nueva hereda la semana de la anterior', () => {
     setup();
     fireEvent.change(screen.getByLabelText('Semana'), { target: { value: '4' } });
-    fireEvent.click(screen.getByRole('button', { name: '+ Añadir pieza' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Añadir pieza' }));
     expect(within(rows()[1]).getByLabelText('Semana')).toHaveValue('4');
   });
 
@@ -130,7 +134,7 @@ describe('CustomStrategyEditor — calendario', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent('Give the strategy a name.');
-    expect(screen.getByRole('button', { name: '+ Add piece' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add piece' })).toBeInTheDocument();
   });
 });
 

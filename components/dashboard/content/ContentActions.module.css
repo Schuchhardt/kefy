@@ -1,0 +1,55 @@
+/* Acciones de tarjeta (ver, editar, eliminar). Antes medían 28px y el único
+   texto era el `title` del ratón: 36–40px y nombre accesible siempre. */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.md {
+  width: 40px;
+  height: 40px;
+}
+
+.btn:hover,
+.btn:active {
+  background: var(--surface-2);
+  border-color: var(--accent-border);
+}
+
+.view {
+  color: var(--accent-text);
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.danger:hover,
+.danger:active {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+/* Se ven de 36px y se tocan en 44px: el área extra es un pseudo-elemento, como
+   .ui-btn--sm en globals.css, para no agrandar filas compactas. */
+@media (pointer: coarse), (max-width: 767px) {
+  .btn { position: relative; }
+  .btn::after { content: ''; position: absolute; inset: -4px; }
+}

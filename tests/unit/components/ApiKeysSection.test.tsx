@@ -109,7 +109,7 @@ async function renderSection(lang: 'es' | 'en' = 'es') {
 }
 
 async function openCreate() {
-  fireEvent.click(screen.getByRole('button', { name: '+ Crear API key' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Crear API key' }));
   return screen.findByRole('dialog');
 }
 
@@ -198,7 +198,7 @@ describe('ApiKeysSection — lista', () => {
   it('con 10 keys activas no deja crear otra', async () => {
     serverKeys = Array.from({ length: 10 }, (_, i) => row({ id: `k${i}`, name: `Key ${i}` }));
     await renderSection();
-    expect(screen.getByRole('button', { name: '+ Crear API key' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Crear API key' })).toBeDisabled();
     expect(screen.getByText('Máximo 10 keys activas por organización.')).toBeInTheDocument();
   });
 
@@ -304,7 +304,7 @@ describe('ApiKeysSection — crear', () => {
     const secretBox = within(dialog).getByText(SECRET).parentElement!;
     await act(async () => { fireEvent.click(within(secretBox).getByRole('button', { name: 'Copiar' })); });
     expect(clipboardWrite).toHaveBeenCalledWith(SECRET);
-    expect(within(secretBox).getByRole('button', { name: '✓ Copiado' })).toBeInTheDocument();
+    expect(within(secretBox).getByRole('button', { name: 'Copiado' })).toBeInTheDocument();
   });
 
   it('409 (límite de keys) muestra copy traducida, no el inglés del servidor, y no muestra secreto', async () => {
@@ -395,5 +395,30 @@ describe('ApiKeysSection — revocar', () => {
     const dialog = await screen.findByRole('dialog');
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Sí, revocar' })); });
     expect(await within(dialog).findByText('No se pudo revocar la key.')).toBeInTheDocument();
+  });
+});
+
+// ─── Ejemplos de conexión ─────────────────────────────────────────────────────
+
+describe('ApiKeysSection — pestañas de ejemplos', () => {
+  it('son pestañas ARIA: una sola en el orden de tabulación y las flechas cambian de cliente', async () => {
+    await renderSection();
+    const tablist = await screen.findByRole('tablist', { name: 'Ejemplos de configuración por cliente' });
+    const tabs = within(tablist).getAllByRole('tab');
+    expect(tabs.map((t) => t.getAttribute('tabindex'))).toEqual(['0', '-1', '-1', '-1']);
+
+    const panel = screen.getByRole('tabpanel');
+    expect(panel).toHaveAttribute('aria-labelledby', tabs[0].id);
+    expect(panel).toHaveTextContent('claude mcp add');
+
+    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
+    expect(within(tablist).getByRole('tab', { name: 'Cursor' })).toHaveAttribute('aria-selected', 'true');
+    expect(document.activeElement).toBe(within(tablist).getByRole('tab', { name: 'Cursor' }));
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('mcpServers');
+
+    fireEvent.keyDown(tabs[1], { key: 'End' });
+    expect(within(tablist).getByRole('tab', { name: 'curl' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(tabs[3], { key: 'ArrowRight' });
+    expect(within(tablist).getByRole('tab', { name: 'Claude Code' })).toHaveAttribute('aria-selected', 'true');
   });
 });

@@ -18,6 +18,7 @@ vi.mock('@/components/dashboard/content/EditContentModal',    () => ({ default: 
 vi.mock('@/components/dashboard/content/ManualCreateModal',   () => ({ default: () => null }));
 vi.mock('@/components/dashboard/content/RecommendModal',      () => ({ default: () => null }));
 vi.mock('@/components/dashboard/content/ContentLibraryModal', () => ({ default: () => null }));
+vi.mock('@/components/dashboard/content/ScheduleModal',       () => ({ default: () => null }));
 
 import ContentPage from '@/app/[lang]/dashboard/content/create/page';
 import { BrandProvider } from '@/lib/brand-context';

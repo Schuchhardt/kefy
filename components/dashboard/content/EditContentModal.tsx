@@ -1,13 +1,18 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
-import Modal from './Modal';
+import Modal from '@/components/ui/Modal';
+import Button, { Spinner, buttonClass } from '@/components/ui/Button';
+import { Field, Input, Textarea } from '@/components/ui/Field';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
 import { ImageGeneratingSpinner } from '@/components/dashboard/ImageGeneratingSpinner';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
-import esT from '@/locales/es/dashboard/content';
-import enT from '@/locales/en/dashboard/content';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
+import styles from './EditContentModal.module.css';
 
 const MuxReelPlayer = dynamic(
   () => import('@/components/dashboard/MuxReelPlayer').then((m) => m.MuxReelPlayer),
@@ -23,12 +28,22 @@ interface EditContentModalProps {
   onUpdate:  (patch: Partial<ContentItem>) => void;
 }
 
-const T = { es: esT.editContentModal, en: enT.editContentModal } as const;
+const COPY = { es: esPublish, en: enPublish } as const;
+type EditCopy = typeof esPublish.edit;
+
+/** Alto máximo de la vista previa vertical (reel/story/TikTok). */
+const PREVIEW_MAX_H = 'min(560px, 55dvh)';
+
+/** Mensaje de un error de la IA: el del servidor si lo trae, si no el genérico. */
+function aiMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 export default function EditContentModal({
   open, onClose, item, brandKit, lang, onUpdate,
 }: EditContentModalProps) {
-  const t = T[lang];
+  const copy = COPY[lang];
+  const t = copy.edit;
 
   const [title,    setTitle]    = useState('');
   const [bodyText, setBodyText] = useState('');
@@ -51,6 +66,11 @@ export default function EditContentModal({
   const [storyVideoScriptLoading, setStoryVideoScriptLoading] = useState(false);
   const [storyVideoError, setStoryVideoError] = useState<string | null>(null);
   const [storyHasScript, setStoryHasScript] = useState(false);
+  // Fallos de la IA, junto a la acción que los provocó (antes se perdían en
+  // una promesa rechazada sin aviso).
+  const [regenTextError, setRegenTextError] = useState<string | null>(null);
+  const [regenImageError, setRegenImageError] = useState<string | null>(null);
+  const [slideError, setSlideError] = useState<{ idx: number; message: string } | null>(null);
 
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef<{ itemId: string; patch: Partial<ContentItem> } | null>(null);
@@ -76,6 +96,10 @@ export default function EditContentModal({
     setPreviewSlide(0);
     setStoryVideoError(null);
     setStoryHasScript(Array.isArray(item.slides) && item.slides.length > 0);
+    setRegenTextError(null);
+    setRegenImageError(null);
+    setSlideError(null);
+    setUploadError(null);
     lastSentRef.current = '';
   }, [item?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -152,7 +176,7 @@ export default function EditContentModal({
       method: 'POST', credentials: 'include', body: fd,
     });
     const d = await res.json() as { url?: string; type?: 'image' | 'video'; error?: string };
-    if (!res.ok || !d.url || !d.type) throw new Error(d.error ?? 'upload failed');
+    if (!res.ok || !d.url || !d.type) throw new Error(d.error ?? t.uploadError);
     return { url: d.url, type: d.type };
   }
 
@@ -165,7 +189,7 @@ export default function EditContentModal({
       setImageUrl(url);
       scheduleSave({ image_url: url });
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : t.uploadError);
+      setUploadError(aiMessage(err, t.uploadError));
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -181,7 +205,7 @@ export default function EditContentModal({
       setVideoUrl(url);
       scheduleSave({ video_url: url });
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : t.uploadError);
+      setUploadError(aiMessage(err, t.uploadError));
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -288,7 +312,7 @@ export default function EditContentModal({
       const { url } = await uploadFile(file);
       updateSlide(idx, { image_url: url });
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : t.uploadError);
+      setUploadError(aiMessage(err, t.uploadError));
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -300,6 +324,7 @@ export default function EditContentModal({
     if (!item) return;
     const slide = slides[idx] as CarouselSlide | ReelScene;
     setRegenSlideTextLoadingIdx(idx);
+    setSlideError(null);
     try {
       const res = await fetch('/api/content/slide-text', {
         method: 'POST', credentials: 'include',
@@ -316,6 +341,8 @@ export default function EditContentModal({
       const d = await res.json() as { title?: string; body?: string; error?: string };
       if (!res.ok) throw new Error(d.error ?? 'Error');
       updateSlide(idx, { title: d.title ?? slide.title, body: d.body ?? slide.body });
+    } catch (err) {
+      setSlideError({ idx, message: aiMessage(err, t.aiError) });
     } finally {
       setRegenSlideTextLoadingIdx(null);
     }
@@ -325,6 +352,7 @@ export default function EditContentModal({
   async function handleRegenText() {
     if (!item) return;
     setRegenTextLoading(true);
+    setRegenTextError(null);
     try {
       const base = bodyText.slice(0, 250) || title || '';
       const topic = regenTextFeedback.trim()
@@ -343,6 +371,8 @@ export default function EditContentModal({
       if (d.hashtags) { setTagsText(d.hashtags.join(' ')); }
       onUpdate({ body: d.body, hashtags: d.hashtags });
       setRegenTextFeedback('');
+    } catch (err) {
+      setRegenTextError(aiMessage(err, t.aiError));
     } finally {
       setRegenTextLoading(false);
     }
@@ -351,6 +381,7 @@ export default function EditContentModal({
   async function handleRegenImage() {
     if (!item) return;
     setRegenImageLoading(true);
+    setRegenImageError(null);
     try {
       const base = bodyText.slice(0, 350) || title || 'imagen para post';
       const prompt = regenImageFeedback.trim()
@@ -368,6 +399,8 @@ export default function EditContentModal({
         onUpdate({ image_url: d.image.url });
       }
       setRegenImageFeedback('');
+    } catch (err) {
+      setRegenImageError(aiMessage(err, t.aiError));
     } finally {
       setRegenImageLoading(false);
     }
@@ -376,11 +409,12 @@ export default function EditContentModal({
   async function handleRegenSlideImage(idx: number, feedback: string) {
     const slide = slides[idx] as CarouselSlide | ReelScene;
     setRegenSlideImageLoadingIdx(idx);
+    setSlideError(null);
     try {
       const context = [slide.title, slide.body].filter(Boolean).join('. ');
       const prompt = feedback.trim()
         ? `${context ? context + '. ' : ''}${feedback.trim()}`
-        : context || (lang === 'en' ? 'image for slide' : 'imagen para slide');
+        : context || t.slideImagePrompt;
       // La imagen se regenera limpia, sin texto quemado: el título/cuerpo se
       // dibujan encima como HTML en la vista previa y se componen sobre los
       // píxeles al publicar (los reels ni siquiera eso: Remotion pinta el
@@ -395,6 +429,8 @@ export default function EditContentModal({
       if (d.image?.url) {
         updateSlide(idx, { image_url: d.image.url, text_baked: false });
       }
+    } catch (err) {
+      setSlideError({ idx, message: aiMessage(err, t.aiError) });
     } finally {
       setRegenSlideImageLoadingIdx(null);
     }
@@ -414,12 +450,12 @@ export default function EditContentModal({
         body: JSON.stringify({ itemId: item.id }),
       });
       const d = await res.json() as { scenes?: ReelScene[]; error?: string };
-      if (!res.ok) throw new Error(d.error ?? 'Error');
+      if (!res.ok) throw new Error(d.error ?? t.aiError);
       setSlides((d.scenes ?? []) as unknown as (CarouselSlide | ReelScene)[]);
       onUpdate({ slides: (d.scenes ?? []) as unknown as ReelScene[] });
       setStoryHasScript(true);
     } catch (err) {
-      setStoryVideoError(err instanceof Error ? err.message : 'Error');
+      setStoryVideoError(aiMessage(err, t.aiError));
     } finally {
       setStoryVideoScriptLoading(false);
     }
@@ -430,9 +466,11 @@ export default function EditContentModal({
   const isReel     = item.content_type === 'reel';
   const isStory    = item.content_type === 'story';
 
-  const saveBadge = saveState === 'saving' ? t.saving
-    : saveState === 'saved' ? `✓ ${t.saved}`
-    : saveState === 'error' ? '⚠' : '';
+
+  const saveStatus: ReactNode = saveState === 'saving' ? <><Spinner size={12} /> {t.saving}</>
+    : saveState === 'saved' ? <><Icon name="check" size={14} /> {t.saved}</>
+    : saveState === 'error' ? <span className={`${styles.saveStatus} ${styles.saveError}`}><Icon name="alert" size={14} /> {t.saveError}</span>
+    : t.subtitle;
 
   // Same hashtag normalization as onTagsChange, kept in sync for the live preview
   const previewHashtags = tagsText
@@ -441,18 +479,22 @@ export default function EditContentModal({
     .filter(Boolean)
     .map((s) => `#${s}`);
 
+  const uploadProps = { loading: uploading, uploadingLabel: t.uploading };
+
   return (
-    <Modal open={open} onClose={onClose} title={t.title} subtitle={saveBadge || t.subtitle} maxWidth={960}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '20px 24px 24px' }}>
-        {/* ── Live Instagram-style preview ─────────────────────────────── */}
-        <div style={{ width: 300, flexShrink: 0 }}>
-          <div style={{ position: 'sticky', top: 0 }}>
-            <p style={{
-              fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8,
-              letterSpacing: '0.05em', textTransform: 'uppercase',
-            }}>
-              {t.previewLabel}
-            </p>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t.title}
+      subtitle={<span role="status" className={styles.saveStatus}>{saveStatus}</span>}
+      maxWidth={960}
+      footer={<Button variant="primary" onClick={onClose}>{t.close}</Button>}
+    >
+      <div className={styles.layout}>
+        {/* ── Live preview ─────────────────────────────────────────────── */}
+        <div className={styles.previewCol}>
+          <div className={styles.previewSticky}>
+            <h3 className={styles.label}>{t.previewLabel}</h3>
             <NetworkPreview
               contentType={item.content_type}
               defaultChannel={item.channel}
@@ -463,225 +505,196 @@ export default function EditContentModal({
               slides={slides}
               activeSlide={previewSlide}
               onActiveSlideChange={setPreviewSlide}
-              username={brandKit?.name ?? 'tu_marca'}
+              username={brandKit?.name ?? copy.preview.defaultUsername}
               logoUrl={brandKit?.logo_url ?? undefined}
               imagePending={item.image_status === 'generating'}
               accentColor={brandKit?.accent_color ?? undefined}
               brandFont={brandKit?.font_heading}
+              lang={lang}
+              frameMaxHeight={PREVIEW_MAX_H}
             />
           </div>
         </div>
 
         {/* ── Editable fields ──────────────────────────────────────────── */}
-        <div style={{ flex: 1, minWidth: 280 }}>
-        {/* Title — hidden for carousel: each slide carries its own content */}
-        {!isCarousel && (
-          <Field label={t.titleField}>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => onTitleChange(e.target.value)}
-              style={inputStyle}
-              placeholder="—"
-            />
-          </Field>
-        )}
+        <div className={styles.fields}>
+          {/* Title — hidden for carousel: each slide carries its own content */}
+          {!isCarousel && (
+            <Field label={t.titleField}>
+              <Input type="text" value={title} onChange={(e) => onTitleChange(e.target.value)} placeholder="—" />
+            </Field>
+          )}
 
-        {/* Body (post & story) */}
-        {(isPost || isStory) && (
-          <Field label={t.bodyField}>
-            <textarea
-              value={bodyText}
-              onChange={(e) => onBodyChange(e.target.value)}
-              rows={5}
-              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
-            />
-          </Field>
-        )}
+          {/* Body (post & story) */}
+          {(isPost || isStory) && (
+            <Field label={t.bodyField}>
+              <Textarea value={bodyText} onChange={(e) => onBodyChange(e.target.value)} rows={5} />
+            </Field>
+          )}
 
-        {/* Hashtags — hidden for carousel: each slide carries its own content */}
-        {!isCarousel && (
-          <Field label={t.hashtagsField} hint={t.hashtagsHint}>
-            <input
-              type="text"
-              value={tagsText}
-              onChange={(e) => onTagsChange(e.target.value)}
-              style={inputStyle}
-              placeholder="#marketing #branding"
-            />
-          </Field>
-        )}
+          {/* Hashtags — hidden for carousel: each slide carries its own content */}
+          {!isCarousel && (
+            <Field label={t.hashtagsField} hint={t.hashtagsHint}>
+              <Input type="text" value={tagsText} onChange={(e) => onTagsChange(e.target.value)} placeholder="#marketing #branding" />
+            </Field>
+          )}
 
-        {/* Image (post & story) — carousel uses per-slide images instead */}
-        {(isPost || isStory) && (
-          <Field label={t.imageField}>
-            {imageUrl ? (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imageUrl} alt="" style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <UploadBtn label={t.changeImage} accept="image/*" onChange={onImageUpload} loading={uploading} />
-                  <button type="button" onClick={removeImage} style={{ ...secondaryBtn, color: '#ff6b6b', borderColor: 'rgba(255,107,107,0.4)' }}>
-                    {t.removeImage}
-                  </button>
+          {/* Image (post & story) — carousel uses per-slide images instead */}
+          {(isPost || isStory) && (
+            <Group label={t.imageField}>
+              {imageUrl ? (
+                <div className={styles.row}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUrl} alt="" className={styles.thumb} />
+                  <div className={styles.stack}>
+                    <UploadBtn label={t.changeImage} accept="image/*" onChange={onImageUpload} {...uploadProps} />
+                    <Button variant="danger-ghost" size="sm" icon={<Icon name="trash" size={14} />} onClick={removeImage}>
+                      {t.removeImage}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ) : item.image_status === 'generating' ? (
-              <div style={{ width: 120, height: 120, borderRadius: 8, overflow: 'hidden' }}>
-                <ImageGeneratingSpinner label={lang === 'en' ? 'Generating…' : 'Generando…'} height={120} accentColor={brandKit?.accent_color ?? undefined} />
-              </div>
-            ) : (
-              <UploadBtn label={t.uploadImage} accept="image/*" onChange={onImageUpload} loading={uploading} />
-            )}
-          </Field>
-        )}
+              ) : item.image_status === 'generating' ? (
+                <div style={{ width: 120, height: 120, borderRadius: 8, overflow: 'hidden' }}>
+                  <ImageGeneratingSpinner label={t.generatingImage} height={120} accentColor={brandKit?.accent_color ?? undefined} />
+                </div>
+              ) : (
+                <UploadBtn label={t.uploadImage} accept="image/*" onChange={onImageUpload} {...uploadProps} />
+              )}
+            </Group>
+          )}
 
-        {/* Video (reel) — scenes already carry background images + text from
-            generation, but the text only gets baked in when Remotion renders
-            them into a video. Auto-trigger that render here, same as Story. */}
-        {isReel && (
-          <Field label={t.videoField}>
-            {videoUrl ? (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <video src={videoUrl} controls style={{ width: 140, height: 200, borderRadius: 8, border: '1px solid var(--border)', objectFit: 'cover', background: '#000' }} />
-                <UploadBtn label={t.changeVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
-              </div>
-            ) : slides.length > 0 ? (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          {/* Video (reel) — scenes already carry background images + text from
+              generation, but the text only gets baked in when Remotion renders
+              them into a video. Auto-trigger that render here, same as Story. */}
+          {isReel && (
+            <Group label={t.videoField}>
+              {videoUrl ? (
+                <div className={styles.row}>
+                  <video src={videoUrl} controls className={styles.video} />
+                  <UploadBtn label={t.changeVideo} accept="video/*" onChange={onVideoUpload} {...uploadProps} />
+                </div>
+              ) : slides.length > 0 ? (
+                <div className={styles.row}>
+                  <MuxReelPlayer
+                    itemId={item.id}
+                    renderStatus={item.render_status ?? 'not_rendered'}
+                    height={200}
+                    lang={lang}
+                    onRenderDone={(_id, url) => {
+                      setVideoUrl(url);
+                      onUpdate({ video_url: url });
+                    }}
+                  />
+                  <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} {...uploadProps} />
+                </div>
+              ) : (
+                <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} {...uploadProps} />
+              )}
+            </Group>
+          )}
+
+          {/* Video (story — optional, generated on demand or uploaded manually) */}
+          {isStory && (
+            <Group label={t.videoField}>
+              {videoUrl ? (
+                <div className={styles.row}>
+                  <video src={videoUrl} controls className={styles.video} />
+                  <UploadBtn label={t.changeVideo} accept="video/*" onChange={onVideoUpload} {...uploadProps} />
+                </div>
+              ) : storyHasScript ? (
                 <MuxReelPlayer
                   itemId={item.id}
-                  renderStatus={item.render_status ?? 'not_rendered'}
+                  renderStatus="not_rendered"
                   height={200}
+                  lang={lang}
                   onRenderDone={(_id, url) => {
                     setVideoUrl(url);
                     onUpdate({ video_url: url });
                   }}
                 />
-                <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
-              </div>
-            ) : (
-              <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
-            )}
-          </Field>
-        )}
+              ) : (
+                <div className={styles.stack}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Icon name="video" size={14} />}
+                    loading={storyVideoScriptLoading}
+                    onClick={handleGenerateStoryVideoScript}
+                  >
+                    {storyVideoScriptLoading ? t.regenerating : t.generateStoryVideo}
+                  </Button>
+                  <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} {...uploadProps} />
+                </div>
+              )}
+              {storyVideoError && <Notice tone="danger">{storyVideoError}</Notice>}
+            </Group>
+          )}
 
-        {/* Video (story — optional, generated on demand or uploaded manually) */}
-        {isStory && (
-          <Field label={t.videoField}>
-            {videoUrl ? (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <video src={videoUrl} controls style={{ width: 140, height: 200, borderRadius: 8, border: '1px solid var(--border)', objectFit: 'cover', background: '#000' }} />
-                <UploadBtn label={t.changeVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
-              </div>
-            ) : storyHasScript ? (
-              <MuxReelPlayer
-                itemId={item.id}
-                renderStatus="not_rendered"
-                height={200}
-                onRenderDone={(_id, url) => {
-                  setVideoUrl(url);
-                  onUpdate({ video_url: url });
-                }}
-              />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={handleGenerateStoryVideoScript}
-                  disabled={storyVideoScriptLoading}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
-                    padding: '9px 16px', borderRadius: 8, border: '1px solid var(--accent)',
-                    background: 'rgba(198,255,75,0.08)', color: 'var(--accent)',
-                    fontSize: 13, fontWeight: 700, cursor: storyVideoScriptLoading ? 'not-allowed' : 'pointer',
-                    opacity: storyVideoScriptLoading ? 0.6 : 1,
-                  }}
-                >
-                  {storyVideoScriptLoading ? t.regenerating : `🎬 ${lang === 'en' ? 'Generate video for this story' : 'Generar video de esta story'}`}
-                </button>
-                <UploadBtn label={t.uploadVideo} accept="video/*" onChange={onVideoUpload} loading={uploading} />
-              </div>
-            )}
-            {storyVideoError && <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: 8 }}>{storyVideoError}</p>}
-          </Field>
-        )}
+          {uploadError && <Notice tone="danger">{uploadError}</Notice>}
 
-        {uploadError && <p style={{ fontSize: 12, color: '#ff6b6b', marginTop: -8, marginBottom: 12 }}>{uploadError}</p>}
-
-        {/* Slides (carousel & reel) */}
-        {(isCarousel || isReel) && (
-          <Field label={isReel ? t.sceneTitle : t.slidesTitle}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(slides as Array<CarouselSlide | ReelScene>).map((s, idx) => (
-                <SlideEditor
-                  key={idx}
-                  slide={s}
-                  idx={idx}
-                  isLast={idx === slides.length - 1}
-                  expanded={editingSlide === idx}
-                  isReel={isReel}
-                  t={t}
-                  uploading={uploading}
-                  onToggle={() => { setPreviewSlide(idx); setEditingSlide(editingSlide === idx ? null : idx); }}
-                  onUpdate={(p) => updateSlide(idx, p)}
-                  onMove={(dir) => moveSlide(idx, dir)}
-                  onDelete={() => deleteSlide(idx)}
-                  onUploadImage={(e) => uploadSlideImage(idx, e)}
-                  onRegenSlideImage={(feedback) => { void handleRegenSlideImage(idx, feedback); }}
-                  regenSlideImageLoading={regenSlideImageLoadingIdx === idx}
-                  onRegenSlideText={(feedback) => { void handleRegenSlideText(idx, feedback); }}
-                  regenSlideTextLoading={regenSlideTextLoadingIdx === idx}
-                />
-              ))}
-              <button type="button" onClick={addSlide} style={{
-                background: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 8,
-                padding: '10px 0', fontSize: 13, fontWeight: 600, color: 'var(--muted)', cursor: 'pointer',
-              }}>
+          {/* Slides (carousel & reel) */}
+          {(isCarousel || isReel) && (
+            <Group label={isReel ? t.sceneTitle : t.slidesTitle}>
+              <ol className={styles.slides}>
+                {(slides as Array<CarouselSlide | ReelScene>).map((s, idx) => (
+                  <SlideEditor
+                    key={idx}
+                    slide={s}
+                    idx={idx}
+                    isLast={idx === slides.length - 1}
+                    expanded={editingSlide === idx}
+                    isReel={isReel}
+                    t={t}
+                    uploading={uploading}
+                    error={slideError?.idx === idx ? slideError.message : null}
+                    onToggle={() => { setPreviewSlide(idx); setEditingSlide(editingSlide === idx ? null : idx); }}
+                    onUpdate={(p) => updateSlide(idx, p)}
+                    onMove={(dir) => moveSlide(idx, dir)}
+                    onDelete={() => deleteSlide(idx)}
+                    onUploadImage={(e) => uploadSlideImage(idx, e)}
+                    onRegenSlideImage={(feedback) => { void handleRegenSlideImage(idx, feedback); }}
+                    regenSlideImageLoading={regenSlideImageLoadingIdx === idx}
+                    onRegenSlideText={(feedback) => { void handleRegenSlideText(idx, feedback); }}
+                    regenSlideTextLoading={regenSlideTextLoadingIdx === idx}
+                  />
+                ))}
+              </ol>
+              <Button variant="secondary" block icon={<Icon name="plus" size={16} />} onClick={addSlide}>
                 {isReel ? t.addScene : t.addSlide}
-              </button>
-            </div>
-          </Field>
-        )}
+              </Button>
+            </Group>
+          )}
 
-        {/* AI Regen — text. For post/story it's the whole copy; for carousel
-            it's the single global post caption (the per-slide text buttons
-            handle the copy baked onto each slide image). Reel regenerates
-            per-scene only. */}
-        {(isPost || isStory || isCarousel) && (
-          <RegenBlock
-            title={isCarousel ? t.regenCaption : t.regenText}
-            placeholder={t.feedbackPlaceholder}
-            feedback={regenTextFeedback}
-            onChange={setRegenTextFeedback}
-            onRegen={handleRegenText}
-            loading={regenTextLoading}
-            t={t}
-          />
-        )}
+          {/* AI Regen — text. For post/story it's the whole copy; for carousel
+              it's the single global post caption (the per-slide text buttons
+              handle the copy baked onto each slide image). Reel regenerates
+              per-scene only. */}
+          {(isPost || isStory || isCarousel) && (
+            <RegenBlock
+              title={isCarousel ? t.regenCaption : t.regenText}
+              placeholder={t.feedbackPlaceholder}
+              feedback={regenTextFeedback}
+              onChange={setRegenTextFeedback}
+              onRegen={handleRegenText}
+              loading={regenTextLoading}
+              error={regenTextError}
+              t={t}
+            />
+          )}
 
-        {/* AI Regen — image (post & story) — carousel regenerates per-slide instead */}
-        {(isPost || isStory) && (
-          <RegenBlock
-            title={t.regenImage}
-            placeholder={t.feedbackPlaceholder}
-            feedback={regenImageFeedback}
-            onChange={setRegenImageFeedback}
-            onRegen={handleRegenImage}
-            loading={regenImageLoading}
-            t={t}
-          />
-        )}
-
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            width: '100%', marginTop: 8, background: 'var(--accent)', color: '#000',
-            border: 'none', borderRadius: 10, padding: '12px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-          }}
-        >
-          {t.close}
-        </button>
+          {/* AI Regen — image (post & story) — carousel regenerates per-slide instead */}
+          {(isPost || isStory) && (
+            <RegenBlock
+              title={t.regenImage}
+              placeholder={t.feedbackPlaceholder}
+              feedback={regenImageFeedback}
+              onChange={setRegenImageFeedback}
+              onRegen={handleRegenImage}
+              loading={regenImageLoading}
+              error={regenImageError}
+              t={t}
+            />
+          )}
         </div>
       </div>
     </Modal>
@@ -690,41 +703,41 @@ export default function EditContentModal({
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/** Grupo de controles con título (imagen, video, slides): no es un único campo
+ *  que se pueda asociar con <label>. */
+function Group({ label, children }: { label: string; children: ReactNode }) {
+  const id = useId();
   return (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-        {label}
-        {hint && <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, opacity: 0.75 }}>— {hint}</span>}
-      </label>
+    <div role="group" aria-labelledby={id} className={styles.group}>
+      <p id={id} className="ui-label" style={{ margin: 0 }}>{label}</p>
       {children}
     </div>
   );
 }
 
 function UploadBtn({
-  label, accept, onChange, loading,
+  label, accept, onChange, loading, uploadingLabel,
 }: {
   label:    string;
   accept:   string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   loading:  boolean;
+  uploadingLabel: string;
 }) {
   return (
-    <label style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
-      background: 'var(--surface)', fontSize: 13, fontWeight: 600,
-      cursor: loading ? 'wait' : 'pointer', color: 'var(--text)',
-    }}>
-      {loading ? '…' : label}
-      <input type="file" accept={accept} hidden onChange={onChange} disabled={loading} />
+    <label
+      className={`${buttonClass({ variant: 'secondary', size: 'sm' })} ${styles.upload}`}
+      data-loading={loading || undefined}
+    >
+      {loading ? <Spinner size={12} /> : <Icon name="upload" size={14} />}
+      {loading ? uploadingLabel : label}
+      <input type="file" accept={accept} className="sr-only" onChange={onChange} disabled={loading} />
     </label>
   );
 }
 
 function SlideEditor({
-  slide, idx, isLast, expanded, isReel, t, uploading,
+  slide, idx, isLast, expanded, isReel, t, uploading, error,
   onToggle, onUpdate, onMove, onDelete, onUploadImage,
   onRegenSlideImage, regenSlideImageLoading, onRegenSlideText, regenSlideTextLoading,
 }: {
@@ -733,8 +746,9 @@ function SlideEditor({
   isLast:   boolean;
   expanded: boolean;
   isReel:   boolean;
-  t:        (typeof T)['es'];
+  t:        EditCopy;
   uploading: boolean;
+  error:    string | null;
   onToggle:          () => void;
   onUpdate:          (patch: Partial<CarouselSlide & ReelScene>) => void;
   onMove:            (dir: -1 | 1) => void;
@@ -745,178 +759,169 @@ function SlideEditor({
   onRegenSlideText:  (feedback: string) => void;
   regenSlideTextLoading: boolean;
 }) {
+  const panelId = useId();
   const [regenOpen, setRegenOpen] = useState(false);
   const [regenFeedback, setRegenFeedback] = useState('');
   const [textRegenOpen, setTextRegenOpen] = useState(false);
   const [textFeedback, setTextFeedback] = useState('');
+  const itemLabel = isReel ? t.sceneN(idx + 1) : t.slideN(idx + 1);
+
+  function submitTextRegen() {
+    onRegenSlideText(textFeedback);
+    setTextFeedback('');
+    setTextRegenOpen(false);
+  }
+  function submitImageRegen() {
+    onRegenSlideImage(regenFeedback);
+    setRegenFeedback('');
+    setRegenOpen(false);
+  }
+
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer' }} onClick={onToggle}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 6, overflow: 'hidden', flexShrink: 0,
-          background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {slide.image_url ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={slide.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <span style={{ fontSize: 14, color: 'var(--muted)' }}>{idx + 1}</span>
-          )}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 13, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {slide.title || `${isReel ? 'Escena' : 'Slide'} ${idx + 1}`}
-          </p>
-          <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {slide.body || '—'}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} onClick={(e) => e.stopPropagation()}>
-          <button type="button" onClick={() => onMove(-1)} disabled={idx === 0} style={iconBtn} title={t.moveUp}>{t.moveUp}</button>
-          <button type="button" onClick={() => onMove(1)} disabled={isLast} style={iconBtn} title={t.moveDown}>{t.moveDown}</button>
-          <button type="button" onClick={onDelete} style={{ ...iconBtn, color: '#ff6b6b' }} title={t.delete}>×</button>
+    <li className={styles.slide}>
+      <div className={styles.slideHead}>
+        <button
+          type="button"
+          className={styles.slideToggle}
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={expanded ? panelId : undefined}
+        >
+          <span className={styles.slideThumb} aria-hidden="true">
+            {slide.image_url ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={slide.image_url} alt="" />
+            ) : (
+              idx + 1
+            )}
+          </span>
+          <span className={styles.slideText}>
+            <span className={styles.slideTitle}>{slide.title || itemLabel}</span>
+            <span className={styles.slideBody}>{slide.body || '—'}</span>
+          </span>
+        </button>
+        <div className={styles.slideActions}>
+          <button type="button" className={styles.iconBtn} onClick={() => onMove(-1)} disabled={idx === 0} aria-label={t.moveUp(itemLabel)}>
+            <Icon name="chevron-up" size={18} />
+          </button>
+          <button type="button" className={styles.iconBtn} onClick={() => onMove(1)} disabled={isLast} aria-label={t.moveDown(itemLabel)}>
+            <Icon name="chevron-down" size={18} />
+          </button>
+          <button type="button" className={`${styles.iconBtn} ${styles.iconBtnDanger}`} onClick={onDelete} aria-label={t.remove(itemLabel)}>
+            <Icon name="trash" size={16} />
+          </button>
         </div>
       </div>
 
       {expanded && (
-        <div style={{ padding: '12px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input
-            type="text"
-            value={slide.title ?? ''}
-            onChange={(e) => onUpdate({ title: e.target.value })}
-            placeholder={t.slideTitle}
-            style={inputStyle}
-          />
-          <textarea
-            value={slide.body ?? ''}
-            onChange={(e) => onUpdate({ body: e.target.value })}
-            rows={3}
-            placeholder={t.slideBody}
-            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
-          />
+        <div id={panelId} className={styles.slidePanel}>
+          <Field label={t.slideTitle}>
+            <Input type="text" value={slide.title ?? ''} onChange={(e) => onUpdate({ title: e.target.value })} />
+          </Field>
+          <Field label={t.slideBody}>
+            <Textarea value={slide.body ?? ''} onChange={(e) => onUpdate({ body: e.target.value })} rows={3} />
+          </Field>
           {isReel && 'duration_seconds' in slide && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label style={{ fontSize: 12, color: 'var(--muted)' }}>{t.sceneDuration}</label>
-              <input
+            <Field label={t.sceneDuration}>
+              <Input
                 type="number"
+                inputMode="numeric"
                 min={1}
                 max={30}
+                className={styles.duration}
                 value={(slide as ReelScene).duration_seconds ?? 3}
                 onChange={(e) => onUpdate({ duration_seconds: Math.max(1, Math.min(30, Number(e.target.value) || 3)) })}
-                style={{ ...inputStyle, width: 80 }}
               />
-            </div>
+            </Field>
           )}
 
           {/* Per-slide AI text regen (title + body of THIS slide) */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              type="button"
+          <div className={styles.stack}>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Icon name="sparkles" size={14} />}
+              loading={regenSlideTextLoading}
+              aria-expanded={textRegenOpen}
               onClick={() => setTextRegenOpen((o) => !o)}
-              disabled={regenSlideTextLoading}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start',
-                padding: '7px 12px', borderRadius: 8, border: '1px solid var(--accent)',
-                background: textRegenOpen ? 'rgba(198,255,75,0.12)' : 'rgba(198,255,75,0.06)',
-                fontSize: 12, fontWeight: 600, color: 'var(--accent)',
-                cursor: regenSlideTextLoading ? 'not-allowed' : 'pointer',
-                opacity: regenSlideTextLoading ? 0.6 : 1,
-              }}
             >
               {regenSlideTextLoading ? t.regenSlideTextLoading : t.regenSlideTextBtn}
-            </button>
+            </Button>
             {textRegenOpen && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <input
-                  type="text"
-                  value={textFeedback}
-                  onChange={(e) => setTextFeedback(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !regenSlideTextLoading) {
-                      onRegenSlideText(textFeedback);
-                      setTextFeedback(''); setTextRegenOpen(false);
-                    }
-                  }}
-                  placeholder={t.regenSlideTextPlaceholder}
-                  style={{ ...inputStyle, fontSize: 12, padding: '8px 12px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => { onRegenSlideText(textFeedback); setTextFeedback(''); setTextRegenOpen(false); }}
-                  disabled={regenSlideTextLoading}
-                  style={{
-                    background: 'rgba(198,255,75,0.08)', border: '1px solid var(--accent)',
-                    color: 'var(--accent)', borderRadius: 8, padding: '8px 0',
-                    fontSize: 12, fontWeight: 700, cursor: regenSlideTextLoading ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {regenSlideTextLoading ? t.regenSlideTextLoading : t.regenSlideTextBtn}
-                </button>
+              <div className={styles.stack} style={{ alignSelf: 'stretch' }}>
+                <Field label={t.regenSlideTextBtn} hideLabel className={styles.group}>
+                  <Input
+                    type="text"
+                    value={textFeedback}
+                    onChange={(e) => setTextFeedback(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !regenSlideTextLoading) submitTextRegen();
+                    }}
+                    placeholder={t.regenSlideTextPlaceholder}
+                  />
+                </Field>
+                <Button variant="primary" size="sm" block disabled={regenSlideTextLoading} onClick={submitTextRegen}>
+                  {t.regenSlideTextBtn}
+                </Button>
               </div>
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className={styles.stack}>
+            <div className={styles.row}>
               {slide.image_url && (
                 /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={slide.image_url} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }} />
+                <img src={slide.image_url} alt="" className={styles.slideImage} />
               )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <UploadBtn label={slide.image_url ? t.changeImage : t.uploadImage} accept="image/*" onChange={onUploadImage} loading={uploading} />
-                <button
-                  type="button"
+              <div className={styles.stack}>
+                <UploadBtn
+                  label={slide.image_url ? t.changeImage : t.uploadImage}
+                  accept="image/*"
+                  onChange={onUploadImage}
+                  loading={uploading}
+                  uploadingLabel={t.uploading}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<Icon name="sparkles" size={14} />}
+                  loading={regenSlideImageLoading}
+                  aria-expanded={regenOpen}
                   onClick={() => setRegenOpen((o) => !o)}
-                  disabled={regenSlideImageLoading}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '7px 12px', borderRadius: 8, border: '1px solid var(--accent)',
-                    background: regenOpen ? 'rgba(198,255,75,0.12)' : 'rgba(198,255,75,0.06)',
-                    fontSize: 12, fontWeight: 600, color: 'var(--accent)', cursor: regenSlideImageLoading ? 'not-allowed' : 'pointer',
-                    opacity: regenSlideImageLoading ? 0.6 : 1,
-                  }}
                 >
                   {regenSlideImageLoading ? t.regenSlideImageLoading : t.regenSlideImageBtn}
-                </button>
+                </Button>
               </div>
             </div>
             {regenOpen && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <input
-                  type="text"
-                  value={regenFeedback}
-                  onChange={(e) => setRegenFeedback(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && regenFeedback.trim()) {
-                      onRegenSlideImage(regenFeedback);
-                      setRegenFeedback(''); setRegenOpen(false);
-                    }
-                  }}
-                  placeholder={t.regenSlideImagePlaceholder}
-                  style={{ ...inputStyle, fontSize: 12, padding: '8px 12px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => { onRegenSlideImage(regenFeedback); setRegenFeedback(''); setRegenOpen(false); }}
-                  style={{
-                    background: 'rgba(198,255,75,0.08)', border: '1px solid var(--accent)',
-                    color: 'var(--accent)', borderRadius: 8, padding: '8px 0',
-                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                  }}
-                >
+              <div className={styles.stack} style={{ alignSelf: 'stretch' }}>
+                <Field label={t.regenSlideImageBtn} hideLabel className={styles.group}>
+                  <Input
+                    type="text"
+                    value={regenFeedback}
+                    onChange={(e) => setRegenFeedback(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && regenFeedback.trim()) submitImageRegen();
+                    }}
+                    placeholder={t.regenSlideImagePlaceholder}
+                  />
+                </Field>
+                <Button variant="primary" size="sm" block onClick={submitImageRegen}>
                   {t.regenSlideImageBtn}
-                </button>
+                </Button>
               </div>
             )}
           </div>
+
+          {error && <Notice tone="danger">{error}</Notice>}
         </div>
       )}
-    </div>
+    </li>
   );
 }
 
 function RegenBlock({
-  title, placeholder, feedback, onChange, onRegen, loading, t,
+  title, placeholder, feedback, onChange, onRegen, loading, error, t,
 }: {
   title: string;
   placeholder: string;
@@ -924,59 +929,18 @@ function RegenBlock({
   onChange: (v: string) => void;
   onRegen: () => void;
   loading: boolean;
-  t: (typeof T)['es'];
+  error: string | null;
+  t: EditCopy;
 }) {
   return (
-    <div style={{ marginTop: 6, marginBottom: 14, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, letterSpacing: '0.06em' }}>
-        {title}
-      </p>
-      <textarea
-        rows={2}
-        value={feedback}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
-      />
-      <button
-        type="button"
-        onClick={onRegen}
-        disabled={loading}
-        style={{
-          width: '100%', marginTop: 8, background: 'rgba(198,255,75,0.08)',
-          border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8,
-          padding: '9px 0', fontSize: 13, fontWeight: 600,
-          cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
-        }}
-      >
+    <div className={styles.regen}>
+      <Field label={title}>
+        <Textarea rows={2} value={feedback} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      </Field>
+      <Button variant="secondary" block icon={<Icon name="sparkles" size={16} />} loading={loading} onClick={onRegen}>
         {loading ? t.regenerating : t.regenerate}
-      </button>
+      </Button>
+      {error && <Notice tone="danger">{error}</Notice>}
     </div>
   );
 }
-
-// ─── Styles ─────────────────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  fontSize: 14,
-  color: 'var(--text)',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const secondaryBtn: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6,
-  padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
-  background: 'var(--surface)', fontSize: 13, fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const iconBtn: React.CSSProperties = {
-  width: 24, height: 24, borderRadius: 4, border: 'none', background: 'transparent',
-  color: 'var(--muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0,
-};

@@ -9,10 +9,13 @@ import {
   CUSTOM_FORMATS,
   CUSTOM_STRATEGY_LIMITS,
   calendarStats,
+  catalogFormatLabel,
+  channelName,
   draftFromCatalog,
   draftFromCustom,
   draftToPayload,
   emptyDraft,
+  formatIcon,
   generateParams,
   mapCatalogChannel,
   mapCatalogFormat,
@@ -187,6 +190,37 @@ describe('utilidades', () => {
       .toEqual({ channel: 'instagram', topic: 'X', type: 'carousel' });
     expect(Object.fromEntries(generateParams({ channel: 'tiktok', format: 'story', topic: 'Y' })))
       .toEqual({ channel: 'tiktok', topic: 'Y', type: 'story' });
+  });
+});
+
+describe('presentación del calendario', () => {
+  it('cada formato tiene su icono (antes caracteres Unicode)', () => {
+    expect(formatIcon('carrusel')).toBe('carousel');
+    expect(formatIcon('carousel')).toBe('carousel');
+    expect(formatIcon('reel')).toBe('video');
+    expect(formatIcon('historia')).toBe('story');
+    expect(formatIcon('story')).toBe('story');
+    expect(formatIcon('infografía')).toBe('chart');
+    expect(formatIcon('email')).toBe('mail');
+    expect(formatIcon('post')).toBe('post');
+    expect(formatIcon(null)).toBe('post');
+  });
+
+  it('el formato del catálogo se muestra en el idioma de la página', () => {
+    expect(catalogFormatLabel('carrusel', esT)).toBe('Carrusel');
+    expect(catalogFormatLabel('carrusel', enT)).toBe('Carousel');
+    expect(catalogFormatLabel('infografía', enT)).toBe('Infographic');
+    expect(catalogFormatLabel('Historias', enT)).toBe('Story');
+    expect(catalogFormatLabel('post', esT)).toBe('Post');
+    expect(catalogFormatLabel('podcast', esT)).toBe('Podcast');
+  });
+
+  it('los canales usan su nombre propio y «general» se explica', () => {
+    expect(channelName('general', esT)).toBe('General (cualquier red)');
+    expect(channelName('', enT)).toBe('General (any network)');
+    expect(channelName('tiktok', esT)).toBe('TikTok');
+    expect(channelName('meta_ads', esT)).toBe('Meta Ads');
+    expect(channelName('email', esT)).toBe('Email');
   });
 });
 

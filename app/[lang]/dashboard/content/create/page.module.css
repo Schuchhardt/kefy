@@ -1,0 +1,782 @@
+/* ─── «Mis contenidos» (content/create) ────────────────────────────────────
+   Estilos de la página que no cubren las clases globales (.page,
+   .page-header, .ui-*). Breakpoint móvil: 767px. */
+
+.title {
+  font-family: var(--font-syne), system-ui, sans-serif;
+}
+
+/* ─── Formulario de generación ───────────────────────────────────────────── */
+
+.panel {
+  max-width: 880px;
+  margin-bottom: 20px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.kindOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 520px;
+}
+
+.kindOption {
+  flex: 1 1 110px;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.kindOption:hover {
+  border-color: var(--accent-border);
+}
+
+.kindOption[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.topicHelpers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.topicHelpersLabel {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.advancedToggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.advancedToggle:hover,
+.advancedToggle:active {
+  color: var(--text);
+}
+
+.advancedToggle[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+.chevron {
+  transition: transform 0.15s;
+}
+
+.advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.rangeValue {
+  margin-left: 8px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.range {
+  width: 100%;
+  min-height: 28px;
+  accent-color: var(--accent);
+}
+
+.rangeScale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.refGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.refList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.refItem {
+  position: relative;
+  width: 64px;
+  height: 64px;
+}
+
+.refItem img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+/* El botón de quitar mide 36×36 aunque el círculo visible sea de 22px. */
+.refRemove {
+  position: absolute;
+  top: -14px;
+  right: -14px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.refRemoveDot {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--on-danger);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.refThumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.refThumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 2px solid var(--border);
+  background: var(--surface-2);
+}
+
+.refThumb[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.refThumb:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.refThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.refCheck {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.refUpload {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1.5px dashed var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.refUpload:hover:not(:disabled),
+.refUpload:active:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--text);
+}
+
+.refUpload:disabled {
+  cursor: progress;
+}
+
+.smallText {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ─── Estado de la generación: un solo bloque ───────────────────────────── */
+
+.status {
+  max-width: 880px;
+  margin-bottom: 24px;
+  scroll-margin: 96px 0;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--accent-border);
+  background: var(--surface);
+}
+
+.progressRing {
+  flex-shrink: 0;
+  width: 28px;
+}
+
+.progressBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progressLabel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-color: var(--accent-border);
+}
+
+.resultMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.resultThumb {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.resultThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.resultText {
+  flex: 1;
+  min-width: 0;
+}
+
+.resultTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-syne), system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.resultTitle svg {
+  color: var(--accent-text);
+}
+
+.resultMeta {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.resultExcerpt {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
+}
+
+.resultActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hideBtn {
+  margin-left: auto;
+}
+
+/* Texto + botón de cerrar en la misma fila (el cierre no cae solo a otra línea). */
+.dismissRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.dismissRow > span {
+  flex: 1;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.noticeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+
+.inlineLink {
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ─── Lista «Mis contenidos» ───────────────────────────────────────────── */
+
+/* Escritorio: título | filtros | vista. Móvil: título y vista arriba, los
+   filtros debajo a todo el ancho (a 360px dos selects juntos cortaban el
+   texto: «Todos los cana»). */
+.listHead {
+  display: flex;
+  align-items: center;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.listTitle {
+  margin: 0 auto 0 0;
+  font-family: var(--font-syne), system-ui, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.listTools {
+  order: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.listTools .filter {
+  width: 200px;
+  flex: 0 1 200px;
+  min-width: 0;
+}
+
+.viewToggle {
+  order: 3;
+  display: flex;
+  gap: 4px;
+}
+
+.viewBtn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.viewBtn:hover,
+.viewBtn:active {
+  color: var(--text);
+}
+
+.viewBtn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-text);
+}
+
+.grid {
+  --card-min: 160px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--card-min), 100%), 1fr));
+  gap: 10px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.busy {
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+/* Tarjeta: el enlace del texto se estira sobre toda la tarjeta (::after) y
+   las acciones quedan por encima. Así la tarjeta entera navega sin anidar
+   botones dentro de un <a>. */
+.card {
+  position: relative;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border-color 0.15s;
+}
+
+.card:hover,
+.card:active,
+.card:has(.cardLink:focus-visible) {
+  border-color: var(--accent-border);
+}
+
+.cardLink {
+  display: block;
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.cardLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.cardLink:focus-visible {
+  outline: none !important;
+}
+
+.cardLink:focus-visible::after {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.cardText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.typeBadge {
+  --badge-color: var(--accent-text);
+  --badge-bg: var(--accent-soft);
+}
+
+.channelBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.date {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Etiquetas sobre la foto: fondo oscuro translúcido, legible sobre cualquier imagen. */
+.photoBadge {
+  position: absolute;
+  z-index: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.muxBadge {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.fallbackIcon {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.fallbackTitle {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.fallbackTitle span {
+  color: #fff;
+  font-weight: 800;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+/* Cuadrícula */
+.gridThumb {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 10px 10px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gridThumb > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gridInfo {
+  padding: 8px 10px 10px;
+}
+
+.gridActions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+/* Lista */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.rowThumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rowThumb > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rowPlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+}
+
+.rowBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.rowActions {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+/* Esqueletos */
+.skeleton {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.skeletonBlock {
+  border-radius: 4px;
+  background: var(--border);
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+@media (max-width: 767px) {
+  .submit {
+    width: 100%;
+  }
+
+  .resultThumb {
+    width: 56px;
+    height: 56px;
+  }
+
+  .resultActions > * {
+    flex: 1 1 auto;
+  }
+
+  .viewToggle {
+    order: 2;
+  }
+
+  .listTools {
+    order: 3;
+    width: 100%;
+  }
+
+  .listTools .filter {
+    width: auto;
+    flex: 1 1 200px;
+  }
+
+  /* Dos columnas a 360px (con 160px no cabían: 2×160 + 10 > 328). */
+  .grid {
+    --card-min: 140px;
+  }
+
+  /* En tarjetas de ~160px las acciones sobre la foto tapaban casi todo el
+     ancho: van debajo del texto. */
+  .gridActions {
+    /* relative + z-index: siguen por encima del enlace estirado (::after). */
+    position: relative;
+    top: auto;
+    right: auto;
+    display: flex;
+    justify-content: flex-end;
+    padding: 0 8px 8px;
+    background: none;
+    backdrop-filter: none;
+  }
+
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .rowActions {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+/* Se ven de 36px y se tocan en 44px: el área extra es un pseudo-elemento, como
+   .ui-btn--sm en globals.css, para no agrandar filas compactas. */
+@media (pointer: coarse), (max-width: 767px) {
+  .viewBtn, .advancedToggle { position: relative; }
+  .viewBtn::after, .advancedToggle::after, .refRemove::after { content: ''; position: absolute; inset: -4px; }
+}

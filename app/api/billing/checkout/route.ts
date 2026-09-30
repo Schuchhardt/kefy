@@ -8,6 +8,8 @@ import { z } from 'zod';
 
 const BodySchema = z.object({
   plan: z.enum(['starter', 'pro', 'business']),
+  /** Idioma al que vuelve Stripe. Antes era siempre /es/. */
+  lang: z.enum(['es', 'en']).optional(),
 });
 
 // ─── POST /api/billing/checkout ───────────────────────────────────────────────
@@ -32,7 +34,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'plan must be starter, pro, or business' }, { status: 422 });
   }
 
-  const { plan } = parsed.data;
+  const { plan, lang = 'es' } = parsed.data;
 
   let priceId: string;
   try {
@@ -62,9 +64,9 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
 
 
-  // Determine success/cancel URLs — lang not stored in JWT, default to 'es'
-  const successUrl = `${appUrl()}/es/dashboard/settings?billing=success`;
-  const cancelUrl  = `${appUrl()}/es/dashboard/settings?billing=canceled`;
+  // El idioma no va en el JWT: lo manda la página (por defecto, 'es').
+  const successUrl = `${appUrl()}/${lang}/dashboard/settings?billing=success#billing`;
+  const cancelUrl  = `${appUrl()}/${lang}/dashboard/settings?billing=canceled#billing`;
 
   let customerId = org.stripe_customer_id ?? undefined;
 

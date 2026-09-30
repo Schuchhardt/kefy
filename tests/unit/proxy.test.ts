@@ -114,6 +114,14 @@ describe('proxy — sesión por cookie', () => {
     expect(location.searchParams.get('next')).toBe('/es/dashboard/settings?connect=instagram&brand=b-1');
   });
 
+  it('el onboarding también exige sesión y vuelve después del login', async () => {
+    const res = await proxy(req('/es/onboarding', { method: 'GET' }));
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get('location')!);
+    expect(location.pathname).toBe('/es/login');
+    expect(location.searchParams.get('next')).toBe('/es/onboarding');
+  });
+
   it('con la sesión caducada también conserva el destino', async () => {
     const res = await proxy(req('/en/dashboard/automations/autopilot', { method: 'GET', headers: { cookie: 'kefy_access=basura' } }));
     const location = new URL(res.headers.get('location')!);

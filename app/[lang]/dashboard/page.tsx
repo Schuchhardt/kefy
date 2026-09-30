@@ -1,183 +1,150 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
-import { useAuth } from '@/lib/auth-context';
+// ─── Home del dashboard ──────────────────────────────────────────────────────
+//
+// Antes (docs/auditoria-ux.md §5.6): un modal «Bienvenido» que se reabría en
+// cada visita, el wizard de 20 pasos incrustado (que desaparecía para siempre
+// en cuanto la cuenta dejaba de ser «nueva»), el panel de redes, la tarjeta
+// «Conecta redes» y la acción rápida «Completa tu identidad» a la vez —tres
+// CTA para lo mismo— y el aviso de plan (incluido el pago fallido) al final de
+// la página, tres pantallas abajo en móvil.
+//
+// Ahora, de arriba abajo: cabecera con qué hace Kefy y el botón de crear,
+// aviso de plan, «Primeros pasos» con estado real (se puede ocultar y se
+// recuerda por usuario), métricas, contenido reciente, lo que mejor funciona
+// y accesos rápidos.
+
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useDataChanged } from '@/lib/data-events';
+import { useAuth } from '@/lib/auth-context';
 import { useBrand } from '@/lib/brand-context';
-import { setOnboardingVisible } from '@/lib/onboarding-visibility';
-import type { Locale } from '@/types/i18n';
-import BrandKitWizard from '@/components/dashboard/BrandKitWizard';
-import ChannelIcon    from '@/components/ui/ChannelIcon';
-import SocialConnectionPanel from '@/components/dashboard/SocialConnectionPanel';
+import { useDataChanged } from '@/lib/data-events';
+import { brandCompleteness, type BrandCompleteness } from '@/lib/brand-setup';
+import { ButtonLink } from '@/components/ui/Button';
+import Button from '@/components/ui/Button';
+import Icon, { type IconName } from '@/components/ui/icons';
+import StatusBadge from '@/components/ui/StatusBadge';
+import ChannelIcon from '@/components/ui/ChannelIcon';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
-import type { Totals, OnboardingStep, RecentContentItem, TopPost, ContentPerformance } from '@/types/content';
+import WelcomeChecklist, { type WelcomeStep } from '@/components/dashboard/WelcomeChecklist';
+import esHome from '@/locales/es/dashboard/home';
+import enHome from '@/locales/en/dashboard/home';
+import type { Totals, RecentContentItem, TopPost, ContentPerformance } from '@/types/content';
+import styles from './page.module.css';
 
-/* ─── Helpers ──────────────────────────────────────────────────────────────── */
-function fmt(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+type MetricKey = Exclude<keyof Totals, 'top_posts'>;
+
+const METRICS: { key: MetricKey; icon: IconName }[] = [
+  { key: 'impressions', icon: 'eye' },
+  { key: 'reach', icon: 'reach' },
+  { key: 'likes', icon: 'heart' },
+  { key: 'comments', icon: 'comment' },
+  { key: 'shares', icon: 'share' },
+  { key: 'clicks', icon: 'click' },
+];
+
+function formatCompact(n: number, lang: string): string {
+  return new Intl.NumberFormat(lang === 'en' ? 'en-US' : 'es-CL', {
+    notation: 'compact', maximumFractionDigits: 1,
+  }).format(n);
 }
 
-/** Shown instead of the metrics/recent-content/top-performing sections while
- *  accounts, brand kit and content are still loading — mirrors their real
- *  shape so nothing jumps around once the data lands. */
-function DashboardSkeleton() {
-  return (
-    <>
-      <section style={{ marginBottom: 40 }}>
-        <SkeletonBlock width={120} height={16} style={{ marginBottom: 16 }} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          {[...Array(6)].map((_, i) => (
-            <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '18px 16px' }}>
-              <SkeletonBlock width={22} height={16} style={{ marginBottom: 10 }} />
-              <SkeletonBlock width={50} height={20} style={{ marginBottom: 8 }} />
-              <SkeletonBlock width={70} height={11} />
-            </div>
-          ))}
-        </div>
-      </section>
+/** La lista de primeros pasos se oculta por usuario y dispositivo. */
+function hiddenKey(userId: string) { return `kefy:welcome-hidden:${userId}`; }
 
-      <section style={{ marginBottom: 40 }}>
-        <SkeletonBlock width={140} height={16} style={{ marginBottom: 16 }} />
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-          {[...Array(5)].map((_, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
-              borderBottom: i < 4 ? '1px solid var(--border)' : 'none',
-            }}>
-              <SkeletonBlock width={40} height={40} borderRadius={8} style={{ flexShrink: 0 }} />
-              <SkeletonBlock height={11} style={{ flex: 1 }} />
-              <SkeletonBlock width={50} height={16} borderRadius={5} style={{ flexShrink: 0 }} />
-            </div>
-          ))}
+function readHidden(userId: string): boolean {
+  try { return window.localStorage.getItem(hiddenKey(userId)) === '1'; } catch { return false; }
+}
+
+function MetricsSkeleton() {
+  return (
+    <div className="auto-grid" style={{ ['--min' as string]: '140px' }}>
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className={styles.metric}>
+          <SkeletonBlock width={20} height={20} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width={56} height={22} style={{ marginBottom: 6 }} />
+          <SkeletonBlock width={72} height={12} />
         </div>
-      </section>
-    </>
+      ))}
+    </div>
   );
 }
 
-const T = {
-  es: {
-    loading: 'Cargando…', hello: 'Hola', there: 'ahí', welcome: 'Bienvenido a tu dashboard',
-    metricsTitle: 'Resumen (últimos 30 días)',
-    syncMetrics: 'Sincronizar métricas', syncing: 'Sincronizando…',
-    impressions: 'Impresiones', reach: 'Alcance', likes: 'Likes',
-    comments: 'Comentarios', shares: 'Compartidos', clicks: 'Clics',
-    recentContent: 'Contenido reciente',
-    topPerforming: 'Mejor rendimiento',
-    noContent: 'Aún no tienes contenido publicado.',
-    createFirst: 'Crear contenido',
-    publishReady: 'Tienes contenido listo para publicar',
-    publishReadyDesc: 'Ya creaste contenido. Publícalo o prográmalo directamente en tus redes sociales.',
-    goToContent: 'Ver mi contenido',
-    quickActions: 'Acciones rápidas',
-    actionBrand: 'Mi marca', actionBrandDesc: 'Completa tu identidad de marca',
-    actionContent: 'Crear contenido', actionContentDesc: 'Genera posts con IA',
-    actionConv: 'Conversaciones', actionConvDesc: 'Revisa DMs y comentarios',
-    actionAuto: 'Automatizaciones', actionAutoDesc: 'Configura reglas de engagement',
-    trialActive: 'Te quedan {n} días de prueba',
-    trialActiveDesc: 'Estás usando Starter gratis. Elige un plan antes de que termine para no interrumpir tu contenido.',
-    trialLastDay: 'Tu prueba termina hoy',
-    trialEnded: 'Tu mes gratis terminó',
-    trialEndedDesc: 'Todo lo que creaste sigue aquí. Elige un plan para volver a generar y publicar.',
-    paymentFailed: 'No pudimos procesar tu pago',
-    paymentFailedDesc: 'Actualiza tu método de pago para seguir creando contenido.',
-    creditsLow: 'Te quedan {n} de {total} créditos IA',
-    creditsLowDesc: 'Cuando se acaben, la generación se pausa hasta tu próximo ciclo.',
-    creditsOut: 'Usaste tus {total} créditos IA del mes',
-    creditsOutDesc: 'Mejora tu plan para seguir generando contenido este mes.',
-    viewPlans: 'Ver planes',
-    noAccounts: 'Conecta redes sociales', noAccountsDesc: 'Ve a Ajustes para conectar tus cuentas y ver métricas.',
-    goSettings: 'Ir a Ajustes',
-    statusPublished: 'Publicado', statusScheduled: 'Programado', statusDraft: 'Borrador',
-  },
-  en: {
-    loading: 'Loading…', hello: 'Hello', there: 'there', welcome: 'Welcome to your dashboard',
-    metricsTitle: 'Summary (last 30 days)',
-    syncMetrics: 'Sync metrics', syncing: 'Syncing…',
-    impressions: 'Impressions', reach: 'Reach', likes: 'Likes',
-    comments: 'Comments', shares: 'Shares', clicks: 'Clicks',
-    recentContent: 'Recent content',
-    topPerforming: 'Top performing',
-    noContent: 'No published content yet.',
-    createFirst: 'Create content',
-    publishReady: 'You have content ready to publish',
-    publishReadyDesc: 'You already created content. Publish it or schedule it to your social networks.',
-    goToContent: 'View my content',
-    quickActions: 'Quick actions',
-    actionBrand: 'My Brand', actionBrandDesc: 'Complete your brand identity',
-    actionContent: 'Create content', actionContentDesc: 'Generate posts with AI',
-    actionConv: 'Conversations', actionConvDesc: 'Check DMs and comments',
-    actionAuto: 'Automations', actionAutoDesc: 'Set up engagement rules',
-    trialActive: '{n} days left in your trial',
-    trialActiveDesc: "You're on Starter for free. Pick a plan before it ends so your content doesn't stop.",
-    trialLastDay: 'Your trial ends today',
-    trialEnded: 'Your free month has ended',
-    trialEndedDesc: 'Everything you made is still here. Pick a plan to generate and publish again.',
-    paymentFailed: "We couldn't process your payment",
-    paymentFailedDesc: 'Update your payment method to keep creating.',
-    creditsLow: '{n} of {total} AI credits left',
-    creditsLowDesc: 'When they run out, generation pauses until your next cycle.',
-    creditsOut: "You've used all {total} AI credits this month",
-    creditsOutDesc: 'Upgrade your plan to keep generating this month.',
-    viewPlans: 'View plans',
-    noAccounts: 'Connect social networks', noAccountsDesc: 'Go to Settings to connect your accounts and view metrics.',
-    goSettings: 'Go to Settings',
-    statusPublished: 'Published', statusScheduled: 'Scheduled', statusDraft: 'Draft',
-  },
-} as const;
-
-/* ─── Page ─────────────────────────────────────────────────────────────────── */
 function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, org, subscription, usage, loading: authLoading } = useAuth();
   const { activeBrand } = useBrand();
   const { lang } = useParams<{ lang: string }>();
-  const t = T[(lang as Locale) ?? 'es'] ?? T.es;
+  const t = lang === 'en' ? enHome : esHome;
+  const base = `/${lang}/dashboard`;
 
-  const [totals, setTotals]           = useState<Totals | null>(null);
-  const [content, setContent]         = useState<RecentContentItem[]>([]);
-  const [perfByContentId, setPerfByContentId] = useState<Map<string, ContentPerformance>>(new Map());
-  const [metricsLoading, setMLoading] = useState(true);
   const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
-  const [brandKitHasData, setBrandKitHasData] = useState<boolean | null>(null);
-  const [contentLoaded, setContentLoaded] = useState(false);
-  const [syncing, setSyncing]         = useState(false);
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [brand, setBrand] = useState<BrandCompleteness | null>(null);
+  const [content, setContent] = useState<RecentContentItem[] | null>(null);
+  const [hasPublished, setHasPublished] = useState<boolean | null>(null);
+  const [totals, setTotals] = useState<Totals | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  const [perfById, setPerfById] = useState<Map<string, ContentPerformance>>(new Map());
+  const [syncing, setSyncing] = useState(false);
+  const [welcomeHidden, setWelcomeHidden] = useState(true);
 
-  function fetchRecentContent() {
-    fetch('/api/content?limit=5', { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const json = await res.json() as { items?: RecentContentItem[]; content?: RecentContentItem[] };
-        setContent(json.items ?? json.content ?? []);
-      })
-      .catch(() => {})
-      .finally(() => setContentLoaded(true));
+  // Los enlaces antiguos (registro anterior, correos) llevaban ?onboarding=1:
+  // ahora el primer paso es su propia página.
+  useEffect(() => {
+    if (searchParams.get('onboarding') === '1') router.replace(`/${lang}/onboarding`);
+  }, [searchParams, router, lang]);
+
+  useEffect(() => {
+    if (user?.id) setWelcomeHidden(readHidden(user.id));
+  }, [user?.id]);
+
+  function hideWelcome() {
+    setWelcomeHidden(true);
+    if (user?.id) {
+      try { window.localStorage.setItem(hiddenKey(user.id), '1'); } catch { /* sin almacenamiento: solo esta visita */ }
+    }
   }
 
-  function fetchTotals() {
-    const to   = new Date();
+  const fetchRecentContent = useCallback(() => {
+    fetch('/api/content?limit=5', { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) { setContent([]); return; }
+        const json = await res.json() as { items?: RecentContentItem[]; content?: RecentContentItem[] };
+        const items = json.items ?? json.content ?? [];
+        setContent(items);
+        if (items.some((c) => c.status === 'published' || c.status === 'scheduled')) {
+          setHasPublished(true);
+          return;
+        }
+        // Lo reciente puede ser todo borradores aunque ya se haya publicado antes.
+        const [pub, sched] = await Promise.all(['published', 'scheduled'].map((status) =>
+          fetch(`/api/content?limit=1&status=${status}`, { credentials: 'include' })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((j) => ((j?.items ?? j?.content ?? []) as unknown[]).length > 0)
+            .catch(() => false)));
+        setHasPublished(pub || sched);
+      })
+      .catch(() => setContent([]));
+  }, []);
+
+  const fetchTotals = useCallback(() => {
+    const to = new Date();
     const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     return fetch(`/api/analytics?from=${from.toISOString()}&to=${to.toISOString()}`, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) return;
-        // `top_posts` llega como hermano de `totals` en la respuesta cruda
-        // (ver AnalyticsOverview en lib/services/analytics.ts) — se guarda
-        // junto para no tener que cargar un tercer estado solo por eso.
+        // `top_posts` llega como hermano de `totals` (AnalyticsOverview en
+        // lib/services/analytics.ts).
         const json = await res.json() as { totals: Totals; top_posts?: TopPost[] };
         setTotals(json.totals ? { ...json.totals, top_posts: json.top_posts ?? [] } : null);
       })
       .catch(() => {});
-  }
+  }, []);
 
-  // Métricas de posts publicados recientemente, para poder mostrar "cómo le
-  // está yendo" junto a cada item de "Contenido reciente" que ya se publicó.
-  function fetchContentPerformance() {
+  // Métricas de lo publicado, para enseñarlas junto al contenido reciente.
+  const fetchPerformance = useCallback(() => {
     fetch('/api/analytics/posts?limit=20', { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) return;
@@ -188,602 +155,294 @@ function DashboardPageInner() {
         for (const row of json.data ?? []) {
           if (row.content.id && row.latest_metrics) map.set(row.content.id, row.latest_metrics);
         }
-        setPerfByContentId(map);
+        setPerfById(map);
       })
       .catch(() => {});
-  }
+  }, []);
+
+  const loadBrandScoped = useCallback(() => {
+    // Al cambiar de marca todo vuelve a «cargando»: si no, se veían un instante
+    // los datos de la marca anterior.
+    setHasAccounts(null);
+    setBrand(null);
+    setContent(null);
+    setHasPublished(null);
+    setTotals(null);
+    setMetricsLoading(true);
+
+    fetch('/api/social/accounts', { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) { setHasAccounts(false); return; }
+        const json = await res.json() as { accounts?: unknown[] };
+        setHasAccounts((json.accounts ?? []).length > 0);
+      })
+      .catch(() => setHasAccounts(false));
+
+    fetch('/api/brand-kit', { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setBrand(brandCompleteness(json?.kit ?? null)))
+      .catch(() => setBrand(brandCompleteness(null)));
+
+    fetchRecentContent();
+  }, [fetchRecentContent]);
+
+  useEffect(() => { loadBrandScoped(); }, [loadBrandScoped, activeBrand?.id]);
+
+  useEffect(() => {
+    if (hasAccounts === null) return;
+    if (!hasAccounts) { setMetricsLoading(false); return; }
+    void fetchTotals().finally(() => setMetricsLoading(false));
+    fetchPerformance();
+  }, [hasAccounts, fetchTotals, fetchPerformance]);
 
   // El asistente creó contenido o sincronizó métricas: se recargan.
   useDataChanged(['analytics', 'content'], () => {
     fetchRecentContent();
-    if (hasAccounts) { void fetchTotals(); fetchContentPerformance(); }
+    if (hasAccounts) { void fetchTotals(); fetchPerformance(); }
   });
-
-  async function fetchAccounts() {
-    const res = await fetch('/api/social/accounts', { credentials: 'include' });
-    if (!res.ok) {
-      setHasAccounts(false);
-      return;
-    }
-    const json = await res.json() as { accounts: { id: string }[] };
-    const items = json.accounts ?? [];
-    setHasAccounts(items.length > 0);
-  }
-
-  function loadBrandScopedData() {
-    // Vuelve al estado "cargando" — importante al cambiar de marca: si no se
-    // resetean, `isNewAccount`/el contenido de la marca anterior se siguen
-    // mostrando (o el empty state parpadea) mientras llegan los nuevos datos.
-    setHasAccounts(null);
-    setBrandKitHasData(null);
-    setContentLoaded(false);
-    setMLoading(true);
-
-    // Check accounts
-    fetchAccounts().catch(() => {
-      setHasAccounts(false);
-    });
-
-    // Check brand kit
+  useDataChanged(['brand-kit'], () => {
     fetch('/api/brand-kit', { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) { setBrandKitHasData(false); return; }
-        const { kit } = await res.json() as { kit: { mission?: string; industry?: string; tagline?: string; website_url?: string; primary_color?: string } };
-        setBrandKitHasData(!!(kit?.mission || kit?.industry || kit?.tagline || kit?.website_url || kit?.primary_color));
-      })
-      .catch(() => setBrandKitHasData(false));
-
-    // Fetch content (all statuses to detect drafts, scheduled, published)
-    fetchRecentContent();
-  }
-
-  useEffect(() => { loadBrandScopedData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Cambiar de marca activa no disparaba por sí solo un refetch: la cookie
-  // httpOnly cambia pero estos datos (cuentas conectadas, brand kit, contenido
-  // reciente) se quedaban con los de la marca anterior. Mismo bug que en
-  // /content/create y /content/calendar.
-  useEffect(() => {
-    if (!activeBrand?.id) return;
-    loadBrandScopedData();
-  }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (searchParams.get('onboarding') === '1') {
-      setOnboardingOpen(true);
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (hasAccounts === null) return;
-    if (!hasAccounts) { setMLoading(false); return; }
-    fetchTotals().finally(() => setMLoading(false));
-    fetchContentPerformance();
-  }, [hasAccounts]);
-
-  // Todo lo que decide qué sección mostrar debe esperar a que las tres cargas
-  // en paralelo (cuentas, brand kit, contenido) hayan terminado — si no,
-  // `hasAccounts`/`brandKitHasData` pueden resolver a `false` antes de que
-  // `content` termine de llegar y el empty state de "cuenta nueva" parpadea
-  // encima de datos que sí existen.
-  const dataReady = hasAccounts !== null && brandKitHasData !== null && contentLoaded;
-  const isNewAccount = dataReady && hasAccounts === false && brandKitHasData === false && content.length === 0;
-  const hasPublishedOrScheduled = content.some(c => c.status === 'published' || c.status === 'scheduled');
-
-  useEffect(() => {
-    if (isNewAccount) setOnboardingOpen(true);
-  }, [isNewAccount]);
-
-  // El asistente flotante se esconde mientras el onboarding está abierto,
-  // también cuando se abrió solo (cuenta nueva) sin ?onboarding=1.
-  useEffect(() => {
-    setOnboardingVisible(onboardingOpen);
-  }, [onboardingOpen]);
-  useEffect(() => () => setOnboardingVisible(false), []);
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => { if (json?.kit) setBrand(brandCompleteness(json.kit)); })
+      .catch(() => {});
+  });
 
   async function handleSync() {
     setSyncing(true);
     try {
       await fetch('/api/analytics/sync', { method: 'POST', credentials: 'include' });
-      const to   = new Date();
-      const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const res  = await fetch(`/api/analytics?from=${from.toISOString()}&to=${to.toISOString()}`, { credentials: 'include' });
-      if (res.ok) {
-        const json = await res.json() as { totals: Totals };
-        setTotals(json.totals ?? null);
-      }
-    } catch { /* non-critical */ }
+      await fetchTotals();
+      fetchPerformance();
+    } catch { /* no crítico: las métricas siguen como estaban */ }
     setSyncing(false);
   }
 
+  // ── Aviso de plan: uno solo, el más urgente ──
+  // No poder crear pesa más que quedarse sin créditos, y eso más que un trial
+  // que aún corre. Va arriba: antes estaba al final de la página.
+  const planNotice: { title: string; desc: string; urgent: boolean } | null = (() => {
+    if (subscription && !subscription.canCreate) {
+      return subscription.reason === 'payment_failed'
+        ? { title: t.plan.paymentFailed, desc: t.plan.paymentFailedDesc, urgent: true }
+        : { title: t.plan.trialEnded, desc: t.plan.trialEndedDesc, urgent: true };
+    }
+    if (usage && usage.remaining <= 0) {
+      return { title: t.plan.creditsOut(usage.limit), desc: t.plan.creditsOutDesc, urgent: true };
+    }
+    // Umbral del 20 %: margen para reaccionar sin avisar el primer día del mes.
+    if (usage && usage.remaining <= usage.limit * 0.2) {
+      return { title: t.plan.creditsLow(usage.remaining, usage.limit), desc: t.plan.creditsLowDesc, urgent: false };
+    }
+    if (subscription?.isTrialing) {
+      const days = subscription.trialDaysLeft ?? 0;
+      return days <= 1
+        ? { title: t.plan.trialLastDay, desc: t.plan.trialEndedDesc, urgent: true }
+        : { title: t.plan.trialActive(days), desc: t.plan.trialActiveDesc, urgent: days <= 3 };
+    }
+    return null;
+  })();
+
+  const dataReady = hasAccounts !== null && brand !== null && content !== null && hasPublished !== null;
+
+  const steps: WelcomeStep[] = dataReady ? [
+    { key: 'posts', done: content.length > 0, href: `/${lang}/onboarding` },
+    {
+      key: 'brand', done: brand.complete, href: `${base}/brand/setup`,
+      desc: brand.percent > 0 ? t.welcome.steps.brand.descPercent(brand.percent) : undefined,
+    },
+    { key: 'social', done: hasAccounts, href: `${base}/settings#social` },
+    { key: 'publish', done: hasPublished, href: `${base}/content` },
+  ] : [];
+  const allDone = steps.length > 0 && steps.every((s) => s.done);
+  const showWelcome = dataReady && !welcomeHidden && !allDone;
+
   if (authLoading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
-        <span style={{ color: 'var(--muted)', fontSize: 14 }}>{t.loading}</span>
+      <div className={styles.loading} role="status">
+        <span>{t.loading}</span>
       </div>
     );
   }
 
-  const metricKeys: { key: Exclude<keyof Totals, 'top_posts'>; label: string; icon: string }[] = [
-    { key: 'impressions', label: t.impressions, icon: '◎' },
-    { key: 'reach',       label: t.reach,       icon: '◉' },
-    { key: 'likes',       label: t.likes,       icon: '♡' },
-    { key: 'comments',    label: t.comments,    icon: '◫' },
-    { key: 'shares',      label: t.shares,      icon: '↗' },
-    { key: 'clicks',      label: t.clicks,      icon: '⊕' },
-  ];
-
-  const quickActions = [
-    { href: `/${lang}/dashboard/brand`,         icon: '◈', label: t.actionBrand,    desc: t.actionBrandDesc    },
-    { href: `/${lang}/dashboard/content`,       icon: '✦', label: t.actionContent,  desc: t.actionContentDesc  },
-    { href: `/${lang}/dashboard/conversations`, icon: '◉', label: t.actionConv,     desc: t.actionConvDesc     },
-    { href: `/${lang}/dashboard/automations`,   icon: '⚡', label: t.actionAuto,     desc: t.actionAutoDesc     },
-  ];
-
-  const statusColor: Record<string, string> = {
-    published: 'var(--accent)', scheduled: '#60a5fa', draft: 'var(--muted)',
-  };
-  const statusLabel: Record<string, string> = {
-    published: t.statusPublished, scheduled: t.statusScheduled, draft: t.statusDraft,
-  };
-
-  function closeOnboarding() {
-    setOnboardingOpen(false);
-    if (searchParams.get('onboarding') === '1') {
-      router.replace(`/${lang}/dashboard`);
-    }
-  }
-
-  const onboardingSteps: OnboardingStep[] = [
-    {
-      key: 'brand',
-      icon: '◈',
-      title: lang === 'en' ? 'Set up your Brand Kit' : 'Configura tu Brand Kit',
-      desc: lang === 'en'
-        ? 'Upload logo, colors, and define your brand voice.'
-        : 'Sube tu logo, colores y define cómo se comunica tu marca.',
-    },
-    {
-      key: 'content',
-      icon: '✦',
-      title: lang === 'en' ? 'Create your first content' : 'Crea tu primer contenido',
-      desc: lang === 'en'
-        ? 'Generate a post, image, or carousel with AI in seconds.'
-        : 'Genera un post, imagen o carrusel con IA en segundos.',
-    },
-    {
-      key: 'social',
-      icon: '◫',
-      title: lang === 'en' ? 'Connect your social networks' : 'Conecta tus redes',
-      desc: lang === 'en'
-        ? 'Link Instagram, LinkedIn, TikTok and publish directly.'
-        : 'Enlaza Instagram, LinkedIn, TikTok y más para publicar directamente.',
-    },
-  ];
-
-  // ── Aviso de plan ──
-  // Se elige un único mensaje, por urgencia descendente: primero lo que impide
-  // trabajar (suscripción bloqueada), luego lo que está por impedirlo
-  // (créditos agotados o casi), y por último el trial que aún corre.
-  const planNotice: { title: string; desc: string; urgent: boolean } | null = (() => {
-    if (subscription && !subscription.canCreate) {
-      if (subscription.reason === 'payment_failed') {
-        return { title: t.paymentFailed, desc: t.paymentFailedDesc, urgent: true };
-      }
-      return { title: t.trialEnded, desc: t.trialEndedDesc, urgent: true };
-    }
-
-    if (usage && usage.remaining <= 0) {
-      return {
-        title: t.creditsOut.replace('{total}', String(usage.limit)),
-        desc: t.creditsOutDesc,
-        urgent: true,
-      };
-    }
-
-    // Umbral del 20 %: suficiente margen para reaccionar sin que el aviso salga
-    // el primer día del mes.
-    if (usage && usage.remaining <= usage.limit * 0.2) {
-      return {
-        title: t.creditsLow
-          .replace('{n}', String(usage.remaining))
-          .replace('{total}', String(usage.limit)),
-        desc: t.creditsLowDesc,
-        urgent: false,
-      };
-    }
-
-    if (subscription?.isTrialing) {
-      const dias = subscription.trialDaysLeft ?? 0;
-      return {
-        title: dias <= 1 ? t.trialLastDay : t.trialActive.replace('{n}', String(dias)),
-        desc: dias <= 1 ? t.trialEndedDesc : t.trialActiveDesc,
-        urgent: dias <= 3,
-      };
-    }
-
-    return null;
-  })();
+  const firstName = user?.name?.trim().split(/\s+/)[0];
 
   return (
-    <div style={{ padding: '40px 48px', maxWidth: 960, fontFamily: 'var(--font-syne), system-ui, sans-serif' }}>
+    <div className={`page ${styles.home}`}>
+      <header className="page-header">
+        <div>
+          <h1>{firstName ? t.hello(firstName) : t.helloAnonymous}</h1>
+          <p>{org?.name ? t.intro(org.name) : t.introNoOrg}</p>
+        </div>
+        <div className="page-header-actions">
+          <ButtonLink href={`${base}/content/create?new=1`} variant="primary" icon={<Icon name="plus" size={16} />}>
+            {t.create}
+          </ButtonLink>
+        </div>
+      </header>
 
-      {onboardingOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.55)',
-            zIndex: 60,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 20,
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: 640,
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 14,
-              padding: '24px 24px 20px',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
-                {lang === 'en' ? 'Welcome to Kefy' : 'Bienvenido a Kefy'}
-              </h2>
-            </div>
+      {planNotice && (
+        <div className={styles.plan} data-urgent={planNotice.urgent}>
+          <Icon name={planNotice.urgent ? 'alert' : 'info'} size={20} />
+          <div className={styles.planText}>
+            <p className={styles.planTitle}>{planNotice.title}</p>
+            <p className={styles.planDesc}>{planNotice.desc}</p>
+          </div>
+          <ButtonLink href={`${base}/settings#billing`} variant={planNotice.urgent ? 'primary' : 'secondary'} size="sm">
+            {t.plan.viewPlans}
+          </ButtonLink>
+        </div>
+      )}
 
-            <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>
-              {lang === 'en'
-                ? 'Complete these steps to get your account ready.'
-                : 'Sigue estos pasos para dejar tu cuenta lista.'}
-            </p>
+      {showWelcome && <WelcomeChecklist lang={lang} steps={steps} onHide={hideWelcome} />}
 
-            <div style={{ display: 'grid', gap: 10, marginBottom: 18 }}>
-              {onboardingSteps.map((step, i) => (
-                <div
-                  key={step.key}
-                  style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 10,
-                    padding: '12px 14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                  }}
-                >
-                  <div style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 8,
-                    background: i === 0 ? 'rgba(198,255,75,0.12)' : 'var(--border)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}>
-                    {step.icon}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ margin: '0 0 2px', fontSize: 14, fontWeight: 600 }}>{step.title}</p>
-                    <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>{step.desc}</p>
-                  </div>
+      {/* ── Métricas ── */}
+      {hasAccounts !== false && (
+        <section className={styles.section} aria-labelledby="home-metrics">
+          <div className={styles.sectionHead}>
+            <h2 id="home-metrics" className={styles.sectionTitle}>{t.metrics.title}</h2>
+            {hasAccounts && (
+              <Button size="sm" variant="secondary" loading={syncing} onClick={() => void handleSync()}
+                icon={<Icon name="refresh" size={14} />}>
+                {syncing ? t.metrics.syncing : t.metrics.sync}
+              </Button>
+            )}
+          </div>
+          {metricsLoading || hasAccounts === null ? <MetricsSkeleton /> : (
+            <div className="auto-grid" style={{ ['--min' as string]: '140px' }}>
+              {METRICS.map(({ key, icon }) => (
+                <div key={key} className={styles.metric}>
+                  <Icon name={icon} size={18} className={styles.metricIcon} />
+                  <p className={styles.metricValue}>{totals ? formatCompact(totals[key], lang) : '—'}</p>
+                  <p className={styles.metricLabel}>{t.metrics[key]}</p>
                 </div>
               ))}
             </div>
-
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={closeOnboarding}
-                style={{
-                  border: 'none',
-                  borderRadius: 10,
-                  padding: '11px 16px',
-                  background: 'var(--accent)',
-                  color: 'var(--bg)',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {lang === 'en' ? 'Start' : 'Empezar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Header ── */}
-      <div style={{ marginBottom: 36 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 6, letterSpacing: '-0.02em' }}>
-          {t.hello}, {user?.name?.split(' ')[0] ?? t.there} 👋
-        </h1>
-        <p style={{ color: 'var(--muted)', fontSize: 15 }}>
-          <strong style={{ color: 'var(--text)' }}>{org?.name}</strong>
-          {org?.name ? ' · ' : ''}{t.welcome}
-        </p>
-      </div>
-
-      {!dataReady ? (
-        <DashboardSkeleton />
-      ) : (
-      <>
-      {/* ── New account setup ── */}
-      {isNewAccount && (
-        <section style={{ marginBottom: 40 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
-            {lang === 'en' ? 'Set up your account' : 'Configura tu cuenta'}
-          </h2>
-          <BrandKitWizard
-            locale={lang ?? 'es'}
-            orgName={org?.name}
-            onComplete={() => setBrandKitHasData(true)}
-          />
-        </section>
-      )}
-
-      {/* ── Onboarding: Connect social / Create first content (solo si no hay contenido) ── */}
-      {content.length === 0 && (
-        <section style={{ marginBottom: 40 }}>
-          <div style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 12,
-            padding: '20px 24px',
-          }}>
-            <SocialConnectionPanel
-              locale={(lang === 'en' ? 'en' : 'es')}
-              mode="onboarding"
-              contentHref={`/${lang}/dashboard/content`}
-              onAccountsChange={(count) => setHasAccounts(count > 0)}
-            />
-          </div>
-        </section>
-      )}
-
-      {/* ── CTA: publicar o programar (tiene cuenta + contenido pero nada publicado/programado) ── */}
-      {hasAccounts === true && content.length > 0 && !hasPublishedOrScheduled && (
-        <section style={{ marginBottom: 40 }}>
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(198,255,75,0.07) 0%, rgba(198,255,75,0.02) 100%)',
-            border: '1px solid rgba(198,255,75,0.3)',
-            borderRadius: 12,
-            padding: '20px 24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 16,
-            flexWrap: 'wrap',
-          }}>
-            <div>
-              <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{t.publishReady}</p>
-              <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>{t.publishReadyDesc}</p>
-            </div>
-            <Link href={`/${lang}/dashboard/content`} style={{
-              background: 'var(--accent)', color: 'var(--bg)', fontWeight: 700,
-              fontSize: 13, padding: '8px 18px', borderRadius: 8, textDecoration: 'none',
-              whiteSpace: 'nowrap', flexShrink: 0,
-            }}>
-              {t.goToContent}
-            </Link>
-          </div>
-        </section>
-      )}
-
-      {/* ── Metrics ── */}
-      {!isNewAccount && (
-      <section style={{ marginBottom: 40 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600 }}>{t.metricsTitle}</h2>
-          {hasAccounts && (
-            <button onClick={handleSync} disabled={syncing} style={{
-              fontSize: 12, padding: '6px 14px', borderRadius: 7,
-              background: syncing ? 'var(--border)' : 'var(--surface)',
-              border: '1px solid var(--border)', color: syncing ? 'var(--muted)' : 'var(--text)',
-              cursor: syncing ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
-            }}>
-              {syncing ? t.syncing : t.syncMetrics}
-            </button>
           )}
-        </div>
-
-        {hasAccounts === false ? (
-          <div style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 12, padding: '24px', textAlign: 'center',
-          }}>
-            <p style={{ fontWeight: 600, marginBottom: 8 }}>{t.noAccounts}</p>
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>{t.noAccountsDesc}</p>
-            <Link href={`/${lang}/dashboard/settings`} style={{
-              display: 'inline-block', background: 'var(--accent)', color: 'var(--bg)',
-              fontWeight: 700, fontSize: 13, padding: '8px 18px', borderRadius: 8, textDecoration: 'none',
-            }}>{t.goSettings}</Link>
-          </div>
-        ) : metricsLoading ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-            {[...Array(6)].map((_, i) => (
-              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '18px 16px' }}>
-                <SkeletonBlock width={22} height={16} style={{ marginBottom: 10 }} />
-                <SkeletonBlock width={50} height={20} style={{ marginBottom: 8 }} />
-                <SkeletonBlock width={70} height={11} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-            {metricKeys.map(({ key, label, icon }) => (
-              <div key={key} style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 10, padding: '18px 16px',
-              }}>
-                <span style={{ fontSize: 18, display: 'block', marginBottom: 8, opacity: 0.5 }}>{icon}</span>
-                <p style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 2 }}>
-                  {totals ? fmt(totals[key]) : '—'}
-                </p>
-                <p style={{ color: 'var(--muted)', fontSize: 12 }}>{label}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+        </section>
+      )}
+      {hasAccounts === false && !showWelcome && (
+        <p className={styles.inlineNotice}>
+          <Icon name="link" size={16} />
+          <span>{t.metrics.noAccounts}</span>
+          <Link href={`${base}/settings#social`}>{t.metrics.connect}</Link>
+        </p>
       )}
 
-      {/* ── Recent content ── */}
-      {!isNewAccount && (
-      <section style={{ marginBottom: 40 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600 }}>{t.recentContent}</h2>
-          <Link href={`/${lang}/dashboard/content`} style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none' }}>
-            {t.createFirst} →
+      {/* ── Contenido reciente ── */}
+      <section className={styles.section} aria-labelledby="home-recent">
+        <div className={styles.sectionHead}>
+          <h2 id="home-recent" className={styles.sectionTitle}>{t.recent.title}</h2>
+          <Link href={`${base}/content`} className={styles.more}>
+            {t.recent.all} <Icon name="arrow-right" size={14} />
           </Link>
         </div>
-        {content.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: 14 }}>{t.noContent}</p>
+        {content === null ? (
+          <div className={styles.list}>
+            {Array.from({ length: 3 }, (_, i) => (
+              <div key={i} className={styles.row}>
+                <SkeletonBlock width={40} height={40} borderRadius={8} />
+                <SkeletonBlock height={12} style={{ flex: 1 }} />
+              </div>
+            ))}
+          </div>
+        ) : content.length === 0 ? (
+          <p className={styles.empty}>{t.recent.empty}</p>
         ) : (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-            {content.map((item, idx) => {
-              const perf = perfByContentId.get(item.id);
+          <ul className={styles.list}>
+            {content.map((item) => {
+              const perf = perfById.get(item.id);
               const isVideo = (item.content_type === 'reel' || item.content_type === 'story') && !!item.video_url;
               return (
-              <Link key={item.id} href={`/${lang}/dashboard/content/${item.id}`} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '12px 16px', textDecoration: 'none', color: 'inherit',
-                borderBottom: idx < content.length - 1 ? '1px solid var(--border)' : 'none',
-              }}>
-                <span style={{
-                  width: 40, height: 40, borderRadius: 8, flexShrink: 0, position: 'relative',
-                  background: item.image_url ? `url(${item.image_url}) center/cover` : 'var(--border)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'var(--muted)', overflow: 'hidden',
-                }}>
-                  {!item.image_url && <ChannelIcon name={item.channel} size={14} />}
-                  {isVideo && (
-                    <span style={{
-                      position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'rgba(0,0,0,0.28)', color: '#fff', fontSize: 14,
-                    }}>▶</span>
-                  )}
-                </span>
-                <p style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)', margin: 0 }}>
-                  {item.body?.slice(0, 80) ?? '—'}
-                </p>
-                {item.status === 'published' && perf && (
-                  <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
-                    👁 {fmt(perf.impressions)} · ♥ {fmt(perf.likes)}
-                  </span>
-                )}
-                <span style={{
-                  fontSize: 10, fontWeight: 600, flexShrink: 0,
-                  padding: '2px 8px', borderRadius: 5,
-                  background: `${statusColor[item.status] ?? 'var(--muted)'}18`,
-                  color: statusColor[item.status] ?? 'var(--muted)',
-                }}>
-                  {statusLabel[item.status] ?? item.status}
-                </span>
-              </Link>
+                <li key={item.id}>
+                  <Link href={`${base}/content/${item.id}`} className={`${styles.row} ui-hoverable`}>
+                    <span
+                      className={styles.thumb}
+                      style={item.image_url ? { backgroundImage: `url(${item.image_url})` } : undefined}
+                      aria-hidden="true"
+                    >
+                      {!item.image_url && <ChannelIcon name={item.channel} size={14} />}
+                      {isVideo && <span className={styles.play}><Icon name="play" size={14} /></span>}
+                    </span>
+                    <span className={styles.body}>
+                      {item.body?.slice(0, 120) || '—'}
+                      {isVideo && <span className="sr-only"> ({t.recent.video})</span>}
+                    </span>
+                    {item.status === 'published' && perf && (
+                      <span className={styles.perf}>
+                        {t.recent.perf(formatCompact(perf.impressions, lang), formatCompact(perf.likes, lang))}
+                      </span>
+                    )}
+                    <StatusBadge status={item.status} lang={lang} />
+                  </Link>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </section>
+
+      {/* ── Mejor rendimiento ── */}
+      {!!totals?.top_posts?.length && (
+        <section className={styles.section} aria-labelledby="home-top">
+          <h2 id="home-top" className={styles.sectionTitle}>{t.top.title}</h2>
+          <ul className="auto-grid" style={{ ['--min' as string]: '170px', listStyle: 'none', padding: 0, margin: '16px 0 0' }}>
+            {totals.top_posts.map((post) => {
+              const inner = (
+                <>
+                  <span
+                    className={styles.topImage}
+                    style={post.image_url ? { backgroundImage: `url(${post.image_url})` } : undefined}
+                    aria-hidden="true"
+                  >
+                    <span className={styles.topChannel}><ChannelIcon name={post.platform} size={11} /></span>
+                  </span>
+                  <span className={styles.topText}>
+                    <span className={styles.topBody}>{post.body_preview || '—'}</span>
+                    <span className={styles.topPerf}>
+                      {t.top.perf(
+                        formatCompact(post.impressions, lang),
+                        formatCompact(post.likes, lang),
+                        `${(post.engagement_rate * 100).toFixed(1)} %`,
+                      )}
+                    </span>
+                  </span>
+                </>
+              );
+              return (
+                <li key={post.scheduled_post_id}>
+                  {post.content_id ? (
+                    <Link href={`${base}/content/${post.content_id}`} className={`${styles.top} ui-link-card`}>{inner}</Link>
+                  ) : (
+                    <div className={styles.top}>{inner}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
-      {/* ── Top performing ── */}
-      {!isNewAccount && !!totals?.top_posts?.length && (
-      <section style={{ marginBottom: 40 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t.topPerforming}</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-          {totals.top_posts.map((post) => (
-            <Link
-              key={post.scheduled_post_id}
-              href={post.content_id ? `/${lang}/dashboard/content/${post.content_id}` : '#'}
-              onClick={(e) => { if (!post.content_id) e.preventDefault(); }}
-              style={{
-                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
-                display: 'block', textDecoration: 'none', color: 'inherit',
-                cursor: post.content_id ? 'pointer' : 'default',
-              }}
-            >
-              <div style={{
-                width: '100%', aspectRatio: '1/1', position: 'relative',
-                background: post.image_url ? `url(${post.image_url}) center/cover` : 'var(--border)',
-              }}>
-                <span style={{
-                  position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: 5,
-                  background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-                }}>
-                  <ChannelIcon name={post.platform} size={11} />
-                </span>
-              </div>
-              <div style={{ padding: '10px 12px' }}>
-                <p style={{ fontSize: 12, color: 'var(--text)', margin: '0 0 6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {post.body_preview || '—'}
-                </p>
-                <p style={{ fontSize: 11, color: 'var(--accent)', margin: 0, fontWeight: 600 }}>
-                  👁 {fmt(post.impressions)} · ♥ {fmt(post.likes)} · {(post.engagement_rate * 100).toFixed(1)}%
-                </p>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-      )}
-      </>
-      )}
-
-      {/* ── Quick actions ── */}
-      <section style={{ marginBottom: 40 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t.quickActions}</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-          {quickActions.map((a) => (
-            <Link key={a.href} href={a.href} style={{
-              display: 'block', background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 10, padding: '18px 16px', textDecoration: 'none', transition: 'border-color 0.15s',
-            }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
-            >
-              <span style={{ fontSize: 20, display: 'block', marginBottom: 10, opacity: 0.7 }}>{a.icon}</span>
-              <p style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{a.label}</p>
-              <p style={{ color: 'var(--muted)', fontSize: 12 }}>{a.desc}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Aviso de plan ──
-          Un solo banner, con el aviso más urgente primero: no poder crear pesa
-          más que quedarse sin créditos, y eso más que un trial que aún corre.
-          Sin nada que avisar no se muestra nada. */}
-      {planNotice && (
-        <div style={{
-          background: planNotice.urgent
-            ? 'linear-gradient(135deg, rgba(255,140,66,0.10) 0%, rgba(255,90,90,0.08) 100%)'
-            : 'linear-gradient(135deg, rgba(198,255,75,0.06) 0%, rgba(255,140,66,0.06) 100%)',
-          border: `1px solid ${planNotice.urgent ? 'rgba(255,140,66,0.35)' : 'var(--border)'}`,
-          borderRadius: 12, padding: '20px 24px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
-        }}>
-          <div>
-            <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{planNotice.title}</p>
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>{planNotice.desc}</p>
-          </div>
-          <Link href={`/${lang}/dashboard/settings`} style={{
-            background: 'var(--accent)', color: 'var(--bg)', fontWeight: 700,
-            fontSize: 13, padding: '8px 18px', borderRadius: 8, textDecoration: 'none',
-            whiteSpace: 'nowrap', flexShrink: 0,
-          }}>
-            {t.viewPlans}
-          </Link>
-        </div>
+      {/* ── Accesos rápidos (con la lista de primeros pasos visible sobran) ── */}
+      {!showWelcome && (
+        <section className={styles.section} aria-labelledby="home-quick">
+          <h2 id="home-quick" className={styles.sectionTitle}>{t.quick.title}</h2>
+          <ul className="auto-grid" style={{ ['--min' as string]: '200px', listStyle: 'none', padding: 0, margin: '16px 0 0' }}>
+            {([
+              { href: `${base}/brand`, icon: 'brand', ...t.quick.brand },
+              { href: `${base}/content/create?new=1`, icon: 'sparkles', ...t.quick.content },
+              { href: `${base}/conversations`, icon: 'inbox', ...t.quick.inbox },
+              { href: `${base}/automations`, icon: 'bolt', ...t.quick.automations },
+            ] as const).map((a) => (
+              <li key={a.href}>
+                <Link href={a.href} className={`${styles.quick} ui-link-card`}>
+                  <Icon name={a.icon} size={20} className={styles.quickIcon} />
+                  <span className={styles.quickLabel}>{a.label}</span>
+                  <span className={styles.quickDesc}>{a.desc}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );

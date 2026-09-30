@@ -1,0 +1,50 @@
+/* ─── Pestañas de red ────────────────────────────────────────────────────────
+   Botones de 36px (40px en táctil) con nombre accesible y aria-pressed: antes
+   medían 34px y el único nombre era el `title`. */
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.tab {
+  position: relative;
+  width: 36px; height: 36px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted);
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.tab:hover, .tab:active { color: var(--text); }
+.tab[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+@media (pointer: coarse), (max-width: 767px) {
+  .tab { width: 40px; height: 40px; }
+}
+.publishedDot {
+  position: absolute; top: -3px; right: -3px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent); border: 1.5px solid var(--bg);
+}
+
+/* Marco vertical (9:16): nunca más ancho que su contenedor; con
+   `--frame-max-h` el ancho se limita para que el alto no pase de ese valor
+   (la proporción no cambia, solo el tamaño). */
+.verticalFrame {
+  width: 100%;
+  margin-inline: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+}
+.verticalFrameCapped { max-width: calc(var(--frame-max-h) * 9 / 16); }
+
+.emptyFrame {
+  width: 100%; aspect-ratio: 1 / 1; border-radius: 10px;
+  border: 1px dashed var(--border); background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 13px;
+}
+
+/* Se ven de 40px y se tocan en 44px: el área extra es un pseudo-elemento, como
+   .ui-btn--sm en globals.css, para no agrandar filas compactas. */
+@media (pointer: coarse), (max-width: 767px) {
+  .tab::after { content: ''; position: absolute; inset: -2px; }
+}

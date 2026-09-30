@@ -6,9 +6,9 @@ const en: CommonCopy = {
     cta: 'Go home',
   },
   metadata: {
-    title: 'Kefy — Your Marketing Team on Autopilot',
+    title: 'Kefy — AI content for your social media, ready to approve',
     description:
-      'Kefy unifies text, image, video generation, scheduling, analytics and ads in one platform for startups, SMBs and online stores.',
+      'Kefy creates on-brand posts, carousels, reels and stories and publishes them to Instagram, Facebook, LinkedIn, TikTok and more. You approve them in one tap. 30 days free, no card.',
     keywords: [
       'marketing automation',
       'content creation',

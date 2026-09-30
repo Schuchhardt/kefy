@@ -1,21 +1,33 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import ChannelIcon from '@/components/ui/ChannelIcon';
+import Button, { ButtonLink } from '@/components/ui/Button';
+import Notice from '@/components/ui/Notice';
+import Icon from '@/components/ui/icons';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { CHANNELS, CHANNEL_LABELS } from '@/lib/channels';
 import { useBrand } from '@/lib/brand-context';
 import type { Channel } from '@/types/channels';
 import type { SocialAccount } from '@/types/social';
+import esT from '@/locales/es/dashboard/social';
+import enT from '@/locales/en/dashboard/social';
+import styles from './SocialConnectionPanel.module.css';
 
 type Locale = 'es' | 'en';
 type Mode = 'settings' | 'onboarding';
 
+const T = { es: esT, en: enT } as const;
+
 /** Redes que el panel ofrece conectar: las mismas que los botones. */
-const CONNECTABLE_PLATFORMS = new Set<string>(
-  CHANNELS.filter((ch) => ch.group === 'organic').map((ch) => ch.value),
-);
+const CONNECTABLE = CHANNELS.filter((ch) => ch.group === 'organic');
+const CONNECTABLE_PLATFORMS = new Set<string>(CONNECTABLE.map((ch) => ch.value));
+
+/** Nombre legible de una red: «googlebusiness» → «Google Business». */
+function networkLabel(platform: string): string {
+  return CHANNEL_LABELS[platform as Channel] ?? platform.charAt(0).toUpperCase() + platform.slice(1);
+}
 
 interface Props {
   locale: Locale;
@@ -42,66 +54,21 @@ export default function SocialConnectionPanel({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { brands, activeBrand, loading: brandsLoading, switchBrand } = useBrand();
+  const { confirm, dialog } = useConfirm();
+  const t = T[locale] ?? T.es;
 
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectSuccess, setConnectSuccess] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   // Estado del enlace directo `?connect=`: la red que se está preparando.
   const [autoConnecting, setAutoConnecting] = useState<string | null>(null);
   // Evita que el enlace se procese dos veces (efectos dobles de StrictMode,
   // re-renders al cambiar la URL o al terminar de cargar las marcas).
   const autoConnectHandled = useRef(false);
-
-  const t = {
-    es: {
-      connectError: 'No se pudo conectar la cuenta',
-      unknownError: 'Error desconocido al conectar',
-      connectedOk: 'conectado correctamente',
-      connected: 'Conectadas',
-      connectNew: 'Conectar nueva',
-      redirecting: 'Redirigiendo…',
-      disconnect: 'Desconectar',
-      confirmDisconnect: '¿Seguro que quieres desconectar esta cuenta?',
-      expires: 'expira',
-      connectTitle: 'Conecta tus redes sociales',
-      connectDesc: 'Conecta al menos una cuenta para empezar a publicar desde Kefy.',
-      ctaTitle: 'Perfecto, ahora crea tu primer contenido',
-      ctaDesc: 'Tu red social ya está conectada y lista para publicar.',
-      ctaButton: 'Crear primer contenido',
-      xSensitiveHint: 'Si tus imágenes salen en X detrás de un aviso de contenido sensible, desmarca «Marcar el contenido multimedia que publicas como material que puede ser sensible» en X → Configuración y privacidad → Privacidad y seguridad → Tus publicaciones. Es un ajuste de tu cuenta de X; Kefy no puede cambiarlo al publicar.',
-      xSensitiveLink: 'Abrir ajustes de X',
-      autoConnecting: 'Conectando {network}…',
-      autoConnectUnknownPlatform: 'El enlace de conexión apunta a una red que Kefy no admite. Elige una de la lista.',
-      autoConnectBrandNotFound: 'La marca del enlace no está entre tus marcas, así que no se conectó ninguna cuenta.',
-      autoConnectBrandSwitchError: 'No se pudo cambiar a la marca del enlace. Inténtalo de nuevo.',
-    },
-    en: {
-      connectError: 'Failed to connect account',
-      unknownError: 'Unknown connection error',
-      connectedOk: 'connected successfully',
-      connected: 'Connected',
-      connectNew: 'Connect new',
-      redirecting: 'Redirecting…',
-      disconnect: 'Disconnect',
-      confirmDisconnect: 'Are you sure you want to disconnect this account?',
-      expires: 'expires',
-      connectTitle: 'Connect your social networks',
-      connectDesc: 'Connect at least one account to start publishing from Kefy.',
-      ctaTitle: 'Great, now create your first content',
-      ctaDesc: 'Your social account is connected and ready to publish.',
-      ctaButton: 'Create first content',
-      xSensitiveHint: 'If your images show up on X behind a sensitive-content warning, untick “Mark media you post as having material that may be sensitive” in X → Settings and privacy → Privacy and safety → Your posts. It’s a setting on your X account; Kefy can’t override it when publishing.',
-      xSensitiveLink: 'Open X settings',
-      autoConnecting: 'Connecting {network}…',
-      autoConnectUnknownPlatform: 'The connection link points to a network Kefy doesn’t support. Pick one from the list.',
-      autoConnectBrandNotFound: 'The link’s brand isn’t one of your brands, so no account was connected.',
-      autoConnectBrandSwitchError: 'Couldn’t switch to the link’s brand. Please try again.',
-    },
-  }[locale];
-
-  const dateLocale = locale === 'en' ? 'en-US' : 'es-ES';
 
   const fetchAccounts = useCallback(async () => {
     const res = await fetch('/api/social/accounts', { credentials: 'include' });
@@ -123,6 +90,7 @@ export default function SocialConnectionPanel({
     void fetchAccounts();
   }, [fetchAccounts]);
 
+  // Vuelta del OAuth: ?connected=<red> o ?error=…
   useEffect(() => {
     const connected = searchParams.get('connected');
     const error = searchParams.get('error');
@@ -146,6 +114,7 @@ export default function SocialConnectionPanel({
     setConnecting(platform);
     setConnectError(null);
     setConnectSuccess(null);
+    setDisconnectError(null);
 
     try {
       const state = crypto.randomUUID();
@@ -157,13 +126,16 @@ export default function SocialConnectionPanel({
       );
       const data = await res.json() as { url?: string; error?: string };
       if (!res.ok || !data.url) {
-        throw new Error(data.error ?? t.connectError);
+        // El detalle técnico (Zernio, perfil…) llega en inglés: va a la
+        // consola; a la persona, la copy de su idioma.
+        throw new Error(data.error ?? `HTTP ${res.status}`);
       }
 
       window.location.href = data.url;
       return true;
     } catch (err) {
-      setConnectError(err instanceof Error ? err.message : t.unknownError);
+      console.error('[social oauth] could not get the authorization URL:', err);
+      setConnectError(t.connectError);
       setConnecting(null);
       return false;
     }
@@ -231,174 +203,172 @@ export default function SocialConnectionPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoConnectFromQuery, searchParams, brandsLoading, brands, activeBrand, switchBrand, router, pathname]);
 
-  async function handleDisconnect(accountId: string) {
-    if (!confirm(t.confirmDisconnect)) return;
-    await fetch(`/api/social/accounts/${accountId}`, { method: 'DELETE', credentials: 'include' });
-    const next = accounts.filter((a) => a.id !== accountId);
-    setAccounts(next);
-    onAccountsChange?.(next.length);
+  async function handleDisconnect(account: SocialAccount) {
+    const network = networkLabel(account.platform);
+    const ok = await confirm({
+      title: t.confirmDisconnectTitle(account.username || network),
+      message: t.confirmDisconnectBody,
+      confirmLabel: t.confirmDisconnect,
+      cancelLabel: t.cancel,
+      danger: true,
+    });
+    if (!ok) return;
+
+    setDisconnecting(account.id);
+    setDisconnectError(null);
+    setConnectSuccess(null);
+    try {
+      const res = await fetch(`/api/social/accounts/${account.id}`, { method: 'DELETE', credentials: 'include' });
+      // 404: ya no estaba (otra pestaña, otra persona). El resultado es el
+      // mismo que se pedía. Cualquier otro fallo deja la cuenta en la lista:
+      // antes se quitaba igual y la interfaz decía que ya no estaba conectada.
+      if (!res.ok && res.status !== 404) {
+        setDisconnectError(res.status === 403 ? t.disconnectForbidden : t.disconnectError);
+        return;
+      }
+      const next = accounts.filter((a) => a.id !== account.id);
+      setAccounts(next);
+      onAccountsChange?.(next.length);
+    } catch {
+      setDisconnectError(t.disconnectError);
+    } finally {
+      setDisconnecting(null);
+    }
   }
+
+  const platformGrid = (
+    <ul
+      className={`auto-grid ${styles.platforms}`}
+      style={{ '--min': '130px', '--gap': '8px' } as CSSProperties}
+    >
+      {CONNECTABLE.map(({ value: platform }) => {
+        const label = networkLabel(platform);
+        const already = accounts.some((a) => a.platform === platform);
+        const redirecting = connecting === platform;
+        return (
+          <li key={platform}>
+            <button
+              type="button"
+              className={styles.platform}
+              data-connected={already || undefined}
+              onClick={() => void handleConnectPlatform(platform)}
+              disabled={connecting !== null}
+              aria-busy={redirecting || undefined}
+              aria-label={redirecting ? t.redirecting : already ? t.connectAgainAria(label) : t.connectAria(label)}
+            >
+              <span className={styles.platformIcon} aria-hidden="true">
+                <ChannelIcon name={platform} size={16} />
+              </span>
+              <span className={styles.platformName}>{redirecting ? t.redirecting : label}</span>
+              {already && <Icon name="check" size={14} strokeWidth={2.4} className={styles.platformCheck} />}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 
   return (
     <>
-      {autoConnecting && !connectError && (
-        <p role="status" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
-          {t.autoConnecting.replace('{network}', CHANNEL_LABELS[autoConnecting as Channel] ?? autoConnecting)}
-        </p>
-      )}
-      {connectError && (
-        <p style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 12 }}>{connectError}</p>
-      )}
-      {connectSuccess && (
-        <p style={{ color: '#4caf50', fontSize: 13, marginBottom: 12 }}>
-          ✓ {connectSuccess.charAt(0).toUpperCase() + connectSuccess.slice(1)} {t.connectedOk}
-        </p>
-      )}
+      <div className={styles.notices}>
+        {autoConnecting && !connectError && (
+          <Notice tone="info">{t.autoConnecting(networkLabel(autoConnecting))}</Notice>
+        )}
+        {connectError && <Notice tone="danger">{connectError}</Notice>}
+        {disconnectError && <Notice tone="danger">{disconnectError}</Notice>}
+        {connectSuccess && (
+          <Notice tone="success" icon={<Icon name="check-circle" size={16} />}>
+            {t.connectedOk(networkLabel(connectSuccess))}
+          </Notice>
+        )}
+      </div>
 
       {mode === 'onboarding' ? (
         accounts.length > 0 ? (
-          <div style={{ textAlign: 'center' }}>
-            <p style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>{t.ctaTitle}</p>
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>{t.ctaDesc}</p>
-            <Link href={contentHref ?? '/dashboard/content'} style={{
-              display: 'inline-block',
-              background: 'var(--accent)',
-              color: 'var(--bg)',
-              fontWeight: 700,
-              fontSize: 13,
-              padding: '9px 18px',
-              borderRadius: 8,
-              textDecoration: 'none',
-            }}>
+          <div className={styles.cta}>
+            <p className={styles.title}>{t.ctaTitle}</p>
+            <p className={styles.desc}>{t.ctaDesc}</p>
+            <ButtonLink
+              href={contentHref ?? '/dashboard/content'}
+              variant="primary"
+              icon={<Icon name="sparkles" size={16} />}
+            >
               {t.ctaButton}
-            </Link>
+            </ButtonLink>
           </div>
         ) : (
           <>
-            <p style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>{t.connectTitle}</p>
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>{t.connectDesc}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-              {CHANNELS.filter((ch) => ch.group === 'organic').map(({ value: platform, label: platformLabel }) => {
-                const already = accounts.some((a) => a.platform === platform);
-                return (
-                  <button
-                    key={platform}
-                    type="button"
-                    onClick={() => void handleConnectPlatform(platform)}
-                    disabled={connecting !== null}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      background: already ? 'rgba(198,255,75,0.04)' : 'var(--bg)',
-                      border: `1px solid ${already ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
-                      borderRadius: 8, padding: '10px 14px', cursor: 'pointer',
-                      opacity: connecting !== null ? 0.6 : 1,
-                    }}
-                  >
-                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20 }}>
-                      <ChannelIcon name={platform} size={16} />
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>
-                      {connecting === platform ? t.redirecting : (CHANNEL_LABELS[platform as Channel] ?? platformLabel)}
-                    </span>
-                    {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--accent)' }}>✓</span>}
-                  </button>
-                );
-              })}
-            </div>
+            <p className={styles.title}>{t.connectTitle}</p>
+            <p className={styles.desc}>{t.connectDesc}</p>
+            {platformGrid}
           </>
         )
       ) : (
         <>
           {!loadingAccounts && accounts.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {t.connected}
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {accounts.map((acc) => (
-                  <div key={acc.id} style={{
-                    background: 'var(--bg)', border: '1px solid var(--border)',
-                    borderRadius: 8, padding: '10px 14px',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <ChannelIcon name={acc.platform} size={18} />
-                      </span>
-                      <div style={{ flex: 1 }}>
-                        <p style={{ fontWeight: 600, fontSize: 14 }}>{acc.username}</p>
-                        <p style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
-                          {acc.platform} · {acc.status}
-                          {acc.token_expires_at && (
-                            <> · {t.expires} {new Date(acc.token_expires_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' })}</>
-                          )}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleDisconnect(acc.id)}
-                        style={{
-                          background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-                          padding: '5px 12px', fontSize: 12, cursor: 'pointer', color: '#ff6b6b',
-                        }}
-                      >
-                        {t.disconnect}
-                      </button>
-                    </div>
-                    {/* Zernio's API has no sensitivity flag — X decides from the
-                        account's own "may be sensitive" setting, so point the
-                        user at it instead of leaving them stuck. */}
-                    {acc.platform === 'twitter' && (
-                      <p style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--muted)', marginTop: 8 }}>
-                        {t.xSensitiveHint}{' '}
-                        <a
-                          href="https://x.com/settings/safety"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: 'var(--accent)' }}
+            <div className={styles.block}>
+              <h3 className={styles.heading}>{t.connected}</h3>
+              <ul className={styles.accounts}>
+                {accounts.map((acc) => {
+                  const network = networkLabel(acc.platform);
+                  const meta = [
+                    network,
+                    acc.status ? (t.accountStatus[acc.status] ?? acc.status) : null,
+                    acc.token_expires_at
+                      ? t.expires(new Date(acc.token_expires_at).toLocaleDateString(t.dateLocale, { day: '2-digit', month: 'short', year: 'numeric' }))
+                      : null,
+                  ].filter(Boolean).join(' · ');
+                  return (
+                    <li key={acc.id} className={styles.account}>
+                      <div className={styles.accountRow}>
+                        <span className={styles.accountIcon} aria-hidden="true">
+                          <ChannelIcon name={acc.platform} size={18} />
+                        </span>
+                        <div className={styles.accountInfo}>
+                          <p className={styles.accountName}>{acc.username || network}</p>
+                          <p className={styles.accountMeta}>{meta}</p>
+                        </div>
+                        <Button
+                          variant="danger-ghost"
+                          size="sm"
+                          className={styles.accountAction}
+                          onClick={() => void handleDisconnect(acc)}
+                          loading={disconnecting === acc.id}
+                          disabled={disconnecting !== null}
+                          aria-label={t.disconnectAria(acc.username || network, network)}
                         >
-                          {t.xSensitiveLink}
-                        </a>
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
+                          {t.disconnect}
+                        </Button>
+                      </div>
+                      {/* Zernio's API has no sensitivity flag — X decides from the
+                          account's own "may be sensitive" setting, so point the
+                          user at it instead of leaving them stuck. */}
+                      {acc.platform === 'twitter' && (
+                        <p className={styles.hint}>
+                          {t.xSensitiveHint}{' '}
+                          <a
+                            href="https://x.com/settings/safety"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.link}
+                          >
+                            {t.xSensitiveLink}
+                          </a>
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 
-          <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            {t.connectNew}
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-            {CHANNELS.filter((ch) => ch.group === 'organic').map(({ value: platform, label: platformLabel }) => {
-              const already = accounts.some((a) => a.platform === platform);
-              return (
-                <button
-                  key={platform}
-                  type="button"
-                  onClick={() => void handleConnectPlatform(platform)}
-                  disabled={connecting !== null}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    background: already ? 'rgba(198,255,75,0.04)' : 'var(--bg)',
-                    border: `1px solid ${already ? 'rgba(198,255,75,0.3)' : 'var(--border)'}`,
-                    borderRadius: 8, padding: '10px 14px', cursor: 'pointer',
-                    opacity: connecting !== null ? 0.6 : 1,
-                  }}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20 }}>
-                    <ChannelIcon name={platform} size={16} />
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>
-                    {connecting === platform ? t.redirecting : (CHANNEL_LABELS[platform as Channel] ?? platformLabel)}
-                  </span>
-                  {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--accent)' }}>✓</span>}
-                </button>
-              );
-            })}
-          </div>
+          <h3 className={styles.heading}>{t.connectNew}</h3>
+          {platformGrid}
         </>
       )}
+
+      {dialog}
     </>
   );
 }

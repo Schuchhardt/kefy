@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { createSupabaseServer } from '@/lib/supabase';
 import type { JWTPayload } from '@/types/auth';
 import { checkRateLimit, clientIp, loginRule, rateLimitResponse } from '@/lib/rate-limit';
+import { reportError } from '@/lib/observability';
 import {
   signAccessToken,
   generateRefreshToken,
@@ -16,6 +17,10 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// Cada error lleva un `code` estable que la página traduce con
+// locales/*/auth.ts (ver lib/auth-errors.ts). El `error` se mantiene para los
+// clientes del API y los logs.
+
 export async function POST(req: NextRequest) {
   // Antes de tocar la base de datos: la fuerza bruta no debe costarnos consultas
   // ni comparaciones de bcrypt, que son deliberadamente lentas.
@@ -28,20 +33,20 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 });
   }
 
   const { email, password } = body as Record<string, unknown>;
 
   if (typeof email !== 'string' || !isValidEmail(email)) {
-    return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
+    return NextResponse.json({ error: 'Valid email is required', code: 'invalid_email' }, { status: 400 });
   }
   if (typeof password !== 'string' || !password) {
-    return NextResponse.json({ error: 'Password is required' }, { status: 400 });
+    return NextResponse.json({ error: 'Password is required', code: 'password_required' }, { status: 400 });
   }
 
   const sanitizedEmail = email.trim().toLowerCase();
@@ -58,7 +63,7 @@ export async function POST(req: NextRequest) {
   const passwordMatch = await bcrypt.compare(password, hashToCompare);
 
   if (!user || !passwordMatch) {
-    return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+    return NextResponse.json({ error: 'Invalid email or password', code: 'invalid_credentials' }, { status: 401 });
   }
 
   // Get membership (most recent org, prefer owner role)
@@ -71,7 +76,13 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
 
   if (!membership) {
-    return NextResponse.json({ error: 'No organization found' }, { status: 500 });
+    // Cuenta a medias (el registro deshace sus pasos, pero hay cuentas antiguas):
+    // la persona no puede entrar y hay que repararla a mano.
+    reportError(new Error('Usuario sin organización'), {
+      route: 'POST /api/auth/login',
+      extra: { userId: user.id },
+    });
+    return NextResponse.json({ error: 'No organization found', code: 'no_organization' }, { status: 500 });
   }
 
   const org = membership.kefy_organizations as unknown as { plan: string } | null;

@@ -1,0 +1,125 @@
+/* ─── Calendario ──────────────────────────────────────────────────────────────
+   Escritorio: rejilla mensual (7 columnas) + detalle del día elegido.
+   Móvil (<768px): la rejilla daba celdas de ~37px con un círculo de 26px y
+   6 semanas × 84px de alto; en su lugar se muestra la agenda del mes (lo
+   programado, agrupado por día). */
+
+.accounts { list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.account {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  padding: 6px 10px; border-radius: 8px; font-size: 13px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.accountName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accountIcon { display: inline-flex; color: var(--text-soft); flex-shrink: 0; }
+
+.notice { margin-bottom: 20px; }
+.notice a { color: var(--accent-text); font-weight: 600; }
+
+.calendar {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; overflow: hidden; margin-bottom: 24px;
+}
+
+.monthNav {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.monthCenter { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
+.monthTitle { margin: 0; font-family: var(--font-syne), system-ui, sans-serif; font-size: 16px; font-weight: 700; text-align: center; }
+
+.legend {
+  list-style: none; margin: 0; padding: 8px 20px;
+  display: flex; gap: 6px 16px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+.legendItem { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+
+.weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
+.weekday {
+  text-align: center; padding: 8px 4px;
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cell { min-height: 84px; min-width: 0; border-top: 1px solid var(--border); border-right: 1px solid var(--border); }
+.cell:nth-child(7n) { border-right: 0; }
+.cellPad { background: transparent; }
+.cellSkeleton { padding: 8px; }
+
+.dayBtn {
+  width: 100%; height: 100%; min-height: 84px; padding: 8px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  text-align: left; color: var(--text); background: transparent;
+  transition: background-color 0.12s;
+}
+.dayBtn:hover, .dayBtn:active { background: var(--surface-2); }
+.dayBtn[aria-pressed="true"] { background: var(--accent-soft); }
+.dayNum {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.dayBtn[aria-pressed="true"] .dayNum { font-weight: 700; }
+.dayNumToday { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.dayDots { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.more { font-size: 11px; color: var(--muted); line-height: 1; margin-left: 1px; }
+
+.hint { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 16px; }
+
+/* ─── Detalle del día (escritorio) ─────────────────────────────────────── */
+.dayDetail { display: flex; flex-direction: column; gap: 12px; }
+.dayDetailHead { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.dayDetailTitle {
+  margin: 0; font-size: 12px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+
+/* ─── Filas de publicación (detalle del día y agenda) ───────────────────── */
+.posts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.post {
+  position: relative;
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  transition: border-color 0.15s;
+}
+.post:has(a.postText:hover) { border-color: var(--accent-border); }
+.postTime { flex-shrink: 0; min-width: 44px; padding-top: 1px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.postIcon { flex-shrink: 0; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-soft); }
+.postMain { flex: 1; min-width: 0; }
+.postText {
+  display: block; margin: 0 0 2px; font-size: 13px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+a.postText { text-decoration: none; }
+a.postText:hover, a.postText:focus-visible { text-decoration: underline; }
+/* Toda la fila abre el contenido (antes el enlace era una línea de 21px de
+   alto); «Cancelar» queda por encima y sigue siendo su propio botón. */
+a.postText::after { content: ''; position: absolute; inset: 0; border-radius: 10px; }
+.postMeta { margin: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.postError { margin: 4px 0 0; font-size: 12px; color: var(--danger); }
+.postSide { position: relative; z-index: 1; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+
+/* ─── Agenda (móvil) ───────────────────────────────────────────────────── */
+.agenda { display: none; padding: 12px; }
+.agendaDays { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
+.agendaDate {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 8px; font-size: 14px; font-weight: 700;
+}
+/* «martes, 30 de septiembre» → «Martes, …» (::first-letter no aplica a flex). */
+.capitalize { display: inline-block; }
+.capitalize::first-letter { text-transform: uppercase; }
+.agenda .post { background: var(--bg); }
+.agendaSkeleton { display: flex; flex-direction: column; gap: 10px; }
+.emptyActions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+@media (max-width: 767px) {
+  .desktopOnly { display: none !important; }
+  .agenda { display: block; }
+  .monthNav { padding: 10px 8px; }
+  .post { flex-wrap: wrap; row-gap: 8px; }
+  .postSide { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
+}

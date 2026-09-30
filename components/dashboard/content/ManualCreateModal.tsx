@@ -1,10 +1,18 @@
 'use client';
 
-import { useState } from 'react';
-import Modal from './Modal';
+import { useId, useRef, useState, type ReactNode } from 'react';
+import Modal from '@/components/ui/Modal';
+import Button from '@/components/ui/Button';
+import { Field, Input, Textarea } from '@/components/ui/Field';
+import Notice from '@/components/ui/Notice';
+import Icon, { type IconName } from '@/components/ui/icons';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import { CHANNELS } from '@/lib/channels';
+import { toLocale } from '@/lib/i18n';
 import type { ContentItem, ContentType, CarouselSlide, ReelScene } from '@/types/content';
+import esT from '@/locales/es/dashboard/content';
+import enT from '@/locales/en/dashboard/content';
+import styles from './ManualCreateModal.module.css';
 
 interface ManualCreateModalProps {
   open:    boolean;
@@ -13,48 +21,19 @@ interface ManualCreateModalProps {
   onCreated: (item: ContentItem) => void;
 }
 
-const T = {
-  es: {
-    title: 'Crear contenido manual', subtitle: 'Sin IA — escribe y sube todo tú',
-    typeLabel: 'Tipo', channelLabel: 'Canal',
-    titleField: 'Título', bodyField: 'Texto', bodyPlaceholder: 'Escribe tu post…',
-    hashtagsField: 'Hashtags', hashtagsHint: 'Separados por espacio o coma',
-    imageField: 'Imagen', uploadImage: 'Subir imagen',
-    videoField: 'Video', uploadVideo: 'Subir video',
-    slidesField: 'Slides', addSlide: '+ Añadir slide',
-    scenesField: 'Escenas', addScene: '+ Añadir escena',
-    slideTitle: 'Título del slide', slideBody: 'Cuerpo del slide',
-    sceneDuration: 'Duración (s)', remove: 'Eliminar',
-    create: 'Crear', creating: 'Creando…', cancel: 'Cancelar',
-    uploadError: 'Error al subir', requireSlides: 'Añade al menos 1 slide',
-    requireVideoOrScenes: 'Sube un video o añade al menos 1 escena',
-  },
-  en: {
-    title: 'Create content manually', subtitle: 'No AI — write and upload everything yourself',
-    typeLabel: 'Type', channelLabel: 'Channel',
-    titleField: 'Title', bodyField: 'Body', bodyPlaceholder: 'Write your post…',
-    hashtagsField: 'Hashtags', hashtagsHint: 'Separated by space or comma',
-    imageField: 'Image', uploadImage: 'Upload image',
-    videoField: 'Video', uploadVideo: 'Upload video',
-    slidesField: 'Slides', addSlide: '+ Add slide',
-    scenesField: 'Scenes', addScene: '+ Add scene',
-    slideTitle: 'Slide title', slideBody: 'Slide body',
-    sceneDuration: 'Duration (s)', remove: 'Remove',
-    create: 'Create', creating: 'Creating…', cancel: 'Cancel',
-    uploadError: 'Upload failed', requireSlides: 'Add at least 1 slide',
-    requireVideoOrScenes: 'Upload a video or add at least 1 scene',
-  },
-};
+type ManualCopy = typeof esT.manualCreate;
 
-const TYPE_OPTIONS: { value: ContentType; icon: string; label: { es: string; en: string } }[] = [
-  { value: 'post',     icon: '✦', label: { es: 'Post',     en: 'Post'     } },
-  { value: 'carousel', icon: '▦', label: { es: 'Carrusel', en: 'Carousel' } },
-  { value: 'reel',     icon: '▶', label: { es: 'Reel',     en: 'Reel'     } },
-  { value: 'story',    icon: '◎', label: { es: 'Story',    en: 'Story'    } },
+const TYPE_OPTIONS: { value: ContentType; icon: IconName }[] = [
+  { value: 'post',     icon: 'post'     },
+  { value: 'carousel', icon: 'carousel' },
+  { value: 'reel',     icon: 'video'    },
+  { value: 'story',    icon: 'story'    },
 ];
 
 export default function ManualCreateModal({ open, onClose, lang, onCreated }: ManualCreateModalProps) {
-  const t = T[lang];
+  const copy = toLocale(lang) === 'en' ? enT : esT;
+  const t = copy.manualCreate;
+  const formId = `manual-create-${useId().replace(/:/g, '')}`;
 
   const [type, setType]     = useState<ContentType>('post');
   const [channel, setChannel] = useState('generic');
@@ -82,8 +61,8 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
     const fd = new FormData();
     fd.append('file', file);
     const res = await fetch('/api/content/upload-media', { method: 'POST', credentials: 'include', body: fd });
-    const d = await res.json() as { url?: string; type?: 'image' | 'video'; error?: string };
-    if (!res.ok || !d.url || !d.type) throw new Error(d.error ?? 'upload failed');
+    const d = await res.json().catch(() => ({})) as { url?: string; type?: 'image' | 'video'; error?: string };
+    if (!res.ok || !d.url || !d.type) throw new Error(d.error || t.uploadError);
     return { url: d.url, type: d.type };
   }
 
@@ -103,7 +82,7 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.uploadError);
+      setError(err instanceof Error && err.message ? err.message : t.uploadError);
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -123,7 +102,9 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
     onClose();
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (creating) return;
     setError(null);
     if (type === 'carousel' && slides.length === 0) { setError(t.requireSlides); return; }
     if (type === 'reel' && !videoUrl && scenes.length === 0) { setError(t.requireVideoOrScenes); return; }
@@ -160,125 +141,131 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const d = await res.json() as { item?: ContentItem; error?: string };
-      if (!res.ok || !d.item) throw new Error(d.error ?? 'create failed');
+      const d = await res.json().catch(() => ({})) as { item?: ContentItem; error?: string };
+      if (!res.ok || !d.item) throw new Error(d.error || t.createError);
       onCreated(d.item);
       reset();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error');
+      setError(err instanceof Error && err.message ? err.message : t.createError);
     } finally {
       setCreating(false);
     }
   }
 
+  const channels = CHANNELS
+    .filter((c) => c.group !== 'ads')
+    .map((c) => (c.value === 'generic' ? { ...c, label: copy.channelGeneric } : c));
+
   return (
-    <Modal open={open} onClose={handleClose} title={t.title} subtitle={t.subtitle} maxWidth={620} dismissable={!creating}>
-      <div style={{ padding: '20px 24px 24px' }}>
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={t.title}
+      subtitle={t.subtitle}
+      maxWidth={620}
+      dismissable={!creating}
+      padded
+      footer={
+        <>
+          <Button variant="ghost" onClick={handleClose} disabled={creating}>{t.cancel}</Button>
+          <Button type="submit" form={formId} variant="primary" loading={creating}>
+            {creating ? t.creating : t.create}
+          </Button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={handleSubmit} className={styles.stack} noValidate>
         {/* Type */}
-        <Field label={t.typeLabel}>
-          <div style={{ display: 'flex', gap: 8 }}>
+        <Group label={t.typeLabel}>
+          <div className={styles.typeOptions}>
             {TYPE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
+                aria-pressed={type === opt.value}
                 onClick={() => setType(opt.value)}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 8, fontSize: 13, cursor: 'pointer',
-                  border: `1px solid ${type === opt.value ? 'var(--accent)' : 'var(--border)'}`,
-                  background: type === opt.value ? 'rgba(198,255,75,0.10)' : 'var(--bg)',
-                  color: type === opt.value ? 'var(--accent)' : 'var(--text)',
-                  fontWeight: type === opt.value ? 700 : 500,
-                }}
+                className={styles.typeOption}
               >
-                {opt.icon} {opt.label[lang]}
+                <Icon name={opt.icon} size={16} />
+                {copy.typeLabels[opt.value]}
               </button>
             ))}
           </div>
-        </Field>
+        </Group>
 
         {/* Channel */}
-        <Field label={t.channelLabel}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {CHANNELS.filter((c) => c.group !== 'ads').map((c) => {
-              const sel = channel === c.value;
-              return (
-                <button
-                  key={c.value}
-                  type="button"
-                  onClick={() => setChannel(c.value)}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '6px 10px', borderRadius: 999,
-                    border: `1px solid ${sel ? 'var(--accent)' : 'var(--border)'}`,
-                    background: sel ? 'rgba(198,255,75,0.10)' : 'var(--surface)',
-                    color: sel ? 'var(--accent)' : 'var(--text)',
-                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  }}
-                >
-                  {c.value !== 'generic' && <ChannelIcon name={c.value} size={14} />}
-                  {c.label}
-                </button>
-              );
-            })}
+        <Group label={t.channelLabel}>
+          <div className="ui-segmented">
+            {channels.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                aria-pressed={channel === c.value}
+                onClick={() => setChannel(c.value)}
+                className={styles.channelBtn}
+              >
+                {c.value !== 'generic' && <ChannelIcon name={c.value} size={14} />}
+                {c.label}
+              </button>
+            ))}
           </div>
-        </Field>
+        </Group>
 
         {/* Title (optional) */}
-        <Field label={t.titleField}>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+        <Field label={t.titleField} hint={t.titleHint}>
+          <Input type="text" value={title} onChange={(e) => setTitle(e.target.value)} />
         </Field>
 
         {/* Body */}
         {(type === 'post' || type === 'reel' || type === 'story') && (
           <Field label={t.bodyField}>
-            <textarea
+            <Textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={4}
               placeholder={t.bodyPlaceholder}
-              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
             />
           </Field>
         )}
 
         {/* Hashtags */}
         <Field label={t.hashtagsField} hint={t.hashtagsHint}>
-          <input type="text" value={tagsText} onChange={(e) => setTagsText(e.target.value)} style={inputStyle} placeholder="#marketing #branding" />
+          <Input type="text" value={tagsText} onChange={(e) => setTagsText(e.target.value)} placeholder="#marketing #branding" />
         </Field>
 
         {/* Cover image (post / story) */}
         {(type === 'post' || type === 'story') && (
-          <Field label={t.imageField}>
+          <Group label={t.imageField}>
             <UploadPreview
               url={imageUrl}
               kind="image"
-              label={t.uploadImage}
+              t={t}
               onUpload={(e) => handleUpload('cover', e)}
               onRemove={() => setImageUrl(null)}
               uploading={uploading}
             />
-          </Field>
+          </Group>
         )}
 
         {/* Video (reel / story) */}
         {(type === 'reel' || type === 'story') && (
-          <Field label={t.videoField}>
+          <Group label={t.videoField}>
             <UploadPreview
               url={videoUrl}
               kind="video"
-              label={t.uploadVideo}
+              t={t}
               onUpload={(e) => handleUpload('video', e)}
               onRemove={() => setVideoUrl(null)}
               uploading={uploading}
             />
-          </Field>
+          </Group>
         )}
 
         {/* Slides (carousel) */}
         {type === 'carousel' && (
-          <Field label={t.slidesField}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Group label={t.slidesField}>
+            <div className={styles.slides}>
               {slides.map((s, idx) => (
                 <SlideRow
                   key={idx}
@@ -295,15 +282,17 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
                   onRemove={() => setSlides((p) => p.filter((_, i) => i !== idx))}
                 />
               ))}
-              <button type="button" onClick={addSlide} style={dashedBtn}>{t.addSlide}</button>
+              <Button variant="secondary" block className={styles.addBtn} icon={<Icon name="plus" size={16} />} onClick={addSlide}>
+                {t.addSlide}
+              </Button>
             </div>
-          </Field>
+          </Group>
         )}
 
         {/* Scenes (reel — optional if no video) */}
         {type === 'reel' && !videoUrl && (
-          <Field label={t.scenesField}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Group label={t.scenesField} hint={t.scenesHint}>
+            <div className={styles.slides}>
               {scenes.map((s, idx) => (
                 <SlideRow
                   key={idx}
@@ -322,93 +311,83 @@ export default function ManualCreateModal({ open, onClose, lang, onCreated }: Ma
                   onRemove={() => setScenes((p) => p.filter((_, i) => i !== idx))}
                 />
               ))}
-              <button type="button" onClick={addScene} style={dashedBtn}>{t.addScene}</button>
+              <Button variant="secondary" block className={styles.addBtn} icon={<Icon name="plus" size={16} />} onClick={addScene}>
+                {t.addScene}
+              </Button>
             </div>
-          </Field>
+          </Group>
         )}
 
-        {error && <p style={{ fontSize: 13, color: '#ff6b6b', marginBottom: 12 }}>{error}</p>}
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={creating}
-            style={{
-              flex: 1, background: 'var(--accent)', color: '#000', border: 'none',
-              borderRadius: 10, padding: '12px 0', fontSize: 14, fontWeight: 700,
-              cursor: creating ? 'not-allowed' : 'pointer', opacity: creating ? 0.6 : 1,
-            }}
-          >
-            {creating ? t.creating : t.create}
-          </button>
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={creating}
-            style={{
-              padding: '12px 20px', borderRadius: 10, border: '1px solid var(--border)',
-              background: 'var(--bg)', color: 'var(--muted)', fontSize: 13, fontWeight: 600,
-              cursor: creating ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {t.cancel}
-          </button>
-        </div>
-      </div>
+        {error && <Notice tone="danger">{error}</Notice>}
+      </form>
     </Modal>
   );
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/** Grupo de controles con su etiqueta (botones, subidas): no son un único
+ *  campo, así que la etiqueta nombra el grupo en vez de un `htmlFor`. */
+function Group({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  const id = `g${useId().replace(/:/g, '')}`;
   return (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+    <div role="group" aria-labelledby={id} className={styles.group}>
+      <span id={id} className="ui-label">
         {label}
-        {hint && <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, opacity: 0.75 }}>— {hint}</span>}
-      </label>
+        {hint && <span style={{ fontWeight: 400, marginLeft: 6 }}>— {hint}</span>}
+      </span>
       {children}
     </div>
   );
 }
 
 function UploadPreview({
-  url, kind, label, onUpload, onRemove, uploading,
+  url, kind, t, onUpload, onRemove, uploading,
 }: {
   url: string | null;
   kind: 'image' | 'video';
-  label: string;
+  t: ManualCopy;
   onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemove: () => void;
   uploading: boolean;
 }) {
+  // Un <label> con el input oculto no se podía alcanzar con el teclado: el
+  // botón abre el selector de archivos del input.
+  const inputRef = useRef<HTMLInputElement>(null);
   if (!url) {
     return (
-      <label style={{
-        display: 'inline-flex', alignItems: 'center', gap: 8,
-        padding: '10px 16px', borderRadius: 8, border: '1px dashed var(--border)',
-        background: 'var(--surface)', fontSize: 13, fontWeight: 600,
-        cursor: uploading ? 'wait' : 'pointer',
-      }}>
-        {uploading ? '…' : `+ ${label}`}
-        <input type="file" accept={kind === 'image' ? 'image/*' : 'video/*'} hidden onChange={onUpload} disabled={uploading} />
-      </label>
+      <div>
+        <Button
+          variant="secondary"
+          icon={<Icon name="upload" size={16} />}
+          loading={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading ? t.uploading : kind === 'image' ? t.uploadImage : t.uploadVideo}
+        </Button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={kind === 'image' ? 'image/*' : 'video/*'}
+          hidden
+          tabIndex={-1}
+          onChange={onUpload}
+          disabled={uploading}
+        />
+      </div>
     );
   }
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+    <div className={styles.preview}>
       {kind === 'image' ? (
         /* eslint-disable-next-line @next/next/no-img-element */
-        <img src={url} alt="" style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+        <img src={url} alt="" className={styles.previewImg} />
       ) : (
-        <video src={url} controls style={{ width: 140, height: 200, borderRadius: 8, border: '1px solid var(--border)', objectFit: 'cover', background: '#000' }} />
+        <video src={url} controls className={styles.previewVideo} />
       )}
-      <button type="button" onClick={onRemove} style={{
-        padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(255,107,107,0.4)',
-        background: 'transparent', color: '#ff6b6b', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-      }}>×</button>
+      <Button variant="danger-ghost" size="sm" icon={<Icon name="trash" size={14} />} onClick={onRemove}>
+        {kind === 'image' ? t.removeImage : t.removeVideo}
+      </Button>
     </div>
   );
 }
@@ -423,7 +402,7 @@ function SlideRow({
   body: string;
   imageUrl: string | null;
   duration?: number;
-  t: (typeof T)['es'];
+  t: ManualCopy;
   uploading: boolean;
   onTitle:   (v: string) => void;
   onBody:    (v: string) => void;
@@ -431,45 +410,69 @@ function SlideRow({
   onUpload:  (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemove:  () => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const durationId = `d${useId().replace(/:/g, '')}`;
+  const n = idx + 1;
+  const name = isReel ? t.sceneNumber(n) : t.slideNumber(n);
+
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>#{idx + 1}</span>
-        <button type="button" onClick={onRemove} style={{
-          marginLeft: 'auto', background: 'none', border: 'none', color: '#ff6b6b',
-          cursor: 'pointer', fontSize: 14, padding: 0,
-        }} title={t.remove}>×</button>
+    <div className={styles.slide} role="group" aria-label={name}>
+      <div className={styles.slideHead}>
+        <span className={styles.slideNum}>{name}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          iconOnly
+          aria-label={isReel ? t.removeScene(n) : t.removeSlide(n)}
+          icon={<Icon name="close" size={16} />}
+          onClick={onRemove}
+        />
       </div>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flexShrink: 0 }}>
+      <div className={styles.slideBody}>
+        <div className={styles.slideMedia}>
           {imageUrl ? (
-            <div style={{ position: 'relative' }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={imageUrl} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }} />
-            </div>
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={imageUrl} alt="" className={styles.slideImg} />
           ) : (
-            <label style={{
-              width: 80, height: 80, borderRadius: 6, border: '1px dashed var(--border)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: uploading ? 'wait' : 'pointer', color: 'var(--muted)',
-              background: 'var(--bg)', fontSize: 22,
-            }}>
-              {uploading ? '…' : '+'}
-              <input type="file" accept="image/*" hidden onChange={onUpload} disabled={uploading} />
-            </label>
+            <>
+              <button
+                type="button"
+                className={styles.slideUpload}
+                onClick={() => inputRef.current?.click()}
+                disabled={uploading}
+                aria-label={isReel ? t.uploadSceneImage(n) : t.uploadSlideImage(n)}
+              >
+                <Icon name={uploading ? 'clock' : 'plus'} size={22} />
+              </button>
+              <input ref={inputRef} type="file" accept="image/*" hidden tabIndex={-1} onChange={onUpload} disabled={uploading} />
+            </>
           )}
         </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <input type="text" value={title} onChange={(e) => onTitle(e.target.value)} placeholder={t.slideTitle} style={smallInput} />
-          <textarea value={body} onChange={(e) => onBody(e.target.value)} rows={2} placeholder={t.slideBody} style={{ ...smallInput, resize: 'vertical', fontFamily: 'inherit' }} />
+        <div className={styles.slideFields}>
+          <Input
+            type="text"
+            value={title}
+            onChange={(e) => onTitle(e.target.value)}
+            placeholder={t.slideTitle}
+            aria-label={`${t.slideTitle} · ${name}`}
+          />
+          <Textarea
+            value={body}
+            onChange={(e) => onBody(e.target.value)}
+            rows={2}
+            placeholder={t.slideBody}
+            aria-label={`${t.slideBody} · ${name}`}
+            className={styles.slideText}
+          />
           {isReel && onDuration && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ fontSize: 11, color: 'var(--muted)' }}>{t.sceneDuration}</label>
-              <input
+            <div className={styles.duration}>
+              <label htmlFor={durationId}>{t.sceneDuration}</label>
+              <Input
+                id={durationId}
                 type="number" min={1} max={30}
                 value={duration ?? 3}
                 onChange={(e) => onDuration(Math.max(1, Math.min(30, Number(e.target.value) || 3)))}
-                style={{ ...smallInput, width: 70 }}
+                className={styles.durationInput}
               />
             </div>
           )}
@@ -478,28 +481,3 @@ function SlideRow({
     </div>
   );
 }
-
-// ─── Styles ─────────────────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  fontSize: 14,
-  color: 'var(--text)',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const smallInput: React.CSSProperties = {
-  ...inputStyle,
-  padding: '7px 10px',
-  fontSize: 13,
-};
-
-const dashedBtn: React.CSSProperties = {
-  background: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 8,
-  padding: '10px 0', fontSize: 13, fontWeight: 600, color: 'var(--muted)', cursor: 'pointer',
-};

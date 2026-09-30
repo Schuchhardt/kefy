@@ -16,6 +16,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
 import { NextResponse } from 'next/server';
 import type { BillingPlan } from '@/types/billing';
+import { OPERATION_CREDIT_COSTS, PLAN_LIMITS } from '@/lib/plans';
 
 /** Operaciones que gastan créditos. */
 export type CreditOperation = 'text' | 'image' | 'video';
@@ -26,20 +27,16 @@ export type CreditOperation = 'text' | 'image' | 'video';
  * Vive aquí y no en la base de datos para poder recalibrarlo sin migrar: si
  * cambia el precio de un proveedor, se ajusta el peso y ya.
  */
-export const CREDIT_COSTS: Record<CreditOperation, number> = {
-  text:   1,   // una llamada a Claude/GPT
-  image:  3,   // generación de imagen + procesado + subida
-  video: 10,   // render en Remotion Lambda + alojamiento
-};
+export const CREDIT_COSTS: Record<CreditOperation, number> = OPERATION_CREDIT_COSTS;
 
 /**
  * Créditos mensuales por plan. Son exactamente los que anuncia la página de
  * precios: si estos números cambian, hay que cambiar la página también.
  */
 export const PLAN_CREDITS: Record<BillingPlan, number> = {
-  starter:   150,
-  pro:       500,
-  business: 2000,
+  starter:  PLAN_LIMITS.starter.credits,
+  pro:      PLAN_LIMITS.pro.credits,
+  business: PLAN_LIMITS.business.credits,
 };
 
 /** Período de facturación del uso: mes calendario en UTC ('2026-09'). */
@@ -236,9 +233,9 @@ export function creditsExhaustedResponse(
  * precios: si cambian aquí, hay que cambiar locales/{es,en}/landing.ts también.
  */
 export const PLAN_ASSISTANT_MESSAGES: Record<BillingPlan, number> = {
-  starter:   300,
-  pro:      1500,
-  business: 5000,
+  starter:  PLAN_LIMITS.starter.assistantMessages,
+  pro:      PLAN_LIMITS.pro.assistantMessages,
+  business: PLAN_LIMITS.business.assistantMessages,
 };
 
 export function assistantMessagesFor(plan: string): number {

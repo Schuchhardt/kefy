@@ -1,13 +1,18 @@
-const en = {
-  title: 'Engagement Rules',
-  subtitle: 'Automate replies to comments, reviews, and messages',
-  newRuleBtn: '+ New rule',
+import type { EngagementCopy } from '@/locales/es/dashboard/engagement';
+
+const en: EngagementCopy = {
+  title: 'Auto-replies',
+  dateLocale: 'en-US',
+  subtitle: 'Automate replies to comments and messages',
+  newRuleBtn: 'New rule',
+  createFirstRule: 'Create first rule',
+  formTitle: 'New auto-reply rule',
   cancelBtn: 'Cancel',
   saveBtn: 'Save rule',
-  saving: 'Saving...',
-  loading: 'Loading rules...',
-  noRules: 'No engagement rules',
-  noRulesHint: 'Create your first rule to reply automatically',
+  saving: 'Saving…',
+  loading: 'Loading rules…',
+  noRules: 'No auto-reply rules yet',
+  noRulesHint: 'Create your first rule to reply automatically.',
   active: 'Active',
   inactive: 'Inactive',
   toggleActivate: 'Activate',
@@ -16,10 +21,11 @@ const en = {
   confirmDelete: 'Delete this rule?',
   errorLoad: 'Error loading rules',
   errorCreate: 'Error creating rule',
-  errorToggle: 'Error updating rule',
-  errorDelete: 'Error deleting rule',
+  errorToggle: "Couldn't update the rule",
+  errorDelete: "Couldn't delete the rule",
   // Form
   nameLabel: 'Rule name',
+  nameRequired: 'Give the rule a name.',
   namePlaceholder: 'E.g.: Auto-reply positive comments',
   triggerLabel: 'Trigger',
   triggers: {
@@ -36,7 +42,7 @@ const en = {
   platformLabel: 'Platform',
   platformAll: 'All platforms',
   keywordLabel: 'Filter by keyword (optional)',
-  keywordPlaceholder: 'E.g.: price, shipping, thanks...',
+  keywordPlaceholder: 'E.g.: price, shipping, thanks…',
   actionLabel: 'Action',
   actions: {
     reply_comment:        'Reply to comment',
@@ -45,14 +51,20 @@ const en = {
     reply_comment_ai:     'AI comment reply',
   } as Record<string, string>,
   templateLabel: 'Reply template',
-  templatePlaceholder: 'Write the automatic reply...\nYou can use {name} to personalize.',
-  templateHint: 'Use {name} to include the user\'s name.',
+  templatePlaceholder: 'Write the automatic reply…',
+  templateHint: 'This exact text is sent to everyone.',
   // AI & Delay
   aiContextLabel:       'AI context',
-  aiContextPlaceholder: 'Additional instructions to customize the AI response...',
+  aiContextPlaceholder: 'Additional instructions to customize the AI response…',
+  aiContextHint:        'The AI will use your brand info plus this context to write the reply.',
   delayLabel:           'Wait before executing',
   delayMinutes:         'minutes',
   delayNone:            'No wait',
+  delayBadge:           (min: number) => `+${min} min`,
+  // Rule card
+  then:                 'then',
+  timesTriggered:       (n: number) => (n === 1 ? 'Ran once' : `Ran ${n} times`),
+  lastTriggered:        (date: string) => `last: ${date}`,
   // Lead action
   leadActionLabel:      'Lead action',
   leadActionNone:       'None',

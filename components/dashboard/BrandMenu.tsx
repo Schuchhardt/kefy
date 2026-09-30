@@ -4,31 +4,18 @@
 // Lo comparten el selector del sidebar (escritorio) y el de la barra superior
 // (móvil), para que ambos se comporten igual sin duplicar la lógica.
 
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useBrand } from '@/lib/brand-context';
 import BrandAvatar from '@/components/dashboard/BrandAvatar';
+import Button from '@/components/ui/Button';
+import { Field, Input } from '@/components/ui/Field';
+import Icon from '@/components/ui/icons';
+import esT from '@/locales/es/dashboard/brand-menu';
+import enT from '@/locales/en/dashboard/brand-menu';
+import styles from './BrandMenu.module.css';
 
-const COPY = {
-  es: {
-    newBrand: 'Nueva marca',
-    namePlaceholder: 'Nombre de la marca',
-    create: 'Crear',
-    cancel: 'Cancelar',
-    planLimit: 'Alcanzaste el límite de tu plan.',
-    upgrade: 'Mejorar plan',
-    createError: 'Error al crear la marca',
-  },
-  en: {
-    newBrand: 'New brand',
-    namePlaceholder: 'Brand name',
-    create: 'Create',
-    cancel: 'Cancel',
-    planLimit: "You've reached your plan limit.",
-    upgrade: 'Upgrade plan',
-    createError: 'Could not create the brand',
-  },
-} as const;
+const T = { es: esT, en: enT } as const;
 
 export default function BrandMenu({
   lang = 'es',
@@ -39,7 +26,7 @@ export default function BrandMenu({
   onDone: () => void;
 }) {
   const { brands, activeBrand, canCreate, switchBrand, createBrand } = useBrand();
-  const t = COPY[lang];
+  const t = T[lang] ?? T.es;
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -56,9 +43,10 @@ export default function BrandMenu({
     onDone();
   }
 
-  async function handleCreate() {
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault();
     const name = newName.trim();
-    if (!name) return;
+    if (!name || !canCreate) return;
     setSaving(true);
     setError(null);
     try {
@@ -67,123 +55,92 @@ export default function BrandMenu({
       setCreating(false);
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.createError);
+      // El servidor responde en inglés («Your plan allows…», «name is
+      // required»): a la persona, la copy de su idioma.
+      console.error('[brand menu] createBrand failed:', err);
+      setError(t.createError);
     } finally {
       setSaving(false);
     }
   }
 
+  function cancelCreate() {
+    setCreating(false);
+    setError(null);
+    setNewName('');
+  }
+
   return (
     <>
-      <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-        {brands.map((b) => (
-          <button
-            key={b.id}
-            onClick={() => handleSwitch(b.id)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 9,
-              width: '100%', padding: '11px 14px',
-              background: 'none', border: 'none', cursor: 'pointer',
-              fontFamily: 'var(--font-syne), system-ui, sans-serif',
-              transition: 'background 0.12s',
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
-          >
-            <BrandAvatar brand={b} size={22} />
-            <span style={{
-              flex: 1, textAlign: 'left', fontSize: 13,
-              color: b.id === activeBrand?.id ? 'var(--accent)' : 'var(--text)',
-              fontWeight: b.id === activeBrand?.id ? 700 : 400,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {b.name}
-            </span>
-            {b.id === activeBrand?.id && (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            )}
-          </button>
-        ))}
-      </div>
+      <ul className={styles.list} aria-label={t.brandsLabel}>
+        {brands.map((b) => {
+          const active = b.id === activeBrand?.id;
+          return (
+            <li key={b.id}>
+              <button
+                type="button"
+                onClick={() => void handleSwitch(b.id)}
+                aria-current={active ? 'true' : undefined}
+                className={`ui-hoverable ${styles.item}`}
+              >
+                {/* El nombre ya se lee al lado: el avatar no lo repite. */}
+                <span className={styles.avatar} aria-hidden="true">
+                  <BrandAvatar brand={b} size={22} />
+                </span>
+                <span className={styles.itemName}>{b.name}</span>
+                {active && <Icon name="check" size={14} strokeWidth={2.5} className={styles.check} />}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
 
-      <div style={{ borderTop: '1px solid var(--border)' }} />
+      <div className={styles.divider} />
 
       {creating ? (
-        <div style={{ padding: '10px 14px' }}>
+        <form className={styles.create} onSubmit={handleCreate}>
           {!canCreate && (
-            <p style={{ fontSize: 11, color: '#ff6b6b', margin: '0 0 8px', lineHeight: 1.4 }}>
+            <p className={styles.limit} role="status">
               {t.planLimit}{' '}
-              <Link href={`/${lang}/dashboard/settings`} style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+              <Link href={`/${lang}/dashboard/settings#billing`} onClick={onDone}>
                 {t.upgrade}
               </Link>
             </p>
           )}
-          <input
-            autoFocus
-            type="text"
-            placeholder={t.namePlaceholder}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && canCreate) handleCreate();
-              if (e.key === 'Escape') { setCreating(false); setError(null); }
-            }}
-            disabled={saving || !canCreate}
-            style={{
-              width: '100%', padding: '7px 10px',
-              background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 6, fontSize: 13, color: 'var(--text)',
-              fontFamily: 'var(--font-syne), system-ui, sans-serif',
-              outline: 'none', boxSizing: 'border-box',
-              marginBottom: 7, opacity: !canCreate ? 0.4 : 1,
-            }}
-          />
-          {error && <p style={{ fontSize: 11, color: '#ff6b6b', margin: '0 0 6px' }}>{error}</p>}
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              onClick={handleCreate}
-              disabled={saving || !newName.trim() || !canCreate}
-              style={{
-                flex: 1, padding: '6px 0', borderRadius: 6, border: 'none',
-                background: 'var(--accent)', color: '#000',
-                fontSize: 12, fontWeight: 700, cursor: canCreate ? 'pointer' : 'not-allowed',
-                fontFamily: 'var(--font-syne), system-ui, sans-serif',
-                opacity: saving || !newName.trim() || !canCreate ? 0.4 : 1,
-              }}
+          <Field label={t.nameLabel} hideLabel>
+            <Input
+              autoFocus
+              type="text"
+              placeholder={t.namePlaceholder}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') cancelCreate(); }}
+              disabled={saving || !canCreate}
+            />
+          </Field>
+          {error && <p className={styles.error} role="alert">{error}</p>}
+          <div className={styles.createActions}>
+            <Button
+              type="submit"
+              size="sm"
+              variant="primary"
+              loading={saving}
+              disabled={!newName.trim() || !canCreate}
             >
-              {saving ? '...' : t.create}
-            </button>
-            <button
-              onClick={() => { setCreating(false); setError(null); setNewName(''); }}
-              style={{
-                padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)',
-                background: 'none', color: 'var(--muted)', fontSize: 12, cursor: 'pointer',
-                fontFamily: 'var(--font-syne), system-ui, sans-serif',
-              }}
-            >
+              {saving ? t.creating : t.create}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={cancelCreate}>
               {t.cancel}
-            </button>
+            </Button>
           </div>
-        </div>
+        </form>
       ) : (
         <button
+          type="button"
           onClick={() => setCreating(true)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            width: '100%', padding: '11px 14px',
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontFamily: 'var(--font-syne), system-ui, sans-serif',
-            color: 'var(--muted)', fontSize: 13,
-          }}
+          className={`ui-hoverable ${styles.newBrand}`}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
+          <Icon name="plus" size={14} strokeWidth={2} />
           {t.newBrand}
         </button>
       )}

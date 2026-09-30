@@ -1,0 +1,252 @@
+/* ─── Estrategias (Mi marca › Estrategia) ──────────────────────────────────
+   Piezas que comparten las dos pestañas —recomendadas del catálogo y
+   personalizadas—: el resumen (enfoque y KPIs), el calendario, la mecánica de
+   conversión; y el panel y el editor de las propias. */
+
+.section { margin-bottom: 36px; min-width: 0; }
+.sectionLabel {
+  margin: 0 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Lo que recibe foco o scroll no queda bajo las pestañas fijas de Mi marca
+   (ni bajo la franja superior en móvil). */
+.anchor { scroll-margin-top: 72px; }
+
+/* ── Panel de estrategias propias ── */
+.panelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin-bottom: 20px;
+}
+.panelIntro { flex: 1 1 280px; min-width: 0; }
+.panelTitle {
+  margin: 0 0 6px;
+  font-family: var(--font-syne), system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+.panelDesc { margin: 0; max-width: 560px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.buttonRow { display: flex; flex-wrap: wrap; gap: 8px; }
+.notice { margin-bottom: 20px; }
+
+.list { list-style: none; margin: 0 0 32px; padding: 0; }
+.strategyCard {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 18px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.strategyCard[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cardName { font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.cardMeta { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.cardOrigin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--accent-text);
+}
+
+/* ── Resumen de una estrategia ── */
+.overview {
+  padding: 24px 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.overviewTitleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-bottom: 8px;
+}
+.overviewTitle {
+  margin: 0;
+  font-family: var(--font-syne), system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.overviewMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.overviewMeta strong { font-weight: 500; color: var(--text); }
+.overviewDesc {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted);
+  white-space: pre-line;
+}
+.kpis { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.kpis + .buttonRow { margin-top: 20px; }
+.kpiLabel {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.kpiPrimary { font-size: 14px; font-weight: 600; color: var(--accent-text); }
+.kpiSecondary { font-size: 14px; color: var(--text); }
+
+/* ── Mecánica de conversión ── */
+.mechanic {
+  margin-bottom: 36px;
+  padding: 20px 24px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 12px;
+}
+.mechanicLabel {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.mechanicText { margin: 0; font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-line; }
+
+/* ── Calendario ──
+   En escritorio es una tabla con una fila de grupo por semana; en móvil cada
+   pieza es una tarjeta (formato y canal arriba, tema, objetivo y «Generar»). */
+.calendarWrap { overflow-x: auto; }
+.calendar { width: 100%; border-collapse: collapse; font-size: 13px; }
+.calendar thead tr { border-bottom: 1.5px solid var(--border); }
+.colHead {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.weekRow th {
+  padding: 16px 12px 6px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.itemRow { border-bottom: 1px solid var(--border); transition: background-color 0.1s; }
+.itemRow:hover { background: var(--surface); }
+.itemRow td { padding: 12px; vertical-align: top; }
+.formatCell { white-space: nowrap; font-size: 12px; color: var(--muted); }
+.formatInner { display: inline-flex; align-items: center; gap: 6px; }
+.formatInner svg { color: var(--text-soft); }
+.channelCell { white-space: nowrap; font-size: 12px; color: var(--muted); }
+.topicCell { min-width: 200px; max-width: 340px; line-height: 1.5; color: var(--text); }
+.detail { margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.goalCell { font-size: 12px; color: var(--muted); }
+.actionCell { white-space: nowrap; text-align: right; }
+.cellLabel { display: none; }
+
+/* ── Editor ── */
+.editor { margin-bottom: 32px; }
+.editorTitle {
+  margin: 0 0 4px;
+  font-family: var(--font-syne), system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+.editorBody { display: grid; gap: 16px; margin-top: 16px; min-width: 0; }
+.subheading {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.rows { display: flex; flex-direction: column; gap: 12px; }
+.row {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.rowLegend { padding: 0 6px; font-size: 12px; font-weight: 700; color: var(--accent-text); }
+.rowActions { display: flex; justify-content: flex-end; }
+.errorList { margin: 0; padding-left: 18px; }
+.errorList:not(:first-child) { margin-top: 6px; }
+
+@media (max-width: 767px) {
+  .anchor { scroll-margin-top: calc(var(--mobile-topbar-h) + 64px); }
+  .overview { padding: 16px; }
+  .mechanic { padding: 16px; }
+
+  .calendarWrap { overflow: visible; }
+  .calendar,
+  .calendar tbody,
+  .calendar tr,
+  .calendar th,
+  .calendar td { display: block; }
+  .calendar thead { display: none; }
+  .weekRow th { padding: 12px 0 8px; }
+  .calendar .itemRow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    margin-bottom: 8px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .itemRow td { padding: 0; }
+  .topicCell,
+  .goalCell,
+  .actionCell { flex-basis: 100%; min-width: 0; max-width: none; }
+  .topicCell { font-weight: 600; }
+  .detail { font-weight: 400; }
+  .actionCell { margin-top: 4px; text-align: left; }
+  .cellLabel { display: inline; }
+}
