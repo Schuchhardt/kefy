@@ -40,6 +40,7 @@ import { advanceVideoJob, createVideoJob, MAX_STEP_ATTEMPTS } from '@/lib/video/
 import { compileVideoPlan } from '@/lib/video/plan';
 import { normalizeVideoScript } from '@/lib/video/script';
 import { OPERATION_CREDIT_COSTS as C } from '@/lib/plans';
+import { resolveFilmTheme } from '@/lib/video/brand';
 
 const script = normalizeVideoScript({
   characters: [{ id: 'ana', name: 'Ana', look: 'barista', voice: 'coral' }],
@@ -52,11 +53,14 @@ const script = normalizeVideoScript({
 async function newJob() {
   db.seed('kefy_content_items', [{ id: 'item-1', org_id: 'org-1', render_status: 'rendering', video_url: null, slides: [], metadata: {} }]);
   const plan = compileVideoPlan(script, { capabilities: { animation: true, lipsync: true } });
-  return createVideoJob(db.client, {
+  const jobId = await createVideoJob(db.client, {
     orgId: 'org-1', brandId: null, userId: 'u1',
     target: { table: 'kefy_content_items', id: 'item-1' },
-    script, plan, renderContext: { plan: 'pro', name: 'Marca', accentColor: '#c6ff4b' },
+    script, plan, renderContext: { plan: 'pro', theme: resolveFilmTheme({ name: 'Marca', accent_color: '#c6ff4b' }) },
   });
+  // Lo que hace produceVideo: la pieza apunta a su producción.
+  db.find('kefy_content_items', (r) => r.id === 'item-1')!.metadata = { video_job_id: jobId };
+  return jobId;
 }
 
 function step(key: string) {
@@ -166,6 +170,57 @@ describe('advanceVideoJob', () => {
     await Promise.all([advanceVideoJob(db.client, jobId), advanceVideoJob(db.client, jobId)]);
     expect(runs.filter((r) => r.stepKey === 'img_s1')).toHaveLength(1);
     expect(runs.filter((r) => r.stepKey === 'anim_s1')).toHaveLength(1);
+  });
+
+  it('una vuelta atrasada no devuelve dos veces los créditos de un paso fallido', async () => {
+    const jobId = await newJob();
+    await advanceVideoJob(db.client, jobId);       // anim_s1 encolada (intento 1)
+    pollBehavior.animate_image = () => ({ status: 'failed', error: 'model error' });
+    await advanceVideoJob(db.client, jobId);       // falla → reintento: intento 2 encolado
+    expect(step('anim_s1')).toMatchObject({ status: 'running', attempts: 2 });
+
+    // Tres consultas a la vez sobre el último intento (polling, cron, webhook).
+    await Promise.all([advanceVideoJob(db.client, jobId), advanceVideoJob(db.client, jobId), advanceVideoJob(db.client, jobId)]);
+    expect(step('anim_s1').status).toBe('failed');
+    expect(refundCount()).toBe(1);
+  });
+
+  it('sin pasos síncronos (webhook) solo consulta y encola en la nube', async () => {
+    const jobId = await newJob();
+    await advanceVideoJob(db.client, jobId, { syncSteps: false });
+    expect(runs).toHaveLength(0);
+    expect(step('img_s1').status).toBe('pending');
+  });
+
+  it('si la pieza se borró, cancela el trabajo y no gasta más', async () => {
+    const jobId = await newJob();
+    db.rows('kefy_content_items').length = 0;
+    const snap = await advanceVideoJob(db.client, jobId);
+    expect(snap).toMatchObject({ status: 'canceled', error: 'target_deleted' });
+    expect(runs).toHaveLength(0);
+    expect(creditsSpent()).toBe(0);
+  });
+
+  it('un trabajo reemplazado por otro no escribe su video en la pieza', async () => {
+    const jobId = await newJob();
+    for (let i = 0; i < 3; i++) await advanceVideoJob(db.client, jobId);
+    // Llega otra producción (el usuario editó y volvió a producir).
+    db.find('kefy_content_items', (r) => r.id === 'item-1')!.metadata = { video_job_id: 'otro-trabajo' };
+    const snap = await advanceVideoJob(db.client, jobId);
+    expect(snap!.status).toBe('canceled');
+    expect(db.find('kefy_content_items', (r) => r.id === 'item-1')!.video_url).toBeNull();
+  });
+
+  it('las fotos se copian a las escenas sin pisar el texto que el usuario editó', async () => {
+    const jobId = await newJob();
+    const item = db.find('kefy_content_items', (r) => r.id === 'item-1')!;
+    item.slides = [
+      { scene_order: 1, scene_id: 's1', title: 'Editado', body: 'Texto del usuario' },
+      { scene_order: 2, scene_id: 's2', title: '', body: 'Chao' },
+    ];
+    for (let i = 0; i < 3; i++) await advanceVideoJob(db.client, jobId);
+    const slides = item.slides as Array<Record<string, unknown>>;
+    expect(slides[0]).toMatchObject({ title: 'Editado', body: 'Texto del usuario', image_url: 'https://cdn/img_s1.jpg', text_baked: false });
   });
 
   it('una excepción de la herramienta se reintenta antes de darla por fallida', async () => {

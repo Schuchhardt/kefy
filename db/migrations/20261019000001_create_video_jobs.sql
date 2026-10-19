@@ -34,11 +34,18 @@ CREATE TABLE IF NOT EXISTS kefy_video_jobs (
   error           TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Última vuelta del motor: el cron avanza primero los que llevan más tiempo
+  -- sin vuelta (los pasos no tocan updated_at del trabajo).
+  advanced_at     TIMESTAMPTZ,
   finished_at     TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS kefy_video_jobs_target_idx ON kefy_video_jobs (target_table, target_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS kefy_video_jobs_running_idx ON kefy_video_jobs (status, updated_at) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS kefy_video_jobs_running_idx ON kefy_video_jobs (advanced_at NULLS FIRST) WHERE status = 'running';
+-- Una sola producción en curso por pieza: dos «Producir» simultáneos no
+-- cobran dos veces (el segundo choca aquí y devuelve el primero).
+CREATE UNIQUE INDEX IF NOT EXISTS kefy_video_jobs_one_running
+  ON kefy_video_jobs (target_table, target_id) WHERE status = 'running';
 
 CREATE TRIGGER kefy_video_jobs_updated_at
   BEFORE UPDATE ON kefy_video_jobs
@@ -76,8 +83,9 @@ CREATE TRIGGER kefy_video_steps_updated_at
   BEFORE UPDATE ON kefy_video_steps
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
--- Voces (wav) y clips generados. Público como kefy-content-images: Remotion
--- Lambda y los proveedores (fal.ai) descargan estas URLs sin credenciales.
+-- Voces generadas (wav). Público como kefy-content-images: Remotion Lambda y
+-- fal.ai (lipsync) descargan estas URLs sin credenciales. Los clips de fal se
+-- usan desde su propia URL.
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('kefy-video-assets', 'kefy-video-assets', true)
 ON CONFLICT (id) DO NOTHING;

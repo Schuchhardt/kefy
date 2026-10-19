@@ -3,8 +3,8 @@ import type React from 'react';
 import {
   AbsoluteFill,
   Audio,
+  Freeze,
   Img,
-  Loop,
   OffthreadVideo,
   Sequence,
   continueRender,
@@ -15,8 +15,8 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import { AnimatedGradientBg, LOGO_SFX, TRANSITION_SFX, isSvgUrl, overlapFor } from './ReelComposition';
-import type { FilmCameraMove, FilmCompositionProps, FilmScene, FilmWord } from './film-types';
+import { LOGO_SFX, TRANSITION_SFX, isSvgUrl, overlapFor } from './ReelComposition';
+import type { FilmCameraMove, FilmCompositionProps, FilmOutro, FilmScene, FilmTheme, FilmWord } from './film-types';
 
 // ─── KefyFilm ─────────────────────────────────────────────────────────────────
 //
@@ -25,9 +25,13 @@ import type { FilmCameraMove, FilmCompositionProps, FilmScene, FilmWord } from '
 // una foto con movimiento de cámara) con su voz, y el texto principal son los
 // subtítulos de esa voz, palabra a palabra. Los titulares son opcionales.
 //
-// La duración total es la suma de los planos, igual que en KefyReel: las
-// transiciones toman prestados frames de la cola del plano anterior (ver
-// overlapFor) y no alargan el video.
+// Todo el diseño sale de `theme` (lib/video/brand.ts): acento, tipografías,
+// fondo y logo de la marca, o el respaldo cuando la marca no los definió. La
+// composición no decide colores: solo los aplica.
+//
+// La duración total es la suma de los planos más el cierre: las transiciones
+// toman prestados frames de la cola del plano anterior (ver overlapFor) y no
+// alargan el video.
 
 export type { FilmCompositionProps } from './film-types';
 
@@ -38,10 +42,23 @@ const MUSIC_VOLUME_UNDER  = 0.1;
 const MUSIC_FADE_IN       = 24;
 const MUSIC_FADE_OUT      = 45;
 const CAPTION_MAX_WORDS   = 3;
+/** El cierre entra fundiéndose sobre la cola del último plano. */
+const OUTRO_OVERLAP       = 12;
+
+/** Respaldo si una props vieja llega sin theme (no debería). */
+const DEFAULT_THEME: FilmTheme = {
+  accent: '#ffd23f', onAccent: '#0b0b0f', primary: '#14141c', secondary: '#2a2440', onPrimary: '#ffffff',
+  headingFont: 'Montserrat', bodyFont: 'Montserrat', branded: false,
+};
 
 function sceneSeconds(scene: Partial<FilmScene> | undefined): number {
   const d = scene?.duration_seconds;
   return typeof d === 'number' && d > 0 ? d : DEFAULT_SCENE_SECONDS;
+}
+
+function outroFrames(outro: FilmOutro | null | undefined, fps: number): number {
+  const d = outro?.duration_seconds;
+  return typeof d === 'number' && d > 0 ? Math.round(d * fps) : 0;
 }
 
 export function getFilmSceneRanges(scenes: FilmScene[], fps: number) {
@@ -54,8 +71,8 @@ export function getFilmSceneRanges(scenes: FilmScene[], fps: number) {
   });
 }
 
-export function getFilmTotalFrames(scenes: FilmScene[], fps = 30): number {
-  return scenes.reduce((acc, s) => acc + Math.max(1, Math.round(sceneSeconds(s) * fps)), 0);
+export function getFilmTotalFrames(scenes: FilmScene[], fps = 30, outro?: FilmOutro | null): number {
+  return scenes.reduce((acc, s) => acc + Math.max(1, Math.round(sceneSeconds(s) * fps)), 0) + outroFrames(outro, fps);
 }
 
 export function calculateFilmMetadata(
@@ -63,7 +80,7 @@ export function calculateFilmMetadata(
   fps = 30,
 ): { durationInFrames: number } {
   const scenes = Array.isArray(props?.scenes) ? props.scenes : [];
-  return { durationInFrames: Math.max(1, getFilmTotalFrames(scenes, fps)) };
+  return { durationInFrames: Math.max(1, getFilmTotalFrames(scenes, fps, props?.outro)) };
 }
 
 /** Frames de transición de entrada de un plano. Los cortes secos y los planos
@@ -93,6 +110,54 @@ export function captionPages(words: FilmWord[], maxWords = CAPTION_MAX_WORDS): F
   return pages;
 }
 
+function fontStack(family: string): string {
+  return `'${family}', 'Montserrat', system-ui, -apple-system, sans-serif`;
+}
+
+// ─── Tipografías ──────────────────────────────────────────────────────────────
+// Se piden a Google Fonts desde el navegador del render (local y Lambda). No
+// todas las familias tienen 800/900: la API responde 400 si se pide un peso
+// que no existe, así que se prueba de más a menos pesos. Después se espera a
+// que la fuente esté de verdad cargada (document.fonts.load), no solo la hoja
+// de estilos: si no, los primeros frames salen con la fuente del sistema.
+
+const WEIGHT_SETS = ['400;600;700;800;900', '400;700;900', '400;700', ''];
+
+async function loadGoogleFont(family: string): Promise<void> {
+  for (const weights of WEIGHT_SETS) {
+    const url = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}${weights ? `:wght@${weights}` : ''}&display=block`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const style = document.createElement('style');
+      style.textContent = await res.text();
+      document.head.appendChild(style);
+      await Promise.all(['400', '700', '800', '900'].map((w) => document.fonts.load(`${w} 64px '${family}'`).catch(() => [])));
+      return;
+    } catch {
+      // Sin red o familia inexistente: se prueba la siguiente variante y, al
+      // final, queda la pila de respaldo de fontStack.
+    }
+  }
+}
+
+// ─── Imágenes que no tumban el render ─────────────────────────────────────────
+// Remotion cancela el render entero si un <Img> no carga (tras sus
+// reintentos). Una foto de un reel viejo borrada del Storage, o un logo que
+// cambió de URL, no puede costar el video: con onError, la imagen se oculta y
+// queda lo que haya debajo (el fondo de marca).
+
+function SafeImg({ src, style, onFail }: { src: string; style: React.CSSProperties; onFail?: () => void }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  const fail = () => { setFailed(true); onFail?.(); };
+  if (isSvgUrl(src)) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt="" style={style} onError={fail} />;
+  }
+  return <Img src={src} style={style} maxRetries={2} onError={fail} />;
+}
+
 // ─── Cámara (fotos fijas) ─────────────────────────────────────────────────────
 
 const CAMERA: Record<FilmCameraMove, { s: [number, number]; x: [number, number]; y: [number, number] }> = {
@@ -103,10 +168,30 @@ const CAMERA: Record<FilmCameraMove, { s: [number, number]; x: [number, number];
   static:    { s: [1.03, 1.05], x: [0, 0],    y: [0, 0] },
 };
 
+// ─── Fondo de marca (planos sin imagen) ───────────────────────────────────────
+
+function BrandBackdrop({ frame, durationFrames, theme }: { frame: number; durationFrames: number; theme: FilmTheme }) {
+  const t  = frame / Math.max(durationFrames, 1);
+  const x1 = 30 + Math.sin(t * Math.PI * 2) * 20;
+  const y1 = 25 + Math.cos(t * Math.PI * 1.5) * 15;
+  const x2 = 70 + Math.cos(t * Math.PI * 1.5) * 18;
+  const y2 = 72 + Math.sin(t * Math.PI * 2) * 12;
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      background: [
+        `radial-gradient(ellipse at ${x1}% ${y1}%, ${theme.accent}33 0%, transparent 55%)`,
+        `radial-gradient(ellipse at ${x2}% ${y2}%, ${theme.secondary} 0%, transparent 60%)`,
+        `linear-gradient(160deg, ${theme.primary} 0%, ${theme.secondary} 55%, ${theme.primary} 100%)`,
+      ].join(', '),
+    }} />
+  );
+}
+
 // ─── Subtítulos ───────────────────────────────────────────────────────────────
 
-function Captions({ words, speechStartFrame, accentColor }: {
-  words: FilmWord[]; speechStartFrame: number; accentColor: string;
+function Captions({ words, speechStartFrame, theme }: {
+  words: FilmWord[]; speechStartFrame: number; theme: FilmTheme;
 }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -125,21 +210,24 @@ function Captions({ words, speechStartFrame, accentColor }: {
 
   return (
     <div style={{
-      position: 'absolute', left: 60, right: 60, bottom: 520,
-      display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '10px 16px',
+      position: 'absolute', left: 64, right: 64, bottom: 500,
+      display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '10px 14px',
       transform: `scale(${interpolate(pop, [0, 1], [0.86, 1])})`,
       opacity: interpolate(pop, [0, 1], [0, 1]),
     }}>
       {page.map((w, i) => {
-        const active = t >= w.start && t < w.end + 0.05;
+        // Una sola palabra activa: la última que ya empezó, mientras dure (o
+        // hasta que empiece la siguiente, si hay una pausa corta entre medio).
+        const next = page[i + 1];
+        const active = t >= w.start && (next ? t < next.start : t <= w.end + 0.25);
         return (
           <span key={`${w.start}-${i}`} style={{
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-            fontWeight: 900, fontSize: 70, lineHeight: 1.15, letterSpacing: '-0.5px',
+            fontFamily: fontStack(theme.bodyFont),
+            fontWeight: 800, fontSize: 74, lineHeight: 1.15, letterSpacing: '-0.5px',
             padding: '2px 14px', borderRadius: 14,
-            color: active ? '#0b0b0f' : '#fff',
-            background: active ? accentColor : 'transparent',
-            textShadow: active ? 'none' : '0 4px 18px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.9)',
+            color: active ? theme.onAccent : '#ffffff',
+            background: active ? theme.accent : 'transparent',
+            textShadow: active ? 'none' : '0 4px 18px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.95)',
           }}>
             {w.text}
           </span>
@@ -151,14 +239,14 @@ function Captions({ words, speechStartFrame, accentColor }: {
 
 // ─── Plano ────────────────────────────────────────────────────────────────────
 
-function FilmShot({ scene, durationFrames, introOffset, isFirst, isLast, accentColor, fontHeading, captions }: {
+function FilmShot({ scene, durationFrames, introOffset, isFirst, fadeOut, theme, captions }: {
   scene:          FilmScene;
   durationFrames: number;
   introOffset:    number;
   isFirst:        boolean;
-  isLast:         boolean;
-  accentColor:    string;
-  fontHeading?:   string;
+  /** El último plano funde a negro si no hay cierre que lo cubra. */
+  fadeOut:        boolean;
+  theme:          FilmTheme;
   captions:       boolean;
 }) {
   const frame = useCurrentFrame();
@@ -169,7 +257,7 @@ function FilmShot({ scene, durationFrames, introOffset, isFirst, isLast, accentC
   const enter = introOffset > 0
     ? interpolate(frame, [0, introOffset], [0, 1], { extrapolateRight: 'clamp' })
     : 1;
-  const exit = isLast
+  const exit = fadeOut
     ? interpolate(frame, [durationFrames - 12, durationFrames], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
     : 1;
   let transform = '';
@@ -184,33 +272,51 @@ function FilmShot({ scene, durationFrames, introOffset, isFirst, isLast, accentC
   const opts = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' } as const;
   const camTransform = `scale(${interpolate(frame, p, cam.s, opts)}) translate(${interpolate(frame, p, cam.x, opts)}px, ${interpolate(frame, p, cam.y, opts)}px)`;
 
+  // Debajo de cada foto, el fondo de marca: si la foto no carga, queda ese.
+  const photo = (src: string) => (
+    <>
+      <AbsoluteFill><BrandBackdrop frame={frame} durationFrames={durationFrames} theme={theme} /></AbsoluteFill>
+      <div style={{ position: 'absolute', inset: 0, transform: camTransform, transformOrigin: 'center' }}>
+        <SafeImg src={src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      </div>
+    </>
+  );
+
   let visual: React.ReactNode;
   if (scene.visual.type === 'video') {
+    // El clip corre una sola vez. Repetirlo con <Loop> se notaba como un salto
+    // y, en un clip con lipsync, repetía las primeras sílabas de la línea. Si
+    // termina antes que el plano, queda congelado su último cuadro (mudo) sobre
+    // la foto del plano.
     const clipFrames = Math.max(1, Math.round(scene.visual.clip_seconds * fps));
-    const video = (
-      <OffthreadVideo
-        src={scene.visual.src}
-        muted={!scene.visual.has_audio}
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      />
-    );
-    // Un clip más corto que el plano se repite en vez de congelarse en negro.
-    visual = clipFrames < durationFrames
-      ? <Loop durationInFrames={clipFrames}>{video}</Loop>
-      : video;
-  } else if (scene.visual.type === 'image') {
+    const { src, has_audio: hasAudio, poster } = scene.visual;
     visual = (
-      <div style={{ width: '100%', height: '100%', transform: camTransform, transformOrigin: 'center' }}>
-        <Img src={scene.visual.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      </div>
+      <>
+        {poster && <AbsoluteFill>{photo(poster)}</AbsoluteFill>}
+        <Sequence durationInFrames={Math.min(clipFrames, durationFrames)} layout="none">
+          <AbsoluteFill>
+            <OffthreadVideo src={src} muted={!hasAudio} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </AbsoluteFill>
+        </Sequence>
+        {clipFrames < durationFrames && (
+          <Sequence from={clipFrames} layout="none">
+            <AbsoluteFill>
+              <Freeze frame={Math.max(0, clipFrames - 1)}>
+                <OffthreadVideo src={src} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              </Freeze>
+            </AbsoluteFill>
+          </Sequence>
+        )}
+      </>
     );
+  } else if (scene.visual.type === 'image') {
+    visual = photo(scene.visual.src);
   } else {
-    visual = <AnimatedGradientBg frame={frame} durationFrames={durationFrames} accentColor={accentColor} />;
+    visual = <BrandBackdrop frame={frame} durationFrames={durationFrames} theme={theme} />;
   }
 
   // ── Titular ────────────────────────────────────────────────────────────
   const titlePop = spring({ frame: settled - 4, fps, config: { damping: 12, stiffness: 240, mass: 0.6 } });
-  const headingFont = fontHeading ? `'${fontHeading}', system-ui, sans-serif` : 'system-ui, sans-serif';
   const speechStart = introOffset + Math.round(scene.speech_offset * fps);
 
   return (
@@ -219,7 +325,7 @@ function FilmShot({ scene, durationFrames, introOffset, isFirst, isLast, accentC
 
       {/* Legibilidad de titular y subtítulos */}
       <AbsoluteFill style={{
-        background: 'linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 28%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%)',
+        background: 'linear-gradient(to bottom, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0) 26%, rgba(0,0,0,0) 52%, rgba(0,0,0,0.58) 100%)',
       }} />
 
       {scene.voice && (
@@ -230,63 +336,141 @@ function FilmShot({ scene, durationFrames, introOffset, isFirst, isLast, accentC
 
       {scene.on_screen_text && (
         <div style={{
-          position: 'absolute', top: 220, left: 68, right: 68,
-          transform: `scale(${interpolate(titlePop, [0, 1], [0.8, 1])})`,
+          position: 'absolute', top: isFirst ? 250 : 230, left: 64, right: 64,
+          transform: `scale(${interpolate(titlePop, [0, 1], [0.8, 1])}) rotate(${interpolate(titlePop, [0, 1], [-2, 0])}deg)`,
           opacity: interpolate(titlePop, [0, 1], [0, 1]),
           transformOrigin: 'left top',
+          lineHeight: 1.32,
         }}>
           <span style={{
-            display: 'inline',
-            fontFamily: headingFont, fontWeight: 900,
-            fontSize: isFirst ? 92 : 68, lineHeight: 1.12, letterSpacing: '-1.5px',
-            color: '#fff',
-            textShadow: '0 4px 28px rgba(0,0,0,0.85)',
-            boxShadow: `inset 0 -0.22em 0 ${accentColor}`,
+            fontFamily: fontStack(theme.headingFont), fontWeight: 900,
+            fontSize: isFirst ? 84 : 60, letterSpacing: '-1px',
+            color: theme.onAccent, background: theme.accent,
+            padding: '4px 20px', borderRadius: 14,
+            boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.35)',
           }}>
             {scene.on_screen_text}
           </span>
         </div>
       )}
 
-      {captions && <Captions words={scene.words} speechStartFrame={speechStart} accentColor={accentColor} />}
+      {captions && <Captions words={scene.words} speechStartFrame={speechStart} theme={theme} />}
+    </AbsoluteFill>
+  );
+}
+
+// ─── Marca: logo y cierre ─────────────────────────────────────────────────────
+
+function Wordmark({ theme, style }: { theme: FilmTheme; style?: React.CSSProperties }) {
+  if (!theme.brandName) return null;
+  return (
+    <span style={{
+      display: 'inline-block',
+      fontFamily: fontStack(theme.headingFont), fontWeight: 800, fontSize: 30, color: '#fff',
+      letterSpacing: '-0.3px', textShadow: '0 2px 12px rgba(0,0,0,0.8)',
+      borderBottom: `4px solid ${theme.accent}`, paddingBottom: 4,
+      ...style,
+    }}>
+      {theme.brandName}
+    </span>
+  );
+}
+
+function BrandMark({ theme, height, frame, fps }: { theme: FilmTheme; height: number; frame: number; fps: number }) {
+  // Un logo que no carga (URL vieja, servidor caído) no deja un chip vacío:
+  // queda el nombre de la marca.
+  const [logoOk, setLogoOk] = useState(true);
+  const pop = spring({ frame, fps, config: { damping: 16, stiffness: 100 } });
+  const style: React.CSSProperties = {
+    transform: `scale(${interpolate(pop, [0, 1], [0.6, 1])})`,
+    opacity: interpolate(pop, [0, 1], [0, 1]),
+    transformOrigin: 'top left',
+  };
+  if (theme.logoUrl && logoOk) {
+    // Los logos suelen estar pensados para fondo claro: un chip blanco evita
+    // que un logo oscuro desaparezca sobre una foto oscura.
+    const img: React.CSSProperties = { height, maxWidth: height * 4, objectFit: 'contain', display: 'block' };
+    return (
+      <div style={{ ...style, background: 'rgba(255,255,255,0.94)', borderRadius: 16, padding: '10px 16px', boxShadow: '0 6px 24px rgba(0,0,0,0.25)' }}>
+        <SafeImg src={theme.logoUrl} style={img} onFail={() => setLogoOk(false)} />
+      </div>
+    );
+  }
+  return <Wordmark theme={theme} style={style} />;
+}
+
+function OutroCard({ theme, outro, durationFrames }: { theme: FilmTheme; outro: FilmOutro; durationFrames: number }) {
+  const [logoOk, setLogoOk] = useState(true);
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const fadeIn  = interpolate(frame, [0, OUTRO_OVERLAP], [0, 1], { extrapolateRight: 'clamp' });
+  const fadeOut = interpolate(frame, [durationFrames - 10, durationFrames], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const card = spring({ frame: frame - 4, fps, config: { damping: 14, stiffness: 140 } });
+  const text = spring({ frame: frame - 12, fps, config: { damping: 18, stiffness: 120 } });
+
+  return (
+    <AbsoluteFill style={{ opacity: fadeIn * fadeOut, background: `linear-gradient(165deg, ${theme.primary} 0%, ${theme.secondary} 100%)` }}>
+      <AbsoluteFill style={{ background: `radial-gradient(ellipse at 50% 38%, ${theme.accent}40 0%, transparent 60%)` }} />
+      <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', gap: 44, padding: '0 90px', textAlign: 'center' }}>
+        <div style={{ transform: `scale(${interpolate(card, [0, 1], [0.7, 1])})`, opacity: interpolate(card, [0, 1], [0, 1]) }}>
+          {theme.logoUrl && logoOk ? (
+            <div style={{ background: '#ffffff', borderRadius: 36, padding: '48px 64px', boxShadow: '0 30px 80px rgba(0,0,0,0.35)' }}>
+              <SafeImg src={theme.logoUrl} style={{ maxHeight: 220, maxWidth: 620, objectFit: 'contain', display: 'block' }} onFail={() => setLogoOk(false)} />
+            </div>
+          ) : (
+            <span style={{
+              fontFamily: fontStack(theme.headingFont), fontWeight: 900, fontSize: 120, lineHeight: 1.05,
+              letterSpacing: '-3px', color: theme.onPrimary, borderBottom: `12px solid ${theme.accent}`, paddingBottom: 10,
+            }}>
+              {theme.brandName}
+            </span>
+          )}
+        </div>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 28,
+          transform: `translateY(${interpolate(text, [0, 1], [30, 0])}px)`, opacity: interpolate(text, [0, 1], [0, 1]),
+        }}>
+          {(outro.headline || theme.tagline) && (
+            <span style={{ fontFamily: fontStack(theme.bodyFont), fontWeight: 700, fontSize: 52, lineHeight: 1.25, color: theme.onPrimary }}>
+              {outro.headline || theme.tagline}
+            </span>
+          )}
+          {theme.contact && (
+            <span style={{
+              fontFamily: fontStack(theme.bodyFont), fontWeight: 800, fontSize: 44,
+              color: theme.onAccent, background: theme.accent, borderRadius: 999, padding: '14px 36px',
+            }}>
+              {theme.contact}
+            </span>
+          )}
+        </div>
+      </AbsoluteFill>
     </AbsoluteFill>
   );
 }
 
 // ─── Composición ──────────────────────────────────────────────────────────────
 
-export function FilmComposition({
-  scenes, brandName, accentColor = '#c6ff4b', fontHeading, logoUrl, musicTrack, captions = true,
-}: FilmCompositionProps) {
+export function FilmComposition({ scenes, theme: themeProp, outro, musicTrack, captions = true }: FilmCompositionProps) {
+  const theme = themeProp ?? DEFAULT_THEME;
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
   const ranges = getFilmSceneRanges(scenes, fps);
+  const scenesEnd = ranges.length ? ranges[ranges.length - 1]!.end : 0;
+  const outroLen = outroFrames(outro, fps);
   const hasSpeech = scenes.some((s) => s.voice || (s.visual.type === 'video' && s.visual.has_audio));
   const musicLevel = hasSpeech ? MUSIC_VOLUME_UNDER : MUSIC_VOLUME_SOLO;
 
-  const [fontHandle] = useState(() => delayRender('Loading brand font'));
+  const [fontHandle] = useState(() => delayRender('Loading brand fonts'));
   useEffect(() => {
-    if (!fontHeading) { continueRender(fontHandle); return; }
-    const link  = document.createElement('link');
-    link.rel    = 'stylesheet';
-    link.href   = `https://fonts.googleapis.com/css2?family=${fontHeading.replace(/ /g, '+')}:wght@400;700;900&display=swap`;
-    link.onload = () => continueRender(fontHandle);
-    link.onerror = () => continueRender(fontHandle);
-    document.head.appendChild(link);
+    const families = [...new Set([theme.headingFont, theme.bodyFont, 'Montserrat'])];
+    Promise.all(families.map(loadGoogleFont)).finally(() => continueRender(fontHandle));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const logoSpring = spring({ frame, fps, config: { damping: 16, stiffness: 100 } });
-  const logoStyle: React.CSSProperties = {
-    position: 'absolute', top: 52, left: 52, height: 64, maxWidth: 220, objectFit: 'contain',
-    filter: 'drop-shadow(0 2px 10px rgba(0,0,0,0.75))',
-    transform: `scale(${interpolate(logoSpring, [0, 1], [0.55, 1])})`,
-    opacity: interpolate(logoSpring, [0, 1], [0, 1]),
-    transformOrigin: 'top left',
-  };
-
   return (
-    <AbsoluteFill style={{ background: '#080810' }}>
+    <AbsoluteFill style={{ background: theme.primary }}>
       {musicTrack && (
         <Audio
           src={staticFile(`audio/music/${musicTrack}`)}
@@ -300,7 +484,7 @@ export function FilmComposition({
         />
       )}
 
-      {(logoUrl || brandName) && (
+      {(theme.logoUrl || theme.brandName) && (
         <Sequence from={4} durationInFrames={30} layout="none">
           <Audio src={staticFile(`audio/sfx/${LOGO_SFX}`)} volume={0.4} />
         </Sequence>
@@ -319,32 +503,30 @@ export function FilmComposition({
               durationFrames={range.durationFrames + introOffset}
               introOffset={introOffset}
               isFirst={i === 0}
-              isLast={i === scenes.length - 1}
-              accentColor={accentColor}
-              fontHeading={fontHeading}
+              fadeOut={i === scenes.length - 1 && outroLen === 0}
+              theme={theme}
               captions={captions}
             />
           </Sequence>
         );
       })}
 
-      {logoUrl ? (
-        isSvgUrl(logoUrl)
-          // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={logoUrl} alt="" style={logoStyle} />
-          : <Img src={logoUrl} style={logoStyle} />
-      ) : brandName ? (
-        <span style={{
-          ...logoStyle, height: undefined, maxWidth: undefined,
-          fontFamily: fontHeading ? `'${fontHeading}', system-ui, sans-serif` : 'system-ui, sans-serif',
-          fontWeight: 800, fontSize: 26, color: '#fff', textShadow: '0 2px 10px rgba(0,0,0,0.75)',
-        }}>
-          {brandName}
-        </span>
-      ) : null}
+      {/* Logo o nombre arriba a la izquierda mientras corren los planos */}
+      <Sequence from={0} durationInFrames={Math.max(1, scenesEnd)} layout="none">
+        <div style={{ position: 'absolute', top: 52, left: 52 }}>
+          <BrandMark theme={theme} height={60} frame={frame} fps={fps} />
+        </div>
+      </Sequence>
 
-      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, background: 'rgba(255,255,255,0.10)' }}>
-        <div style={{ height: '100%', width: `${(frame / Math.max(1, durationInFrames)) * 100}%`, background: accentColor }} />
+      {outro && outroLen > 0 && (
+        <Sequence from={Math.max(0, scenesEnd - OUTRO_OVERLAP)} durationInFrames={outroLen + OUTRO_OVERLAP}>
+          <Audio src={staticFile(`audio/sfx/${LOGO_SFX}`)} volume={0.35} />
+          <OutroCard theme={theme} outro={outro} durationFrames={outroLen + OUTRO_OVERLAP} />
+        </Sequence>
+      )}
+
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 5, background: 'rgba(255,255,255,0.12)' }}>
+        <div style={{ height: '100%', width: `${(frame / Math.max(1, durationInFrames)) * 100}%`, background: theme.accent }} />
       </div>
     </AbsoluteFill>
   );

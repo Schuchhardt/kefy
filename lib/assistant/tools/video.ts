@@ -102,7 +102,9 @@ const getVideoStatusTool = defineTool({
   input: z.object({ item_id: z.uuid(), format }).strict(),
   confirm: 'never',
   handler: async (ctx, input) => {
-    const production = await getVideoProduction(ctx, { itemId: input.item_id, format: input.format });
+    // Vuelta corta y sin pasos síncronos: no bloquea el turno del chat con
+    // una imagen de un minuto.
+    const production = await getVideoProduction(ctx, { itemId: input.item_id, format: input.format, budgetMs: 5000 });
     return { data: { item_id: input.item_id, production }, links: [itemLink(ctx.language, input.item_id)] };
   },
 });

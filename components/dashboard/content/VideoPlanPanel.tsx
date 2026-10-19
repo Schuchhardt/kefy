@@ -8,7 +8,7 @@
 //
 // También pinta el avance de una producción en curso (VideoProgressSteps).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Button from '@/components/ui/Button';
 import Notice from '@/components/ui/Notice';
 import { Field, Select } from '@/components/ui/Field';
@@ -46,17 +46,22 @@ export function VideoPlanPanel({ itemId, format, lang = 'es', busy = false, onPr
   const [plan, setPlan]     = useState<VideoPlanView | null>(null);
   const [error, setError]   = useState<string | null>(null);
 
+  // Cambiar de nivel rápido dispara varias peticiones: solo vale la última,
+  // si no el total mostrado podía ser de otro nivel que el que se produce.
+  const requestRef = useRef(0);
   const load = useCallback(async (m: MotionLevel) => {
+    const request = ++requestRef.current;
     setError(null);
     try {
       const qs = new URLSearchParams({ itemId, motion: m, lang });
       if (format) qs.set('format', format);
       const res = await fetch(`/api/content/reel/plan?${qs}`, { credentials: 'include' });
       const data = await res.json() as VideoPlanView & { error?: string };
+      if (request !== requestRef.current) return;
       if (!res.ok) { setError(data.error ?? t.loadError); return; }
       setPlan(data);
     } catch {
-      setError(t.loadError);
+      if (request === requestRef.current) setError(t.loadError);
     }
   }, [itemId, format, lang, t.loadError]);
 
@@ -143,7 +148,7 @@ export function VideoPlanPanel({ itemId, format, lang = 'es', busy = false, onPr
         variant="primary"
         block
         loading={busy}
-        disabled={busy || !enough}
+        disabled={busy || !enough || plan.motion !== motion}
         icon={<Icon name="video" size={16} />}
         onClick={() => onProduce(motion)}
       >

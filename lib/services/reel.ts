@@ -34,6 +34,7 @@ import type { ReelScene } from '@/types/content';
 import type { BrandKit } from '@/types/brand-kit';
 import { scriptToReelScenes, type VideoScript } from '@/lib/video/script';
 import { compileVideoPlan } from '@/lib/video/plan';
+import { videoBrandBrief, type VideoBrandKit } from '@/lib/video/brand';
 import { VIDEO_TOOLS } from '@/lib/video/tools';
 
 const ROUTE = 'POST /api/content/reel';
@@ -46,16 +47,7 @@ export const REEL_VARIANT_COUNT_MAX = 3;
 const VALID_IMAGE_QUALITIES = new Set(['low', 'medium', 'high']);
 type ImageQuality = 'low' | 'medium' | 'high';
 
-type KitRow = {
-  id?:              string | null;
-  name?:            string | null;
-  tagline?:         string | null;
-  tone?:            string[] | null;
-  industry?:        string | null;
-  primary_color?:   string | null;
-  secondary_color?: string | null;
-  accent_color?:    string | null;
-};
+type KitRow = VideoBrandKit & { id?: string | null };
 
 export interface GenerateReelInput {
   topic:                  string;
@@ -124,7 +116,10 @@ async function generateOneVariant(
       tone:        promptCtx.tone,
       brandName:   promptCtx.brandName,
       tagline:     promptCtx.tagline,
-      extraCtx:    (`${promptCtx.extraCtx ?? ''}${variantHint}`).trim() || undefined,
+      // El perfil completo de la marca (audiencia, diferenciales, contacto…)
+      // o, sin Brand Kit, una guía de respaldo: lib/video/brand.ts.
+      brandBrief:  videoBrandBrief(opts.kit, ctx.language),
+      extraCtx:    variantHint.trim() || undefined,
     });
   } catch (err) {
     await refund();

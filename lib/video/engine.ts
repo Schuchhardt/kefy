@@ -30,8 +30,10 @@ import { appUrl } from '@/lib/app-url';
 import { getVideoTool, type ToolResult, type ToolRunContext } from '@/lib/video/tools';
 import { TOOL_CREDIT_OPERATION, type VideoToolName } from '@/lib/video/tools/types';
 import { COMPOSE_STEP_KEY, resolveRefs, type MotionLevel, type VideoPlan } from '@/lib/video/plan';
-import { buildFilmProps, sceneImageUrls, type StepOutputs, type TimelineBrand } from '@/lib/video/timeline';
+import { buildFilmProps, sceneImageUrls, type StepOutputs } from '@/lib/video/timeline';
+import type { FilmTheme } from '@/remotion/film-types';
 import { scriptToReelScenes, type VideoScript } from '@/lib/video/script';
+import { resolveFilmTheme } from '@/lib/video/brand';
 import type { RenderTable } from '@/lib/reel-render';
 
 /** Intentos por paso antes de darlo por fallido. */
@@ -70,8 +72,10 @@ export interface StepRow {
   started_at:  string | null;
 }
 
-export interface RenderContext extends TimelineBrand {
+export interface RenderContext {
   plan:        string;
+  /** Diseño de marca resuelto al crear el trabajo (lib/video/brand.ts). */
+  theme:       FilmTheme;
   musicTrack?: string;
 }
 
@@ -135,6 +139,14 @@ function webhookUrlFor(stepId: string): string | undefined {
 
 // ─── Creación ────────────────────────────────────────────────────────────────
 
+/** Ya hay un trabajo en curso para esa pieza (índice único parcial). */
+export class VideoJobConflictError extends Error {
+  constructor() {
+    super('A video job is already running for this target');
+    this.name = 'VideoJobConflictError';
+  }
+}
+
 export interface CreateJobInput {
   orgId:          string;
   brandId:        string | null;
@@ -168,6 +180,7 @@ export async function createVideoJob(db: Db, input: CreateJobInput): Promise<str
     })
     .select('id')
     .single();
+  if (error?.code === '23505') throw new VideoJobConflictError();
   if (error || !job) throw new Error(`No se pudo crear el trabajo de video: ${error?.message ?? 'sin fila'}`);
 
   const { error: stepsError } = await db.from('kefy_video_steps').insert(
@@ -249,45 +262,61 @@ function needsAllDeps(tool: VideoToolName): boolean {
   return tool === 'animate_image' || tool === 'lip_sync';
 }
 
+/**
+ * Actualiza un paso solo si sigue en el estado e intento que esta vuelta
+ * conoce. Tres vueltas pueden mirar el mismo paso a la vez (polling, cron,
+ * webhook): sin la guarda de `attempts`, una vuelta atrasada podía devolver a
+ * pending un intento nuevo, o devolver dos veces los mismos créditos. Si la
+ * guarda falla, se recarga el paso: lo cambió otra vuelta.
+ */
+async function updateStep(db: Db, step: StepRow, patch: Record<string, unknown>, from: StepStatus): Promise<boolean> {
+  const { data } = await db
+    .from('kefy_video_steps')
+    .update(patch)
+    .eq('id', step.id)
+    .eq('status', from)
+    .eq('attempts', step.attempts)
+    .select('id');
+  if (data && data.length > 0) {
+    Object.assign(step, patch);
+    return true;
+  }
+  const { data: fresh } = await db.from('kefy_video_steps').select('*').eq('id', step.id).maybeSingle();
+  if (fresh) Object.assign(step, fresh);
+  return false;
+}
+
 async function settleStep(db: Db, job: JobRow, step: StepRow, result: ToolResult, now: number): Promise<void> {
-  const at = new Date(now).toISOString();
   if (result.status === 'pending') {
-    step.handle = result.handle;
-    await db.from('kefy_video_steps').update({ handle: result.handle }).eq('id', step.id).eq('status', 'running');
+    await updateStep(db, step, { handle: result.handle }, 'running');
     return;
   }
   if (result.status === 'done') {
-    step.status = 'done';
-    step.output = result.output;
-    await db.from('kefy_video_steps')
-      .update({ status: 'done', output: result.output, finished_at: at, error: null })
-      .eq('id', step.id).eq('status', 'running');
+    await updateStep(db, step, {
+      status: 'done', output: result.output, finished_at: new Date(now).toISOString(), error: null,
+    }, 'running');
     return;
   }
   await failStep(db, job, step, result.error, now);
 }
 
-/** Reintenta si quedan intentos; si no, lo da por fallido y devuelve los créditos. */
-async function failStep(db: Db, job: JobRow, step: StepRow, error: string, now: number): Promise<void> {
-  const retry = step.attempts < MAX_STEP_ATTEMPTS;
-  if (retry) {
-    step.status = 'pending';
-    step.handle = null;
-    step.error  = error;
-    await db.from('kefy_video_steps')
-      .update({ status: 'pending', handle: null, error })
-      .eq('id', step.id).eq('status', 'running');
+/**
+ * Reintenta si quedan intentos; si no, lo da por fallido y devuelve los
+ * créditos — solo la vuelta que de verdad lo marcó fallido, una vez.
+ */
+async function failStep(
+  db: Db, job: JobRow, step: StepRow, error: string, now: number, opts: { final?: boolean } = {},
+): Promise<void> {
+  if (!opts.final && step.attempts < MAX_STEP_ATTEMPTS) {
+    await updateStep(db, step, { status: 'pending', handle: null, error }, 'running');
     return;
   }
-  step.status = 'failed';
-  step.error  = error;
-  await db.from('kefy_video_steps')
-    .update({ status: 'failed', handle: null, error, charged: false, finished_at: new Date(now).toISOString() })
-    .eq('id', step.id).eq('status', 'running');
-  if (step.charged) {
-    step.charged = false;
-    await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[step.tool]);
-  }
+  const wasCharged = step.charged;
+  const won = await updateStep(db, step, {
+    status: 'failed', handle: null, error, charged: false, finished_at: new Date(now).toISOString(),
+  }, 'running');
+  if (!won) return;
+  if (wasCharged) await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[step.tool]);
   reportError(new Error(error), {
     route: 'lib/video/engine', service: step.tool,
     extra: { jobId: job.id, step: step.key, attempts: step.attempts },
@@ -297,11 +326,7 @@ async function failStep(db: Db, job: JobRow, step: StepRow, error: string, now: 
 async function skipStep(
   db: Db, step: StepRow, reason: string, now: number, from: StepStatus = 'pending',
 ): Promise<void> {
-  step.status = 'skipped';
-  step.error  = reason;
-  await db.from('kefy_video_steps')
-    .update({ status: 'skipped', error: reason, finished_at: new Date(now).toISOString() })
-    .eq('id', step.id).eq('status', from);
+  await updateStep(db, step, { status: 'skipped', error: reason, finished_at: new Date(now).toISOString() }, from);
 }
 
 function outputsOf(steps: StepRow[]): StepOutputs {
@@ -312,13 +337,48 @@ function runContext(job: JobRow, step: StepRow): ToolRunContext {
   return { orgId: job.org_id, jobId: job.id, stepKey: step.key, webhookUrl: webhookUrlFor(step.id) };
 }
 
-/** Copia las fotos generadas a la pieza: previews, editor y portada las usan. */
+interface TargetRow {
+  id:        string;
+  slides:    unknown;
+  metadata:  Record<string, unknown> | null;
+  video_url: string | null;
+  image_url?: string | null;
+}
+
+/** La pieza que recibe el video, o null si ya no existe. */
+async function loadTarget(db: Db, job: JobRow): Promise<TargetRow | null> {
+  const cols = job.target_table === 'kefy_content_items'
+    ? 'id, slides, metadata, video_url, image_url'
+    : 'id, slides, metadata, video_url';
+  const { data } = await db.from(job.target_table).select(cols).eq('id', job.target_id).maybeSingle();
+  return (data as TargetRow | null) ?? null;
+}
+
+/** ¿Este trabajo sigue siendo el de la pieza? Otro más nuevo lo reemplaza. */
+function ownsTarget(job: JobRow, target: TargetRow | null): target is TargetRow {
+  return !!target && target.metadata?.video_job_id === job.id;
+}
+
+/**
+ * Copia las fotos generadas a las escenas de la pieza (previews, editor y
+ * portada las usan). Solo la URL de la imagen: el texto que el usuario haya
+ * editado mientras tanto no se toca.
+ */
 async function writeSceneImages(db: Db, job: JobRow, outputs: StepOutputs): Promise<void> {
+  const target = await loadTarget(db, job);
+  if (!ownsTarget(job, target)) return;
   const images = sceneImageUrls(job.script, outputs);
-  const slides = scriptToReelScenes(job.script, images);
-  const cover  = Object.values(images).find((u) => !!u) ?? null;
+  const current = Array.isArray(target.slides) ? (target.slides as Array<Record<string, unknown>>) : [];
+  const slides = current.length
+    ? current.map((slide, i) => {
+      const id = typeof slide.scene_id === 'string' ? slide.scene_id : job.script.scenes[i]?.id;
+      const url = id ? images[id] : null;
+      return url ? { ...slide, image_url: url, text_baked: false } : slide;
+    })
+    : scriptToReelScenes(job.script, images);
   const patch: Record<string, unknown> = { slides };
-  if (job.target_table === 'kefy_content_items' && cover) patch.image_url = cover;
+  const cover = Object.values(images).find((u) => !!u) ?? null;
+  if (job.target_table === 'kefy_content_items' && cover && !target.image_url) patch.image_url = cover;
   await db.from(job.target_table).update(patch).eq('id', job.target_id);
 }
 
@@ -337,8 +397,7 @@ async function startStep(db: Db, job: JobRow, step: StepRow, steps: StepRow[], n
 
   const tool = getVideoTool(step.tool);
   if (!tool || !tool.available()) {
-    step.attempts = MAX_STEP_ATTEMPTS;
-    await failStep(db, job, step, `Herramienta no disponible: ${step.tool}`, now);
+    await failStep(db, job, step, `Herramienta no disponible: ${step.tool}`, now, { final: true });
     return;
   }
 
@@ -350,15 +409,20 @@ async function startStep(db: Db, job: JobRow, step: StepRow, steps: StepRow[], n
       await skipStep(db, step, 'credits_exhausted', now, 'running');
       return;
     }
-    step.charged = true;
-    await db.from('kefy_video_steps').update({ charged: true }).eq('id', step.id);
+    if (!await updateStep(db, step, { charged: true }, 'running')) {
+      // Otra vuelta tomó el paso mientras se cobraba: no se usa este cobro.
+      await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[step.tool]);
+      return;
+    }
   }
 
   const outputs = outputsOf(steps);
   let input: Record<string, unknown>;
   if (step.key === COMPOSE_STEP_KEY) {
     await writeSceneImages(db, job, outputs);
-    input = buildFilmProps(job.script, outputs, job.render_context, job.render_context.musicTrack) as unknown as Record<string, unknown>;
+    // Trabajos creados antes de que el tema existiera: el respaldo.
+    const theme = job.render_context.theme ?? resolveFilmTheme(null);
+    input = buildFilmProps(job.script, outputs, theme, job.render_context.musicTrack) as unknown as Record<string, unknown>;
   } else {
     input = resolveRefs(step.input, outputs) as Record<string, unknown>;
   }
@@ -382,8 +446,7 @@ async function pollStep(db: Db, job: JobRow, step: StepRow, now: number): Promis
     return;
   }
   if (now - startedAt > ASYNC_STEP_TIMEOUT_MS) {
-    step.attempts = MAX_STEP_ATTEMPTS;
-    await failStep(db, job, step, 'timeout', now);
+    await failStep(db, job, step, 'timeout', now, { final: true });
     return;
   }
   if (!tool?.poll) return;
@@ -409,7 +472,9 @@ async function finishJob(db: Db, job: JobRow, steps: StepRow[], now: number): Pr
     const { data: updated } = await db.from('kefy_video_jobs')
       .update({ status: 'done', video_url: videoUrl, finished_at: at, error: null })
       .eq('id', job.id).eq('status', 'running').select('id');
-    if (updated?.length) {
+    // Solo si la pieza sigue apuntando a este trabajo: si el usuario la editó
+    // y pidió otro, el video viejo no pisa al nuevo.
+    if (updated?.length && ownsTarget(job, await loadTarget(db, job))) {
       await db.from(job.target_table)
         .update({ video_url: videoUrl, render_status: 'ready' })
         .eq('id', job.target_id);
@@ -423,11 +488,24 @@ async function finishJob(db: Db, job: JobRow, steps: StepRow[], now: number): Pr
   const { data: updated } = await db.from('kefy_video_jobs')
     .update({ status: 'failed', error, finished_at: at })
     .eq('id', job.id).eq('status', 'running').select('id');
-  if (updated?.length) {
-    await db.from(job.target_table).update({ render_status: 'not_rendered' }).eq('id', job.target_id);
+  const target = updated?.length ? await loadTarget(db, job) : null;
+  if (ownsTarget(job, target)) {
+    // Si la pieza ya tenía un video (se pidió reemplazarlo), sigue con ese.
+    await db.from(job.target_table)
+      .update({ render_status: target.video_url ? 'ready' : 'not_rendered' })
+      .eq('id', job.target_id);
   }
   job.status = 'failed';
   job.error = error;
+}
+
+/** Cancela un trabajo cuya pieza ya no existe o que otro trabajo reemplazó. */
+async function cancelJob(db: Db, job: JobRow, reason: string, now: number): Promise<void> {
+  await db.from('kefy_video_jobs')
+    .update({ status: 'canceled', error: reason, finished_at: new Date(now).toISOString() })
+    .eq('id', job.id).eq('status', 'running');
+  job.status = 'canceled';
+  job.error = reason;
 }
 
 /**
@@ -437,14 +515,34 @@ async function finishJob(db: Db, job: JobRow, steps: StepRow[], now: number): Pr
 export async function advanceVideoJob(
   db: Db,
   jobId: string,
-  opts: { budgetMs?: number } = {},
+  opts: {
+    budgetMs?: number;
+    /**
+     * false: solo consulta y lanza pasos asíncronos (encolar en fal o Lambda
+     * tarda segundos). Para funciones cortas como el webhook, donde una imagen
+     * de 60 s podría quedar a medias y pagarse dos veces.
+     */
+    syncSteps?: boolean;
+  } = {},
 ): Promise<VideoJobSnapshot | null> {
   const loaded = await loadJob(db, jobId);
   if (!loaded) return null;
   const { job, steps } = loaded;
   if (job.status !== 'running') return snapshotOf(job, steps);
 
+  // Pieza borrada o reemplazada por otra producción: no se sigue gastando.
+  const target = await loadTarget(db, job);
+  if (!target) {
+    await cancelJob(db, job, 'target_deleted', Date.now());
+    return snapshotOf(job, steps);
+  }
+  if (typeof target.metadata?.video_job_id === 'string' && target.metadata.video_job_id !== job.id) {
+    await cancelJob(db, job, 'superseded', Date.now());
+    return snapshotOf(job, steps);
+  }
+
   const deadline = Date.now() + (opts.budgetMs ?? DEFAULT_BUDGET_MS);
+  const syncSteps = opts.syncSteps !== false;
   const byKey = new Map(steps.map((s) => [s.key, s]));
 
   // 1. Lo que ya corre en la nube.
@@ -462,17 +560,20 @@ export async function advanceVideoJob(
         await skipStep(db, step, 'dependency_failed', Date.now());
         continue;
       }
+      if (!syncSteps && getVideoTool(step.tool)?.mode === 'sync') continue;
       ready.push(step);
     }
     if (ready.length === 0) break;
 
-    for (let i = 0; i < ready.length; i += MAX_PARALLEL) {
+    for (let i = 0; i < ready.length && Date.now() < deadline; i += MAX_PARALLEL) {
       await Promise.all(ready.slice(i, i + MAX_PARALLEL).map((s) => startStep(db, job, s, steps, Date.now())));
-      if (Date.now() >= deadline) break;
     }
   }
 
-  // 3. Cierre.
+  // 3. Cierre, y marca de la vuelta para que el cron reparta las suyas.
   await finishJob(db, job, steps, Date.now());
+  if (job.status === 'running') {
+    await db.from('kefy_video_jobs').update({ advanced_at: new Date().toISOString() }).eq('id', job.id);
+  }
   return snapshotOf(job, steps);
 }

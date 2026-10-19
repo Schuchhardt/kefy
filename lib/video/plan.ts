@@ -62,13 +62,22 @@ export interface PlanBrand {
 export interface PlanOptions {
   motion?:               MotionLevel;
   /** Qué herramientas asíncronas están configuradas (FAL_KEY, etc.). */
-  capabilities:          { animation: boolean; lipsync: boolean };
+  capabilities:          { animation: boolean; lipsync: boolean; images?: boolean; voice?: boolean };
+  /** false: no se generan fotos (el reel lo pidió así); los planos usan el fondo de marca o su foto. */
+  generate_images?:      boolean;
   image_quality?:        'low' | 'medium' | 'high';
   brand?:                PlanBrand;
   reference_image_urls?: string[];
+  /** Indicación de acento para el TTS (lib/video/brand.ts::voiceAccent). */
+  voice_accent?:         string;
 }
 
 export const COMPOSE_STEP_KEY = 'compose';
+
+/** Sin indicaciones del guion ni de la marca, una locución de reel que funcione. */
+const DEFAULT_VOICE_STYLE = 'Warm, confident and energetic social media voice-over, natural pacing, smile in the voice.';
+/** Estilo de imagen de respaldo cuando el guion no fijó uno. */
+const DEFAULT_VISUAL_STYLE = 'Cinematic, natural light, shallow depth of field, rich but realistic colors';
 
 const NO_TEXT = 'NO text, NO words, NO letters, NO captions, NO logos, NO watermarks, NO signs with writing.';
 
@@ -112,10 +121,25 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
   const brand   = opts.brand ?? {};
   const quality = opts.image_quality ?? 'medium';
   const brandRefs = (opts.reference_image_urls ?? []).slice(0, 2);
-  const style   = script.visual_style ? `${script.visual_style}. ` : '';
+  const style   = `${script.visual_style || DEFAULT_VISUAL_STYLE}. `;
 
+  const canImage   = opts.capabilities.images !== false && opts.generate_images !== false;
+  const canVoice   = opts.capabilities.voice !== false;
   const canAnimate = opts.capabilities.animation;
-  const canLipsync = opts.capabilities.lipsync && canAnimate;
+  const canLipsync = opts.capabilities.lipsync && canAnimate && canVoice;
+
+  if (opts.capabilities.images === false) {
+    notes.push({
+      es: 'La generación de imágenes no está configurada: los planos usan el fondo animado de la marca.',
+      en: 'Image generation is not configured: shots use the animated brand background.',
+    });
+  }
+  if (!canVoice && script.scenes.some((s) => s.line)) {
+    notes.push({
+      es: 'La voz no está configurada: el video sale sin locución, con los textos en pantalla.',
+      en: 'Voice is not configured: the video has no voice-over, only on-screen text.',
+    });
+  }
   const animated   = canAnimate ? motionScenes(script, motion) : new Set<string>();
 
   if (!canAnimate && motion !== 'none' && script.scenes.some((s) => s.visual.kind !== 'still')) {
@@ -134,7 +158,7 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
 
   // ── Retratos de referencia de los personajes ──────────────────────────────
   const characters = new Map(script.characters.map((c) => [c.id, c]));
-  for (const c of script.characters) {
+  for (const c of canImage ? script.characters : []) {
     steps.push({
       key:        `char_${c.id}`,
       tool:       'generate_image',
@@ -152,8 +176,11 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
   // ── Planos ────────────────────────────────────────────────────────────────
   for (const scene of script.scenes) {
     const sceneChars = scene.visual.character_ids.map((id) => characters.get(id)).filter((c) => !!c);
-    const isTalking  = scene.visual.kind === 'talking' && animated.has(scene.id) && canLipsync;
-    const isAnimated = animated.has(scene.id);
+    const givenImage = scene.visual.image_url ?? null;
+    // Sin foto (ni dada ni generada) no hay nada que animar.
+    const hasImage   = !!givenImage || canImage;
+    const isAnimated = animated.has(scene.id) && hasImage;
+    const isTalking  = scene.visual.kind === 'talking' && isAnimated && canLipsync && !!scene.line;
 
     if (scene.visual.kind === 'talking' && !isTalking && motion !== 'none' && canAnimate && animated.has(scene.id) && !canLipsync) {
       notes.push({
@@ -163,7 +190,6 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
     }
 
     const imgKey = `img_${scene.id}`;
-    const givenImage = scene.visual.image_url ?? null;
     const imageRef: PlanRef | string = givenImage ?? ref(`${imgKey}.image_url`);
     const castLine = sceneChars.length
       ? ` People in the shot: ${sceneChars.map((c) => `${c.name} (${c.look})`).join('; ')}.`
@@ -171,7 +197,7 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
     const framing = isTalking
       ? ' Medium close-up, the person faces the camera, mouth closed, eye level.'
       : '';
-    if (!givenImage) steps.push({
+    if (!givenImage && canImage) steps.push({
       key:        imgKey,
       tool:       'generate_image',
       scene_id:   scene.id,
@@ -184,13 +210,13 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
           ...brandRefs,
         ].slice(0, 3),
       },
-      depends_on: sceneChars.map((c) => `char_${c.id}`),
+      depends_on: canImage ? sceneChars.map((c) => `char_${c.id}`) : [],
       // Sin imagen el plano cae al fondo animado de marca: el video sale igual.
       optional:   true,
     });
 
     let voiceKey: string | null = null;
-    if (scene.line && scene.speaker) {
+    if (scene.line && scene.speaker && canVoice) {
       voiceKey = `voice_${scene.id}`;
       const speaker = scene.speaker === 'narrator' ? null : characters.get(scene.speaker);
       const voiceStyle = speaker ? speaker.voice_style : script.narrator.style;
@@ -201,8 +227,10 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
         input: {
           text:         scene.line,
           voice:        speaker ? speaker.voice : script.narrator.voice,
-          instructions: [voiceStyle, script.language === 'es' ? 'Speak in natural Latin American Spanish.' : '']
-            .filter(Boolean).join(' '),
+          instructions: [
+            voiceStyle || DEFAULT_VOICE_STYLE,
+            opts.voice_accent ?? (script.language === 'es' ? 'Speak in natural, neutral Latin American Spanish.' : ''),
+          ].filter(Boolean).join(' '),
           language:     script.language,
         },
         depends_on: [],

@@ -39,10 +39,14 @@ export interface TimedWord {
 /**
  * Tiempos por palabra para los subtítulos, con el texto exacto del guion.
  *
- * Whisper devuelve lo que oyó (sin puntuación, y a veces con el nombre de la
- * marca mal escrito); el guion tiene el texto bueno pero no los tiempos. Se
- * reparte: la palabra i del guion toma el tiempo de la palabra proporcional
- * de whisper. Sin whisper, se reparte la duración por largo de palabra.
+ * Whisper devuelve lo que oyó (sin puntuación, a veces con el nombre de la
+ * marca partido o mal escrito, o «24/7» como varias palabras); el guion tiene
+ * el texto bueno pero no los tiempos. Se reparte el habla de forma continua:
+ * las N palabras del guion se distribuyen sobre las M palabras oídas, y cada
+ * una ocupa su tramo proporcional del tiempo hablado (los silencios entre
+ * palabras oídas no cuentan). Así ninguna palabra comparte tramo con otra —
+ * antes dos palabras del guion podían caer en la misma palabra oída y se
+ * resaltaban juntas. Sin whisper, se reparte la duración por largo de palabra.
  */
 export function alignWords(
   line: string,
@@ -52,13 +56,25 @@ export function alignWords(
   const words = line.split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
 
-  if (heard.length > 0) {
-    return words.map((text, i) => {
-      const a = heard[Math.min(heard.length - 1, Math.floor((i * heard.length) / words.length))]!;
-      const nextIdx = Math.floor(((i + 1) * heard.length) / words.length) - 1;
-      const b = heard[Math.min(heard.length - 1, Math.max(nextIdx, 0))]!;
-      return { text, start: a.start, end: Math.max(a.start, b.end) };
-    });
+  const spans = heard
+    .filter((h) => Number.isFinite(h.start) && Number.isFinite(h.end) && h.end >= h.start)
+    .sort((a, b) => a.start - b.start);
+
+  if (spans.length > 0) {
+    const n = words.length;
+    const m = spans.length;
+    // Posición continua x ∈ [0, m] → segundo: dentro de la palabra oída k.
+    const at = (x: number): number => {
+      const k = Math.min(m - 1, Math.floor(x));
+      const span = spans[k]!;
+      const frac = Math.min(1, x - k);
+      return span.start + frac * (span.end - span.start);
+    };
+    return words.map((text, i) => ({
+      text,
+      start: round(at((i * m) / n)),
+      end:   round(at(((i + 1) * m) / n - 1e-9)),
+    }));
   }
 
   const weights = words.map((w) => w.length + 2);
@@ -66,8 +82,12 @@ export function alignWords(
   let t = 0;
   return words.map((text, i) => {
     const d = (weights[i]! / total) * durationSeconds;
-    const word = { text, start: t, end: t + d };
+    const word = { text, start: round(t), end: round(t + d) };
     t += d;
     return word;
   });
+}
+
+function round(n: number): number {
+  return Math.round(n * 1000) / 1000;
 }

@@ -140,13 +140,20 @@ export function MuxReelPlayer({
   // Auto-restart of a render the server declared dead — capped to avoid loops.
   const restartCountRef = useRef(0);
   const startRenderRef  = useRef<(() => void) | null>(null);
+  // Polling only while mounted: closing the modal must stop it. Each poll of a
+  // scripted reel runs an engine pass on the server.
+  const mountedRef      = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const isMuxLegacy = localUrl?.startsWith('mux:') ?? false;
   const muxId       = isMuxLegacy ? localUrl!.slice(4) : null;
 
   // ── Poll for render completion ─────────────────────────────────────────────
   const pollStatus = useCallback(async () => {
-    if (!isRenderingRef.current) return;
+    if (!isRenderingRef.current || !mountedRef.current) return;
     try {
       const qs = format ? `itemId=${itemId}&format=${format}` : `itemId=${itemId}`;
       const res  = await fetch(`/api/content/reel/render?${qs}`, { credentials: 'include' });

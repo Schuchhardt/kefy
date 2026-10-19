@@ -10,6 +10,7 @@ import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
 import { getBrandKitForBrand } from '@/lib/services/brand-kit';
 import { scriptToReelScenes } from '@/lib/video/script';
+import { videoBrandBrief } from '@/lib/video/brand';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -234,7 +235,8 @@ export async function PATCH(req: NextRequest) {
       tone:        brandKit?.tone ?? [],
       brandName:   brandKit?.name    ?? undefined,
       tagline:     brandKit?.tagline ?? undefined,
-      extraCtx:    brandKit?.industry ? `Industry: ${brandKit.industry}. ${storyCtx}` : storyCtx,
+      brandBrief:  videoBrandBrief(brandKit, language),
+      extraCtx:    storyCtx,
     }));
   } catch (err) {
     await videoGuard.refund();

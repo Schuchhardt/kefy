@@ -11,7 +11,7 @@
 //   lipsync → clip animado + voz aparte → foto con movimiento → fondo de marca.
 
 import type { VideoScript } from '@/lib/video/script';
-import type { FilmCompositionProps, FilmScene, FilmVisual, FilmWord } from '@/remotion/film-types';
+import type { FilmCompositionProps, FilmScene, FilmTheme, FilmVisual, FilmWord } from '@/remotion/film-types';
 
 /** La voz entra un poco después del corte, no pegada a él. */
 export const SPEECH_LEAD_SECONDS = 0.2;
@@ -19,15 +19,11 @@ export const SPEECH_LEAD_SECONDS = 0.2;
 export const SPEECH_TAIL_SECONDS = 0.35;
 export const FILM_SCENE_MIN_SECONDS = 1.5;
 export const FILM_SCENE_MAX_SECONDS = 15;
+/** Tarjeta de cierre con el logo: solo si la marca tiene logo o nombre. */
+export const OUTRO_SECONDS = 2.2;
 
 export type StepOutputs = Record<string, Record<string, unknown> | undefined>;
 
-export interface TimelineBrand {
-  name?:        string;
-  accentColor?: string;
-  fontHeading?: string;
-  logoUrl?:     string;
-}
 
 function url(v: unknown): string | null {
   return typeof v === 'string' && /^https?:\/\//.test(v) ? v : null;
@@ -51,7 +47,7 @@ function clamp(n: number, min: number, max: number): number {
 export function buildFilmProps(
   script: VideoScript,
   outputs: StepOutputs,
-  brand: TimelineBrand,
+  theme: FilmTheme,
   musicTrack?: string,
 ): FilmCompositionProps {
   const scenes: FilmScene[] = script.scenes.map((scene) => {
@@ -67,10 +63,13 @@ export function buildFilmProps(
     const clipSeconds   = num(anim?.clip_seconds) ?? 5;
 
     let visual: FilmVisual;
+    // `poster`: la foto del plano, que queda debajo del clip y lo reemplaza
+    // si el clip termina antes que el plano.
     if (lipsUrl) {
-      visual = { type: 'video', src: lipsUrl, clip_seconds: Math.max(clipSeconds, voiceSeconds ?? 0), has_audio: true };
+      // El clip con lipsync dura lo que la voz (sync_mode 'loop').
+      visual = { type: 'video', src: lipsUrl, clip_seconds: voiceSeconds ?? clipSeconds, has_audio: true, poster: image };
     } else if (animUrl) {
-      visual = { type: 'video', src: animUrl, clip_seconds: clipSeconds, has_audio: false };
+      visual = { type: 'video', src: animUrl, clip_seconds: clipSeconds, has_audio: false, poster: image };
     } else if (image) {
       visual = { type: 'image', src: image };
     } else {
@@ -80,8 +79,10 @@ export function buildFilmProps(
     // El clip con lipsync ya trae la voz desde su segundo 0.
     const speechInClip  = visual.type === 'video' && visual.has_audio;
     const speechOffset  = voiceSeconds ? (speechInClip ? 0 : SPEECH_LEAD_SECONDS) : 0;
+    // Con voz, el plano dura lo que la voz: nunca se corta una frase (el tope
+    // solo aplica a los planos mudos; el guion ya acota el largo de la línea).
     const duration = voiceSeconds
-      ? clamp(speechOffset + voiceSeconds + SPEECH_TAIL_SECONDS, FILM_SCENE_MIN_SECONDS, FILM_SCENE_MAX_SECONDS)
+      ? Math.max(FILM_SCENE_MIN_SECONDS, speechOffset + voiceSeconds + SPEECH_TAIL_SECONDS)
       : clamp(scene.duration_seconds, FILM_SCENE_MIN_SECONDS, FILM_SCENE_MAX_SECONDS);
 
     return {
@@ -99,12 +100,10 @@ export function buildFilmProps(
 
   return {
     scenes,
-    brandName:   brand.name,
-    accentColor: brand.accentColor ?? '#c6ff4b',
-    fontHeading: brand.fontHeading,
-    logoUrl:     brand.logoUrl,
+    theme,
+    outro: theme.logoUrl || theme.brandName ? { duration_seconds: OUTRO_SECONDS, headline: null } : null,
     musicTrack,
-    captions:    true,
+    captions: true,
   };
 }
 

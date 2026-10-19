@@ -59,6 +59,28 @@ describe('normalizeVideoScript', () => {
 describe('mergeSlideEdits', () => {
   const script = normalizeVideoScript(raw, 'es');
 
+  it('empareja por scene_id: borrar o reordenar escenas no cambia el personaje ni el lipsync de cada plano', () => {
+    const slides = scriptToReelScenes(script);
+    // Se borra el primer plano y se invierten los dos restantes.
+    const edited = [slides[2]!, slides[1]!];
+    const merged = mergeSlideEdits(script, edited);
+    expect(merged.scenes.map((s) => s.id)).toEqual(['s3', 's2']);
+    expect(merged.scenes[1]).toMatchObject({ speaker: 'ana', visual: { kind: 'talking', character_ids: ['ana'] } });
+    expect(merged.scenes[0]).toMatchObject({ order: 1, transition: 'cut' });
+  });
+
+  it('una escena nueva sin scene_id recibe un id que no choca con los existentes', () => {
+    const slides = [...scriptToReelScenes(script), { scene_order: 9, title: 'Nueva', body: 'Algo' }];
+    const merged = mergeSlideEdits(script, slides);
+    expect(merged.scenes.map((s) => s.id)).toEqual(['s1', 's2', 's3', 's4']);
+  });
+
+  it('si cambia quién habla, el plano deja de ser lipsync', () => {
+    const slides = scriptToReelScenes(script);
+    slides[1]!.body = '';
+    expect(mergeSlideEdits(script, slides).scenes[1]!.visual.kind).toBe('animated');
+  });
+
   it('lleva al guion el texto editado en las escenas y reutiliza las fotos ya producidas', () => {
     const slides = scriptToReelScenes(script, { s1: 'https://cdn.example.com/s1.jpg' });
     slides[0]!.body = 'Línea nueva';
@@ -85,12 +107,28 @@ describe('mergeSlideEdits', () => {
 describe('scriptFromSlides', () => {
   it('convierte escenas de texto en planos con voz en off y anima el primero', () => {
     const script = scriptFromSlides([
-      { scene_order: 1, title: 'Hook', body: 'Mira esto', duration_seconds: 3, image_url: 'https://cdn.example.com/a.jpg' },
+      { scene_order: 1, title: 'Hook', body: 'Mira esto', duration_seconds: 3, image_url: 'https://cdn.example.com/a.jpg', text_baked: false },
       { scene_order: 2, title: 'CTA', body: 'Síguenos', duration_seconds: 3 },
     ], 'es', { hook: 'caption' });
     expect(script!.scenes[0]!.visual).toMatchObject({ kind: 'animated', image_url: 'https://cdn.example.com/a.jpg' });
     expect(script!.scenes[1]!.visual.kind).toBe('still');
     expect(script!.scenes.every((s) => s.speaker === 'narrator')).toBe(true);
+  });
+
+  it('una foto con el texto quemado (o sin el dato, como las anteriores) no se reutiliza', () => {
+    const script = scriptFromSlides([
+      { scene_order: 1, title: 'A', body: 'a', image_url: 'https://cdn.example.com/a.jpg' },
+      { scene_order: 2, title: 'B', body: 'b', image_url: 'https://cdn.example.com/b.jpg', text_baked: true },
+    ], 'es');
+    expect(script!.scenes.map((s) => s.visual.image_url)).toEqual([null, null]);
+  });
+
+  it('solo reutiliza fotos que pasan el filtro (Storage de Kefy)', () => {
+    const script = scriptFromSlides([
+      { scene_order: 1, title: 'A', body: 'a', image_url: 'https://evil.example.com/a.jpg', text_baked: false },
+      { scene_order: 2, title: 'B', body: 'b', image_url: 'https://kefy.storage/b.jpg', text_baked: false },
+    ], 'es', {}, { isReusableImage: (u) => u.startsWith('https://kefy.storage/') });
+    expect(script!.scenes.map((s) => s.visual.image_url)).toEqual([null, 'https://kefy.storage/b.jpg']);
   });
 
   it('sin escenas no hay guion', () => {

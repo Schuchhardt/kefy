@@ -31,7 +31,8 @@ request.
 | `lib/video/tools/*` | Las herramientas: `generate_image`, `text_to_speech`, `animate_image`, `lip_sync`, `compose_video` |
 | `lib/video/engine.ts` | `advanceVideoJob`: una «vuelta» al trabajo. Lanza lo que está listo, consulta lo que está en la nube y cierra |
 | `lib/video/timeline.ts` | Guion + salidas → props de la composición `KefyFilm` (pura) |
-| `remotion/FilmComposition.tsx` | El montaje: clips, fotos con cámara, voces, subtítulos palabra a palabra, transiciones, música y logo |
+| `lib/video/brand.ts` | La marca del video: `resolveFilmTheme` (diseño), `videoBrandBrief` (copy) y `voiceAccent` (voz), cada uno con su respaldo |
+| `remotion/FilmComposition.tsx` | El montaje: clips, fotos con cámara, voces, subtítulos palabra a palabra, transiciones, música, logo y tarjeta de cierre |
 | `lib/services/video.ts` | `getVideoPlan` / `produceVideo` / `getVideoProduction`, compartidos por la UI, el asistente, la API y el MCP |
 | `lib/assistant/tools/video.ts` | `get_video_plan`, `produce_video` (con confirmación) y `get_video_status` |
 | `components/dashboard/content/VideoPlanPanel.tsx` | Panel del plan y del avance, dentro de `MuxReelPlayer` |
@@ -59,9 +60,23 @@ request.
 
 Se guarda en `metadata.video_script` del item (o de la rendición). `slides`
 sigue existiendo como vista derivada (`scriptToReelScenes`) porque la usan las
-previews, el editor y la biblioteca. Si el usuario edita una escena, el texto
-nuevo entra al guion al producir (`mergeSlideEdits`), y las fotos que ya
-produjo una pasada anterior se reutilizan.
+previews, el editor y la biblioteca. Cada escena lleva el `scene_id` de su
+plano (`sanitizePatchSlides` lo conserva al editar).
+
+Si el usuario edita una escena, el texto nuevo entra al guion al producir
+(`mergeSlideEdits`):
+
+- Escena y plano se emparejan **por `scene_id`, no por posición**. Si se borra
+  o reordena una escena, cada plano conserva su personaje, su tipo y su
+  lipsync.
+- Una escena nueva entra como foto con narrador.
+- Si la línea de un plano con lipsync cambia de hablante, deja de ser lipsync.
+- Las fotos que ya produjo una pasada anterior se reutilizan, con dos
+  condiciones: que estén limpias (`text_baked: false`) y que sean del Storage
+  de Kefy (`isKefyStorageUrl`). Una URL cualquiera pegada en una escena no se
+  manda a fal.ai ni a Lambda. Las fotos de reels anteriores (sin `text_baked`)
+  se tratan como quemadas y se regeneran: si no, el montaje les pondría encima
+  el texto otra vez.
 
 ## El plan
 
@@ -85,10 +100,42 @@ voice_s1 ───────────────────────�
   | `key` (por defecto) | Lo que pidió el guion, priorizando el hook y los planos que hablan, hasta 3 planos |
   | `full` | Todos los planos |
 
-- **Degradación en vez de error:**
-  - Sin `FAL_KEY`, o con `motion: 'none'`, los planos animados salen como foto
-    con cámara. Los que hablan salen como foto más voz en off.
-  - Cada degradación deja una nota en el plan.
+- **Degradación en vez de error.** Cada degradación deja una nota en el plan.
+
+  | Situación | Qué pasa |
+  |---|---|
+  | Sin `FAL_KEY` o con `motion: 'none'` | Los planos animados salen como foto con cámara, y los que hablan como foto con voz en off |
+  | Sin OpenAI o con `generate_images: false` | No hay fotos: los planos usan el fondo animado de marca. Sin foto tampoco hay animación |
+  | Sin voz | No hay locución ni lipsync; quedan los textos en pantalla |
+
+## Marca: diseño, copy y voz
+
+Todo sale de `lib/video/brand.ts`, y cada campo del Brand Kit se valida.
+Cuando un campo no sirve, entra un respaldo pensado como diseño propio, no como
+un hueco: un video sin Brand Kit tiene que verse bien igual.
+
+| Qué | Con marca | Respaldo |
+|---|---|---|
+| Acento (subtítulos, titulares, barra) | `accent_color`, o si no destaca (gris, casi negro o casi blanco), `primary_color` o `secondary_color` | Amarillo cálido `#ffd23f` sobre tinta, el estilo de subtítulos de los reels nativos |
+| Texto sobre el acento y sobre el fondo | Tinta o blanco, el que dé más contraste (≥ 4,5:1, WCAG) | Igual |
+| Fondo (planos sin foto y cierre) | `primary_color`. Si es claro, se oscurece para que los subtítulos blancos se lean | Tinta `#14141c` → `#2a2440` |
+| Tipografías | `font_heading` / `font_body`, solo si están en el catálogo de Google Fonts (`lib/google-fonts.ts`). Una de las dos sirve para ambas | Montserrat |
+| Logo | `logo_url` (https) dentro de un chip blanco: un logo oscuro no desaparece sobre una foto oscura | Nombre de la marca en la tipografía de titulares. Sin nombre, nada |
+| Cierre (2,2 s) | Logo o nombre, `tagline` y contacto: la web (`depando.cl`) o el @ de Instagram | Sin nombre ni logo, no hay cierre: el último plano funde a negro |
+| Copy del guion | `videoBrandBrief`: audiencia, diferenciales, misión, tono, estilo, ubicación, contacto para el CTA y si usa emojis. Prohíbe inventar precios o promesas | Guía de respaldo: experto local cercano, beneficios concretos, CTA simple, estilo visual coherente con el tema |
+| Voz | `voiceAccent` según `customer_locations` (España, México, Argentina) | Español latinoamericano neutro y un estilo de locución de reel |
+| Música | `pickMusicTrack(id, ánimo)`: el ánimo sale del `music_mood` del guion más el tono de la marca (`TRACK_MOODS`) | Cualquier pista, la misma siempre para la misma pieza |
+
+El tema se resuelve al crear el trabajo y viaja en su `render_context`: editar
+el Brand Kit a mitad de producción no cambia un video que ya se está haciendo.
+
+En el render, nada de la marca puede tumbar el video:
+
+- **Imagen o logo que no carga** (`SafeImg`): la imagen se oculta y queda el
+  fondo de marca, o el nombre en vez del logo. Sin esto, Remotion cancelaba el
+  render entero y solo se devolvían los créditos del montaje.
+- **Tipografías**: se piden a Google Fonts de más a menos pesos (no todas
+  tienen 800/900), y el render espera a `document.fonts.load`.
 
 ## Costo
 
@@ -124,18 +171,45 @@ Cuándo se cobra cada cosa:
 No hay proceso de fondo: `advanceVideoJob` hace una vuelta y deja el trabajo
 donde quedó. Esa vuelta la disparan tres cosas:
 
-- **Polling del reproductor:** `GET /api/content/reel/render`, cada 4 s.
-- **Cron:** `/api/content/reel/reconcile`, cada 5 min. Avanza hasta 8
-  producciones por pasada.
-- **Webhook de fal.ai:** `POST /api/webhooks/video?step=&sig=`. La URL va
-  firmada con HMAC del id del paso (`VIDEO_WEBHOOK_SECRET`, o `CRON_SECRET` si
-  falta). El cuerpo no se usa: el motor le pregunta el resultado a fal.
+- **Polling del reproductor:** `GET /api/content/reel/render`, 4 s después
+  de la respuesta anterior. Cada vuelta tiene 20 s de presupuesto
+  (`POLL_BUDGET_MS`); los pasos que lance terminan igual.
+- **Cron:** `/api/content/reel/reconcile`, cada 5 min.
+  - Avanza hasta 8 producciones, de a 2 a la vez. Cada una puede lanzar 6
+    imágenes; más a la vez chocaría con el rate limit de OpenAI.
+  - Empieza por las que llevan más tiempo sin vuelta (`advanced_at`).
+  - No empieza una vuelta nueva pasados 150 s.
+- **Webhook de fal.ai:** `POST /api/webhooks/video?step=&sig=`.
+  - La URL va firmada con HMAC del id del paso (`VIDEO_WEBHOOK_SECRET`, o
+    `CRON_SECRET` si falta).
+  - El cuerpo no se usa: el motor le pregunta el resultado a fal.
+  - Solo consulta y encola pasos asíncronos (`syncSteps: false`). Una imagen
+    de un minuto lanzada al final de la función podía quedar cortada y
+    pagarse dos veces.
+- **Asistente:** `get_video_status` hace una vuelta de 5 s.
 
 Garantías:
 
 - **Reclamo atómico.** Para lanzarse, un paso pasa de `pending` a `running` con
   un `UPDATE … WHERE status = 'pending'`. Así dos vueltas simultáneas no lanzan
   el mismo paso dos veces.
+- **Guarda por intento.** Toda actualización de un paso exige el mismo
+  `status` y `attempts` que conoce la vuelta (`updateStep`). Sin esto:
+  - una vuelta atrasada podía devolver a `pending` un intento nuevo, dejando
+    huérfano un trabajo de fal ya pagado;
+  - tres vueltas sobre el mismo fallo devolvían tres veces los créditos.
+
+  Ahora devuelve los créditos solo la vuelta que de verdad marcó el fallo.
+- **Una producción por pieza.** Un índice único parcial
+  (`target_table, target_id WHERE status = 'running'`) frena el doble clic: el
+  segundo «Producir» devuelve el trabajo del primero.
+- **Guion nuevo, producción nueva.** Si el usuario editó la pieza mientras se
+  producía y vuelve a producir, el trabajo viejo se cancela (`superseded`).
+  Un trabajo solo escribe en la pieza si `metadata.video_job_id` sigue
+  apuntando a él. Antes de montar copia a las escenas solo las URLs de las
+  fotos, sin pisar el texto editado.
+- **Pieza borrada.** El trabajo se cancela (`target_deleted`) y deja de
+  gastar.
 - **Reintentos.** Hasta 2 intentos por paso (`MAX_STEP_ATTEMPTS`):
   - Un paso síncrono que lleva más de 4 min en `running` murió con su función:
     se reintenta.
@@ -148,10 +222,23 @@ Garantías:
   3. la foto con movimiento de cámara,
   4. el fondo animado de la marca.
 
-  La duración de cada plano sale de la voz real, no de la estimación del guion.
+  La duración de cada plano sale de la voz real, no de la estimación del guion,
+  y una voz larga nunca se corta.
+
+  Un clip corre una sola vez, sin `<Loop>`. Repetirlo se notaba como un salto
+  y, en un clip con lipsync, repetía las primeras sílabas de la línea. Si el
+  clip termina antes que el plano, queda congelado su último cuadro (mudo)
+  sobre la foto del plano (`poster`).
 - **Cierre.** Al terminar el montaje, el video se escribe en `video_url`, con
   `render_status = 'ready'`. Antes de montar, las fotos se copian a `slides` y
-  a `image_url` (la portada).
+  a `image_url` (la portada, solo si no tenía). Al reemplazar un video
+  (`force`), el anterior se queda hasta que el nuevo exista; si la producción
+  falla, la pieza sigue `ready` con el anterior.
+- **Proveedores lentos.** Un 408, 429 o 5xx de fal no es un fallo: se vuelve a
+  mirar. Si no, un trabajo que sigue corriendo se volvería a encolar y se
+  pagaría dos veces.
+- **Sin montaje no se cobra nada.** Si Lambda no está configurado,
+  `produceVideo` responde 503 antes de cobrar el primer paso.
 
 ## Rutas
 
@@ -175,6 +262,24 @@ escenas.
 | `VIDEO_WEBHOOK_SECRET` | Opcional: firma de los webhooks |
 | Las de Remotion (`docs/reel-render.md`) | El montaje |
 
+## Probar el diseño en local
+
+Para revisar cambios de diseño sin proveedores, `KefyFilm` se renderiza con
+unas props en JSON:
+
+```bash
+npx remotion render remotion/Root.tsx KefyFilm out.mp4 --props=props.json \
+  --browser-executable=/ruta/a/chrome   # en la nube: /opt/pw-browsers/...
+npx remotion still remotion/Root.tsx KefyFilm frame.png --frame=60 --props=props.json
+```
+
+Para armar las props hay que pasar el guion por `buildFilmProps`, con el tema
+de `resolveFilmTheme`, las URLs de fotos y voces, y los tiempos por palabra
+(`alignWords`). Remotion Studio (`npx remotion studio remotion/Root.tsx`)
+muestra la muestra de `Root.tsx`.
+
+## Despliegue
+
 Hay que **re-desplegar el sitio de Remotion**
 (`npx tsx scripts/deploy-remotion-lambda.ts`) para que Lambda tenga la
 composición `KefyFilm`.
@@ -187,13 +292,16 @@ descargan de ahí las voces.
 
 | Archivo | Qué cubre |
 |---|---|
-| `tests/unit/lib/video/script.test.ts` | Normalización del guion, ediciones de escenas y guion desde slides |
+| `tests/unit/lib/video/script.test.ts` | Normalización del guion, ediciones por `scene_id`, fotos quemadas o externas y guion desde slides |
+| `tests/unit/lib/video/brand.test.ts` | Tema de marca, contraste, respaldos, brief del copy, acento de voz y música por ánimo |
+| `tests/unit/lib/video/fal.test.ts` | Contrato de la cola de fal: webhook, estados, 408/429/5xx como pendientes |
+| `tests/unit/lib/services/content-slides.test.ts` | Editar escenas conserva `scene_id` |
 | `tests/unit/lib/video/plan.test.ts` | Grafo, costo, niveles de animación, degradación y `$ref` |
 | `tests/unit/lib/video/timeline.test.ts` | Respaldos, duración por voz y voz dentro del clip |
 | `tests/unit/lib/video/audio.test.ts` | Duración de WAV (incluido el streaming de OpenAI) y alineación de palabras |
-| `tests/unit/lib/video/engine.test.ts` | Producción completa, fallos con reembolso, omisión sin créditos, reclamo atómico |
-| `tests/unit/api/video-production.test.ts` | Plan, confirmación obligatoria, tope de créditos, suscripción, no duplicar |
-| `tests/unit/remotion/film-duration.test.ts` | Duración = suma de planos, transiciones y páginas de subtítulos |
+| `tests/unit/lib/video/engine.test.ts` | Producción completa, fallos con un solo reembolso, omisión sin créditos, reclamo atómico, webhook sin pasos síncronos, pieza borrada o reemplazada, fotos sin pisar el texto |
+| `tests/unit/api/video-production.test.ts` | Plan, confirmación obligatoria, tope de créditos, suscripción, sin Lambda no cobra, `force` conserva el video, guion nuevo cancela el viejo, no duplicar |
+| `tests/unit/remotion/film-duration.test.ts` | Duración = suma de planos más el cierre, transiciones y páginas de subtítulos |
 
 ## Pendiente
 

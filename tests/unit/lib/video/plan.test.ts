@@ -70,6 +70,30 @@ describe('compileVideoPlan', () => {
     expect(anim.depends_on).toEqual([]);
   });
 
+  it('sin generar imágenes (generate_images:false o sin OpenAI) no hay fotos ni nada que animar', () => {
+    const s = script(['animated', 'talking']);
+    for (const plan of [
+      compileVideoPlan(s, { capabilities: FAL, generate_images: false }),
+      compileVideoPlan(s, { capabilities: { ...FAL, images: false } }),
+    ]) {
+      expect(plan.steps.map((x) => x.tool)).toEqual(['text_to_speech', 'text_to_speech', 'compose_video']);
+    }
+  });
+
+  it('sin voz no hay locución ni lipsync, y lo avisa', () => {
+    const plan = compileVideoPlan(script(['talking']), { capabilities: { ...FAL, voice: false } });
+    expect(plan.steps.some((x) => x.tool === 'text_to_speech' || x.tool === 'lip_sync')).toBe(false);
+    expect(plan.notes.some((n) => /voz/.test(n.es))).toBe(true);
+  });
+
+  it('la voz lleva el acento de la marca y un estilo de respaldo', () => {
+    const s = normalizeVideoScript({ scenes: [{ speaker: 'narrator', line: 'Hola', visual: { image_prompt: 'x' } }] }, 'es');
+    const voice = compileVideoPlan(s, { capabilities: FAL, voice_accent: 'Speak in natural Castilian Spanish from Spain.' })
+      .steps.find((x) => x.tool === 'text_to_speech')!;
+    expect(voice.input.instructions).toMatch(/voice-over/);
+    expect(voice.input.instructions).toMatch(/Castilian/);
+  });
+
   it('un plano mudo no lleva voz', () => {
     const s = normalizeVideoScript({ scenes: [{ speaker: null, line: null, on_screen_text: 'Solo texto', visual: { image_prompt: 'x' } }] }, 'es');
     expect(compileVideoPlan(s, { capabilities: FAL }).steps.some((x) => x.tool === 'text_to_speech')).toBe(false);

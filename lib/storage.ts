@@ -38,9 +38,9 @@ export async function uploadBase64Image(
 const VIDEO_ASSETS_BUCKET = 'kefy-video-assets';
 
 /**
- * Sube un archivo generado para un video (voz, clip) al bucket público de
- * assets de video. Bucket aparte del de imágenes: ese restringe a tipos de
- * imagen, y aquí entran audio (wav) y video (mp4).
+ * Sube un archivo generado para un video (hoy, las voces en wav) al bucket
+ * público de assets de video. Bucket aparte del de imágenes: ese restringe a
+ * tipos de imagen.
  */
 export async function uploadVideoAsset(
   buffer: Buffer,

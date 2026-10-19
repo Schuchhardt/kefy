@@ -31,7 +31,10 @@ export async function POST(req: NextRequest) {
   if (!step) return NextResponse.json({ ok: true, ignored: 'unknown_step' });
 
   try {
-    const snap = await advanceVideoJob(db, step.job_id as string, { budgetMs: 60 * 1000 });
+    // Solo consulta y encola pasos asíncronos: una imagen síncrona lanzada al
+    // final de la función podía quedar cortada por maxDuration y pagarse dos
+    // veces. Las imágenes y voces las lanzan el polling y el cron.
+    const snap = await advanceVideoJob(db, step.job_id as string, { budgetMs: 30 * 1000, syncSteps: false });
     return NextResponse.json({ ok: true, status: snap?.status ?? null });
   } catch (err) {
     reportError(err, { route: 'POST /api/webhooks/video', service: 'fal', extra: { stepId } });

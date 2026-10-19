@@ -23,6 +23,7 @@ export const SCENE_SECONDS_MIN = 1.5;
 export const SCENE_SECONDS_MAX = 10;
 const CHARACTERS_MAX = 3;
 const SCENES_MAX = 10;
+const LINE_MAX = 220;
 
 /** Voces de `gpt-4o-mini-tts`. */
 export const VOICES = [
@@ -156,7 +157,8 @@ export function normalizeVideoScript(raw: unknown, language: 'es' | 'en'): Video
     const sc = s as Record<string, unknown>;
     const visual = (sc.visual && typeof sc.visual === 'object' ? sc.visual : {}) as Record<string, unknown>;
     const imagePrompt = str(visual.image_prompt ?? sc.image_prompt, 400);
-    const line = optStr(sc.line, 300);
+    // ~220 caracteres ≈ 13 s de voz: más que eso no cabe en un plano.
+    const line = optStr(sc.line, LINE_MAX);
     const onScreen = optStr(sc.on_screen_text ?? sc.title, 80);
     if (!imagePrompt && !line && !onScreen) continue;
 
@@ -247,6 +249,7 @@ export function scriptToReelScenes(
 ): ReelScene[] {
   return script.scenes.map((s) => ({
     scene_order:      s.order,
+    scene_id:         s.id,
     title:            s.on_screen_text ?? '',
     body:             s.line ?? '',
     duration_seconds: s.duration_seconds,
@@ -256,22 +259,50 @@ export function scriptToReelScenes(
   }));
 }
 
+export interface MergeOptions {
+  /**
+   * Qué fotos ya existentes se pueden reutilizar. El servicio pasa el filtro
+   * del Storage de Kefy: una URL cualquiera pegada en una escena no se manda
+   * a los proveedores ni a Lambda.
+   */
+  isReusableImage?: (url: string) => boolean;
+}
+
 /**
  * Aplica al guion lo que el usuario editó en las escenas (`slides`) desde el
- * editor de la pieza: el titular y la línea de cada plano, y planos borrados
- * o agregados. Sin esto, editar el texto de un reel no cambiaría el video.
+ * editor de la pieza: el titular y la línea de cada plano, y planos borrados,
+ * reordenados o agregados. Sin esto, editar el texto de un reel no cambiaría
+ * el video.
+ *
+ * Cada escena se empareja con su plano por `scene_id`, no por posición: borrar
+ * la escena 2 no le pone a la 3 el personaje y el lipsync de la 2.
  */
-export function mergeSlideEdits(script: VideoScript, slides: unknown): VideoScript {
+export function mergeSlideEdits(script: VideoScript, slides: unknown, opts: MergeOptions = {}): VideoScript {
   if (!Array.isArray(slides) || slides.length === 0) return script;
-  const scenes: VideoScene[] = slides.slice(0, SCENES_MAX).map((raw, i) => {
-    const slide = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    const base = script.scenes[i];
+  const byId = new Map(script.scenes.map((s) => [s.id, s]));
+  const items = slides.slice(0, SCENES_MAX).map((raw) => (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>);
+  const keyed = items.some((s) => typeof s.scene_id === 'string' && byId.has(s.scene_id));
+  const used = new Set<string>();
+  let nextId = 1 + Math.max(0, ...script.scenes.map((s) => Number(s.id.slice(1)) || 0));
+
+  const scenes: VideoScene[] = items.map((slide, i) => {
+    const candidate = keyed
+      ? (typeof slide.scene_id === 'string' ? byId.get(slide.scene_id) : undefined)
+      : script.scenes[i];
+    const base = candidate && !used.has(candidate.id) ? candidate : undefined;
+    if (base) used.add(base.id);
+
     const title = optStr(slide.title, 80);
-    const body  = optStr(slide.body, 300);
-    const imageUrl = typeof slide.image_url === 'string' && slide.image_url.startsWith('http') ? slide.image_url : null;
+    const body  = optStr(slide.body, LINE_MAX);
+    // Una foto con el texto ya quemado no sirve de fondo: el montaje le pondría
+    // encima titular y subtítulos otra vez (las anteriores a text_baked lo están).
+    const imageUrl = typeof slide.image_url === 'string' && /^https:\/\//.test(slide.image_url)
+      && slide.text_baked === false && (opts.isReusableImage?.(slide.image_url) ?? true)
+      ? slide.image_url : null;
+
     if (!base) {
       return {
-        id: `s${i + 1}`, order: i + 1,
+        id: `s${nextId++}`, order: i + 1,
         duration_seconds: clamp(typeof slide.duration_seconds === 'number' ? slide.duration_seconds : 3, SCENE_SECONDS_MIN, SCENE_SECONDS_MAX),
         speaker: body ? 'narrator' : null,
         line: body,
@@ -283,17 +314,23 @@ export function mergeSlideEdits(script: VideoScript, slides: unknown): VideoScri
         transition: i === 0 ? 'cut' : 'crossfade',
       };
     }
+    // Una línea nueva sin hablante la dice el narrador; sin línea, no habla nadie.
+    const speaker = body ? base.speaker ?? 'narrator' : null;
     return {
       ...base,
-      id: `s${i + 1}`,
       order: i + 1,
       line: body,
-      // Una línea nueva sin hablante la dice el narrador; sin línea, no habla nadie.
-      speaker: body ? base.speaker ?? 'narrator' : null,
+      speaker,
+      // Sin la línea del personaje no hay nada que sincronizar.
+      visual: {
+        ...base.visual,
+        kind: base.visual.kind === 'talking' && speaker !== base.speaker ? 'animated' : base.visual.kind,
+        // La foto que ya produjo una pasada anterior se reutiliza: rehacer el
+        // video tras corregir un texto no vuelve a pagar las imágenes.
+        ...(imageUrl ? { image_url: imageUrl } : {}),
+      },
       on_screen_text: title,
-      // La foto que ya produjo una pasada anterior se reutiliza: rehacer el
-      // video tras corregir un texto no vuelve a pagar las imágenes.
-      visual: imageUrl ? { ...base.visual, image_url: imageUrl } : base.visual,
+      transition: i === 0 ? 'cut' : base.transition === 'cut' && base.order === 1 ? 'crossfade' : base.transition,
     };
   });
   return { ...script, scenes };
@@ -308,6 +345,7 @@ export function scriptFromSlides(
   slides: unknown,
   language: 'es' | 'en',
   meta: { title?: string | null; hook?: string | null; hashtags?: string[] | null } = {},
+  opts: MergeOptions = {},
 ): VideoScript | null {
   const base: VideoScript = {
     version: VIDEO_SCRIPT_VERSION,
@@ -321,7 +359,7 @@ export function scriptFromSlides(
     characters: [],
     scenes: [],
   };
-  const merged = mergeSlideEdits(base, slides);
+  const merged = mergeSlideEdits(base, slides, opts);
   if (merged.scenes.length === 0) return null;
   merged.scenes = merged.scenes.map((s, i) => ({
     ...s,

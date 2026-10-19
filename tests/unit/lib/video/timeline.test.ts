@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeVideoScript } from '@/lib/video/script';
-import { buildFilmProps, SPEECH_LEAD_SECONDS, SPEECH_TAIL_SECONDS } from '@/lib/video/timeline';
+import { buildFilmProps, OUTRO_SECONDS, SPEECH_LEAD_SECONDS, SPEECH_TAIL_SECONDS } from '@/lib/video/timeline';
+import { resolveFilmTheme } from '@/lib/video/brand';
 
 const script = normalizeVideoScript({
   characters: [{ id: 'ana', name: 'Ana', look: 'barista', voice: 'coral' }],
@@ -27,13 +28,23 @@ describe('buildFilmProps', () => {
     voice_s2: voice(3),
     voice_s3: voice(1.2),
     // s3 sin imagen (falló), s4 sin nada.
-  }, { name: 'Marca', accentColor: '#ff0000' }, 'track.mp3');
+  }, resolveFilmTheme({ name: 'Marca', accent_color: '#ff0000' }), 'track.mp3');
 
   it('elige el mejor visual disponible de cada plano: lipsync → clip → foto → fondo', () => {
     expect(props.scenes[0]!.visual).toMatchObject({ type: 'video', src: 'https://cdn/1-lips.mp4', has_audio: true });
     expect(props.scenes[1]!.visual).toMatchObject({ type: 'video', src: 'https://cdn/2.mp4', has_audio: false });
     expect(props.scenes[2]!.visual).toEqual({ type: 'none' });
     expect(props.scenes[3]!.visual).toEqual({ type: 'none' });
+  });
+
+  it('los clips llevan la foto del plano debajo, por si terminan antes que el plano', () => {
+    expect(props.scenes[0]!.visual).toMatchObject({ poster: 'https://cdn/1.jpg', clip_seconds: 2 });
+    expect(props.scenes[1]!.visual).toMatchObject({ poster: 'https://cdn/2.jpg', clip_seconds: 5 });
+  });
+
+  it('una voz larga nunca se corta', () => {
+    const long = buildFilmProps(script, { voice_s3: voice(18) }, resolveFilmTheme(null));
+    expect(long.scenes[2]!.duration_seconds).toBeGreaterThan(18);
   });
 
   it('la voz va dentro del clip con lipsync y aparte en el resto', () => {
@@ -53,7 +64,12 @@ describe('buildFilmProps', () => {
     expect(props.scenes[3]!.words).toEqual([]);
   });
 
-  it('lleva marca, música y subtítulos', () => {
-    expect(props).toMatchObject({ brandName: 'Marca', accentColor: '#ff0000', musicTrack: 'track.mp3', captions: true });
+  it('lleva el tema de marca, música, subtítulos y cierre con la marca', () => {
+    expect(props).toMatchObject({ musicTrack: 'track.mp3', captions: true, theme: { brandName: 'Marca', accent: '#ff0000' } });
+    expect(props.outro).toEqual({ duration_seconds: OUTRO_SECONDS, headline: null });
+  });
+
+  it('sin nombre ni logo de marca no hay tarjeta de cierre', () => {
+    expect(buildFilmProps(script, {}, resolveFilmTheme(null)).outro).toBeNull();
   });
 });

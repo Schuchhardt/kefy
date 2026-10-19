@@ -31,13 +31,17 @@ import {
   compileVideoPlan, MOTION_LEVELS, type MotionLevel, type PlanNote, type VideoPlan,
 } from '@/lib/video/plan';
 import { VIDEO_TOOLS } from '@/lib/video/tools';
+import { resolveFilmTheme, voiceAccent, type VideoBrandKit } from '@/lib/video/brand';
+import { isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
 import type { VideoToolName } from '@/lib/video/tools/types';
 import {
-  advanceVideoJob, createVideoJob, latestJobFor, snapshotOf,
+  advanceVideoJob, createVideoJob, latestJobFor, snapshotOf, VideoJobConflictError,
   type JobRow, type RenderContext, type StepRow, type VideoJobSnapshot,
 } from '@/lib/video/engine';
 
 const ROUTE = 'lib/services/video';
+/** Presupuesto de una vuelta pedida por el reproductor o el asistente. */
+const POLL_BUDGET_MS = 20 * 1000;
 
 export type VideoFormat = 'reel' | 'story';
 
@@ -103,24 +107,33 @@ export async function resolveVideoTarget(
   };
 }
 
-/** Guion vigente de la pieza, con las ediciones de sus escenas aplicadas. */
+/**
+ * Guion vigente de la pieza, con las ediciones de sus escenas aplicadas. Solo
+ * se reutilizan fotos del Storage de Kefy: una URL cualquiera pegada en una
+ * escena no se manda a fal.ai ni a Lambda (SSRF).
+ */
 export function scriptForTarget(target: VideoTarget, language: 'es' | 'en'): VideoScript | null {
+  const opts = { isReusableImage: isKefyStorageUrl };
   const stored = readVideoScript(target.metadata);
-  if (stored) return mergeSlideEdits(stored, target.slides);
-  return scriptFromSlides(target.slides, language, { title: target.title, hook: target.hook, hashtags: target.hashtags });
+  if (stored) return mergeSlideEdits(stored, target.slides, opts);
+  return scriptFromSlides(target.slides, language, { title: target.title, hook: target.hook, hashtags: target.hashtags }, opts);
+}
+
+/** Lo que cambia el video: si difiere, una producción en curso ya no sirve. */
+function scriptFingerprint(script: VideoScript): string {
+  return JSON.stringify(script.scenes.map((s) => [s.id, s.line, s.on_screen_text, s.speaker, s.visual.kind, s.visual.image_prompt]));
 }
 
 function capabilities() {
   return {
     animation: VIDEO_TOOLS.animate_image.available(),
     lipsync:   VIDEO_TOOLS.lip_sync.available(),
+    images:    VIDEO_TOOLS.generate_image.available(),
+    voice:     VIDEO_TOOLS.text_to_speech.available(),
   };
 }
 
-type KitRow = {
-  name?: string | null; primary_color?: string | null; secondary_color?: string | null; accent_color?: string | null;
-  font_heading?: string | null; logo_url?: string | null; reference_image_urls?: string[] | null;
-};
+type KitRow = VideoBrandKit;
 
 async function brandKitFor(ctx: ServiceContext, target: VideoTarget): Promise<KitRow | null> {
   const brandId = target.brandId ?? ctx.brandId;
@@ -130,11 +143,14 @@ async function brandKitFor(ctx: ServiceContext, target: VideoTarget): Promise<Ki
 }
 
 /** Opciones de imagen que se pidieron al crear el reel (metadata.video_options). */
-function videoOptions(target: VideoTarget): { image_quality?: 'low' | 'medium' | 'high'; reference_image_urls?: string[] } {
+function videoOptions(target: VideoTarget): {
+  image_quality?: 'low' | 'medium' | 'high'; reference_image_urls?: string[]; generate_images?: boolean;
+} {
   const o = target.metadata.video_options as Record<string, unknown> | undefined;
   if (!o || typeof o !== 'object') return {};
   const q = o.image_quality;
   return {
+    generate_images: o.generate_images === false ? false : undefined,
     image_quality: q === 'low' || q === 'medium' || q === 'high' ? q : undefined,
     reference_image_urls: Array.isArray(o.reference_image_urls)
       ? o.reference_image_urls.filter((u): u is string => typeof u === 'string' && u.startsWith('https://'))
@@ -147,6 +163,7 @@ function compile(script: VideoScript, motion: MotionLevel, kit: KitRow | null, t
     ...videoOptions(target),
     motion,
     capabilities: capabilities(),
+    voice_accent: voiceAccent(kit, script.language),
     brand: {
       name:           kit?.name ?? undefined,
       primaryColor:   kit?.primary_color ?? undefined,
@@ -298,11 +315,26 @@ export async function produceVideo(
   const target = await resolveVideoTarget(ctx, input.itemId, input.format);
   const db = createSupabaseServer();
 
-  // Un trabajo en curso no se duplica: se devuelve su estado.
+  const script = scriptForTarget(target, ctx.language);
+  if (!script) {
+    throw new ServiceError('invalid_input', 422, msg(ctx.language,
+      'Esta pieza no tiene guion ni escenas para producir un video.',
+      'This item has no script or scenes to produce a video from.'));
+  }
+
+  // Un trabajo en curso con el mismo guion no se duplica: se devuelve su
+  // estado. Si el guion cambió desde entonces (el usuario editó una escena),
+  // ese trabajo ya no sirve: se cancela y se produce el nuevo.
   const current = await latestJobFor(db, target.table, target.id);
   if (current?.status === 'running') {
-    const snap = await advanceVideoJob(db, current.id, { budgetMs: 0 });
-    if (snap) return snap;
+    if (scriptFingerprint(current.script) === scriptFingerprint(script)) {
+      const snap = await advanceVideoJob(db, current.id, { budgetMs: 0 });
+      if (snap) return snap;
+    } else {
+      await db.from('kefy_video_jobs')
+        .update({ status: 'canceled', error: 'superseded', finished_at: new Date().toISOString() })
+        .eq('id', current.id).eq('status', 'running');
+    }
   }
   if (target.videoUrl && !input.force) {
     throw new ServiceError('conflict', 409, msg(ctx.language,
@@ -311,12 +343,13 @@ export async function produceVideo(
       { error: 'already_rendered', video_url: target.videoUrl });
   }
 
-  const script = scriptForTarget(target, ctx.language);
-  if (!script) {
-    throw new ServiceError('invalid_input', 422, msg(ctx.language,
-      'Esta pieza no tiene guion ni escenas para producir un video.',
-      'This item has no script or scenes to produce a video from.'));
+  // Sin montaje no hay video: no se cobra ningún paso si Lambda no está.
+  if (!VIDEO_TOOLS.compose_video.available()) {
+    throw new ServiceError('unavailable', 503, msg(ctx.language,
+      'La producción de video no está disponible en este momento.',
+      'Video production is not available right now.'));
   }
+
   const kit  = await brandKitFor(ctx, target);
   const plan = compile(script, parseMotion(input.motion), kit, target);
 
@@ -335,13 +368,12 @@ export async function produceVideo(
   // suscripción → rate limit → créditos. El resto se cobra paso a paso.
   const refund = await chargeOrThrow(ctx, 'video', ROUTE);
 
+  // Diseño y música de marca, resueltos ahora: editar el Brand Kit a mitad
+  // de la producción no cambia un video que ya se está haciendo.
   const renderContext: RenderContext = {
-    plan:        ctx.auth.plan,
-    name:        kit?.name ?? undefined,
-    accentColor: kit?.accent_color ?? '#c6ff4b',
-    fontHeading: kit?.font_heading ?? undefined,
-    logoUrl:     kit?.logo_url ?? undefined,
-    musicTrack:  pickMusicTrack(target.id),
+    plan:       ctx.auth.plan,
+    theme:      resolveFilmTheme(kit),
+    musicTrack: pickMusicTrack(target.id, [script.music_mood, ...(kit?.tone ?? [])].filter(Boolean).join(' ')),
   };
 
   let jobId: string;
@@ -352,14 +384,22 @@ export async function produceVideo(
     });
   } catch (err) {
     await refund();
+    // Dos «Producir» a la vez (doble clic, el asistente y la UI): el índice
+    // único deja pasar uno solo, y el otro devuelve ese mismo trabajo.
+    if (err instanceof VideoJobConflictError) {
+      const running = await latestJobFor(db, target.table, target.id);
+      const snap = running ? await advanceVideoJob(db, running.id, { budgetMs: 0 }) : null;
+      if (snap) return snap;
+    }
     reportError(err, { route: ROUTE, auth: ctx.auth, service: 'supabase', extra: { itemId: target.itemId } });
     throw new ServiceError('unavailable', 500, msg(ctx.language,
       'No se pudo iniciar la producción del video.', 'Could not start the video production.')).markReported();
   }
 
+  // El video anterior (si se pidió reemplazarlo) se queda hasta que el nuevo
+  // exista: si la producción falla, la pieza sigue teniendo uno publicable.
   await db.from(target.table).update({
     render_status: 'rendering',
-    video_url:     null,
     metadata:      { ...target.metadata, video_script: script, video_job_id: jobId },
   }).eq('id', target.id);
 
@@ -375,14 +415,16 @@ export async function produceVideo(
 /** Da una vuelta al trabajo más reciente de la pieza. null si nunca se produjo. */
 export async function getVideoProduction(
   ctx: ServiceContext,
-  input: { itemId: string; format?: string | null; advance?: boolean },
+  input: { itemId: string; format?: string | null; advance?: boolean; budgetMs?: number },
 ): Promise<VideoJobSnapshot | null> {
   const target = await resolveVideoTarget(ctx, input.itemId, input.format);
   const db = createSupabaseServer();
   const job = await latestJobFor(db, target.table, target.id);
   if (!job) return null;
   if (input.advance === false || job.status !== 'running') return jobSnapshot(job);
-  return advanceVideoJob(db, job.id);
+  // Vuelta corta: los pasos que lance terminan igual (una imagen tarda lo que
+  // tarde), pero no se encadenan rondas mientras el cliente espera.
+  return advanceVideoJob(db, job.id, { budgetMs: input.budgetMs ?? POLL_BUDGET_MS });
 }
 
 async function jobSnapshot(job: JobRow): Promise<VideoJobSnapshot> {

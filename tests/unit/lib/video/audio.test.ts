@@ -45,6 +45,20 @@ describe('alignWords', () => {
     ]);
   });
 
+  it('con más palabras en el guion que las oídas, cada una tiene su tramo y no se pisan', () => {
+    // «24/7» se oye como dos palabras y «depando.cl» como tres: los conteos no cuadran.
+    const words = alignWords('Atención 24/7 en depando.cl ya', 3, [
+      { start: 0, end: 0.5 }, { start: 0.6, end: 1.4 }, { start: 1.5, end: 2.6 },
+    ]);
+    expect(words.map((w) => w.text)).toEqual(['Atención', '24/7', 'en', 'depando.cl', 'ya']);
+    for (let i = 1; i < words.length; i++) {
+      expect(words[i]!.start).toBeGreaterThanOrEqual(words[i - 1]!.end);
+      expect(words[i]!.end).toBeGreaterThan(words[i]!.start);
+    }
+    expect(words[0]!.start).toBe(0);
+    expect(words[words.length - 1]!.end).toBeCloseTo(2.6, 2);
+  });
+
   it('sin whisper reparte la duración por largo de palabra', () => {
     const words = alignWords('a bbbb', 2);
     expect(words[0]!.start).toBe(0);

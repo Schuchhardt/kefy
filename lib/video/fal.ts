@@ -39,7 +39,9 @@ function falKey(): string {
   return key;
 }
 
-const falFetch = withProviderAlerts('fal');
+// `fetch` se resuelve en cada llamada (no al cargar el módulo): así los tests
+// pueden sustituirlo.
+const falFetch = withProviderAlerts('fal', (input, init) => fetch(input, init));
 
 async function readError(res: Response): Promise<string> {
   const text = await res.text().catch(() => '');
@@ -76,8 +78,10 @@ export async function falPoll(handle: FalHandle): Promise<FalPoll> {
   const statusRes = await falFetch(handle.status_url, { headers });
   if (!statusRes.ok) {
     // 4xx sobre el estado: el trabajo no existe (o la clave cambió) — no va a
-    // aparecer reintentando. 5xx: fal tuvo un problema, se vuelve a mirar.
-    if (statusRes.status >= 400 && statusRes.status < 500) {
+    // aparecer reintentando. 5xx, 408 y 429 (tres vueltas consultando a la
+    // vez): fal tuvo un problema o pidió calma, se vuelve a mirar después. Dar
+    // por fallido un trabajo que sigue corriendo lo haría pagar dos veces.
+    if (statusRes.status >= 400 && statusRes.status < 500 && statusRes.status !== 408 && statusRes.status !== 429) {
       return { status: 'failed', error: await readError(statusRes) };
     }
     return { status: 'pending' };
@@ -90,6 +94,7 @@ export async function falPoll(handle: FalHandle): Promise<FalPoll> {
   }
 
   const resultRes = await falFetch(handle.response_url, { headers });
+  if (resultRes.status === 408 || resultRes.status === 429 || resultRes.status >= 500) return { status: 'pending' };
   if (!resultRes.ok) return { status: 'failed', error: await readError(resultRes) };
   const output = await resultRes.json() as Record<string, unknown>;
   // Un trabajo COMPLETED puede traer el error del modelo en el cuerpo.

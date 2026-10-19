@@ -1,7 +1,7 @@
 import { Composition, registerRoot } from 'remotion';
 import { ReelComposition, getTotalFrames, calculateReelMetadata, type ReelCompositionProps } from './ReelComposition';
 import { FilmComposition, calculateFilmMetadata, getFilmTotalFrames } from './FilmComposition';
-import type { FilmCompositionProps } from './film-types';
+import type { FilmCompositionProps, FilmTheme } from './film-types';
 
 // Sample scenes for Remotion Studio preview
 const SAMPLE_SCENES: ReelCompositionProps['scenes'] = [
@@ -15,6 +15,12 @@ const SAMPLE_SCENES: ReelCompositionProps['scenes'] = [
 const SAMPLE_FPS = 30;
 
 // Muestra del pipeline de video (lib/video): sin URLs, cae al fondo de marca.
+// El tema es el que resolveFilmTheme arma para Kefy (lib/video/brand.ts).
+const SAMPLE_THEME: FilmTheme = {
+  accent: '#c6ff4b', onAccent: '#0b0b0f', primary: '#14141c', secondary: '#2a2440', onPrimary: '#ffffff',
+  headingFont: 'Montserrat', bodyFont: 'Montserrat', brandName: 'Kefy', tagline: 'IA para tu marca social',
+  contact: 'kefy.app', branded: true,
+};
 const SAMPLE_FILM: FilmCompositionProps['scenes'] = [
   {
     id: 's1', duration_seconds: 3, visual: { type: 'none' }, camera: 'push_in', voice: null, speech_offset: 0.2,
@@ -55,12 +61,12 @@ export const RemotionRoot: React.FC = () => {
         id="KefyFilm"
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         component={FilmComposition as any}
-        durationInFrames={getFilmTotalFrames(SAMPLE_FILM, SAMPLE_FPS)}
+        durationInFrames={getFilmTotalFrames(SAMPLE_FILM, SAMPLE_FPS, { duration_seconds: 2.2 })}
         calculateMetadata={({ props }) => calculateFilmMetadata({ props: props as Partial<FilmCompositionProps> }, SAMPLE_FPS)}
         fps={SAMPLE_FPS}
         width={1080}
         height={1920}
-        defaultProps={{ scenes: SAMPLE_FILM, brandName: 'Kefy', accentColor: '#c6ff4b' }}
+        defaultProps={{ scenes: SAMPLE_FILM, theme: SAMPLE_THEME, outro: { duration_seconds: 2.2, headline: null } }}
       />
     </>
   );

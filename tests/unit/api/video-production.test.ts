@@ -60,10 +60,18 @@ beforeEach(() => {
   resetQuotaState();
   resetSubscriptionState();
   vi.mocked(getAuthFromRequest).mockResolvedValue(auth as never);
-  process.env.FAL_KEY = 'test-key';
+  Object.assign(process.env, VIDEO_ENV);
 });
 
-afterEach(() => { delete process.env.FAL_KEY; });
+afterEach(() => { for (const k of Object.keys(VIDEO_ENV)) delete process.env[k]; });
+
+/** Lo que el pipeline necesita configurado: fal, OpenAI y Remotion Lambda. */
+const VIDEO_ENV = {
+  FAL_KEY: 'test-key',
+  OPENAI_API_KEY: 'sk-test',
+  REMOTION_LAMBDA_FUNCTION_NAME: 'fn',
+  REMOTION_SERVE_URL: 'https://serve.example.com',
+};
 
 describe('GET /api/content/reel/plan', () => {
   it('lista las herramientas del guion con su costo, sin gastar nada', async () => {
@@ -133,6 +141,43 @@ describe('POST /api/content/reel/render (reel con guion)', () => {
     const res = await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }));
     expect(res.status).toBe(402);
     expect(db.rows('kefy_video_jobs')).toHaveLength(0);
+  });
+
+  it('sin Remotion configurado no cobra nada: sin montaje no hay video', async () => {
+    seedItem();
+    delete process.env.REMOTION_SERVE_URL;
+    const { POST } = await import('@/app/api/content/reel/render/route');
+    const res = await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }));
+    expect(res.status).toBe(503);
+    expect(quotaState.calls.filter((c) => c.fn === 'kefy_credits_consume')).toHaveLength(0);
+    expect(db.rows('kefy_video_jobs')).toHaveLength(0);
+  });
+
+  it('reemplazar un video (force) conserva el anterior mientras se produce el nuevo', async () => {
+    seedItem({ video_url: 'https://s3/old.mp4', render_status: 'ready' });
+    const { POST } = await import('@/app/api/content/reel/render/route');
+    const res = await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true, force: true }));
+    expect(res.status).toBe(202);
+    expect(db.find('kefy_content_items', (r) => r.id === 'item-1')).toMatchObject({
+      video_url: 'https://s3/old.mp4', render_status: 'rendering',
+    });
+  });
+
+  it('si el guion cambió, la producción en curso se cancela y se produce el nuevo', async () => {
+    seedItem();
+    const { POST } = await import('@/app/api/content/reel/render/route');
+    const first = await (await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }))).json();
+
+    // El usuario edita la línea del primer plano mientras se produce.
+    const item = db.find('kefy_content_items', (r) => r.id === 'item-1')!;
+    (item.slides as Array<Record<string, unknown>>)[0]!.body = 'Una línea nueva';
+
+    const second = await (await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }))).json();
+    expect(second.production.job_id).not.toBe(first.production.job_id);
+    expect(db.find('kefy_video_jobs', (r) => r.id === first.production.job_id)).toMatchObject({ status: 'canceled' });
+    const meta = db.find('kefy_content_items', (r) => r.id === 'item-1')!.metadata as Record<string, unknown>;
+    expect(meta.video_job_id).toBe(second.production.job_id);
+    expect((meta.video_script as { scenes: Array<{ line: string }> }).scenes[0]!.line).toBe('Una línea nueva');
   });
 
   it('una segunda confirmación no duplica una producción en curso', async () => {

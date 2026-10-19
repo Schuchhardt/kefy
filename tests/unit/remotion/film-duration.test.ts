@@ -19,6 +19,12 @@ describe('KefyFilm: duración', () => {
     expect(getFilmTotalFrames(scenes, FPS)).toBe(calculateFilmMetadata({ props: { scenes } }, FPS).durationInFrames);
   });
 
+  it('la tarjeta de cierre suma su duración al final', () => {
+    const scenes = [scene(2), scene(3)];
+    expect(calculateFilmMetadata({ props: { scenes, outro: { duration_seconds: 2.2 } } }, FPS).durationInFrames)
+      .toBe(5 * FPS + Math.round(2.2 * FPS));
+  });
+
   it('sin planos no rompe Remotion (mínimo 1 frame)', () => {
     expect(calculateFilmMetadata({ props: {} }, FPS).durationInFrames).toBe(1);
   });

@@ -3,6 +3,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { reconcileRenderTarget, type RenderTable, type RenderTarget } from '@/lib/reel-render';
 import { advanceVideoJob } from '@/lib/video/engine';
+import { reportError } from '@/lib/observability';
 
 export const runtime     = 'nodejs';
 export const maxDuration = 300;
@@ -30,9 +31,14 @@ export const maxDuration = 300;
 
 /** Cap per run so one sweep can't exceed the function's time budget. */
 const MAX_TARGETS_PER_RUN = 25;
-/** Video productions advanced per run, and the time each one may take. */
-const MAX_JOBS_PER_RUN = 8;
-const JOB_BUDGET_MS    = 20 * 1000;
+/** Video productions advanced per run. They go two at a time (each may run up
+ *  to 6 image generations in parallel — more would hit OpenAI rate limits),
+ *  and no new one starts after RUN_BUDGET_MS so a pass plus its longest sync
+ *  step (~90 s) fits in maxDuration. */
+const MAX_JOBS_PER_RUN   = 8;
+const JOBS_IN_PARALLEL   = 2;
+const JOB_BUDGET_MS      = 20 * 1000;
+const RUN_BUDGET_MS      = 150 * 1000;
 
 function isVercelCronAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET ?? process.env.AUTOPILOT_CRON_SECRET;
@@ -102,21 +108,26 @@ async function runReconcile(orgId: string | null) {
     .from('kefy_video_jobs')
     .select('id')
     .eq('status', 'running')
-    .order('updated_at', { ascending: true })
+    .order('advanced_at', { ascending: true, nullsFirst: true })
     .limit(MAX_JOBS_PER_RUN);
   if (orgId) jobsQuery = jobsQuery.eq('org_id', orgId);
   const { data: jobs } = await jobsQuery;
 
-  const productions = await Promise.all(((jobs ?? []) as Array<{ id: string }>).map(async (job) => {
-    try {
-      const snap = await advanceVideoJob(db, job.id, { budgetMs: JOB_BUDGET_MS });
-      return { id: job.id, status: snap?.status ?? 'missing' };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'advance failed';
-      console.error(`[reel/reconcile] video job ${job.id}:`, message);
-      return { id: job.id, status: 'error', error: message };
-    }
-  }));
+  const startedAt = Date.now();
+  const queue = [...((jobs ?? []) as Array<{ id: string }>)];
+  const productions: Array<{ id: string; status: string; error?: string }> = [];
+  while (queue.length && Date.now() - startedAt < RUN_BUDGET_MS) {
+    const batch = queue.splice(0, JOBS_IN_PARALLEL);
+    productions.push(...await Promise.all(batch.map(async (job) => {
+      try {
+        const snap = await advanceVideoJob(db, job.id, { budgetMs: JOB_BUDGET_MS });
+        return { id: job.id, status: snap?.status ?? 'missing' };
+      } catch (err) {
+        reportError(err, { route: 'reel/reconcile', extra: { videoJobId: job.id } });
+        return { id: job.id, status: 'error', error: err instanceof Error ? err.message : 'advance failed' };
+      }
+    })));
+  }
 
   const summary = {
     productions:  productions.length,

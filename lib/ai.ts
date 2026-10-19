@@ -576,6 +576,8 @@ export interface GenerateVideoScriptOptions {
   brandName?:   string;
   tagline?:     string;
   extraCtx?:    string;
+  /** Perfil de marca para el copy (lib/video/brand.ts::videoBrandBrief). */
+  brandBrief?:  string;
 }
 
 export interface GenerateVideoScriptResult {
@@ -606,10 +608,11 @@ export async function generateVideoScript(
     language:   lang,
     tone,
     brandCtx,
+    brandBrief: opts.brandBrief ?? '',
     extraCtx:   opts.extraCtx ?? '',
   }, [
     `You are a short-form video director writing a ${sceneCount}-shot vertical video for ${opts.channel} in ${lang}.`,
-    `Tone: ${tone}. ${brandCtx} ${opts.extraCtx ?? ''}`,
+    `Tone: ${tone}. ${brandCtx} ${opts.brandBrief ?? ''} ${opts.extraCtx ?? ''}`,
     'Return ONLY valid JSON: {"title","hook","hashtags":[],"visual_style","narrator":{"voice","style"},"music_mood","characters":[],',
     '"scenes":[{"duration_seconds","speaker","line","on_screen_text","visual":{"kind":"still|animated|talking","image_prompt","motion_prompt","character_ids":[],"camera"},"transition"}]}',
   ].join(' '));
