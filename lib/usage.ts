@@ -19,7 +19,7 @@ import type { BillingPlan } from '@/types/billing';
 import { OPERATION_CREDIT_COSTS, PLAN_LIMITS } from '@/lib/plans';
 
 /** Operaciones que gastan créditos. */
-export type CreditOperation = 'text' | 'image' | 'video';
+export type CreditOperation = keyof typeof OPERATION_CREDIT_COSTS;
 
 /**
  * Coste en créditos de cada operación, proporcional a lo que cuesta ejecutarla.

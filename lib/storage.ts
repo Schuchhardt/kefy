@@ -34,3 +34,29 @@ export async function uploadBase64Image(
 
   return data.publicUrl;
 }
+
+const VIDEO_ASSETS_BUCKET = 'kefy-video-assets';
+
+/**
+ * Sube un archivo generado para un video (voz, clip) al bucket público de
+ * assets de video. Bucket aparte del de imágenes: ese restringe a tipos de
+ * imagen, y aquí entran audio (wav) y video (mp4).
+ */
+export async function uploadVideoAsset(
+  buffer: Buffer,
+  orgId: string,
+  filename: string,
+  contentType: string,
+): Promise<string> {
+  const path = `${orgId}/${Date.now()}-${filename}`;
+  const db   = createSupabaseServer();
+
+  const { error } = await db.storage
+    .from(VIDEO_ASSETS_BUCKET)
+    .upload(path, buffer, { contentType, upsert: false });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+
+  const { data } = db.storage.from(VIDEO_ASSETS_BUCKET).getPublicUrl(path);
+  if (!data?.publicUrl) throw new Error('Could not retrieve public URL after upload');
+  return data.publicUrl;
+}

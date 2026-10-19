@@ -5,8 +5,12 @@
 // route handler (junto con /api/content/story), que es justo lo que este
 // archivo corrige.
 //
+// Un reel es un guion de video plano a plano (lib/video/script.ts): aquí solo
+// se escribe el guion; las imágenes, animaciones, voces y el montaje se
+// producen después, con el plan y su costo a la vista (lib/services/video.ts).
+//
 // Soporta más de una variante por llamada (`variant_count`, hasta
-// REEL_VARIANT_COUNT_MAX): cada variante corre su propio guion + imágenes y
+// REEL_VARIANT_COUNT_MAX): cada variante corre su propio guion y
 // se guarda como su propio item de `kefy_content_items`, agrupadas por
 // `metadata.variant_group_id` — así el usuario las compara desde la
 // biblioteca en vez de un selector efímero que se pierde si cierra la
@@ -20,9 +24,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { createSupabaseServer } from '@/lib/supabase';
-import { generateReelScript, generateContentImage } from '@/lib/ai';
-import { consumeCredits, refundCredits } from '@/lib/usage';
-import { uploadBase64Image } from '@/lib/storage';
+import { generateVideoScript } from '@/lib/ai';
 import { reportError } from '@/lib/observability';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, chargeOrThrow } from '@/lib/services/errors';
@@ -30,6 +32,9 @@ import { getBrandKitForBrand, brandPromptContext } from '@/lib/services/brand-ki
 import type { ContentChannel } from '@/types/ai';
 import type { ReelScene } from '@/types/content';
 import type { BrandKit } from '@/types/brand-kit';
+import { scriptToReelScenes, type VideoScript } from '@/lib/video/script';
+import { compileVideoPlan } from '@/lib/video/plan';
+import { VIDEO_TOOLS } from '@/lib/video/tools';
 
 const ROUTE = 'POST /api/content/reel';
 
@@ -66,6 +71,11 @@ export interface GenerateReelInput {
 export interface ReelVariant {
   itemId:        string;
   variant_index: number;
+  /** Guion completo: planos, voces, personajes y herramientas de cada plano. */
+  script:        VideoScript;
+  /** Créditos estimados para producir el video con la animación por defecto. */
+  production_credits: number;
+  /** Vista derivada del guion, en el formato de siempre (previews, editor). */
   scenes:        ReelScene[];
   hook:          string;
   hashtags:      string[];
@@ -86,9 +96,6 @@ interface OneVariantOpts {
   channel:          ContentChannel;
   topic:            string;
   sceneCount:       number;
-  genImages:        boolean;
-  imageQuality:     ImageQuality;
-  referenceImages?: string[];
   kit:              KitRow | null;
   variantIndex:     number;
   variantCount:     number;
@@ -97,7 +104,7 @@ interface OneVariantOpts {
 async function generateOneVariant(
   ctx: ServiceContext,
   opts: OneVariantOpts,
-): Promise<{ scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> {
+): Promise<{ script: VideoScript; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> {
   const promptCtx = brandPromptContext(opts.kit as Pick<BrandKit, 'name' | 'tagline' | 'tone' | 'industry'> | null);
   // Sin esto, dos variantes del mismo topic suelen salir como el mismo hook
   // reformulado — el pedido explícito de "otro ángulo" es lo que de verdad
@@ -109,7 +116,7 @@ async function generateOneVariant(
   const refund = await chargeOrThrow(ctx, 'text', ROUTE);
   let generated;
   try {
-    generated = await generateReelScript({
+    generated = await generateVideoScript({
       channel:     opts.channel,
       topic:       opts.topic,
       scene_count: opts.sceneCount,
@@ -129,51 +136,26 @@ async function generateOneVariant(
     throw new ServiceError('provider_error', 502, message).markReported();
   }
 
-  // Una imagen de fondo por escena: cada una consume cuota por separado. Sin
-  // cuota, la escena se queda sin fondo generado y Remotion usa el gradiente
-  // de marca — el reel sigue saliendo (mismo criterio que un carrusel).
-  const scenes = await Promise.all(
-    generated.scenes.map(async (scene) => {
-      if (!opts.genImages) return { ...scene, image_url: undefined };
-
-      const sceneCredits = await consumeCredits(ctx.auth.orgId, ctx.auth.plan, 'image').catch(() => null);
-      if (!sceneCredits?.allowed) return { ...scene, image_url: undefined };
-
-      try {
-        // Sin logo: Remotion lo superpone, no puede venir quemado en el fondo.
-        const bgPrompt = `Background scene for a reel: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks, NO signs with writing, NO UI overlays. Pure cinematic background scene only.`;
-        const imgResult = await generateContentImage({
-          prompt:  bgPrompt,
-          size:    '1024x1792',
-          quality: opts.imageQuality,
-          brand: {
-            name:           opts.kit?.name           ?? undefined,
-            primaryColor:   opts.kit?.primary_color  ?? undefined,
-            secondaryColor: opts.kit?.secondary_color ?? undefined,
-            accentColor:    opts.kit?.accent_color   ?? undefined,
-            tone:           opts.kit?.tone           ?? undefined,
-          },
-          referenceImages: opts.referenceImages,
-        });
-        const imageUrl = await uploadBase64Image(
-          imgResult.b64, ctx.auth.orgId, `reel-scene-${scene.scene_order}-${Date.now()}.jpeg`,
-        );
-        return { ...scene, image_url: imageUrl };
-      } catch (imgErr) {
-        await refundCredits(ctx.auth.orgId, 'image');
-        reportError(imgErr, {
-          route: ROUTE, auth: ctx.auth, service: 'ai',
-          extra: { escena: scene.scene_order, fase: 'imagen', variantIndex: opts.variantIndex },
-        });
-        return { ...scene, image_url: undefined };
-      }
-    }),
-  );
-
+  // Ya no se generan imágenes aquí: el guion se guarda con su plan de
+  // producción (imágenes, animaciones, voces, lipsync) y el usuario lo ve con
+  // su costo antes de producirlo (lib/services/video.ts). Generar 2–3
+  // variantes cuesta un texto cada una, no 8 imágenes cada una.
+  const { script } = generated;
   return {
-    scenes, hook: generated.hook, hashtags: generated.hashtags,
-    model: generated.model, tokensUsed: generated.tokensUsed,
+    script,
+    scenes:     scriptToReelScenes(script),
+    hook:       script.hook,
+    hashtags:   script.hashtags,
+    model:      generated.model,
+    tokensUsed: generated.tokensUsed,
   };
+}
+
+function estimateProductionCredits(script: VideoScript, kit: KitRow | null): number {
+  return compileVideoPlan(script, {
+    capabilities: { animation: VIDEO_TOOLS.animate_image.available(), lipsync: VIDEO_TOOLS.lip_sync.available() },
+    brand: { name: kit?.name ?? undefined },
+  }).credits;
 }
 
 /**
@@ -183,9 +165,13 @@ async function generateOneVariant(
 export async function generateReel(ctx: ServiceContext, input: GenerateReelInput): Promise<GenerateReelOutput> {
   const channel      = input.channel ?? 'generic';
   const sceneCount   = Math.min(REEL_SCENE_COUNT_MAX, Math.max(REEL_SCENE_COUNT_MIN, Math.floor(input.scene_count ?? 5)));
-  const genImages    = input.generate_images !== false;
-  const imageQuality = VALID_IMAGE_QUALITIES.has(input.image_quality ?? '') ? input.image_quality! : 'medium';
-  const referenceImages = input.reference_image_urls?.slice(0, 3);
+  // Las opciones de imagen ya no se usan al escribir el guion: se guardan
+  // para cuando se produzca el video.
+  const videoOptions = {
+    image_quality:        VALID_IMAGE_QUALITIES.has(input.image_quality ?? '') ? input.image_quality! : 'medium',
+    reference_image_urls: input.reference_image_urls?.slice(0, 2) ?? [],
+    generate_images:      input.generate_images !== false,
+  };
   const variantCount = Math.min(
     REEL_VARIANT_COUNT_MAX,
     Math.max(REEL_VARIANT_COUNT_MIN, Math.floor(input.variant_count ?? 1)),
@@ -195,12 +181,8 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
   const db = createSupabaseServer();
   const { data: kit } = await getBrandKitForBrand(db, ctx.brandId);
 
-  // En paralelo, no en serie: cada variante genera texto + hasta
-  // REEL_SCENE_COUNT_MAX imágenes, y en serie 2 variantes se acercaban al
-  // maxDuration de la ruta (180s) — la 2ª a veces ni alcanzaba a terminar
-  // dentro del tiempo de la función, así que el usuario solo veía 1 versión
-  // guardada aunque hubiera pedido 2. En paralelo, el total es ~lo que tarda
-  // la variante más lenta, no la suma de todas.
+  // En paralelo, no en serie: el total es ~lo que tarda la variante más
+  // lenta, no la suma de todas.
   //
   // Si la variante 2 se queda sin crédito o choca con el rate limit, la 1 ya
   // generada y cobrada no se pierde — se devuelve sola en vez de fallar toda
@@ -210,7 +192,7 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
   const settled = await Promise.allSettled(
     Array.from({ length: variantCount }, (_, i) =>
       generateOneVariant(ctx, {
-        channel, topic, sceneCount, genImages, imageQuality, referenceImages,
+        channel, topic, sceneCount,
         kit: kit as KitRow | null, variantIndex: i + 1, variantCount,
       }),
     ),
@@ -221,7 +203,7 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
   // originalIndex se conserva para el metadata (variant_index) — con
   // ejecución en paralelo una variante del medio puede fallar mientras las de
   // los costados terminan bien, y no se quiere que eso reordene la numeración.
-  const generatedVariants: Array<{ originalIndex: number; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> =
+  const generatedVariants: Array<{ originalIndex: number; script: VideoScript; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> =
     settled
       .map((r, originalIndex) => (r.status === 'fulfilled' ? { originalIndex, ...r.value } : null))
       .filter((v): v is NonNullable<typeof v> => v !== null);
@@ -231,7 +213,6 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
   const variants: ReelVariant[] = [];
   for (const generated of generatedVariants) {
     const i = generated.originalIndex;
-    const coverImage = generated.scenes.find((s) => s.image_url)?.image_url ?? null;
     const { data: item, error: itemError } = await db
       .from('kefy_content_items')
       .insert({
@@ -241,15 +222,17 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
         created_by:   ctx.auth.userId,
         channel,
         content_type: 'reel',
-        title:        generated.hook || generated.scenes[0]?.title || null,
+        title:        generated.script.title || generated.hook || generated.scenes[0]?.title || null,
         body:         generated.hook || null,
-        image_url:    coverImage,
+        image_url:    null,
         slides:       generated.scenes,
         hashtags:     generated.hashtags,
         status:       'draft',
         metadata: {
-          scene_count: generated.scenes.length,
-          model:       generated.model,
+          scene_count:   generated.scenes.length,
+          model:         generated.model,
+          video_script:  generated.script,
+          video_options: videoOptions,
           ...(variantGroupId
             ? { variant_group_id: variantGroupId, variant_index: i + 1, variant_count: variantCount }
             : {}),
@@ -268,6 +251,8 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
     variants.push({
       itemId:        item.id as string,
       variant_index: i + 1,
+      script:        generated.script,
+      production_credits: estimateProductionCredits(generated.script, kit as KitRow | null),
       scenes:        generated.scenes,
       hook:          generated.hook,
       hashtags:      generated.hashtags,

@@ -24,8 +24,11 @@ tabla ya tenía ambas columnas.
 | Pro | US$99/mes | 5 | 500 | 1 |
 | Business | US$199/mes | 15 | 2000 | 5 |
 
-Cada operación descuenta según su coste: texto 1 crédito, imagen 3, video 10
-(`CREDIT_COSTS` en `lib/usage.ts`).
+Cada operación descuenta según su coste: texto 1 crédito, imagen 3, montaje de
+video 10, y las herramientas del pipeline de video: voz 1, clip animado 8,
+lipsync 8 (`CREDIT_COSTS` en `lib/usage.ts`; ver `docs/video-pipeline.md`). Un
+video se cotiza entero antes de producirlo y no arranca si no cabe en lo que
+queda del mes.
 
 Estos números son los que anuncia la página de precios. Si cambian en
 `lib/usage.ts`, `lib/brands.ts` o `lib/team.ts`, hay que cambiarlos también en

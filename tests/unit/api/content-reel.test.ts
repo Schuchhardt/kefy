@@ -44,7 +44,7 @@ vi.mock('@/lib/brands', () => ({
 }));
 
 vi.mock('@/lib/ai', () => ({
-  generateReelScript: vi.fn(),
+  generateVideoScript: vi.fn(),
   generateContentImage: vi.fn(),
 }));
 
@@ -54,7 +54,8 @@ vi.mock('@/lib/storage', () => ({
 
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateReelScript, generateContentImage } from '@/lib/ai';
+import { generateVideoScript, generateContentImage } from '@/lib/ai';
+import { normalizeVideoScript } from '@/lib/video/script';
 import { uploadBase64Image } from '@/lib/storage';
 
 const mockAuth  = { userId: 'u1', orgId: 'org-1', role: 'owner', plan: 'pro' };
@@ -76,14 +77,24 @@ function mockBrandKitChain(data: unknown = { id: 'kit-1', name: 'Marca', tagline
   };
 }
 
-function makeScenes(count: number) {
-  return Array.from({ length: count }, (_, i) => ({
-    scene_order: i + 1,
-    title: `Escena ${i + 1}`,
-    body: `Cuerpo ${i + 1}`,
-    duration_seconds: 3,
-    image_prompt: `prompt ${i + 1}`,
-  }));
+/** Lo que devuelve generateVideoScript: un guion normalizado de `count` planos. */
+function scriptResult(count: number, hook = 'Hook', hashtags: string[] = [], tokensUsed = 1) {
+  return {
+    script: normalizeVideoScript({
+      title: hook,
+      hook,
+      hashtags,
+      scenes: Array.from({ length: count }, (_, i) => ({
+        duration_seconds: 3,
+        speaker: 'narrator',
+        line: `Línea ${i + 1}`,
+        on_screen_text: `Escena ${i + 1}`,
+        visual: { kind: i === 0 ? 'animated' : 'still', image_prompt: `prompt ${i + 1}` },
+      })),
+    }, 'es'),
+    model: 'claude-opus-4-5',
+    tokensUsed,
+  };
 }
 
 describe('POST /api/content/reel', () => {
@@ -120,7 +131,7 @@ describe('POST /api/content/reel', () => {
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
     mockSupabaseClient.from.mockReturnValueOnce(mockBrandKitChain());
-    vi.mocked(generateReelScript).mockRejectedValueOnce(new Error('AI down'));
+    vi.mocked(generateVideoScript).mockRejectedValueOnce(new Error('AI down'));
 
     const res = await POST(makeReq({ topic: 'Tutorial' }));
     expect(res.status).toBe(502);
@@ -131,13 +142,11 @@ describe('POST /api/content/reel', () => {
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
     mockSupabaseClient.from.mockReturnValueOnce(mockBrandKitChain());
-    vi.mocked(generateReelScript).mockResolvedValueOnce({
-      scenes: makeScenes(8), hook: 'Hook', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1,
-    });
+    vi.mocked(generateVideoScript).mockResolvedValueOnce(scriptResult(8, 'Hook', [], 1));
 
     await POST(makeReq({ topic: 'Tutorial', scene_count: 20, generate_images: false, save: false }));
 
-    const callArgs = vi.mocked(generateReelScript).mock.calls[0][0];
+    const callArgs = vi.mocked(generateVideoScript).mock.calls[0][0];
     expect(callArgs.scene_count).toBe(8);
   });
 
@@ -146,17 +155,15 @@ describe('POST /api/content/reel', () => {
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
     mockSupabaseClient.from.mockReturnValueOnce(mockBrandKitChain());
-    vi.mocked(generateReelScript).mockResolvedValueOnce({
-      scenes: makeScenes(3), hook: 'Hook', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1,
-    });
+    vi.mocked(generateVideoScript).mockResolvedValueOnce(scriptResult(3, 'Hook', [], 1));
 
     await POST(makeReq({ topic: 'Tutorial', scene_count: 1, generate_images: false, save: false }));
 
-    const callArgs = vi.mocked(generateReelScript).mock.calls[0][0];
+    const callArgs = vi.mocked(generateVideoScript).mock.calls[0][0];
     expect(callArgs.scene_count).toBe(3);
   });
 
-  it('generate_images:false no genera imágenes por escena', async () => {
+  it('escribir el guion no genera imágenes: se producen después, con el plan a la vista', async () => {
     const { POST } = await import('@/app/api/content/reel/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
     vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
@@ -170,13 +177,13 @@ describe('POST /api/content/reel', () => {
       .mockReturnValueOnce(mockBrandKitChain())
       .mockReturnValueOnce(insertChain);
 
-    vi.mocked(generateReelScript).mockResolvedValueOnce({
-      scenes: makeScenes(3), hook: 'Hook', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1,
-    });
+    vi.mocked(generateVideoScript).mockResolvedValueOnce(scriptResult(3, 'Hook', [], 1));
 
     const res = await POST(makeReq({ topic: 'Tutorial', generate_images: false }));
     expect(res.status).toBe(201);
     expect(generateContentImage).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.scenes.every((s: { image_url: unknown }) => s.image_url === null)).toBe(true);
   });
 
   it('save:false ya no evita persistir — un reel siempre queda en la biblioteca', async () => {
@@ -193,9 +200,7 @@ describe('POST /api/content/reel', () => {
       .mockReturnValueOnce(mockBrandKitChain())
       .mockReturnValueOnce(insertChain);
 
-    vi.mocked(generateReelScript).mockResolvedValueOnce({
-      scenes: makeScenes(3), hook: 'Hook', hashtags: ['#x'], model: 'claude-opus-4-5', tokensUsed: 1,
-    });
+    vi.mocked(generateVideoScript).mockResolvedValueOnce(scriptResult(3, 'Hook', ['#x'], 1));
     vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
     vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/scene.jpg');
 
@@ -232,9 +237,9 @@ describe('POST /api/content/reel', () => {
       .mockReturnValueOnce(insertChainA)
       .mockReturnValueOnce(insertChainB);
 
-    vi.mocked(generateReelScript)
-      .mockResolvedValueOnce({ scenes: makeScenes(3), hook: 'Hook A', hashtags: ['#a'], model: 'claude-opus-4-5', tokensUsed: 1 })
-      .mockResolvedValueOnce({ scenes: makeScenes(3), hook: 'Hook B', hashtags: ['#b'], model: 'claude-opus-4-5', tokensUsed: 1 });
+    vi.mocked(generateVideoScript)
+      .mockResolvedValueOnce(scriptResult(3, 'Hook A', ['#a'], 1))
+      .mockResolvedValueOnce(scriptResult(3, 'Hook B', ['#b'], 1));
 
     const res = await POST(makeReq({ topic: 'Tutorial', generate_images: false, variant_count: 2 }));
     expect(res.status).toBe(201);
@@ -268,8 +273,8 @@ describe('POST /api/content/reel', () => {
       .mockReturnValueOnce(mockBrandKitChain())
       .mockReturnValueOnce(insertChain);
 
-    vi.mocked(generateReelScript)
-      .mockResolvedValueOnce({ scenes: makeScenes(3), hook: 'Hook A', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1 })
+    vi.mocked(generateVideoScript)
+      .mockResolvedValueOnce(scriptResult(3, 'Hook A', [], 1))
       .mockRejectedValueOnce(new Error('AI down'));
 
     const res = await POST(makeReq({ topic: 'Tutorial', generate_images: false, variant_count: 2 }));
@@ -294,9 +299,7 @@ describe('POST /api/content/reel', () => {
       .mockReturnValueOnce(mockBrandKitChain())
       .mockReturnValueOnce(insertChain);
 
-    vi.mocked(generateReelScript).mockResolvedValueOnce({
-      scenes: makeScenes(5), hook: 'Hook llamativo', hashtags: ['#tutorial'], model: 'claude-opus-4-5', tokensUsed: 40,
-    });
+    vi.mocked(generateVideoScript).mockResolvedValueOnce(scriptResult(5, 'Hook llamativo', ['#tutorial'], 40));
     vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
     vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/scene.jpg');
 
@@ -308,8 +311,22 @@ describe('POST /api/content/reel', () => {
     const insertedRow = insertChain.insert.mock.calls[0][0] as Record<string, unknown>;
     expect(insertedRow.content_type).toBe('reel');
     expect((insertedRow.slides as unknown[]).length).toBe(5);
-    expect(insertedRow.image_url).toBe('https://cdn.example.com/scene.jpg');
+    // Sin imagen todavía: la portada sale de la producción del video.
+    expect(insertedRow.image_url).toBeNull();
     expect(insertedRow.title).toBe('Hook llamativo');
+    expect(generateContentImage).not.toHaveBeenCalled();
+
+    // El guion completo queda en metadata para producirlo después.
+    const meta = insertedRow.metadata as Record<string, unknown>;
+    const script = meta.video_script as { scenes: Array<{ line: string; visual: { kind: string } }> };
+    expect(script.scenes).toHaveLength(5);
+    expect(script.scenes[0]!.visual.kind).toBe('animated');
+    expect(script.scenes[0]!.line).toBe('Línea 1');
+    expect(meta.video_options).toMatchObject({ image_quality: 'medium' });
+
+    // Cada variante dice cuánto costaría producirla.
+    expect(body.production_credits).toBeGreaterThan(0);
+    expect(body.script.scenes).toHaveLength(5);
   });
 
   it('devuelve 500 si el insert falla', async () => {
@@ -326,9 +343,7 @@ describe('POST /api/content/reel', () => {
       .mockReturnValueOnce(mockBrandKitChain())
       .mockReturnValueOnce(insertChain);
 
-    vi.mocked(generateReelScript).mockResolvedValueOnce({
-      scenes: makeScenes(3), hook: 'Hook', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1,
-    });
+    vi.mocked(generateVideoScript).mockResolvedValueOnce(scriptResult(3, 'Hook', [], 1));
     vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
     vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/scene.jpg');
 
@@ -358,10 +373,10 @@ describe('POST /api/content/reel', () => {
 
     // Cada variante solo puede resolver cuando SU deferred se resuelve
     // explícitamente. Si arrancaran en serie, la 2ª llamada a
-    // generateReelScript no ocurriría hasta después de resolver la 1ª.
+    // generateVideoScript no ocurriría hasta después de resolver la 1ª.
     let startedCalls = 0;
-    const deferreds: Array<{ resolve: (v: Awaited<ReturnType<typeof generateReelScript>>) => void }> = [];
-    vi.mocked(generateReelScript).mockImplementation(() => {
+    const deferreds: Array<{ resolve: (v: Awaited<ReturnType<typeof generateVideoScript>>) => void }> = [];
+    vi.mocked(generateVideoScript).mockImplementation(() => {
       startedCalls++;
       return new Promise((resolve) => { deferreds.push({ resolve }); });
     });
@@ -377,8 +392,8 @@ describe('POST /api/content/reel', () => {
     for (let i = 0; i < 50; i++) await Promise.resolve();
     expect(startedCalls).toBe(2);
 
-    deferreds[0]!.resolve({ scenes: makeScenes(3), hook: 'Hook A', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1 });
-    deferreds[1]!.resolve({ scenes: makeScenes(3), hook: 'Hook B', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 1 });
+    deferreds[0]!.resolve(scriptResult(3, 'Hook A', [], 1));
+    deferreds[1]!.resolve(scriptResult(3, 'Hook B', [], 1));
 
     const res = await resPromise;
     expect(res.status).toBe(201);

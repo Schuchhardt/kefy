@@ -6,10 +6,18 @@ import { reportError } from '@/lib/observability';
 import { renderMediaOnLambda } from '@remotion/lambda/client';
 import { reconcileRenderTarget, type RenderTarget } from '@/lib/reel-render';
 import { pickMusicTrack } from '@/remotion/audio-tracks';
+import { readVideoScript } from '@/lib/video/script';
+import type { VideoJobSnapshot } from '@/lib/video/engine';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { getVideoProduction, produceVideo } from '@/lib/services/video';
+import type { JWTPayload } from '@/types/auth';
 
 export const runtime     = 'nodejs';
-// Lambda renders async — 60 s is enough to trigger + return 202
-export const maxDuration = 60;
+// Legacy Lambda renders only need ~60 s to trigger. Scripted reels run an
+// engine pass of the video pipeline on every poll (lib/video/engine.ts), and
+// that pass may generate images or voices synchronously.
+export const maxDuration = 300;
 
 // ─── Env helper ───────────────────────────────────────────────────────────────
 
@@ -89,6 +97,37 @@ async function resolveTarget(db: Db, itemId: string, orgId: string, format: stri
   };
 }
 
+// ─── Video pipeline (scripted reels) ──────────────────────────────────────────
+// A reel with a script (metadata.video_script) is not rendered straight from
+// its slides: its script is compiled into tool calls — images, animation,
+// voices, lip-sync — that run in the cloud before the final edit. See
+// lib/services/video.ts and docs/video-pipeline.md. This route keeps its
+// contract for MuxReelPlayer (render_status / progress / video_url) and adds
+// `production` with the per-step state.
+
+function isScripted(target: RenderTarget): boolean {
+  return !!readVideoScript(target.metadata) || typeof target.metadata.video_job_id === 'string';
+}
+
+function productionPayload(snap: VideoJobSnapshot | null) {
+  if (!snap) return { render_status: 'not_rendered', needs_confirmation: true, production: null };
+  const render_status = snap.status === 'done' ? 'ready'
+    : snap.status === 'running' ? 'rendering'
+    : snap.status === 'failed' ? 'error' : 'not_rendered';
+  return {
+    render_status,
+    progress:   snap.progress,
+    video_url:  snap.video_url,
+    error:      snap.error ?? undefined,
+    production: snap,
+  };
+}
+
+function videoCtx(auth: JWTPayload, req: NextRequest, lang?: unknown) {
+  const language = lang === 'en' || req.nextUrl.searchParams.get('lang') === 'en' ? 'en' : 'es';
+  return serviceContext(auth, '', language, { brandScope: 'org', source: 'route' });
+}
+
 // ─── GET /api/content/reel/render?itemId=X&format=reel|story ─────────────────
 // Poll Lambda render progress. When done, saves the S3 URL as video_url on
 // whichever row (item or rendition) is the render target.
@@ -105,6 +144,15 @@ export async function GET(req: NextRequest) {
   const resolved = await resolveTarget(db, itemId, auth.orgId, format);
   if (!resolved) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const { target } = resolved;
+
+  if (isScripted(target) && !(target.renderStatus === 'ready' && target.videoUrl)) {
+    try {
+      const snap = await getVideoProduction(videoCtx(auth, req), { itemId, format });
+      return NextResponse.json(productionPayload(snap));
+    } catch (e) {
+      return serviceErrorResponse(e, { route: 'GET /api/content/reel/render', auth });
+    }
+  }
 
   // Already done — return immediately
   if (target.renderStatus === 'ready' && target.videoUrl) {
@@ -176,8 +224,33 @@ export async function POST(req: NextRequest) {
   }
 
   // Already rendered — return existing video URL immediately
-  if (target.videoUrl) {
+  if (target.videoUrl && input.force !== true) {
     return NextResponse.json({ video_url: target.videoUrl, render_status: 'ready' });
+  }
+
+  // Scripted reel: producing it runs paid tools (animation, lip-sync…), so it
+  // only starts on an explicit `produce: true` — sent by the player after the
+  // user saw the plan and its cost. An older cached client that auto-POSTs on
+  // mount gets told to confirm instead of silently spending credits.
+  if (isScripted(target)) {
+    if (input.produce !== true) {
+      if (target.renderStatus === 'rendering') {
+        const snap = await getVideoProduction(videoCtx(auth, req, input.lang), { itemId, format, advance: false })
+          .catch(() => null);
+        if (snap) return NextResponse.json(productionPayload(snap), { status: 202 });
+      }
+      return NextResponse.json({ render_status: 'not_rendered', needs_confirmation: true });
+    }
+    try {
+      const snap = await produceVideo(videoCtx(auth, req, input.lang), {
+        itemId, format,
+        motion: typeof input.motion === 'string' ? input.motion : null,
+        force:  input.force === true,
+      });
+      return NextResponse.json(productionPayload(snap), { status: 202 });
+    } catch (e) {
+      return serviceErrorResponse(e, { route: 'POST /api/content/reel/render', auth });
+    }
   }
   // A render already in flight: resolve its real state instead of starting a
   // second one. If it turns out to be finished or dead, we continue below and

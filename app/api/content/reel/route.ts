@@ -21,9 +21,11 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 ]);
 
 // ─── POST /api/content/reel ───────────────────────────────────────────────────
-// Generate a short-form vertical reel storyboard.
-// Claude writes the scene script; gpt-image-2 generates one background image
-// per scene (optional). Always saved as content_type='reel' — a reel never
+// Write a short-form vertical video script, shot by shot (lib/video/script.ts):
+// what each shot shows, what is said and by whom, and which cloud tools
+// produce it. Nothing is produced here — the player shows the production plan
+// and its cost, and the user confirms it (lib/services/video.ts).
+// Always saved as content_type='reel' — a reel never
 // stays out of the library (see lib/services/reel.ts for why `save` isn't a
 // thing here, unlike /api/content/generate or /api/content/carousel).
 //
@@ -32,8 +34,8 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 //   topic            — required
 //   scene_count?     — 3–8 (default 5)
 //   language?        — 'es' (default) | 'en'
-//   generate_images? — boolean (default true)
-//   image_quality?   — 'low' | 'medium' (default) | 'high'
+//   generate_images? — boolean (default true) — kept for production
+//   image_quality?   — 'low' | 'medium' (default) | 'high' — used when producing
 //   variant_count?   — 1–3 (default 1). >1 generates that many independent
 //                      takes on the same topic, each its own item, grouped by
 //                      metadata.variant_group_id so the library can show them
@@ -41,9 +43,9 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 //   reference_image_urls?  — public URLs of reference images to guide AI image generation
 //
 // Single variant (default) responds with the same flat shape as before:
-//   { itemId, scenes, hook, hashtags, model, tokensUsed }
+//   { itemId, scenes, hook, hashtags, model, tokensUsed, script, production_credits }
 // variant_count > 1 responds with:
-//   { variant_group_id, requested_variant_count, variants: [{ itemId, variant_index, scenes, hook, hashtags, model, tokensUsed }] }
+//   { variant_group_id, requested_variant_count, variants: [{ itemId, variant_index, script, production_credits, scenes, hook, hashtags, model, tokensUsed }] }
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -116,6 +118,8 @@ export async function POST(req: NextRequest) {
           hashtags:   out.variants[0]?.hashtags,
           model:      out.variants[0]?.model,
           tokensUsed: out.variants[0]?.tokensUsed,
+          script:     out.variants[0]?.script,
+          production_credits: out.variants[0]?.production_credits,
         };
 
     const res = NextResponse.json(payload, { status: 201 });

@@ -36,8 +36,8 @@ export interface ReelCompositionProps {
 // ─── Bundled audio (CC0, Kenney — see public/audio/sfx/LICENSE-kenney.txt) ────
 
 /** One per scene cut, cycled by scene index so it doesn't repeat identically. */
-const TRANSITION_SFX = ['drop_001.ogg', 'drop_002.ogg', 'drop_003.ogg', 'drop_004.ogg'];
-const LOGO_SFX       = 'pluck_001.ogg';
+export const TRANSITION_SFX = ['drop_001.ogg', 'drop_002.ogg', 'drop_003.ogg', 'drop_004.ogg'];
+export const LOGO_SFX       = 'pluck_001.ogg';
 
 function sfxSrc(filename: string): string {
   return staticFile(`audio/sfx/${filename}`);
@@ -67,7 +67,7 @@ function musicVolumeAt(frame: number, totalFrames: number): number {
 
 // ─── Animated gradient background ────────────────────────────────────────────
 
-function AnimatedGradientBg({
+export function AnimatedGradientBg({
   frame,
   durationFrames,
   accentColor,
@@ -399,7 +399,7 @@ function ReelScene({
 
 /** SVG files can't be decoded via img.decode() used internally by Remotion's <Img>.
  *  Detect them by URL extension so we can fall back to a plain <img> tag. */
-function isSvgUrl(url: string): boolean {
+export function isSvgUrl(url: string): boolean {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
     return pathname.endsWith('.svg');

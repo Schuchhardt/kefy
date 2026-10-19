@@ -383,14 +383,15 @@ const createReelTool = defineTool({
   title: { es: 'Crear reel con IA', en: 'Create AI reel' },
   kind: 'write',
   description:
-    'Generates a short vertical video reel script (3-8 scenes, one background image per scene by default) and ' +
-    'saves it as a draft — content_type "reel". This only writes the script + images; rendering the actual video ' +
-    'is a separate step (not yet exposed as a tool) done from the dashboard. ' +
-    `Costs ${CREDIT_COSTS.text} + ${CREDIT_COSTS.image} credits per scene image, per variant. ` +
+    'Writes a short vertical video script (3-8 shots) and saves it as a draft reel. Each shot says what is ' +
+    'shown, what is said and by whom, and which cloud tools produce it (generated photo, AI animation, voice, ' +
+    'lip-sync for characters talking to camera). It does NOT produce the video: show the user the plan with ' +
+    'get_video_plan and produce it with produce_video. ' +
+    `Costs ${CREDIT_COSTS.text} credit per variant; each variant returns production_credits, the estimated cost of producing it. ` +
     'Pass variant_count > 1 to get that many independent takes on the same topic in one call, each saved as its ' +
-    'own draft item and grouped so they can be compared side by side — useful when the caller wants options ' +
-    'instead of a single result. If credits run out mid-way through a later variant, the earlier ones already ' +
-    'generated are still returned rather than losing them.',
+    'own draft item and grouped so they can be compared side by side. If credits run out mid-way through a later ' +
+    'variant, the earlier ones already generated are still returned rather than losing them. ' +
+    'generate_images and image_quality only apply later, when the video is produced.',
   input: z
     .object({
       topic: z.string().trim().min(1).max(500),
@@ -402,12 +403,7 @@ const createReelTool = defineTool({
     })
     .strict(),
   confirm: 'never',
-  estimateCredits: (input) => {
-    const variants = input.variant_count ?? 1;
-    const perVariant = CREDIT_COSTS.text
-      + (input.generate_images !== false ? CREDIT_COSTS.image * (input.scene_count ?? 5) : 0);
-    return perVariant * variants;
-  },
+  estimateCredits: (input) => CREDIT_COSTS.text * (input.variant_count ?? 1),
   describe: async (_ctx, input) => ({
     topic: input.topic,
     scene_count: input.scene_count,
@@ -424,25 +420,23 @@ const createReelTool = defineTool({
       variant_count:         input.variant_count,
     });
 
-    const variants = out.variants.map((v) => {
-      const withImage = v.scenes.filter((s) => !!s.image_url).length;
-      return {
-        item_id:        v.itemId,
-        variant_index:  v.variant_index,
-        status:         'draft',
-        hook:            v.hook,
-        hashtags:        v.hashtags,
-        scenes: v.scenes.map((s) => ({
-          scene_order: s.scene_order,
-          title:       s.title,
-          body:        s.body,
-          image_url:   s.image_url,
-          duration_seconds: s.duration_seconds,
-        })),
-        images_generated: withImage,
-        images_missing:   input.generate_images !== false ? v.scenes.length - withImage : 0,
-      };
-    });
+    const variants = out.variants.map((v) => ({
+      item_id:            v.itemId,
+      variant_index:      v.variant_index,
+      status:             'draft',
+      hook:               v.hook,
+      hashtags:           v.hashtags,
+      production_credits: v.production_credits,
+      characters:         v.script.characters.map((c) => ({ id: c.id, name: c.name })),
+      shots: v.script.scenes.map((s) => ({
+        order:            s.order,
+        kind:             s.visual.kind,
+        speaker:          s.speaker,
+        line:             s.line,
+        on_screen_text:   s.on_screen_text,
+        duration_seconds: s.duration_seconds,
+      })),
+    }));
 
     return {
       data: {

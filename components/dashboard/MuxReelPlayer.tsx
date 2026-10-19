@@ -8,6 +8,9 @@ import Button from '@/components/ui/Button';
 import Icon from '@/components/ui/icons';
 import esPublish from '@/locales/es/dashboard/publish';
 import enPublish from '@/locales/en/dashboard/publish';
+import { VideoPlanPanel, VideoProgressSteps } from '@/components/dashboard/content/VideoPlanPanel';
+import type { VideoJobSnapshot } from '@/lib/video/engine';
+import type { MotionLevel } from '@/lib/video/plan';
 
 type MuxLegacyPlayerProps = {
   playbackId: string; streamType: string; style: React.CSSProperties;
@@ -82,6 +85,21 @@ type RenderError =
   | { kind: 'failed' | 'interrupted' | 'timeout' | 'startError' | 'unknownError' }
   | { kind: 'message'; message: string };
 
+/** Polls before giving up: a legacy Lambda render takes ~1–3 min, a scripted
+ *  production (animations, lip-sync) can take 15+. */
+const MAX_POLLS_RENDER     = 90;   // × 4 s ≈ 6 min
+const MAX_POLLS_PRODUCTION = 450;  // × 4 s ≈ 30 min
+
+type RenderResponse = {
+  render_status?:      string;
+  video_url?:          string | null;
+  mux_playback_id?:    string;
+  progress?:           number;
+  error?:              string;
+  needs_confirmation?: boolean;
+  production?:         VideoJobSnapshot | null;
+};
+
 // Resolve the initial local URL from whichever prop is available
 function resolveInitialUrl(videoUrl?: string | null, muxPlaybackId?: string | null): string | null {
   if (videoUrl) return videoUrl;
@@ -110,6 +128,11 @@ export function MuxReelPlayer({
   const [isRendering, setIsRendering] = useState(renderStatus === 'rendering');
   const [renderError, setRenderError] = useState<RenderError | null>(null);
   const [progress, setProgress]       = useState<number>(0);
+  // Scripted reels (video pipeline): the server asks to confirm the plan
+  // before spending, and reports per-step progress while producing.
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [production, setProduction]     = useState<VideoJobSnapshot | null>(null);
+  const [producing, setProducing]       = useState(false);
 
   const isRenderingRef  = useRef(renderStatus === 'rendering');
   const pollCountRef    = useRef(0);
@@ -127,14 +150,17 @@ export function MuxReelPlayer({
     try {
       const qs = format ? `itemId=${itemId}&format=${format}` : `itemId=${itemId}`;
       const res  = await fetch(`/api/content/reel/render?${qs}`, { credentials: 'include' });
-      const data = await res.json() as {
-        render_status?: string;
-        video_url?:     string;
-        mux_playback_id?: string;
-        progress?:      number;
-      };
+      const data = await res.json() as RenderResponse;
 
       if (typeof data.progress === 'number') setProgress(data.progress);
+      if (data.production) setProduction(data.production);
+
+      if (data.needs_confirmation) {
+        isRenderingRef.current = false;
+        setIsRendering(false);
+        setNeedsConfirm(true);
+        return;
+      }
 
       const resolvedUrl = data.video_url ?? (data.mux_playback_id ? `mux:${data.mux_playback_id}` : null);
 
@@ -147,7 +173,13 @@ export function MuxReelPlayer({
       } else if (data.render_status === 'error') {
         isRenderingRef.current = false;
         setIsRendering(false);
-        setRenderError({ kind: 'failed' });
+        setRenderError(data.production && data.error ? { kind: 'message', message: data.error } : { kind: 'failed' });
+      } else if (data.render_status === 'not_rendered' && data.production !== undefined) {
+        // A scripted production is never restarted on its own: it spends
+        // credits, so it goes back to the plan for the user to confirm.
+        isRenderingRef.current = false;
+        setIsRendering(false);
+        setNeedsConfirm(true);
       } else if (data.render_status === 'not_rendered') {
         // The server found the render dead (trigger lost or stale) and reset the
         // row — polling it further would never finish. Start a fresh render,
@@ -163,7 +195,8 @@ export function MuxReelPlayer({
         }
       } else {
         pollCountRef.current += 1;
-        if (pollCountRef.current < 90) {
+        const maxPolls = data.production ? MAX_POLLS_PRODUCTION : MAX_POLLS_RENDER;
+        if (pollCountRef.current < maxPolls) {
           setTimeout(pollStatus, 4000);
         } else {
           isRenderingRef.current = false;
@@ -177,11 +210,14 @@ export function MuxReelPlayer({
   }, [itemId, format, onRenderDone]);
 
   // ── Start render ───────────────────────────────────────────────────────────
-  const startRender = useCallback(async () => {
+  // `motion` set = the user confirmed the production plan (scripted reels).
+  // Without it, a scripted reel only answers `needs_confirmation`.
+  const startRender = useCallback(async (motion?: MotionLevel) => {
     isRenderingRef.current = true;
     pollCountRef.current   = 0;
     setIsRendering(true);
     setRenderError(null);
+    if (motion) setProducing(true);
     onRenderStart?.(itemId);
 
     try {
@@ -189,20 +225,30 @@ export function MuxReelPlayer({
         method:      'POST',
         credentials: 'include',
         headers:     { 'Content-Type': 'application/json' },
-        body:        JSON.stringify(format ? { itemId, format } : { itemId }),
+        body:        JSON.stringify({
+          itemId,
+          ...(format ? { format } : {}),
+          ...(motion ? { produce: true, motion, lang } : {}),
+        }),
       });
-      const data = await res.json() as {
-        video_url?:       string;
-        mux_playback_id?: string;
-        renderId?:        string;
-        error?:           string;
-      };
+      const data = await res.json() as RenderResponse & { renderId?: string };
+      setProducing(false);
 
       if (!res.ok) {
         isRenderingRef.current = false;
         setIsRendering(false);
         setRenderError(data.error ? { kind: 'message', message: data.error } : { kind: 'startError' });
         return;
+      }
+      if (data.needs_confirmation) {
+        isRenderingRef.current = false;
+        setIsRendering(false);
+        setNeedsConfirm(true);
+        return;
+      }
+      if (data.production) {
+        setNeedsConfirm(false);
+        setProduction(data.production);
       }
 
       const resolvedUrl = data.video_url ?? (data.mux_playback_id ? `mux:${data.mux_playback_id}` : null);
@@ -217,11 +263,12 @@ export function MuxReelPlayer({
         setTimeout(pollStatus, 5000);
       }
     } catch (err) {
+      setProducing(false);
       isRenderingRef.current = false;
       setIsRendering(false);
       setRenderError(err instanceof Error && err.message ? { kind: 'message', message: err.message } : { kind: 'unknownError' });
     }
-  }, [itemId, format, pollStatus, onRenderStart, onRenderDone]);
+  }, [itemId, format, lang, pollStatus, onRenderStart, onRenderDone]);
 
   // Keeps the poller able to restart a render without a circular dependency
   // between the two callbacks.
@@ -301,6 +348,36 @@ export function MuxReelPlayer({
         >
           {t.retry}
         </Button>
+      </div>
+    );
+  }
+
+  // ── Scripted reel: confirm the production plan ───────────────────────────
+  if (needsConfirm && !isRendering) {
+    return (
+      <VideoPlanPanel
+        itemId={itemId}
+        format={format}
+        lang={lang}
+        busy={producing}
+        onProduce={(motion) => { void startRender(motion); }}
+      />
+    );
+  }
+
+  // ── Scripted reel: producing ───────────────────────────────────────────────
+  if (production && isRendering) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ ...cs, background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <GenerationLoader
+            progress={Math.max(progress, 0.02)}
+            label={t.rendering}
+            accentColor={accentColor}
+            showPercent
+          />
+        </div>
+        <VideoProgressSteps production={production} lang={lang} />
       </div>
     );
   }

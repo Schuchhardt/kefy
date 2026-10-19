@@ -50,7 +50,7 @@ const en: ContentCopy = {
   // ── Generation status: a single progress and result block ──
   progressWriting: 'Writing the copy…',
   progressCarousel: 'Writing the slides and creating the images…',
-  progressReel: 'Writing the script and creating the scenes…',
+  progressReel: 'Writing the video script shot by shot…',
   progressStory: 'Writing the story and creating the vertical image…',
   progressImage: 'Generating image…',
   progressEta: (s: number) => `~${s} s`,

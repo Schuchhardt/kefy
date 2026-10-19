@@ -136,6 +136,9 @@ const en = {
     create_manual_content: 'Saving content…',
     update_content: 'Editing content…',
     generate_content_image: 'Generating image…',
+    get_video_plan: 'Working out the video plan…',
+    produce_video: 'Starting the video production…',
+    get_video_status: 'Checking the video…',
     list_social_accounts: 'Checking connected accounts…',
     get_connect_account_link: 'Preparing the connection link…',
     list_autopilot_rules: 'Checking autopilot…',
@@ -207,8 +210,7 @@ const en = {
       const topic = str(p.topic, str(i.topic));
       const n = Number(p.variant_count ?? i.variant_count ?? 1);
       const variants = n > 1 ? ` (${n} variants)` : '';
-      const imgs = (p.generate_images ?? i.generate_images) !== false ? ' with images' : '';
-      return `Create a reel${imgs}${variants}${topic ? ` about ${quote(topic)}` : ''}`;
+      return `Write a reel script${variants}${topic ? ` about ${quote(topic)}` : ''}`;
     },
     create_manual_content: (i) => {
       const title = str(i.title);
@@ -226,6 +228,13 @@ const en = {
       const prompt = str(i.prompt);
       return prompt ? `Generate a new image: ${quote(prompt, 60)}` : 'Generate a new image for the content';
     },
+    get_video_plan: () => 'See the video production plan',
+    produce_video: (i, p) => {
+      const credits = Number(p.credits);
+      const tools = str(p.tools);
+      return `Produce the video${Number.isFinite(credits) && credits > 0 ? ` (${credits} credits)` : ''}${tools ? `: ${tools}` : ''}${i.force ? ', replacing the current one' : ''}`;
+    },
+    get_video_status: () => 'Check how the video is going',
     list_social_accounts: () => 'Check connected accounts',
     get_connect_account_link: (i) => `Prepare the link to connect ${str(i.platform, 'an account')}`,
     list_autopilot_rules: () => 'Check the autopilot rules',

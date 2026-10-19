@@ -23,6 +23,7 @@ import type {
 } from '@/types/ai';
 import { withSourceBlock } from '@/lib/content-source';
 import { withProviderAlerts } from '@/lib/provider-alerts';
+import { normalizeVideoScript, type VideoScript } from '@/lib/video/script';
 
 // ─── Modelos ──────────────────────────────────────────────────────────────────
 //
@@ -44,7 +45,7 @@ export function getAnthropic(): Anthropic {
   return new Anthropic({ apiKey: key, fetch: withProviderAlerts('anthropic') });
 }
 
-function getOpenAI(): OpenAI {
+export function getOpenAI(): OpenAI {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('Missing OPENAI_API_KEY env var');
   return new OpenAI({ apiKey: key, fetch: withProviderAlerts('openai') });
@@ -559,6 +560,83 @@ export async function generateReelScript(
     scenes:     parsed.scenes,
     hook:       parsed.hook ?? '',
     hashtags:   parsed.hashtags ?? [],
+    model,
+    tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+  };
+}
+
+// ─── Video script (guion por planos) ─────────────────────────────────────────
+
+export interface GenerateVideoScriptOptions {
+  channel:      ContentChannel;
+  topic:        string;
+  scene_count?: number;
+  tone?:        string[];
+  language?:    'es' | 'en';
+  brandName?:   string;
+  tagline?:     string;
+  extraCtx?:    string;
+}
+
+export interface GenerateVideoScriptResult {
+  script:     VideoScript;
+  model:      string;
+  tokensUsed: number;
+}
+
+/**
+ * Guion de video plano a plano (ver lib/video/script.ts). Reemplaza a
+ * `generateReelScript` para los reels: ese sigue vivo solo para las
+ * conversiones de formato, que todavía producen escenas de texto.
+ */
+export async function generateVideoScript(
+  opts: GenerateVideoScriptOptions,
+): Promise<GenerateVideoScriptResult> {
+  const language   = opts.language === 'en' ? 'en' : 'es';
+  const lang       = language === 'en' ? 'English' : 'Spanish';
+  const tone       = opts.tone?.join(', ') || 'dynamic, engaging';
+  const sceneCount = Math.min(8, Math.max(1, opts.scene_count ?? 5));
+  const brandCtx   = opts.brandName
+    ? `Brand: "${opts.brandName}"${opts.tagline ? ` — "${opts.tagline}"` : ''}.`
+    : '';
+
+  const system = loadPrompt('video-script', {
+    sceneCount: String(sceneCount),
+    channel:    opts.channel,
+    language:   lang,
+    tone,
+    brandCtx,
+    extraCtx:   opts.extraCtx ?? '',
+  }, [
+    `You are a short-form video director writing a ${sceneCount}-shot vertical video for ${opts.channel} in ${lang}.`,
+    `Tone: ${tone}. ${brandCtx} ${opts.extraCtx ?? ''}`,
+    'Return ONLY valid JSON: {"title","hook","hashtags":[],"visual_style","narrator":{"voice","style"},"music_mood","characters":[],',
+    '"scenes":[{"duration_seconds","speaker","line","on_screen_text","visual":{"kind":"still|animated|talking","image_prompt","motion_prompt","character_ids":[],"camera"},"transition"}]}',
+  ].join(' '));
+
+  const client = getAnthropic();
+  const model  = MODELS.content;
+  const response = await client.messages.create({
+    model,
+    max_tokens: 4096,
+    system,
+    messages: [{ role: 'user', content: `Write a ${sceneCount}-shot vertical video about: ${opts.topic}` }],
+  });
+
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonFences(raw));
+  } catch {
+    throw new Error(`Claude returned invalid video script JSON: ${raw.slice(0, 200)}`);
+  }
+
+  return {
+    script:     normalizeVideoScript(parsed, language),
     model,
     tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
   };

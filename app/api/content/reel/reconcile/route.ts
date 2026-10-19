@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { reconcileRenderTarget, type RenderTable, type RenderTarget } from '@/lib/reel-render';
+import { advanceVideoJob } from '@/lib/video/engine';
 
 export const runtime     = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 // ─── /api/content/reel/reconcile ──────────────────────────────────────────────
 // Finishes Remotion Lambda renders whose browser never came back.
@@ -19,9 +20,19 @@ export const maxDuration = 120;
 // Invocation modes:
 //   - GET  (Vercel Cron): header `Authorization: Bearer ${CRON_SECRET}`
 //   - POST (manual): authenticated owner/admin — only their own org's rows
+//
+// It also advances the video pipeline (lib/video/engine.ts): every running
+// production gets one engine pass, so a video keeps progressing — images,
+// animations, lip-sync, final edit — even if nobody has the player open.
+// Rows that belong to a production (metadata.video_job_id) are left to the
+// engine: they have no Lambda pointers and the plain reconciler would reset
+// them as 'trigger_lost'.
 
 /** Cap per run so one sweep can't exceed the function's time budget. */
 const MAX_TARGETS_PER_RUN = 25;
+/** Video productions advanced per run, and the time each one may take. */
+const MAX_JOBS_PER_RUN = 8;
+const JOB_BUDGET_MS    = 20 * 1000;
 
 function isVercelCronAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET ?? process.env.AUTOPILOT_CRON_SECRET;
@@ -53,7 +64,7 @@ async function fetchRendering(db: Db, table: RenderTable, orgId: string | null, 
   if (orgId && table === 'kefy_content_items') query = query.eq('org_id', orgId);
 
   const { data } = await query;
-  return ((data ?? []) as Row[]).map((row) => ({
+  return ((data ?? []) as Row[]).filter((row) => !row.metadata?.video_job_id).map((row) => ({
     table,
     id:           row.id,
     metadata:     row.metadata ?? {},
@@ -86,7 +97,29 @@ async function runReconcile(orgId: string | null) {
     }
   }
 
+  // ── Video pipeline ─────────────────────────────────────────────────────────
+  let jobsQuery = db
+    .from('kefy_video_jobs')
+    .select('id')
+    .eq('status', 'running')
+    .order('updated_at', { ascending: true })
+    .limit(MAX_JOBS_PER_RUN);
+  if (orgId) jobsQuery = jobsQuery.eq('org_id', orgId);
+  const { data: jobs } = await jobsQuery;
+
+  const productions = await Promise.all(((jobs ?? []) as Array<{ id: string }>).map(async (job) => {
+    try {
+      const snap = await advanceVideoJob(db, job.id, { budgetMs: JOB_BUDGET_MS });
+      return { id: job.id, status: snap?.status ?? 'missing' };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'advance failed';
+      console.error(`[reel/reconcile] video job ${job.id}:`, message);
+      return { id: job.id, status: 'error', error: message };
+    }
+  }));
+
   const summary = {
+    productions:  productions.length,
     swept:        results.length,
     ready:        results.filter((r) => r.status === 'ready').length,
     rendering:    results.filter((r) => r.status === 'rendering').length,
@@ -95,7 +128,7 @@ async function runReconcile(orgId: string | null) {
   };
   console.log('[reel/reconcile] done:', JSON.stringify(summary));
 
-  return NextResponse.json({ ...summary, results });
+  return NextResponse.json({ ...summary, results, video_jobs: productions });
 }
 
 export async function GET(req: NextRequest) {

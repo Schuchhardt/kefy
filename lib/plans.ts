@@ -27,7 +27,13 @@ export const PLAN_ORDER: readonly BillingPlan[] = ['starter', 'pro', 'business']
 export const OPERATION_CREDIT_COSTS = {
   text:   1,   // una llamada a Claude/GPT
   image:  3,   // generación de imagen + procesado + subida
-  video: 10,   // render en Remotion Lambda + alojamiento
+  video: 10,   // montaje del video en Remotion Lambda + alojamiento
+  // Herramientas del pipeline de video (lib/video/tools). Se cobran por paso,
+  // además del montaje: un plano animado cuesta un clip imagen→video, una voz
+  // es un TTS + alineación de palabras, un lipsync es otro modelo de video.
+  voice:      1,   // TTS (gpt-4o-mini-tts) + tiempos por palabra (whisper)
+  animation:  8,   // clip imagen→video de 5–10 s (fal.ai, Kling)
+  lipsync:    8,   // sincronía de labios sobre un clip (fal.ai)
 } as const;
 
 /** Duración del mes gratis que recibe toda cuenta nueva (en Starter). */
