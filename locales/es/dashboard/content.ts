@@ -57,7 +57,7 @@ const es = {
   // ── Estado de la generación: un solo bloque de progreso y resultado ──
   progressWriting: 'Escribiendo el texto…',
   progressCarousel: 'Escribiendo los slides y creando las imágenes…',
-  progressReel: 'Escribiendo el guion y creando las escenas…',
+  progressReel: 'Escribiendo el guion del video plano a plano…',
   progressStory: 'Escribiendo la story y creando la imagen vertical…',
   progressImage: 'Generando imagen…',
   progressEta: (s: number) => `~${s} s`,

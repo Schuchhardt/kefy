@@ -165,6 +165,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 |---|---|---|
 | Ver el workspace (marcas, plan, créditos, estrategia activa) | `get_workspace_context` | read |
 | Crear contenido con IA | `create_post`, `create_carousel`, `create_reel`, `generate_content_image` | write |
+| Video (guion → herramientas → montaje) | `get_video_plan`, `get_video_status` (read) · `produce_video` (write, siempre con confirmación) — ver `docs/video-pipeline.md` | read / write |
 | Arrancar una marca nueva: leer su web (opcional) y escribir 3 posts de inicio | `create_starter_posts` | write |
 | Pasar contenido ya escrito desde otro proyecto | `create_manual_content`, `update_content` | write |
 | Ver y buscar contenido | `list_content`, `get_content` | read |

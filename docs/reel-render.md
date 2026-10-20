@@ -1,5 +1,12 @@
 # Render de reels / stories (Remotion Lambda)
 
+> **Los reels nuevos no pasan por aquí.** Desde el pipeline de video, un reel es
+> un guion por planos que se produce con herramientas en la nube y se monta con
+> la composición `KefyFilm`: ver [`docs/video-pipeline.md`](video-pipeline.md).
+> Este documento describe el render directo `KefyReel`, que sigue vivo para las
+> piezas **sin guion** (reels anteriores y rendiciones de formato), y la
+> infraestructura de Lambda que comparten los dos.
+
 Cómo se convierte un guion de escenas en un MP4 publicable, y por qué el estado
 `rendering` necesita un reconciliador.
 

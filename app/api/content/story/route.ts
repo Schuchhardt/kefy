@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText, generateContentImage, generateReelScript } from '@/lib/ai';
+import { generateContentText, generateContentImage, generateVideoScript } from '@/lib/ai';
 import { guardAiRequest } from '@/lib/ai-guard';
 import { consumeCredits, refundCredits } from '@/lib/usage';
 import { reportError } from '@/lib/observability';
 import type { ContentChannel } from '@/types/ai';
 import { uploadBase64Image } from '@/lib/storage';
+import { getBrandKitForBrand } from '@/lib/services/brand-kit';
+import { scriptToReelScenes } from '@/lib/video/script';
+import { videoBrandBrief } from '@/lib/video/brand';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -19,8 +22,8 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 // ─── POST /api/content/story ───────────────────────────────────────────────────
 // Generate a Story: a short caption (same copywriter as posts) + one vertical
 // (9:16) image. Stores the result as content_type='story'.
-// A separate action can later turn it into a short vertical video by reusing
-// the reel script + Remotion render pipeline (see reel/render/route.ts).
+// A separate action (PATCH) can later turn it into a short video script that
+// the video pipeline produces (see lib/services/video.ts).
 //
 // Body:
 //   channel   — optional (defaults to 'generic')
@@ -173,10 +176,12 @@ export async function POST(req: NextRequest) {
 }
 
 // ─── PATCH /api/content/story ──────────────────────────────────────────────────
-// "Generar video de esta story" — writes a short (1-3 scene) vertical script
-// with Claude and a background image per scene, then stores it in `slides` so
-// POST /api/content/reel/render (which accepts content_type 'reel' | 'story')
-// can render it with the same Remotion pipeline used for reels.
+// "Generar video de esta story" — writes a short (1-3 shot) video script with
+// Claude (lib/video/script.ts) and stores it in metadata.video_script, with
+// the derived scenes in `slides`. The story's own image is reused as the first
+// shot. Nothing is produced here: the player shows the production plan (tools
+// + credits) and the user confirms it — same pipeline as reels
+// (lib/services/video.ts).
 //
 // Body: { itemId: string }
 
@@ -191,12 +196,13 @@ export async function PATCH(req: NextRequest) {
   const input  = body as Record<string, unknown>;
   const itemId = typeof input.itemId === 'string' ? input.itemId.trim() : null;
   if (!itemId) return NextResponse.json({ error: 'itemId is required' }, { status: 422 });
+  const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
 
   const db = createSupabaseServer();
 
   const { data: item, error: fetchError } = await db
     .from('kefy_content_items')
-    .select('id, content_type, channel, body, title')
+    .select('id, content_type, channel, body, title, image_url, metadata, brand_id')
     .eq('id', itemId)
     .eq('org_id', auth.orgId)
     .single();
@@ -206,11 +212,9 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Only story items can generate a video script' }, { status: 422 });
   }
 
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select('name, tagline, tone, industry, primary_color, secondary_color, accent_color')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
+  const { data: brandKit } = item.brand_id
+    ? await getBrandKitForBrand(db, item.brand_id)
+    : { data: null };
 
   const topic = (item.title || item.body || '').slice(0, 500);
   if (!topic) return NextResponse.json({ error: 'Story has no text to base the video on' }, { status: 422 });
@@ -220,18 +224,20 @@ export async function PATCH(req: NextRequest) {
   });
   if (videoGuard.blocked) return videoGuard.blocked;
 
-  let generated;
+  let script;
   try {
-    generated = await generateReelScript({
+    const storyCtx = 'This is a Story, not a full Reel: 1-3 shots, under 12 seconds in total, one clear message.';
+    ({ script } = await generateVideoScript({
       channel:     (item.channel as ContentChannel) ?? 'generic',
       topic,
       scene_count: 2,
-      language:    'es',
+      language,
       tone:        brandKit?.tone ?? [],
       brandName:   brandKit?.name    ?? undefined,
       tagline:     brandKit?.tagline ?? undefined,
-      extraCtx:    brandKit?.industry ? `Industry: ${brandKit.industry}. Keep it short — this is a Story, not a full Reel.` : 'Keep it short — this is a Story, not a full Reel.',
-    });
+      brandBrief:  videoBrandBrief(brandKit, language),
+      extraCtx:    storyCtx,
+    }));
   } catch (err) {
     await videoGuard.refund();
     reportError(err, { route: 'PATCH /api/content/story', auth, service: 'ai', extra: { itemId } });
@@ -239,45 +245,18 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  const scenes = await Promise.all(
-    generated.scenes.map(async (scene) => {
-      const sceneCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
-      if (!sceneCredits?.allowed) return { ...scene, image_url: undefined };
-
-      try {
-        const bgPrompt = `Background scene for a vertical story: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks. Pure cinematic background scene only.`;
-        const imgResult = await generateContentImage({
-          prompt:  bgPrompt,
-          size:    '1024x1792',
-          quality: 'medium',
-          brand: {
-            name:           brandKit?.name           ?? undefined,
-            primaryColor:   brandKit?.primary_color  ?? undefined,
-            secondaryColor: brandKit?.secondary_color ?? undefined,
-            accentColor:    brandKit?.accent_color   ?? undefined,
-            tone:           brandKit?.tone           ?? undefined,
-          },
-        });
-        const imageUrl = await uploadBase64Image(
-          imgResult.b64,
-          auth.orgId,
-          `story-scene-${scene.scene_order}-${Date.now()}.jpeg`,
-        );
-        return { ...scene, image_url: imageUrl };
-      } catch (imgErr) {
-        await refundCredits(auth.orgId, 'image');
-        reportError(imgErr, {
-          route: 'PATCH /api/content/story', auth, service: 'ai',
-          extra: { escena: scene.scene_order, fase: 'imagen' },
-        });
-        return { ...scene, image_url: undefined };
-      }
-    }),
-  );
+  // La imagen de la story es el primer plano: no se paga otra.
+  const storyImage = typeof item.image_url === 'string' && item.image_url ? item.image_url : null;
+  if (storyImage && script.scenes[0]) script.scenes[0].visual.image_url = storyImage;
+  const scenes = scriptToReelScenes(script, storyImage ? { s1: storyImage } : {});
 
   const { error: updateError } = await db
     .from('kefy_content_items')
-    .update({ slides: scenes, render_status: 'not_rendered' })
+    .update({
+      slides:        scenes,
+      render_status: 'not_rendered',
+      metadata:      { ...((item.metadata ?? {}) as Record<string, unknown>), video_script: script },
+    })
     .eq('id', itemId);
 
   if (updateError) {
@@ -285,5 +264,5 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save story video script' }, { status: 500 });
   }
 
-  return NextResponse.json({ itemId, scenes });
+  return NextResponse.json({ itemId, scenes, script });
 }

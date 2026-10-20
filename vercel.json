@@ -19,7 +19,7 @@
   ],
   "functions": {
     "app/api/content/reel/render/route.ts": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "memory": 512
     },
     "app/api/autopilot/run/route.ts": {
@@ -29,7 +29,7 @@
       "maxDuration": 300
     },
     "app/api/content/reel/reconcile/route.ts": {
-      "maxDuration": 120,
+      "maxDuration": 300,
       "memory": 512
     },
     "app/api/content/image/route.ts": {
@@ -52,6 +52,9 @@
     },
     "app/api/v1/tools/[name]/route.ts": {
       "maxDuration": 300
+    },
+    "app/api/webhooks/video/route.ts": {
+      "maxDuration": 120
     }
   }
 }

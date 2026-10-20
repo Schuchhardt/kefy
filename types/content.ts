@@ -25,6 +25,8 @@ export interface CarouselSlide {
 /** Canonical reel scene (text overlay + duration + optional generated image). */
 export interface ReelScene {
   scene_order:      number;
+  /** Plano del guion de video (metadata.video_script) al que corresponde. */
+  scene_id?:        string;
   title:            string;
   body:             string;
   duration_seconds: number;

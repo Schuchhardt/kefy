@@ -19,6 +19,8 @@ const text    = '#F0EFE8';
 const PROVIDER_LABEL: Record<string, string> = {
   anthropic: 'Anthropic (Claude)',
   openai:    'OpenAI',
+  fal:       'fal.ai',
+  higgsfield: 'Higgsfield',
 };
 
 export default function ProviderCreditsLow({ provider, detail }: ProviderCreditsLowProps) {

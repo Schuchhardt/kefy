@@ -46,7 +46,7 @@ vi.mock('@/lib/brands', () => ({
 vi.mock('@/lib/ai', () => ({
   generateContentText: vi.fn(),
   generateContentImage: vi.fn(),
-  generateReelScript: vi.fn(),
+  generateVideoScript: vi.fn(),
 }));
 
 vi.mock('@/lib/storage', () => ({
@@ -55,8 +55,9 @@ vi.mock('@/lib/storage', () => ({
 
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText, generateContentImage, generateReelScript } from '@/lib/ai';
+import { generateContentText, generateContentImage, generateVideoScript } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
+import { normalizeVideoScript } from '@/lib/video/script';
 
 const mockAuth  = { userId: 'u1', orgId: 'org-1', role: 'owner', plan: 'pro' };
 const mockBrand = { id: 'brand-1', org_id: 'org-1', name: 'Marca', slug: 'marca', avatar_url: null, archived: false, created_at: '', updated_at: '' };
@@ -248,7 +249,7 @@ describe('PATCH /api/content/story', () => {
     expect(body.error).toMatch(/story/i);
   });
 
-  it('genera el guion de video y guarda las escenas en slides', async () => {
+  it('genera el guion de video, reutiliza la imagen de la story como primer plano y no produce nada', async () => {
     const { PATCH } = await import('@/app/api/content/story/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
 
@@ -256,7 +257,10 @@ describe('PATCH /api/content/story', () => {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({
-        data: { id: 'story-1', content_type: 'story', channel: 'instagram', body: 'Texto de la story', title: null },
+        data: {
+          id: 'story-1', content_type: 'story', channel: 'instagram', body: 'Texto de la story', title: null,
+          image_url: 'https://cdn.example.com/story.jpg', metadata: { created_via: 'ui' }, brand_id: 'brand-1',
+        },
         error: null,
       }),
     };
@@ -269,24 +273,33 @@ describe('PATCH /api/content/story', () => {
       .mockReturnValueOnce(mockBrandKitChain())
       .mockReturnValueOnce(updateChain);
 
-    vi.mocked(generateReelScript).mockResolvedValueOnce({
-      scenes: [
-        { scene_order: 1, title: 'Escena 1', body: 'Hola', duration_seconds: 3, image_prompt: 'prompt 1' },
-        { scene_order: 2, title: 'Escena 2', body: 'Chau', duration_seconds: 3, image_prompt: 'prompt 2' },
-      ],
-      hook: 'Hook', hashtags: [], model: 'claude-opus-4-5', tokensUsed: 20,
+    vi.mocked(generateVideoScript).mockResolvedValueOnce({
+      script: normalizeVideoScript({
+        scenes: [
+          { duration_seconds: 3, speaker: 'narrator', line: 'Hola', on_screen_text: 'Escena 1', visual: { kind: 'animated', image_prompt: 'prompt 1' } },
+          { duration_seconds: 3, speaker: 'narrator', line: 'Chau', on_screen_text: 'Escena 2', visual: { kind: 'still', image_prompt: 'prompt 2' } },
+        ],
+      }, 'es'),
+      model: 'claude-opus-4-5', tokensUsed: 20,
     });
-    vi.mocked(generateContentImage).mockResolvedValue({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
-    vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/scene.jpg');
 
     const res = await PATCH(makeReq('PATCH', { itemId: 'story-1' }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.scenes).toHaveLength(2);
+    expect(vi.mocked(generateVideoScript).mock.calls[0]![0].scene_count).toBe(2);
+    expect(generateContentImage).not.toHaveBeenCalled();
+    expect(uploadBase64Image).not.toHaveBeenCalled();
 
     const updatePayload = updateChain.update.mock.calls[0][0] as Record<string, unknown>;
     const savedScenes = updatePayload.slides as Array<Record<string, unknown>>;
     expect(savedScenes).toHaveLength(2);
-    expect(savedScenes[0].image_url).toBe('https://cdn.example.com/scene.jpg');
+    expect(savedScenes[0].image_url).toBe('https://cdn.example.com/story.jpg');
+    expect(savedScenes[1].image_url).toBeNull();
+    expect(updatePayload.render_status).toBe('not_rendered');
+    const meta = updatePayload.metadata as Record<string, unknown>;
+    expect(meta.created_via).toBe('ui');
+    const script = meta.video_script as { scenes: Array<{ visual: { image_url?: string } }> };
+    expect(script.scenes[0]!.visual.image_url).toBe('https://cdn.example.com/story.jpg');
   });
 });

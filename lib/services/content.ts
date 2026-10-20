@@ -127,6 +127,21 @@ export function sanitizeSlides(raw: unknown): SlideInput[] | null {
   return out;
 }
 
+/**
+ * Lo que una escena de reel con guion de video necesita conservar al editarse
+ * (lib/video/script.ts::mergeSlideEdits): a qué plano corresponde, su prompt y
+ * si su foto está limpia. Sin `scene_id`, borrar una escena desordenaba los
+ * planos; sin `text_baked`, la foto ya producida se volvía a pagar.
+ */
+function videoSceneFields(s: Record<string, unknown>): Record<string, unknown> {
+  if (typeof s.scene_id !== 'string' || !/^s\d{1,3}$/.test(s.scene_id)) return {};
+  return {
+    scene_id: s.scene_id,
+    ...(typeof s.image_prompt === 'string' ? { image_prompt: s.image_prompt.slice(0, 400) } : {}),
+    ...(typeof s.text_baked === 'boolean' ? { text_baked: s.text_baked } : {}),
+  };
+}
+
 /** Igual que sanitizeSlides pero para una edición: descarta lo que no es objeto. */
 function sanitizePatchSlides(raw: unknown[]): Array<Record<string, unknown>> {
   return raw
@@ -137,6 +152,7 @@ function sanitizePatchSlides(raw: unknown[]): Array<Record<string, unknown>> {
       body:             typeof s.body  === 'string' ? s.body.slice(0, 2000) : null,
       image_url:        typeof s.image_url === 'string' && s.image_url ? s.image_url : null,
       duration_seconds: typeof s.duration_seconds === 'number' ? s.duration_seconds : null,
+      ...videoSceneFields(s),
     }))
     .sort((a, b) => (a.slide_order as number) - (b.slide_order as number))
     .map((s, i) => ({ ...s, slide_order: i + 1 }));

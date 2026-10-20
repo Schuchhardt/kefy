@@ -10,6 +10,7 @@ import { workspaceTools } from './workspace';
 import { brandTools } from './brand';
 import { strategyTools } from './strategy';
 import { contentTools } from './content';
+import { videoTools } from './video';
 import { publishingTools } from './publishing';
 import { analyticsTools } from './analytics';
 import { inboxTools } from './inbox';
@@ -28,6 +29,7 @@ export function ensureToolsRegistered(): void {
     ...brandTools,
     ...strategyTools,
     ...contentTools,
+    ...videoTools,
     ...publishingTools,
     ...analyticsTools,
     ...inboxTools,

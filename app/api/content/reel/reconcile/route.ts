@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { reconcileRenderTarget, type RenderTable, type RenderTarget } from '@/lib/reel-render';
+import { advanceVideoJob } from '@/lib/video/engine';
+import { reportError } from '@/lib/observability';
 
 export const runtime     = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 // ─── /api/content/reel/reconcile ──────────────────────────────────────────────
 // Finishes Remotion Lambda renders whose browser never came back.
@@ -19,9 +21,24 @@ export const maxDuration = 120;
 // Invocation modes:
 //   - GET  (Vercel Cron): header `Authorization: Bearer ${CRON_SECRET}`
 //   - POST (manual): authenticated owner/admin — only their own org's rows
+//
+// It also advances the video pipeline (lib/video/engine.ts): every running
+// production gets one engine pass, so a video keeps progressing — images,
+// animations, lip-sync, final edit — even if nobody has the player open.
+// Rows that belong to a production (metadata.video_job_id) are left to the
+// engine: they have no Lambda pointers and the plain reconciler would reset
+// them as 'trigger_lost'.
 
 /** Cap per run so one sweep can't exceed the function's time budget. */
 const MAX_TARGETS_PER_RUN = 25;
+/** Video productions advanced per run. They go two at a time (each may run up
+ *  to 6 image generations in parallel — more would hit OpenAI rate limits),
+ *  and no new one starts after RUN_BUDGET_MS so a pass plus its longest sync
+ *  step (~90 s) fits in maxDuration. */
+const MAX_JOBS_PER_RUN   = 8;
+const JOBS_IN_PARALLEL   = 2;
+const JOB_BUDGET_MS      = 20 * 1000;
+const RUN_BUDGET_MS      = 150 * 1000;
 
 function isVercelCronAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET ?? process.env.AUTOPILOT_CRON_SECRET;
@@ -46,6 +63,10 @@ async function fetchRendering(db: Db, table: RenderTable, orgId: string | null, 
       ? 'id, metadata, video_url, render_status, org_id'
       : 'id, metadata, video_url, render_status')
     .eq('render_status', 'rendering')
+    // Las piezas del pipeline de video las avanza su trabajo (más abajo). Se
+    // filtran aquí y no después del límite: si no, 25 piezas del pipeline en
+    // curso dejaban sin reconciliar los renders directos.
+    .is('metadata->>video_job_id', null)
     .limit(limit);
 
   // Renditions have no org_id column — they are scoped through their item, and
@@ -53,7 +74,7 @@ async function fetchRendering(db: Db, table: RenderTable, orgId: string | null, 
   if (orgId && table === 'kefy_content_items') query = query.eq('org_id', orgId);
 
   const { data } = await query;
-  return ((data ?? []) as Row[]).map((row) => ({
+  return ((data ?? []) as Row[]).filter((row) => !row.metadata?.video_job_id).map((row) => ({
     table,
     id:           row.id,
     metadata:     row.metadata ?? {},
@@ -86,7 +107,34 @@ async function runReconcile(orgId: string | null) {
     }
   }
 
+  // ── Video pipeline ─────────────────────────────────────────────────────────
+  let jobsQuery = db
+    .from('kefy_video_jobs')
+    .select('id')
+    .eq('status', 'running')
+    .order('advanced_at', { ascending: true, nullsFirst: true })
+    .limit(MAX_JOBS_PER_RUN);
+  if (orgId) jobsQuery = jobsQuery.eq('org_id', orgId);
+  const { data: jobs } = await jobsQuery;
+
+  const startedAt = Date.now();
+  const queue = [...((jobs ?? []) as Array<{ id: string }>)];
+  const productions: Array<{ id: string; status: string; error?: string }> = [];
+  while (queue.length && Date.now() - startedAt < RUN_BUDGET_MS) {
+    const batch = queue.splice(0, JOBS_IN_PARALLEL);
+    productions.push(...await Promise.all(batch.map(async (job) => {
+      try {
+        const snap = await advanceVideoJob(db, job.id, { budgetMs: JOB_BUDGET_MS });
+        return { id: job.id, status: snap?.status ?? 'missing' };
+      } catch (err) {
+        reportError(err, { route: 'reel/reconcile', extra: { videoJobId: job.id } });
+        return { id: job.id, status: 'error', error: err instanceof Error ? err.message : 'advance failed' };
+      }
+    })));
+  }
+
   const summary = {
+    productions:  productions.length,
     swept:        results.length,
     ready:        results.filter((r) => r.status === 'ready').length,
     rendering:    results.filter((r) => r.status === 'rendering').length,
@@ -95,7 +143,7 @@ async function runReconcile(orgId: string | null) {
   };
   console.log('[reel/reconcile] done:', JSON.stringify(summary));
 
-  return NextResponse.json({ ...summary, results });
+  return NextResponse.json({ ...summary, results, video_jobs: productions });
 }
 
 export async function GET(req: NextRequest) {

@@ -139,6 +139,9 @@ const es = {
     create_manual_content: 'Guardando contenido…',
     update_content: 'Editando contenido…',
     generate_content_image: 'Generando imagen…',
+    get_video_plan: 'Calculando el plan del video…',
+    produce_video: 'Lanzando la producción del video…',
+    get_video_status: 'Revisando el video…',
     list_social_accounts: 'Revisando cuentas conectadas…',
     get_connect_account_link: 'Preparando el link de conexión…',
     list_autopilot_rules: 'Revisando el autopilot…',
@@ -210,8 +213,7 @@ const es = {
       const topic = str(p.topic, str(i.topic));
       const n = Number(p.variant_count ?? i.variant_count ?? 1);
       const variants = n > 1 ? ` (${n} variantes)` : '';
-      const imgs = (p.generate_images ?? i.generate_images) !== false ? ' con imágenes' : '';
-      return `Crear un reel${imgs}${variants}${topic ? ` sobre ${quote(topic)}` : ''}`;
+      return `Escribir el guion de un reel${variants}${topic ? ` sobre ${quote(topic)}` : ''}`;
     },
     create_manual_content: (i) => {
       const title = str(i.title);
@@ -229,6 +231,13 @@ const es = {
       const prompt = str(i.prompt);
       return prompt ? `Generar una imagen nueva: ${quote(prompt, 60)}` : 'Generar una imagen nueva para el contenido';
     },
+    get_video_plan: () => 'Ver el plan de producción del video',
+    produce_video: (i, p) => {
+      const credits = Number(p.credits);
+      const tools = str(p.tools);
+      return `Producir el video${Number.isFinite(credits) && credits > 0 ? ` (${credits} créditos)` : ''}${tools ? `: ${tools}` : ''}${i.force ? ', reemplazando el actual' : ''}`;
+    },
+    get_video_status: () => 'Revisar cómo va el video',
     list_social_accounts: () => 'Revisar las cuentas conectadas',
     get_connect_account_link: (i) => `Preparar el link para conectar ${str(i.platform, 'una cuenta')}`,
     list_autopilot_rules: () => 'Revisar las reglas del autopilot',
