@@ -21,7 +21,7 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { reportWarning } from '@/lib/observability';
 import ProviderCreditsLow from '@/emails/ProviderCreditsLow';
 
-export type AiProvider = 'anthropic' | 'openai' | 'fal';
+export type AiProvider = 'anthropic' | 'openai' | 'fal' | 'higgsfield';
 
 const ALERT_WINDOW_SECONDS = 60 * 60; // como mucho 1 correo por proveedor por hora
 
@@ -30,12 +30,22 @@ const EXHAUSTION_STATUS: Record<AiProvider, ReadonlySet<number>> = {
   anthropic: new Set([400, 403]),
   // fal.ai bloquea la cuenta sin saldo («User is locked. Reason: Exhausted balance»).
   fal:       new Set([402, 403]),
+  // Higgsfield responde 403 cuando no quedan créditos en la cuenta de la API.
+  higgsfield: new Set([402, 403]),
 };
 
 const EXHAUSTION_PATTERN: Record<AiProvider, RegExp> = {
   openai:    /insufficient_quota|exceeded your current quota|billing hard limit/i,
   anthropic: /credit balance is too low|insufficient credit/i,
   fal:       /exhausted balance|insufficient (balance|credits)/i,
+  higgsfield: /insufficient|not enough credits|credit/i,
+};
+
+const PROVIDER_LABEL: Record<AiProvider, string> = {
+  anthropic:  'Anthropic',
+  openai:     'OpenAI',
+  fal:        'fal.ai',
+  higgsfield: 'Higgsfield',
 };
 
 function looksExhausted(provider: AiProvider, status: number, body: string): boolean {
@@ -50,7 +60,7 @@ async function sendAlertEmail(provider: AiProvider, detail: string): Promise<voi
 
   const resend = new Resend(apiKey);
   const html   = await render(ProviderCreditsLow({ provider, detail }));
-  const label  = provider === 'openai' ? 'OpenAI' : 'Anthropic';
+  const label  = PROVIDER_LABEL[provider];
 
   await resend.emails.send({
     from:    process.env.RESEND_FROM_EMAIL ?? 'Kefy <no-reply@email.kefy.app>',

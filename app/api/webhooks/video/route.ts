@@ -7,14 +7,15 @@ export const runtime     = 'nodejs';
 export const maxDuration = 120;
 
 // ─── POST /api/webhooks/video?step=&sig= ───────────────────────────────
-// fal.ai calls this when an animation or lip-sync finishes (the engine passes
-// the URL as `fal_webhook` when it queues the job). Without it, the next step
+// Higgsfield or fal.ai calls this when an animation or lip-sync finishes (the
+// engine passes the URL as `hf_webhook` / `fal_webhook` when it queues the job). Without it, the next step
 // would wait for the player's poll or the 5-minute cron.
 //
 // The body is not trusted: the signature (HMAC of the step id, see
 // lib/video/engine.ts::signStep) only proves the URL came from us, so the
 // handler just runs an engine pass — which asks fal for the real result
 // itself — instead of reading the result from the payload.
+// Higgsfield may deliver more than once; each delivery is just another pass.
 //
 // Always answers 200 for a valid signature: fal retries non-2xx responses,
 // and a retry would only run the same pass again.
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     const snap = await advanceVideoJob(db, step.job_id as string, { budgetMs: 30 * 1000, syncSteps: false });
     return NextResponse.json({ ok: true, status: snap?.status ?? null });
   } catch (err) {
-    reportError(err, { route: 'POST /api/webhooks/video', service: 'fal', extra: { stepId } });
+    reportError(err, { route: 'POST /api/webhooks/video', service: 'video', extra: { stepId } });
     return NextResponse.json({ ok: true, error: 'advance_failed' });
   }
 }

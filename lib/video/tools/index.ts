@@ -21,3 +21,4 @@ export function getVideoTool(name: string): VideoTool | null {
 
 export type { VideoTool, VideoToolName, ToolResult, ToolRunContext } from './types';
 export { VIDEO_TOOL_NAMES } from './types';
+export { speechInClipAvailable } from './motion';

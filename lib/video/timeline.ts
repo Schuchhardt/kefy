@@ -8,9 +8,15 @@
 // plano un poco más largo. Sin voz, se usa la duración del guion.
 //
 // Cada pieza tiene su respaldo, así un paso fallido no tumba el video:
-//   lipsync → clip animado + voz aparte → foto con movimiento → fondo de marca.
+//   lipsync o clip que dice la línea → clip animado + voz aparte →
+//   foto con movimiento → fondo de marca.
+//
+// Un clip que dice la línea (Higgsfield, `has_audio` en la salida de anim_*)
+// manda sobre el plano igual que la voz: dura lo que el clip y sus palabras
+// son los subtítulos.
 
 import type { VideoScript } from '@/lib/video/script';
+import { alignWords } from '@/lib/video/tools/audio';
 import type { FilmCompositionProps, FilmScene, FilmTheme, FilmVisual, FilmWord } from '@/remotion/film-types';
 
 /** La voz entra un poco después del corte, no pegada a él. */
@@ -61,6 +67,8 @@ export function buildFilmProps(
     const lipsUrl       = url(lips?.video_url);
     const animUrl       = url(anim?.video_url);
     const clipSeconds   = num(anim?.clip_seconds) ?? 5;
+    // El clip dice la línea (no hay voz aparte para este plano).
+    const animSpeaks    = !!animUrl && anim?.has_audio === true;
 
     let visual: FilmVisual;
     // `poster`: la foto del plano, que queda debajo del clip y lo reemplaza
@@ -69,7 +77,7 @@ export function buildFilmProps(
       // El clip con lipsync dura lo que la voz (sync_mode 'loop').
       visual = { type: 'video', src: lipsUrl, clip_seconds: voiceSeconds ?? clipSeconds, has_audio: true, poster: image };
     } else if (animUrl) {
-      visual = { type: 'video', src: animUrl, clip_seconds: clipSeconds, has_audio: false, poster: image };
+      visual = { type: 'video', src: animUrl, clip_seconds: clipSeconds, has_audio: animSpeaks, poster: image };
     } else if (image) {
       visual = { type: 'image', src: image };
     } else {
@@ -83,7 +91,21 @@ export function buildFilmProps(
     // solo aplica a los planos mudos; el guion ya acota el largo de la línea).
     const duration = voiceSeconds
       ? Math.max(FILM_SCENE_MIN_SECONDS, speechOffset + voiceSeconds + SPEECH_TAIL_SECONDS)
-      : clamp(scene.duration_seconds, FILM_SCENE_MIN_SECONDS, FILM_SCENE_MAX_SECONDS);
+      : animSpeaks
+        ? clamp(clipSeconds, FILM_SCENE_MIN_SECONDS, FILM_SCENE_MAX_SECONDS)
+        : clamp(scene.duration_seconds, FILM_SCENE_MIN_SECONDS, FILM_SCENE_MAX_SECONDS);
+
+    // Subtítulos: los de la voz, o los del clip que dice la línea. Si ese clip
+    // falló, la línea no se oye en ningún lado: al menos se lee, repartida
+    // sobre el plano.
+    const lineWithoutAudio = !voiceUrl && !speechInClip && scene.visual.kind === 'talking' && !!scene.line;
+    const sceneWords = voiceSeconds
+      ? words(voice?.words)
+      : animSpeaks
+        ? words(anim?.words)
+        : lineWithoutAudio
+          ? alignWords(scene.line!, duration - SPEECH_TAIL_SECONDS)
+          : [];
 
     return {
       id:               scene.id,
@@ -92,7 +114,7 @@ export function buildFilmProps(
       camera:           scene.visual.camera,
       voice:            voiceUrl && !speechInClip ? { src: voiceUrl } : null,
       speech_offset:    speechOffset,
-      words:            voiceSeconds ? words(voice?.words) : [],
+      words:            sceneWords,
       on_screen_text:   scene.on_screen_text,
       transition:       scene.transition,
     };

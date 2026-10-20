@@ -25,7 +25,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { consumeCredits, refundCredits } from '@/lib/usage';
-import { reportError } from '@/lib/observability';
+import { reportError, reportWarning } from '@/lib/observability';
 import { appUrl } from '@/lib/app-url';
 import { getVideoTool, type ToolResult, type ToolRunContext } from '@/lib/video/tools';
 import { TOOL_CREDIT_OPERATION, type VideoToolName } from '@/lib/video/tools/types';
@@ -308,7 +308,14 @@ async function failStep(
   db: Db, job: JobRow, step: StepRow, error: string, now: number, opts: { final?: boolean } = {},
 ): Promise<void> {
   if (!opts.final && step.attempts < MAX_STEP_ATTEMPTS) {
-    await updateStep(db, step, { status: 'pending', handle: null, error }, 'running');
+    // Se reintenta: no es un fallo todavía, pero sin este aviso un primer
+    // intento fallido no deja rastro (el error se borra si el reintento sale).
+    if (await updateStep(db, step, { status: 'pending', handle: null, error }, 'running')) {
+      reportWarning(`Paso de video reintentado: ${error}`, {
+        route: 'lib/video/engine', service: step.tool,
+        extra: { jobId: job.id, step: step.key, attempts: step.attempts },
+      });
+    }
     return;
   }
   const wasCharged = step.charged;
@@ -334,7 +341,7 @@ function outputsOf(steps: StepRow[]): StepOutputs {
 }
 
 function runContext(job: JobRow, step: StepRow): ToolRunContext {
-  return { orgId: job.org_id, jobId: job.id, stepKey: step.key, webhookUrl: webhookUrlFor(step.id) };
+  return { orgId: job.org_id, jobId: job.id, stepKey: step.key, attempt: step.attempts, webhookUrl: webhookUrlFor(step.id) };
 }
 
 interface TargetRow {

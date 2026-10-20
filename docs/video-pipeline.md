@@ -29,6 +29,7 @@ request.
 | `prompts/video-script.prompt.md` + `generateVideoScript` (`lib/ai.ts`) | Claude escribe el guion |
 | `lib/video/plan.ts` | `compileVideoPlan`: guion → pasos con dependencias, `$ref` y costo. Es puro |
 | `lib/video/tools/*` | Las herramientas: `generate_image`, `text_to_speech`, `animate_image`, `lip_sync`, `compose_video` |
+| `lib/video/higgsfield.ts`, `lib/video/fal.ts` | Clientes de las colas de video. `animate_image` usa Higgsfield si está configurado, si no fal |
 | `lib/video/engine.ts` | `advanceVideoJob`: una «vuelta» al trabajo. Lanza lo que está listo, consulta lo que está en la nube y cierra |
 | `lib/video/timeline.ts` | Guion + salidas → props de la composición `KefyFilm` (pura) |
 | `lib/video/brand.ts` | La marca del video: `resolveFilmTheme` (diseño), `videoBrandBrief` (copy) y `voiceAccent` (voz), cada uno con su respaldo |
@@ -80,7 +81,28 @@ Si el usuario edita una escena, el texto nuevo entra al guion al producir
 
 ## El plan
 
-Así se ve el grafo de un plano con un personaje que habla:
+Con **Higgsfield** (Seedance 2.0 genera el audio del clip), un plano donde
+habla un personaje es una sola animación que dice la línea:
+
+```
+char_ana ──► img_s2 ──► anim_s2 (dice la línea) ──┐
+img_s1 ──► anim_s1 (mudo) ────────────────────────┤──► compose
+voice_s1 (narrador) ──────────────────────────────┘
+```
+
+- El prompt de la animación lleva la línea entre comillas, el idioma, el
+  acento (`voiceAccent`) y el `voice_style` del personaje. El clip dura lo que
+  tarda en decirse (`speakingClipSeconds`, 4–15 s).
+- Al terminar, el clip se transcribe con whisper: esos son los subtítulos
+  palabra a palabra. Sin transcripción se reparten sobre el clip.
+- Los planos animados que no hablan piden `generate_audio: false`: debajo
+  suenan la música y el narrador, y un audio inventado chocaría.
+- El narrador sigue siendo TTS: no está en cuadro.
+- La voz del mismo personaje puede variar un poco entre planos: cada clip la
+  genera de nuevo.
+
+Con **fal** (respaldo si no hay Higgsfield), así se ve el grafo de un plano con
+un personaje que habla:
 
 ```
 char_ana ──► img_s2 ──► anim_s2 ──► lips_s2 ──┐
@@ -146,8 +168,8 @@ Cada herramienta cobra su operación de créditos (`OPERATION_CREDIT_COSTS` en
 |---|---|---|
 | `generate_image` | OpenAI (gpt-image) | 3 (`image`) |
 | `text_to_speech` | OpenAI (`gpt-4o-mini-tts` + `whisper-1`) | 1 (`voice`) |
-| `animate_image` | fal.ai (Kling 2.1 i2v, `FAL_ANIMATE_MODEL`) | 8 (`animation`) |
-| `lip_sync` | fal.ai (sync-lipsync v2, `FAL_LIPSYNC_MODEL`) | 8 (`lipsync`) |
+| `animate_image` | Higgsfield (Seedance 2.0 i2v, `HIGGSFIELD_ANIMATE_MODEL`) o fal.ai (Kling 2.1 i2v, `FAL_ANIMATE_MODEL`) | 8 (`animation`) |
+| `lip_sync` | fal.ai (sync-lipsync v2, `FAL_LIPSYNC_MODEL`). Con Higgsfield no se usa | 8 (`lipsync`) |
 | `compose_video` | Remotion Lambda | 10 (`video`) |
 
 Un reel de 5 planos con nivel `key` cuesta 54 créditos: 5 imágenes (15), 5
@@ -179,7 +201,7 @@ donde quedó. Esa vuelta la disparan tres cosas:
     imágenes; más a la vez chocaría con el rate limit de OpenAI.
   - Empieza por las que llevan más tiempo sin vuelta (`advanced_at`).
   - No empieza una vuelta nueva pasados 150 s.
-- **Webhook de fal.ai:** `POST /api/webhooks/video?step=&sig=`.
+- **Webhook de Higgsfield o fal.ai:** `POST /api/webhooks/video?step=&sig=` (`hf_webhook` / `fal_webhook`).
   - La URL va firmada con HMAC del id del paso (`VIDEO_WEBHOOK_SECRET`, o
     `CRON_SECRET` si falta).
   - El cuerpo no se usa: el motor le pregunta el resultado a fal.
@@ -257,7 +279,9 @@ escenas.
 
 | Variable | Para qué |
 |---|---|
-| `FAL_KEY` | Sin ella no hay animación ni lipsync; el resto funciona |
+| `HIGGSFIELD_API_KEY` | `KEY_ID:KEY_SECRET` de console.higgsfield.ai (o `HF_API_KEY_ID` + `HF_API_KEY_SECRET`). Animación con audio; tiene prioridad sobre fal |
+| `HIGGSFIELD_ANIMATE_MODEL` | Opcional: por defecto `bytedance/seedance-2.0/image-to-video` |
+| `FAL_KEY` | Respaldo: animación y lipsync en fal. Sin Higgsfield ni fal no hay animación; el resto funciona |
 | `FAL_ANIMATE_MODEL`, `FAL_LIPSYNC_MODEL`, `OPENAI_TTS_MODEL` | Opcionales: cambian el modelo sin tocar código |
 | `VIDEO_WEBHOOK_SECRET` | Opcional: firma de los webhooks |
 | Las de Remotion (`docs/reel-render.md`) | El montaje |
@@ -295,6 +319,8 @@ descargan de ahí las voces.
 | `tests/unit/lib/video/script.test.ts` | Normalización del guion, ediciones por `scene_id`, fotos quemadas o externas y guion desde slides |
 | `tests/unit/lib/video/brand.test.ts` | Tema de marca, contraste, respaldos, brief del copy, acento de voz y música por ánimo |
 | `tests/unit/lib/video/fal.test.ts` | Contrato de la cola de fal: webhook, estados, 408/429/5xx como pendientes |
+| `tests/unit/lib/video/higgsfield.test.ts` | Contrato de Higgsfield: credenciales, `hf_webhook`, idempotencia, estados |
+| `tests/unit/lib/video/motion.test.ts` | `animate_image` con Higgsfield: audio solo si habla, transcripción del clip, handles viejos de fal |
 | `tests/unit/lib/services/content-slides.test.ts` | Editar escenas conserva `scene_id` |
 | `tests/unit/lib/video/plan.test.ts` | Grafo, costo, niveles de animación, degradación y `$ref` |
 | `tests/unit/lib/video/timeline.test.ts` | Respaldos, duración por voz y voz dentro del clip |

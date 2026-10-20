@@ -34,6 +34,8 @@ export interface ToolRunContext {
   orgId:       string;
   jobId:       string;
   stepKey:     string;
+  /** Número de intento del paso (1, 2…): con el id del paso arma la clave de idempotencia. */
+  attempt?:    number;
   /** URL a la que el proveedor avisa al terminar (solo herramientas asíncronas). */
   webhookUrl?: string;
 }
@@ -48,7 +50,7 @@ export interface VideoTool {
   label:    { es: string; en: string };
   /** Qué hace, en una línea, para el panel del plan y la documentación del asistente. */
   summary:  { es: string; en: string };
-  provider: 'openai' | 'fal' | 'remotion';
+  provider: 'openai' | 'fal' | 'higgsfield' | 'remotion';
   /** Operación de créditos que cuesta cada llamada. */
   credit:   CreditOperation;
   mode:     'sync' | 'async';

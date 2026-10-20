@@ -12,6 +12,34 @@ import { TOOL_CREDIT_OPERATION, type VideoTool } from './types';
 
 const TTS_MODEL = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
 
+/**
+ * Tiempos de cada palabra oída en un audio (o en un clip con audio), con
+ * whisper-1. Nunca lanza: sin tiempos, los subtítulos se reparten por largo de
+ * palabra (`alignWords`).
+ */
+export async function transcribeWordTimings(
+  buf: Buffer,
+  filename: string,
+  mime: string,
+  language: 'es' | 'en',
+  stepKey: string,
+): Promise<Array<{ start: number; end: number }>> {
+  try {
+    const transcript = await getOpenAI().audio.transcriptions.create({
+      file:     await toFile(buf, filename, { type: mime }),
+      model:    'whisper-1',
+      language,
+      response_format: 'verbose_json',
+      timestamp_granularities: ['word'],
+    });
+    const words = (transcript as unknown as { words?: Array<{ start: number; end: number }> }).words;
+    return Array.isArray(words) ? words.filter((w) => typeof w.start === 'number' && typeof w.end === 'number') : [];
+  } catch (err) {
+    reportError(err, { route: 'lib/video/tools/voice', service: 'ai', extra: { step: stepKey, fase: 'whisper' } });
+    return [];
+  }
+}
+
 export const textToSpeechTool: VideoTool = {
   name:     'text_to_speech',
   label:    { es: 'Voz', en: 'Voice' },
@@ -45,21 +73,7 @@ export const textToSpeechTool: VideoTool = {
     // por palabras (≈2,5 por segundo) en vez de fallar.
     const duration = wavDurationSeconds(buf) ?? Math.max(1, text.split(/\s+/).length / 2.5);
 
-    let heard: Array<{ start: number; end: number }> = [];
-    try {
-      const transcript = await client.audio.transcriptions.create({
-        file:     await toFile(buf, 'voice.wav', { type: 'audio/wav' }),
-        model:    'whisper-1',
-        language,
-        response_format: 'verbose_json',
-        timestamp_granularities: ['word'],
-      });
-      const words = (transcript as unknown as { words?: Array<{ start: number; end: number }> }).words;
-      if (Array.isArray(words)) heard = words.filter((w) => typeof w.start === 'number' && typeof w.end === 'number');
-    } catch (err) {
-      // Los subtítulos salen igual, repartidos por largo de palabra.
-      reportError(err, { route: 'lib/video/tools/voice', service: 'ai', extra: { step: ctx.stepKey, fase: 'whisper' } });
-    }
+    const heard = await transcribeWordTimings(buf, 'voice.wav', 'audio/wav', language, ctx.stepKey);
 
     const audioUrl = await uploadVideoAsset(buf, ctx.orgId, `voice-${ctx.stepKey}.wav`, 'audio/wav');
     return {

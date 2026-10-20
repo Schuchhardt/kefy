@@ -73,3 +73,27 @@ describe('buildFilmProps', () => {
     expect(buildFilmProps(script, {}, resolveFilmTheme(null)).outro).toBeNull();
   });
 });
+
+describe('buildFilmProps con un clip que dice la línea', () => {
+  const words = [{ text: 'Hola', start: 0.3, end: 0.6 }, { text: 'a', start: 0.6, end: 0.7 }, { text: 'todos', start: 0.7, end: 1.1 }];
+
+  it('el clip trae la voz: dura lo que el clip, sin voz aparte, con sus subtítulos', () => {
+    const props = buildFilmProps(script, {
+      img_s1: { image_url: 'https://cdn/1.jpg' },
+      anim_s1: { video_url: 'https://cdn/1.mp4', clip_seconds: 6, has_audio: true, words },
+    }, resolveFilmTheme({ name: 'Marca' }));
+    const s1 = props.scenes[0]!;
+    expect(s1.visual).toMatchObject({ type: 'video', src: 'https://cdn/1.mp4', has_audio: true, clip_seconds: 6 });
+    expect(s1.voice).toBeNull();
+    expect(s1.duration_seconds).toBe(6);
+    expect(s1.speech_offset).toBe(0);
+    expect(s1.words).toEqual(words);
+  });
+
+  it('si el clip que hablaba falló, la línea al menos se lee en subtítulos', () => {
+    const props = buildFilmProps(script, { img_s1: { image_url: 'https://cdn/1.jpg' } }, resolveFilmTheme({ name: 'Marca' }));
+    const s1 = props.scenes[0]!;
+    expect(s1.visual).toEqual({ type: 'image', src: 'https://cdn/1.jpg' });
+    expect(s1.words.map((w) => w.text)).toEqual(['Hola', 'a', 'todos']);
+  });
+});

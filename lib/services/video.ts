@@ -30,7 +30,7 @@ import {
 import {
   compileVideoPlan, MOTION_LEVELS, type MotionLevel, type PlanNote, type VideoPlan,
 } from '@/lib/video/plan';
-import { VIDEO_TOOLS } from '@/lib/video/tools';
+import { VIDEO_TOOLS, speechInClipAvailable } from '@/lib/video/tools';
 import { resolveFilmTheme, voiceAccent, type VideoBrandKit } from '@/lib/video/brand';
 import { isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
 import type { VideoToolName } from '@/lib/video/tools/types';
@@ -130,6 +130,7 @@ function capabilities() {
     lipsync:   VIDEO_TOOLS.lip_sync.available(),
     images:    VIDEO_TOOLS.generate_image.available(),
     voice:     VIDEO_TOOLS.text_to_speech.available(),
+    speech_in_clip: speechInClipAvailable(),
   };
 }
 

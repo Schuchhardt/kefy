@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeVideoScript } from '@/lib/video/script';
-import { compileVideoPlan, COMPOSE_STEP_KEY, KEY_MOTION_SCENES, resolveRefs } from '@/lib/video/plan';
+import { compileVideoPlan, COMPOSE_STEP_KEY, KEY_MOTION_SCENES, resolveRefs, speakingClipSeconds } from '@/lib/video/plan';
 import { OPERATION_CREDIT_COSTS as C } from '@/lib/plans';
 
 const FAL = { animation: true, lipsync: true };
 const NO_FAL = { animation: false, lipsync: false };
+/** Higgsfield: el clip trae el audio, sin lipsync. */
+const HF = { animation: true, lipsync: false, speech_in_clip: true };
 
 function script(kinds: Array<'still' | 'animated' | 'talking'>) {
   return normalizeVideoScript({
@@ -105,6 +107,37 @@ describe('resolveRefs', () => {
     const input = { image_url: { $ref: 'img_s1.image_url' }, refs: [{ $ref: 'char_a.image_url' }, 'https://x/y.jpg'], n: 5 };
     expect(resolveRefs(input, { img_s1: { image_url: 'https://cdn/s1.jpg' } })).toEqual({
       image_url: 'https://cdn/s1.jpg', refs: ['https://x/y.jpg'], n: 5,
+    });
+  });
+
+  describe('con un modelo que genera el audio del clip (Higgsfield)', () => {
+    it('el personaje dice su línea en el clip: sin voz ni lipsync aparte', () => {
+      const plan = compileVideoPlan(script(['talking']), { capabilities: HF });
+      expect(plan.steps.map((s) => s.key)).toEqual(['char_ana', 'img_s1', 'anim_s1', COMPOSE_STEP_KEY]);
+      const anim = plan.steps.find((s) => s.key === 'anim_s1')!;
+      expect(anim.input).toMatchObject({ speech: 'Línea 1', language: 'es', duration: speakingClipSeconds('Línea 1') });
+      expect(anim.input.prompt).toContain('"Línea 1"');
+      expect(anim.input.prompt).toContain('Spanish');
+      expect(plan.credits).toBe(2 * C.image + C.animation + C.video);
+      expect(plan.notes.some((n) => /lipsync/i.test(n.es))).toBe(false);
+    });
+
+    it('el narrador sigue siendo voz en off y los planos animados no piden audio', () => {
+      const plan = compileVideoPlan(script(['animated', 'talking']), { capabilities: HF });
+      expect(plan.steps.filter((s) => s.tool === 'text_to_speech').map((s) => s.key)).toEqual(['voice_s1']);
+      expect(plan.steps.find((s) => s.key === 'anim_s1')!.input.speech).toBeUndefined();
+    });
+
+    it('si el plano que habla no se anima (motion none), la línea vuelve a ser TTS', () => {
+      const plan = compileVideoPlan(script(['talking']), { capabilities: HF, motion: 'none' });
+      expect(plan.steps.some((s) => s.key === 'voice_s1')).toBe(true);
+      expect(plan.steps.some((s) => s.tool === 'animate_image')).toBe(false);
+    });
+
+    it('el largo del clip alcanza para decir la línea, entre 4 y 15 s', () => {
+      expect(speakingClipSeconds('Hola')).toBe(4);
+      expect(speakingClipSeconds(Array(20).fill('palabra').join(' '))).toBe(10);
+      expect(speakingClipSeconds(Array(80).fill('palabra').join(' '))).toBe(15);
     });
   });
 });

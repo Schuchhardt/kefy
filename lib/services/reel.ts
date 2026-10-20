@@ -35,7 +35,7 @@ import type { BrandKit } from '@/types/brand-kit';
 import { scriptToReelScenes, type VideoScript } from '@/lib/video/script';
 import { compileVideoPlan } from '@/lib/video/plan';
 import { videoBrandBrief, type VideoBrandKit } from '@/lib/video/brand';
-import { VIDEO_TOOLS } from '@/lib/video/tools';
+import { VIDEO_TOOLS, speechInClipAvailable } from '@/lib/video/tools';
 
 const ROUTE = 'POST /api/content/reel';
 
@@ -148,7 +148,11 @@ async function generateOneVariant(
 
 function estimateProductionCredits(script: VideoScript, kit: KitRow | null): number {
   return compileVideoPlan(script, {
-    capabilities: { animation: VIDEO_TOOLS.animate_image.available(), lipsync: VIDEO_TOOLS.lip_sync.available() },
+    capabilities: {
+      animation:      VIDEO_TOOLS.animate_image.available(),
+      lipsync:        VIDEO_TOOLS.lip_sync.available(),
+      speech_in_clip: speechInClipAvailable(),
+    },
     brand: { name: kit?.name ?? undefined },
   }).credits;
 }

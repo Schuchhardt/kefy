@@ -16,7 +16,13 @@
 // Los valores que solo existen al ejecutar (la URL de una imagen) van como
 // referencias `{ $ref: 'img_s1.image_url' }` que el motor resuelve.
 //
-// Degradación en vez de error: sin fal.ai configurado, o con `motion: 'none'`,
+// Con un modelo que genera el audio del clip (Higgsfield, `speech_in_clip`),
+// el plano que habla es un solo paso: la imagen se anima diciendo la línea,
+// sin voz ni lipsync aparte:
+//
+//   char_ana ──► img_s2 ──► anim_s2 (dice la línea) ──► compose
+//
+// Degradación en vez de error: sin animación configurada, o con `motion: 'none'`,
 // los planos animados quedan como foto con movimiento de cámara y los que
 // hablan como foto + voz en off. Cada degradación deja una nota en el plan.
 
@@ -62,7 +68,14 @@ export interface PlanBrand {
 export interface PlanOptions {
   motion?:               MotionLevel;
   /** Qué herramientas asíncronas están configuradas (FAL_KEY, etc.). */
-  capabilities:          { animation: boolean; lipsync: boolean; images?: boolean; voice?: boolean };
+  capabilities:          {
+    animation: boolean;
+    lipsync:   boolean;
+    images?:   boolean;
+    voice?:    boolean;
+    /** El modelo de animación genera el audio del clip: el personaje dice su línea en el clip. */
+    speech_in_clip?: boolean;
+  };
   /** false: no se generan fotos (el reel lo pidió así); los planos usan el fondo de marca o su foto. */
   generate_images?:      boolean;
   image_quality?:        'low' | 'medium' | 'high';
@@ -98,6 +111,19 @@ function animationSeconds(scene: VideoScene): 5 | 10 {
 }
 
 /**
+ * Segundos de un clip que dice la línea: lo que tarda en decirse (≈2,5
+ * palabras por segundo) más aire al principio y al final, entre 4 y 15 s
+ * (lo que acepta Seedance). Corto de más corta la frase; largo de más, paga
+ * segundos de clip en silencio.
+ */
+export function speakingClipSeconds(line: string): number {
+  const words = line.split(/\s+/).filter(Boolean).length;
+  return Math.min(15, Math.max(4, Math.ceil(words / 2.5 + 1.5)));
+}
+
+const LANGUAGE_NAME: Record<string, string> = { es: 'Spanish', en: 'English' };
+
+/**
  * Qué planos se animan con el nivel pedido. `full` anima todos; `key` respeta
  * lo que eligió el guion, con el hook y los que hablan primero, hasta
  * KEY_MOTION_SCENES; `none` ninguno.
@@ -127,6 +153,7 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
   const canVoice   = opts.capabilities.voice !== false;
   const canAnimate = opts.capabilities.animation;
   const canLipsync = opts.capabilities.lipsync && canAnimate && canVoice;
+  const speechInClip = !!opts.capabilities.speech_in_clip && canAnimate;
 
   if (opts.capabilities.images === false) {
     notes.push({
@@ -180,9 +207,13 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
     // Sin foto (ni dada ni generada) no hay nada que animar.
     const hasImage   = !!givenImage || canImage;
     const isAnimated = animated.has(scene.id) && hasImage;
-    const isTalking  = scene.visual.kind === 'talking' && isAnimated && canLipsync && !!scene.line;
+    // Un personaje (no el narrador) dice la línea dentro del clip.
+    const speaksInClip = scene.visual.kind === 'talking' && isAnimated && speechInClip
+      && !!scene.line && !!scene.speaker && scene.speaker !== 'narrator';
+    const isTalking  = speaksInClip
+      || (scene.visual.kind === 'talking' && isAnimated && canLipsync && !!scene.line);
 
-    if (scene.visual.kind === 'talking' && !isTalking && motion !== 'none' && canAnimate && animated.has(scene.id) && !canLipsync) {
+    if (scene.visual.kind === 'talking' && !isTalking && motion !== 'none' && canAnimate && animated.has(scene.id) && !canLipsync && !speechInClip) {
       notes.push({
         es: `El plano ${scene.order} iba con lipsync, pero no está configurado: el personaje se anima y la línea va en voz en off.`,
         en: `Shot ${scene.order} was lip-synced, but lip-sync is not configured: the character is animated and the line plays as voice-over.`,
@@ -216,7 +247,7 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
     });
 
     let voiceKey: string | null = null;
-    if (scene.line && scene.speaker && canVoice) {
+    if (scene.line && scene.speaker && canVoice && !speaksInClip) {
       voiceKey = `voice_${scene.id}`;
       const speaker = scene.speaker === 'narrator' ? null : characters.get(scene.speaker);
       const voiceStyle = speaker ? speaker.voice_style : script.narrator.style;
@@ -241,7 +272,16 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
     if (isAnimated) {
       const animKey = `anim_${scene.id}`;
       const lead = sceneChars[0];
-      const motionPrompt = isTalking
+      const speaker = speaksInClip ? characters.get(scene.speaker!) ?? lead : null;
+      const motionPrompt = speaksInClip
+        ? [
+            `${speaker ? `${speaker.look}. ` : ''}The person looks at the camera and says, in ${LANGUAGE_NAME[script.language] ?? 'Spanish'}: "${scene.line}"`,
+            speaker?.voice_style ? `Voice: ${speaker.voice_style}.` : '',
+            opts.voice_accent ?? (script.language === 'es' ? 'Natural, neutral Latin American Spanish.' : ''),
+            'Clear speech with accurate lip sync, natural subtle head movement and small gestures. No background music.',
+            scene.visual.motion_prompt ?? '',
+          ].filter(Boolean).join(' ')
+        : isTalking
         ? `${lead ? `${lead.look}. ` : ''}The person talks naturally to the camera with subtle head movement and small gestures. ${scene.visual.motion_prompt ?? ''}`
         : scene.visual.motion_prompt ?? 'subtle cinematic motion, gentle camera drift';
       steps.push({
@@ -251,7 +291,8 @@ export function compileVideoPlan(script: VideoScript, opts: PlanOptions): VideoP
         input: {
           image_url: imageRef,
           prompt:    motionPrompt.trim(),
-          duration:  animationSeconds(scene),
+          duration:  speaksInClip ? speakingClipSeconds(scene.line!) : animationSeconds(scene),
+          ...(speaksInClip ? { speech: scene.line, language: script.language } : {}),
         },
         depends_on: givenImage ? [] : [imgKey],
         optional:   true,
