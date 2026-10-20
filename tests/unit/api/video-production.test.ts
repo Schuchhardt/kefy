@@ -180,6 +180,42 @@ describe('POST /api/content/reel/render (reel con guion)', () => {
     expect((meta.video_script as { scenes: Array<{ line: string }> }).scenes[0]!.line).toBe('Una línea nueva');
   });
 
+  it('si el guion cambió pero el nuevo no se puede producir, la producción en curso sigue', async () => {
+    seedItem();
+    const { POST } = await import('@/app/api/content/reel/render/route');
+    const first = await (await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }))).json();
+
+    const item = db.find('kefy_content_items', (r) => r.id === 'item-1')!;
+    (item.slides as Array<Record<string, unknown>>)[0]!.body = 'Una línea nueva';
+    // Ya no quedan créditos para el plan nuevo.
+    db.seed('kefy_usage_counters', [{ org_id: 'org-1', period: new Date().toISOString().slice(0, 7), credits: 499 }]);
+
+    const res = await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }));
+    expect(res.status).toBe(429);
+    expect(db.find('kefy_video_jobs', (r) => r.id === first.production.job_id)).toMatchObject({ status: 'running' });
+    expect((item.metadata as Record<string, unknown>).video_job_id).toBe(first.production.job_id);
+  });
+
+  it('reemplazar una producción devuelve lo que la vieja no llegó a hacer', async () => {
+    seedItem();
+    const { POST } = await import('@/app/api/content/reel/render/route');
+    await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }));
+    const item = db.find('kefy_content_items', (r) => r.id === 'item-1')!;
+    (item.slides as Array<Record<string, unknown>>)[0]!.body = 'Una línea nueva';
+    await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }));
+    // El montaje prepagado de la primera vuelve.
+    expect(quotaState.calls.filter((c) => c.fn === 'kefy_credits_refund')).toHaveLength(1);
+  });
+
+  it('otro nivel de animación reemplaza la producción en curso en vez de ignorarlo', async () => {
+    seedItem();
+    const { POST } = await import('@/app/api/content/reel/render/route');
+    const first = await (await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true }))).json();
+    const second = await (await POST(req('POST', '/api/content/reel/render', { itemId: 'item-1', produce: true, motion: 'none' }))).json();
+    expect(second.production.job_id).not.toBe(first.production.job_id);
+    expect(second.production.motion).toBe('none');
+  });
+
   it('una segunda confirmación no duplica una producción en curso', async () => {
     seedItem();
     const { POST } = await import('@/app/api/content/reel/render/route');

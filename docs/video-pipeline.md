@@ -187,6 +187,15 @@ Cuándo se cobra cada cosa:
 3. El motor cobra cada paso al lanzarlo. Si el paso falla del todo, devuelve
    los créditos. Si no hay créditos para un paso, ese paso se omite y el plano
    usa su respaldo: el video no se bloquea.
+4. Devoluciones (`refundChargedSteps`, un `UPDATE charged = true → false`
+   que devuelve cada crédito una sola vez aunque corran varias vueltas):
+   - **El trabajo falla** (el montaje no salió): se devuelve todo, también
+     las imágenes, voces y clips que sí se hicieron. Sin video no se cobra.
+   - **El trabajo se cancela** (`superseded` o `target_deleted`): se devuelve
+     lo pendiente o en curso, incluido el montaje prepagado. Lo ya hecho queda
+     cobrado: la cancelación la causó el usuario.
+   - Las devoluciones van al mes en curso: un trabajo que cruza de mes
+     devuelve al mes nuevo.
 
 ## El motor
 
@@ -225,13 +234,18 @@ Garantías:
 - **Una producción por pieza.** Un índice único parcial
   (`target_table, target_id WHERE status = 'running'`) frena el doble clic: el
   segundo «Producir» devuelve el trabajo del primero.
-- **Guion nuevo, producción nueva.** Si el usuario editó la pieza mientras se
-  producía y vuelve a producir, el trabajo viejo se cancela (`superseded`).
+- **Guion nuevo, producción nueva.** Si el usuario editó la pieza (o eligió
+  otro nivel de animación) mientras se producía y vuelve a producir, el
+  trabajo viejo se cancela (`superseded`). Pero recién después de validar y
+  cobrar el nuevo: un 409 o un 429 no deja la pieza sin producción.
+  La pieza apunta al trabajo nuevo (`video_job_id`, un UUID generado antes)
+  antes de que el trabajo exista: así ninguna vuelta del cron lo ve sin dueño
+  y lo cancela.
   Un trabajo solo escribe en la pieza si `metadata.video_job_id` sigue
   apuntando a él. Antes de montar copia a las escenas solo las URLs de las
   fotos, sin pisar el texto editado.
-- **Pieza borrada.** El trabajo se cancela (`target_deleted`) y deja de
-  gastar.
+- **Pieza borrada.** El trabajo se cancela (`target_deleted`), deja de
+  gastar y devuelve lo que no llegó a hacer.
 - **Reintentos.** Hasta 2 intentos por paso (`MAX_STEP_ATTEMPTS`):
   - Un paso síncrono que lleva más de 4 min en `running` murió con su función:
     se reintenta.

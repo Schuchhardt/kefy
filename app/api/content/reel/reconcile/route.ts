@@ -63,6 +63,10 @@ async function fetchRendering(db: Db, table: RenderTable, orgId: string | null, 
       ? 'id, metadata, video_url, render_status, org_id'
       : 'id, metadata, video_url, render_status')
     .eq('render_status', 'rendering')
+    // Las piezas del pipeline de video las avanza su trabajo (más abajo). Se
+    // filtran aquí y no después del límite: si no, 25 piezas del pipeline en
+    // curso dejaban sin reconciliar los renders directos.
+    .is('metadata->>video_job_id', null)
     .limit(limit);
 
   // Renditions have no org_id column — they are scoped through their item, and

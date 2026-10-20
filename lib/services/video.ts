@@ -15,6 +15,7 @@
 // Las piezas anteriores al pipeline no lo tienen: se arma uno desde sus
 // escenas (`scriptFromSlides`) cuando se pide producirlas.
 
+import { randomUUID } from 'node:crypto';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getUsage } from '@/lib/usage';
 import { reportError } from '@/lib/observability';
@@ -35,7 +36,7 @@ import { resolveFilmTheme, voiceAccent, type VideoBrandKit } from '@/lib/video/b
 import { isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
 import type { VideoToolName } from '@/lib/video/tools/types';
 import {
-  advanceVideoJob, createVideoJob, latestJobFor, snapshotOf, VideoJobConflictError,
+  advanceVideoJob, cancelVideoJob, createVideoJob, latestJobFor, snapshotOf, VideoJobConflictError,
   type JobRow, type RenderContext, type StepRow, type VideoJobSnapshot,
 } from '@/lib/video/engine';
 
@@ -323,18 +324,21 @@ export async function produceVideo(
       'This item has no script or scenes to produce a video from.'));
   }
 
-  // Un trabajo en curso con el mismo guion no se duplica: se devuelve su
-  // estado. Si el guion cambió desde entonces (el usuario editó una escena),
-  // ese trabajo ya no sirve: se cancela y se produce el nuevo.
+  const motion = parseMotion(input.motion);
+
+  // Un trabajo en curso con el mismo guion y la misma animación no se
+  // duplica: se devuelve su estado. Si cambió algo (el usuario editó una
+  // escena o eligió otro nivel de animación), ese trabajo ya no sirve y se
+  // reemplaza — pero recién después de validar y cobrar el nuevo: un 409 o
+  // un 429 no puede dejar la pieza sin ninguna producción.
   const current = await latestJobFor(db, target.table, target.id);
+  let superseded: JobRow | null = null;
   if (current?.status === 'running') {
-    if (scriptFingerprint(current.script) === scriptFingerprint(script)) {
+    if (scriptFingerprint(current.script) === scriptFingerprint(script) && current.motion === motion) {
       const snap = await advanceVideoJob(db, current.id, { budgetMs: 0 });
       if (snap) return snap;
     } else {
-      await db.from('kefy_video_jobs')
-        .update({ status: 'canceled', error: 'superseded', finished_at: new Date().toISOString() })
-        .eq('id', current.id).eq('status', 'running');
+      superseded = current;
     }
   }
   if (target.videoUrl && !input.force) {
@@ -352,7 +356,7 @@ export async function produceVideo(
   }
 
   const kit  = await brandKitFor(ctx, target);
-  const plan = compile(script, parseMotion(input.motion), kit, target);
+  const plan = compile(script, motion, kit, target);
 
   // Antes de cobrar nada: que el plan entero quepa en lo que queda del mes.
   // Un video a medio producir porque se acabaron los créditos al tercer paso
@@ -377,19 +381,36 @@ export async function produceVideo(
     musicTrack: pickMusicTrack(target.id, [script.music_mood, ...(kit?.tone ?? [])].filter(Boolean).join(' ')),
   };
 
-  let jobId: string;
+  // El trabajo viejo se cancela (y devuelve lo que no llegó a hacer) antes de
+  // crear el nuevo: el índice único solo deja uno en curso por pieza.
+  if (superseded) await cancelVideoJob(db, { id: superseded.id, org_id: ctx.auth.orgId }, 'superseded');
+
+  // La pieza apunta al trabajo nuevo antes de que exista: así ninguna vuelta
+  // del motor (cron, polling) lo ve sin dueño y lo cancela como reemplazado.
+  const jobId = randomUUID();
+  const previousJobId = typeof target.metadata.video_job_id === 'string' ? target.metadata.video_job_id : null;
+  await db.from(target.table).update({
+    metadata: { ...target.metadata, video_script: script, video_job_id: jobId },
+  }).eq('id', target.id);
+
   try {
-    jobId = await createVideoJob(db, {
+    await createVideoJob(db, {
+      id: jobId,
       orgId: ctx.auth.orgId, brandId: target.brandId, userId: ctx.auth.userId ?? null,
       target: { table: target.table, id: target.id }, script, plan, renderContext,
     });
   } catch (err) {
     await refund();
     // Dos «Producir» a la vez (doble clic, el asistente y la UI): el índice
-    // único deja pasar uno solo, y el otro devuelve ese mismo trabajo.
-    if (err instanceof VideoJobConflictError) {
-      const running = await latestJobFor(db, target.table, target.id);
-      const snap = running ? await advanceVideoJob(db, running.id, { budgetMs: 0 }) : null;
+    // único deja pasar uno solo, y el otro devuelve ese mismo trabajo. La
+    // pieza apunta al que ganó; si no hubo carrera, a lo que tenía antes.
+    const running = err instanceof VideoJobConflictError ? await latestJobFor(db, target.table, target.id) : null;
+    const owner = running?.status === 'running' ? running.id : previousJobId;
+    await db.from(target.table).update({
+      metadata: { ...target.metadata, video_script: script, video_job_id: owner },
+    }).eq('id', target.id);
+    if (running) {
+      const snap = await advanceVideoJob(db, running.id, { budgetMs: 0 });
       if (snap) return snap;
     }
     reportError(err, { route: ROUTE, auth: ctx.auth, service: 'supabase', extra: { itemId: target.itemId } });

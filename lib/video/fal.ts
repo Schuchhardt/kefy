@@ -89,6 +89,11 @@ export async function falPoll(handle: FalHandle): Promise<FalPoll> {
   const status = await statusRes.json() as { status?: string; error?: string };
 
   if (status.status === 'IN_QUEUE' || status.status === 'IN_PROGRESS') return { status: 'pending' };
+  // COMPLETED con `error`: el modelo falló. Sin esto se pedía el resultado,
+  // fal respondía 5xx y el paso quedaba «pendiente» hasta el timeout de 30 min.
+  if (status.status === 'COMPLETED' && status.error) {
+    return { status: 'failed', error: `fal: ${String(status.error).slice(0, 300)}` };
+  }
   if (status.status !== 'COMPLETED') {
     return { status: 'failed', error: status.error ?? `fal status ${status.status ?? 'desconocido'}` };
   }

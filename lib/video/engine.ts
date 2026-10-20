@@ -148,6 +148,8 @@ export class VideoJobConflictError extends Error {
 }
 
 export interface CreateJobInput {
+  /** Id fijado por quien llama: la pieza ya apunta a él antes de que exista el trabajo. */
+  id?:            string;
   orgId:          string;
   brandId:        string | null;
   userId:         string | null;
@@ -165,6 +167,7 @@ export async function createVideoJob(db: Db, input: CreateJobInput): Promise<str
   const { data: job, error } = await db
     .from('kefy_video_jobs')
     .insert({
+      ...(input.id ? { id: input.id } : {}),
       org_id:           input.orgId,
       brand_id:         input.brandId,
       created_by:       input.userId,
@@ -495,6 +498,9 @@ async function finishJob(db: Db, job: JobRow, steps: StepRow[], now: number): Pr
   const { data: updated } = await db.from('kefy_video_jobs')
     .update({ status: 'failed', error, finished_at: at })
     .eq('id', job.id).eq('status', 'running').select('id');
+  // Sin video no se cobra nada: se devuelven también las imágenes, voces y
+  // clips que sí salieron (el montaje ya devolvió lo suyo al fallar).
+  if (updated?.length) await refundChargedSteps(db, job, ['pending', 'running', 'done']);
   const target = updated?.length ? await loadTarget(db, job) : null;
   if (ownsTarget(job, target)) {
     // Si la pieza ya tenía un video (se pidió reemplazarlo), sigue con ese.
@@ -506,11 +512,47 @@ async function finishJob(db: Db, job: JobRow, steps: StepRow[], now: number): Pr
   job.error = error;
 }
 
+/**
+ * Devuelve los créditos de los pasos cobrados en esos estados. El UPDATE
+ * condicional (`charged = true` → false) es el reclamo: dos vueltas a la vez
+ * reciben filas distintas y cada crédito se devuelve una sola vez.
+ */
+async function refundChargedSteps(db: Db, job: Pick<JobRow, 'id' | 'org_id'>, statuses: StepStatus[]): Promise<number> {
+  const { data } = await db.from('kefy_video_steps')
+    .update({ charged: false })
+    .eq('job_id', job.id)
+    .eq('charged', true)
+    .in('status', statuses)
+    .select('tool');
+  const rows = (data ?? []) as Array<{ tool: VideoToolName }>;
+  for (const row of rows) {
+    await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[row.tool]).catch((err) => {
+      reportError(err, { route: 'lib/video/engine', service: 'supabase', extra: { jobId: job.id, fase: 'refund' } });
+    });
+  }
+  return rows.length;
+}
+
+/**
+ * Cancela un trabajo en curso y devuelve los créditos de lo que no llegó a
+ * terminar (pasos pendientes o en curso, incluido el montaje prepagado). Lo
+ * que ya se produjo queda cobrado: el usuario canceló (editó la pieza o la
+ * borró), no fue un fallo nuestro. Devuelve false si el trabajo ya no corría.
+ */
+export async function cancelVideoJob(
+  db: Db, job: Pick<JobRow, 'id' | 'org_id'>, reason: string, now = Date.now(),
+): Promise<boolean> {
+  const { data } = await db.from('kefy_video_jobs')
+    .update({ status: 'canceled', error: reason, finished_at: new Date(now).toISOString() })
+    .eq('id', job.id).eq('status', 'running').select('id');
+  if (!data?.length) return false;
+  await refundChargedSteps(db, job, ['pending', 'running']);
+  return true;
+}
+
 /** Cancela un trabajo cuya pieza ya no existe o que otro trabajo reemplazó. */
 async function cancelJob(db: Db, job: JobRow, reason: string, now: number): Promise<void> {
-  await db.from('kefy_video_jobs')
-    .update({ status: 'canceled', error: reason, finished_at: new Date(now).toISOString() })
-    .eq('id', job.id).eq('status', 'running');
+  await cancelVideoJob(db, job, reason, now);
   job.status = 'canceled';
   job.error = reason;
 }

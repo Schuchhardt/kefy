@@ -51,4 +51,10 @@ describe('fal queue', () => {
     mockFetch({ status: 404, body: { detail: 'not found' } });
     expect((await falPoll(handle)).status).toBe('failed');
   });
+
+  it('COMPLETED con error es un fallo, sin esperar al timeout', async () => {
+    process.env.FAL_KEY = 'k';
+    mockFetch({ status: 200, body: { status: 'COMPLETED', error: 'model crashed' } });
+    expect(await falPoll(handle)).toEqual({ status: 'failed', error: 'fal: model crashed' });
+  });
 });

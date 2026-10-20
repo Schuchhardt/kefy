@@ -36,7 +36,7 @@ vi.mock('@/lib/video/tools', () => {
   return { getVideoTool: (n: string) => tools[n] ?? null, VIDEO_TOOLS: tools };
 });
 
-import { advanceVideoJob, createVideoJob, MAX_STEP_ATTEMPTS } from '@/lib/video/engine';
+import { advanceVideoJob, cancelVideoJob, createVideoJob, MAX_STEP_ATTEMPTS } from '@/lib/video/engine';
 import { compileVideoPlan } from '@/lib/video/plan';
 import { normalizeVideoScript } from '@/lib/video/script';
 import { OPERATION_CREDIT_COSTS as C } from '@/lib/plans';
@@ -61,6 +61,13 @@ async function newJob() {
   // Lo que hace produceVideo: la pieza apunta a su producción.
   db.find('kefy_content_items', (r) => r.id === 'item-1')!.metadata = { video_job_id: jobId };
   return jobId;
+}
+
+/** Créditos devueltos (suma de los kefy_credits_refund). */
+function refunded(): number {
+  return quotaState.calls
+    .filter((c) => c.fn === 'kefy_credits_refund')
+    .reduce((sum, c) => sum + Number(c.args.p_amount ?? 0), 0);
 }
 
 function step(key: string) {
@@ -233,5 +240,39 @@ describe('advanceVideoJob', () => {
     };
     await advanceVideoJob(db.client, jobId);
     expect(step('voice_s1').status).toBe('done');
+  });
+
+  it('si el montaje falla, devuelve todo lo cobrado: sin video no se cobra nada', async () => {
+    const jobId = await newJob();
+    behavior.compose_video = () => ({ status: 'failed', error: 'lambda down' });
+    for (let i = 0; i < 8; i++) await advanceVideoJob(db.client, jobId);
+    expect((await advanceVideoJob(db.client, jobId))!.status).toBe('failed');
+    // Imágenes, voces, animación y lipsync que sí salieron, más el montaje prepagado.
+    expect(refunded()).toBe(creditsSpent() + C.video);
+    expect(db.rows('kefy_video_steps').every((r) => r.charged === false)).toBe(true);
+    // Otra vuelta sobre el trabajo fallido no devuelve dos veces.
+    const before = refundCount();
+    await advanceVideoJob(db.client, jobId);
+    expect(refundCount()).toBe(before);
+  });
+
+  it('cancelar devuelve lo que no llegó a terminar (y el montaje prepagado), no lo ya hecho', async () => {
+    const jobId = await newJob();
+    await advanceVideoJob(db.client, jobId);   // imágenes y voces listas, animación en curso
+    expect(step('anim_s1')).toMatchObject({ status: 'running', charged: true });
+
+    expect(await cancelVideoJob(db.client, { id: jobId, org_id: 'org-1' }, 'superseded')).toBe(true);
+    expect(refunded()).toBe(C.animation + C.video);
+    expect(step('img_s1').charged).toBe(true);
+    // Cancelar dos veces no devuelve dos veces.
+    expect(await cancelVideoJob(db.client, { id: jobId, org_id: 'org-1' }, 'superseded')).toBe(false);
+    expect(refunded()).toBe(C.animation + C.video);
+  });
+
+  it('una pieza borrada cancela el trabajo y devuelve el montaje prepagado', async () => {
+    const jobId = await newJob();
+    db.rows('kefy_content_items').length = 0;
+    await advanceVideoJob(db.client, jobId);
+    expect(refunded()).toBe(C.video);
   });
 });
