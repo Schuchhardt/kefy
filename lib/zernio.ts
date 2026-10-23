@@ -232,11 +232,13 @@ export async function publishPost(
     platformTarget.platformSpecificData = { contentType: 'reel' };
   }
 
+  // `content` solo es obligatorio en posts de solo texto: una story o un post
+  // que es solo imagen va sin él (un string vacío se arriesga a un rechazo).
   const zernioBody: Record<string, unknown> = {
-    content:   postContent,
     platforms: [platformTarget],
     hashtags:  payload.hashtags ?? [],
   };
+  if (postContent.trim()) zernioBody.content = postContent;
   if (mediaItems.length > 0) zernioBody.mediaItems = mediaItems;
   if (payload.scheduled_at) {
     zernioBody.scheduledFor = payload.scheduled_at;

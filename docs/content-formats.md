@@ -44,6 +44,17 @@ una pieza distinta, con fotos sin ninguna relación con el original.
 > Cubierto por `tests/unit/api/content-renditions.test.ts`, que recorre **todas**
 > las combinaciones de origen y destino, no sólo post→carrusel.
 
+### Piezas sin texto
+
+El `topic` sale de `buildDerivedTopic()`: título, si no la primera frase del
+cuerpo, y si no hay cuerpo el texto de las slides. Si la pieza no tiene ningún
+texto (una story que es solo una foto), `topicImageFor()` devuelve su imagen y
+`describeImageAsTopic()` (`lib/ai.ts`) la describe en una frase que hace de
+tema. Lo usan la conversión de formato y «Generar video» de la story
+(`PATCH /api/content/story`). Solo se rechaza la pieza sin texto **ni**
+imagen. Cubierto por `tests/unit/lib/content-source.test.ts`,
+`tests/unit/api/content-renditions.test.ts` y `tests/unit/api/content-story.test.ts`.
+
 ---
 
 ## 2. El texto se quema al publicar, no al generar

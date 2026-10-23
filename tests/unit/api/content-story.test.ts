@@ -47,6 +47,7 @@ vi.mock('@/lib/ai', () => ({
   generateContentText: vi.fn(),
   generateContentImage: vi.fn(),
   generateVideoScript: vi.fn(),
+  describeImageAsTopic: vi.fn(),
 }));
 
 vi.mock('@/lib/storage', () => ({
@@ -55,7 +56,7 @@ vi.mock('@/lib/storage', () => ({
 
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText, generateContentImage, generateVideoScript } from '@/lib/ai';
+import { generateContentText, generateContentImage, generateVideoScript, describeImageAsTopic } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 import { normalizeVideoScript } from '@/lib/video/script';
 
@@ -301,5 +302,82 @@ describe('PATCH /api/content/story', () => {
     expect(meta.created_via).toBe('ui');
     const script = meta.video_script as { scenes: Array<{ visual: { image_url?: string } }> };
     expect(script.scenes[0]!.visual.image_url).toBe('https://cdn.example.com/story.jpg');
+  });
+
+  // Regresión: «Generar video» en una story que es solo una imagen fallaba con
+  // «Story has no text to base the video on».
+  function storyChains(data: Record<string, unknown>) {
+    const itemChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data, error: null }),
+    };
+    const updateChain = { update: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ error: null }) };
+    mockSupabaseClient.from
+      .mockReturnValueOnce(itemChain)
+      .mockReturnValueOnce(mockBrandKitChain())
+      .mockReturnValueOnce(updateChain);
+    return updateChain;
+  }
+
+  const imageOnlyStory = {
+    id: 'story-2', content_type: 'story', channel: 'instagram', body: null, title: null,
+    image_url: 'https://cdn.example.com/solo-imagen.jpg', metadata: {}, brand_id: 'brand-1',
+  };
+
+  it('story solo imagen: saca el tema de la imagen y genera el guion', async () => {
+    const { PATCH } = await import('@/app/api/content/story/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    const updateChain = storyChains(imageOnlyStory);
+    vi.mocked(describeImageAsTopic).mockResolvedValueOnce('Zapatillas rojas en oferta de lanzamiento');
+    vi.mocked(generateVideoScript).mockResolvedValueOnce({
+      script: normalizeVideoScript({
+        scenes: [{ duration_seconds: 3, speaker: 'narrator', line: 'Hola', on_screen_text: 'Oferta', visual: { kind: 'still', image_prompt: 'p' } }],
+      }, 'es'),
+      model: 'm', tokensUsed: 1,
+    });
+
+    const res = await PATCH(makeReq('PATCH', { itemId: 'story-2' }));
+    expect(res.status).toBe(200);
+    expect(describeImageAsTopic).toHaveBeenCalledWith('https://cdn.example.com/solo-imagen.jpg', 'es');
+    expect(vi.mocked(generateVideoScript).mock.calls[0]![0].topic).toBe('Zapatillas rojas en oferta de lanzamiento');
+    const saved = updateChain.update.mock.calls[0][0] as { slides: Array<{ image_url: string | null }> };
+    expect(saved.slides[0].image_url).toBe('https://cdn.example.com/solo-imagen.jpg');
+  });
+
+  it('story con texto: no gasta en leer la imagen', async () => {
+    const { PATCH } = await import('@/app/api/content/story/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    storyChains({ ...imageOnlyStory, body: 'Lanzamos zapatillas nuevas' });
+    vi.mocked(generateVideoScript).mockResolvedValueOnce({
+      script: normalizeVideoScript({ scenes: [{ duration_seconds: 3, speaker: 'narrator', line: 'x', visual: { kind: 'still', image_prompt: 'p' } }] }, 'es'),
+      model: 'm', tokensUsed: 1,
+    });
+
+    const res = await PATCH(makeReq('PATCH', { itemId: 'story-2' }));
+    expect(res.status).toBe(200);
+    expect(describeImageAsTopic).not.toHaveBeenCalled();
+  });
+
+  it('story sin texto ni imagen: 422 sin cobrar ni llamar a la IA', async () => {
+    const { PATCH } = await import('@/app/api/content/story/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    storyChains({ ...imageOnlyStory, image_url: null });
+
+    const res = await PATCH(makeReq('PATCH', { itemId: 'story-2' }));
+    expect(res.status).toBe(422);
+    expect(describeImageAsTopic).not.toHaveBeenCalled();
+    expect(generateVideoScript).not.toHaveBeenCalled();
+  });
+
+  it('si no se puede leer la imagen: 502 y no genera el guion', async () => {
+    const { PATCH } = await import('@/app/api/content/story/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    storyChains(imageOnlyStory);
+    vi.mocked(describeImageAsTopic).mockRejectedValueOnce(new Error('vision down'));
+
+    const res = await PATCH(makeReq('PATCH', { itemId: 'story-2' }));
+    expect(res.status).toBe(502);
+    expect(generateVideoScript).not.toHaveBeenCalled();
   });
 });

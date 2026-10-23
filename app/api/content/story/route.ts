@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText, generateContentImage, generateVideoScript } from '@/lib/ai';
+import { generateContentText, generateContentImage, generateVideoScript, describeImageAsTopic } from '@/lib/ai';
+import { buildDerivedTopic, topicImageFor } from '@/lib/content-source';
 import { guardAiRequest } from '@/lib/ai-guard';
 import { consumeCredits, refundCredits } from '@/lib/usage';
 import { reportError } from '@/lib/observability';
@@ -216,13 +217,30 @@ export async function PATCH(req: NextRequest) {
     ? await getBrandKitForBrand(db, item.brand_id)
     : { data: null };
 
-  const topic = (item.title || item.body || '').slice(0, 500);
-  if (!topic) return NextResponse.json({ error: 'Story has no text to base the video on' }, { status: 422 });
+  const sourceRow = { ...item, content_type: 'story' as const };
+  let topic = buildDerivedTopic(sourceRow);
+  const imageForTopic = topicImageFor(sourceRow);
+  if (!topic && !imageForTopic) {
+    return NextResponse.json({ error: 'Story has no text or image to base the video on' }, { status: 422 });
+  }
 
   const videoGuard = await guardAiRequest(req, {
     auth, operation: 'text', route: 'PATCH /api/content/story',
   });
   if (videoGuard.blocked) return videoGuard.blocked;
+
+  // Una story que es solo una imagen: el tema sale de lo que muestra la imagen.
+  if (!topic && imageForTopic) {
+    try {
+      topic = await describeImageAsTopic(imageForTopic, language);
+    } catch (err) {
+      reportError(err, { route: 'PATCH /api/content/story', auth, service: 'ai', extra: { itemId, fase: 'tema-imagen' } });
+    }
+    if (!topic) {
+      await videoGuard.refund();
+      return NextResponse.json({ error: 'Could not read the story image to base the video on' }, { status: 502 });
+    }
+  }
 
   let script;
   try {

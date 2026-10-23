@@ -645,6 +645,41 @@ export async function generateVideoScript(
   };
 }
 
+// ─── Tema a partir de una imagen ─────────────────────────────────────────────
+
+/**
+ * Describe en una frase de qué trata una imagen, para usarla como `topic`
+ * cuando la pieza no tiene texto (una story que es solo una foto). Lo llaman
+ * rutas que ya pasaron por guardAiRequest.
+ */
+export async function describeImageAsTopic(
+  imageUrl: string,
+  language: 'es' | 'en' = 'es',
+): Promise<string> {
+  const lang = language === 'en' ? 'English' : 'Spanish';
+  const response = await getAnthropic().messages.create({
+    model:      MODELS.content,
+    max_tokens: 200,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'url', url: imageUrl } },
+        {
+          type: 'text',
+          text: `This image is a social media piece with no caption. In ${lang}, write ONE sentence (max 40 words) describing what it shows and what it is promoting or communicating, including any visible text, product or offer. Return only the sentence.`,
+        },
+      ],
+    }],
+  });
+
+  return response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('')
+    .trim()
+    .slice(0, 500);
+}
+
 // ─── Content recommendations (AI fallback when no strategy) ──────────────────
 
 /**

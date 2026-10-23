@@ -84,6 +84,38 @@ describe('resolvePublishMedia — story', () => {
   });
 });
 
+describe('resolvePublishMedia — story solo imagen', () => {
+  // Regresión: una story subida a mano con solo una imagen fallaba al publicar
+  // con «Content has no body text». El caption de una story es opcional.
+  it('sin body: publica la imagen sin caption', () => {
+    for (const body of [null, '', '   ']) {
+      const res = resolvePublishMedia('story', { ...base, body });
+
+      expect(res.ok, `body=${JSON.stringify(body)}`).toBe(true);
+      if (!res.ok) return;
+      expect(res.media.image_url).toBe('https://cdn.example.com/cover.jpg');
+      expect(res.media.text).toBe('');
+      expect(res.media.is_video).toBe(false);
+    }
+  });
+
+  it('en video sin body: el caption son solo los hashtags', () => {
+    const res = resolvePublishMedia('story', { ...base, body: null, video_url: 'https://s3.example.com/story.mp4' });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.media.text).toBe('#marketing #ia');
+  });
+
+  it('sin imagen ni video: falla aunque tenga texto', () => {
+    const res = resolvePublishMedia('story', { ...base, image_url: null });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/story/i);
+  });
+});
+
 describe('resolvePublishMedia — carousel', () => {
   it('envía las slides sin duplicar la portada', () => {
     const res = resolvePublishMedia('carousel', {
@@ -131,9 +163,20 @@ describe('resolvePublishMedia — post', () => {
     expect(res.media.video_url).toBeUndefined();
   });
 
-  it('sin body: falla', () => {
+  it('solo imagen, sin body: publica la imagen sin caption', () => {
     const res = resolvePublishMedia('post', { ...base, body: null });
-    expect(res.ok).toBe(false);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.media.image_url).toBe('https://cdn.example.com/cover.jpg');
+    expect(res.media.text).toBe('');
+  });
+
+  it('sin body ni imagen: falla', () => {
+    for (const body of [null, '', '   ']) {
+      const res = resolvePublishMedia('post', { ...base, body, image_url: null });
+      expect(res.ok, `body=${JSON.stringify(body)}`).toBe(false);
+    }
   });
 });
 

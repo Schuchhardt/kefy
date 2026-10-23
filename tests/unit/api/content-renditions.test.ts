@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import {
+  fakeRpc, quotaState, resetQuotaState, resetSubscriptionState, subscriptionState,
+  consumedCount, creditsSpent, refundCount,
+} from '../helpers/quota';
 
 // Regresión (producción, item 0d0a38dd-…): desde un post se pulsaba «Generar
 // versión de carrusel» y salía un carrusel que no tenía relación con el post —
@@ -10,7 +14,29 @@ import { NextRequest } from 'next/server';
 // Estas pruebas cubren TODAS las direcciones de conversión (post↔carrusel,
 // carrusel↔reel, reel↔story…), no sólo la que se reportó.
 
-const mockSupabaseClient = { from: vi.fn() };
+// Créditos: por defecto, `fakeRpc`. Un test puede limitar cuántos consumos
+// pasan (`creditsLeft`) para simular que se agotan a mitad de la conversión.
+let creditsLeft = Infinity;
+const mockSupabaseClient = {
+  from: vi.fn(),
+  rpc: vi.fn((fn: string, args?: Record<string, unknown>) => {
+    if (fn === 'kefy_credits_consume') {
+      if (creditsLeft <= 0) {
+        quotaState.calls.push({ fn, args: args ?? {} });
+        return Promise.resolve({ data: -1, error: null });
+      }
+      creditsLeft--;
+    }
+    return fakeRpc(fn, args);
+  }),
+};
+
+vi.mock('@/lib/subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/subscription')>();
+  const { fakeEntitlement } = await import('../helpers/quota');
+  return { ...actual, getEntitlement: async () => fakeEntitlement() };
+});
+vi.mock('@/lib/observability', () => ({ reportError: vi.fn() }));
 
 vi.mock('@/lib/supabase', () => ({ createSupabaseServer: () => mockSupabaseClient }));
 
@@ -24,6 +50,7 @@ vi.mock('@/lib/ai', () => ({
   generateContentImage:   vi.fn(),
   generateCarouselSlides: vi.fn(),
   generateReelScript:     vi.fn(),
+  describeImageAsTopic:   vi.fn(),
 }));
 
 vi.mock('@/lib/storage', () => ({ uploadBase64Image: vi.fn() }));
@@ -34,6 +61,7 @@ import {
   generateContentImage,
   generateContentText,
   generateReelScript,
+  describeImageAsTopic,
 } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 import { POST } from '@/app/api/content/[itemId]/renditions/route';
@@ -128,6 +156,9 @@ function call(itemId: string, format: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetQuotaState();
+  resetSubscriptionState();
+  creditsLeft = Infinity;
   vi.mocked(getAuthFromRequest).mockResolvedValue(auth as never);
   vi.mocked(uploadBase64Image).mockResolvedValue('https://cdn.example.com/generated.jpeg');
   vi.mocked(generateContentImage).mockResolvedValue({ b64: 'AAAA', revisedPrompt: 'x' });
@@ -266,10 +297,60 @@ describe('POST /api/content/[itemId]/renditions — casos límite', () => {
     expect(generateCarouselSlides).not.toHaveBeenCalled();
   });
 
-  it('un ítem sin texto no puede derivar otro formato', async () => {
-    mockDb({ ...POST_ITEM, title: null, body: null });
+  it('un ítem sin texto ni imagen no puede derivar otro formato', async () => {
+    mockDb({ ...POST_ITEM, title: null, body: null, image_url: null });
     const res = await call('item-1', 'carousel');
     expect(res.status).toBe(422);
+    expect(describeImageAsTopic).not.toHaveBeenCalled();
+  });
+});
+
+// Regresión: una story subida a mano con solo una imagen no se podía convertir
+// a otro formato («Item has no text to base a new format on»).
+describe('POST /api/content/[itemId]/renditions — pieza solo imagen', () => {
+  const IMAGE_ONLY_STORY = {
+    ...POST_ITEM,
+    content_type: 'story',
+    title: null,
+    body: null,
+    hashtags: [],
+    image_url: 'https://cdn.example.com/story-only.jpeg',
+  };
+
+  it('saca el tema de la imagen y convierte a todos los formatos', async () => {
+    for (const format of ['post', 'carousel', 'reel']) {
+      vi.mocked(describeImageAsTopic).mockClear();
+      vi.mocked(describeImageAsTopic).mockResolvedValue('Una taza de café con la oferta 2x1 de la cafetería');
+      mockDb(IMAGE_ONLY_STORY);
+
+      const res = await call('item-1', format);
+      expect(res.status, `story → ${format}`).toBe(201);
+      expect(describeImageAsTopic).toHaveBeenCalledWith('https://cdn.example.com/story-only.jpeg');
+    }
+    const [opts] = vi.mocked(generateContentText).mock.calls[0];
+    expect(opts.topic).toBe('Una taza de café con la oferta 2x1 de la cafetería');
+  });
+
+  it('con texto no mira la imagen', async () => {
+    mockDb(POST_ITEM);
+    await call('item-1', 'story');
+    expect(describeImageAsTopic).not.toHaveBeenCalled();
+  });
+
+  it('un carrusel sin cuerpo usa el texto de sus slides, sin mirar la imagen', async () => {
+    mockDb({ ...CAROUSEL_ITEM, title: null, body: null });
+    const res = await call('item-1', 'post');
+    expect(res.status).toBe(201);
+    expect(describeImageAsTopic).not.toHaveBeenCalled();
+    expect(vi.mocked(generateContentText).mock.calls[0][0].topic).toContain('Publicar más no es mejor');
+  });
+
+  it('si no se puede leer la imagen, 502 sin generar nada', async () => {
+    vi.mocked(describeImageAsTopic).mockRejectedValue(new Error('vision down'));
+    mockDb(IMAGE_ONLY_STORY);
+    const res = await call('item-1', 'post');
+    expect(res.status).toBe(502);
+    expect(generateContentText).not.toHaveBeenCalled();
   });
 
   it('un formato desconocido se rechaza', async () => {
@@ -278,3 +359,129 @@ describe('POST /api/content/[itemId]/renditions — casos límite', () => {
     expect(res.status).toBe(422);
   });
 });
+
+// La conversión llama a Claude y genera imágenes: tiene que pasar por la
+// guardia de gasto como cualquier otra generación (AGENTS.md).
+describe('POST /api/content/[itemId]/renditions — créditos y suscripción', () => {
+  it('con el mes gratis vencido: 402 y no llama a la IA', async () => {
+    subscriptionState.status = 'canceled';
+    subscriptionState.daysLeft = -1;
+    mockDb(POST_ITEM);
+
+    const res = await call('item-1', 'story');
+    expect(res.status).toBe(402);
+    expect(generateContentText).not.toHaveBeenCalled();
+    expect(generateContentImage).not.toHaveBeenCalled();
+  });
+
+  it('sin créditos: 429 y no llama a la IA', async () => {
+    quotaState.quotaAllowed = false;
+    mockDb(POST_ITEM);
+
+    const res = await call('item-1', 'story');
+    expect(res.status).toBe(429);
+    expect((await res.json()).creditsExhausted).toBe(true);
+    expect(generateContentText).not.toHaveBeenCalled();
+  });
+
+  it('carrusel → story cobra 1 texto + 1 imagen', async () => {
+    mockDb(CAROUSEL_ITEM);
+    const res = await call('item-1', 'story');
+    expect(res.status).toBe(201);
+    expect(consumedCount(1)).toBe(1);
+    expect(consumedCount(3)).toBe(1);
+    expect(creditsSpent()).toBe(4);
+    expect(refundCount()).toBe(0);
+  });
+
+  it('post → carrusel cobra 1 texto + 1 imagen por slide', async () => {
+    vi.mocked(generateCarouselSlides).mockResolvedValue({
+      slides: [
+        { slide_order: 1, title: 'T1', body: 'B1', image_prompt: 'p1' },
+        { slide_order: 2, title: 'T2', body: 'B2', image_prompt: 'p2' },
+        { slide_order: 3, title: 'T3', body: 'B3', image_prompt: 'p3' },
+      ],
+      description: 'd', hashtags: [], model: 'm', tokensUsed: 1,
+    });
+    mockDb(POST_ITEM);
+
+    const res = await call('item-1', 'carousel');
+    expect(res.status).toBe(201);
+    expect(creditsSpent()).toBe(1 + 3 * 3);
+  });
+
+  it('a post/story sin créditos para la imagen: 429, se devuelve el texto y no se genera nada', async () => {
+    creditsLeft = 1; // alcanza para el texto, no para la imagen
+    mockDb(POST_ITEM);
+
+    const res = await call('item-1', 'story');
+    expect(res.status).toBe(429);
+    expect(refundCount()).toBe(1);
+    expect(generateContentText).not.toHaveBeenCalled();
+    expect(generateContentImage).not.toHaveBeenCalled();
+  });
+
+  it('carrusel: si los créditos se agotan a mitad, las slides restantes salen sin imagen', async () => {
+    vi.mocked(generateCarouselSlides).mockResolvedValue({
+      slides: [
+        { slide_order: 1, title: 'T1', body: 'B1', image_prompt: 'p1' },
+        { slide_order: 2, title: 'T2', body: 'B2', image_prompt: 'p2' },
+      ],
+      description: 'd', hashtags: [], model: 'm', tokensUsed: 1,
+    });
+    creditsLeft = 2; // texto + una imagen
+    const upserted = mockDb(POST_ITEM);
+
+    const res = await call('item-1', 'carousel');
+    expect(res.status).toBe(201);
+    expect(generateContentImage).toHaveBeenCalledTimes(1);
+    const slides = upserted[0].slides as Array<{ image_url: string | null }>;
+    expect(slides.filter((sl) => sl.image_url)).toHaveLength(1);
+  });
+
+  it('si la generación falla: 502 y se devuelven el texto y la imagen', async () => {
+    vi.mocked(generateContentText).mockRejectedValue(new Error('claude down'));
+    mockDb(POST_ITEM);
+
+    const res = await call('item-1', 'story');
+    expect(res.status).toBe(502);
+    expect(refundCount()).toBe(2);
+  });
+
+  it('una imagen de slide que falla se devuelve, el resto se cobra', async () => {
+    vi.mocked(generateCarouselSlides).mockResolvedValue({
+      slides: [
+        { slide_order: 1, title: 'T1', body: 'B1', image_prompt: 'p1' },
+        { slide_order: 2, title: 'T2', body: 'B2', image_prompt: 'p2' },
+      ],
+      description: 'd', hashtags: [], model: 'm', tokensUsed: 1,
+    });
+    vi.mocked(generateContentImage)
+      .mockResolvedValueOnce({ b64: 'AAAA', revisedPrompt: 'x' })
+      .mockRejectedValueOnce(new Error('image down'));
+    mockDb(POST_ITEM);
+
+    const res = await call('item-1', 'carousel');
+    expect(res.status).toBe(201);
+    expect(refundCount()).toBe(1);
+  });
+
+  it('el formato propio y una rendición ya lista no cobran nada', async () => {
+    mockDb(POST_ITEM);
+    await call('item-1', 'post');
+    mockDb(POST_ITEM, { id: 'r1', format: 'carousel', status: 'ready' });
+    await call('item-1', 'carousel');
+    expect(creditsSpent()).toBe(0);
+  });
+
+  it('una pieza solo imagen que no se puede leer: 502 y se devuelve el texto', async () => {
+    vi.mocked(describeImageAsTopic).mockRejectedValue(new Error('vision down'));
+    mockDb({ ...POST_ITEM, content_type: 'story', title: null, body: null });
+
+    const res = await call('item-1', 'post');
+    expect(res.status).toBe(502);
+    expect(refundCount()).toBe(1);
+    expect(generateContentText).not.toHaveBeenCalled();
+  });
+});
+

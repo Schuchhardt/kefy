@@ -182,7 +182,7 @@ export default function ScheduleModal({
       const res = await fetch(`/api/content/${selectedItem.id}/renditions`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format }),
+        body: JSON.stringify({ format, language: lang }),
       });
       const d = await res.json() as { rendition?: ContentRendition; error?: string };
       if (!res.ok || !d.rendition) throw new Error(d.error ?? t.errors.rendition);

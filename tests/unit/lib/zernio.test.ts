@@ -147,6 +147,38 @@ describe('publishPost', () => {
     expect(body.platforms[0].platformSpecificData).toEqual({ contentType: 'story' });
   });
 
+  // Regresión: una story que es solo una imagen no tiene caption. `content`
+  // solo es obligatorio en posts de solo texto, así que no se manda vacío.
+  it('story solo imagen (sin texto): no manda content, sí la imagen', async () => {
+    for (const text of ['', '   ']) {
+      mockFetch.mockClear();
+      mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+      await publishPost({
+        account_id:   'acc-1',
+        platform:     'instagram',
+        text,
+        image_url:    'https://cdn.example.com/story.jpg',
+        content_type: 'story',
+      });
+
+      const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string);
+      expect('content' in body, `text=${JSON.stringify(text)}`).toBe(false);
+      expect(body.mediaItems).toEqual([{ type: 'image', url: 'https://cdn.example.com/story.jpg' }]);
+      expect(body.platforms[0].platformSpecificData).toEqual({ contentType: 'story' });
+    }
+  });
+
+  it('TikTok foto sin texto: no rompe el recorte del título', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
+
+    await publishPost({ account_id: 'acc-1', platform: 'tiktok', text: '', image_url: 'https://cdn.example.com/a.jpg' });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect('content' in JSON.parse(init.body as string)).toBe(false);
+  });
+
   it('content_type story en una plataforma sin Stories (twitter): publica como post normal', async () => {
     mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
 
