@@ -19,9 +19,10 @@ import type { Scope } from '@/lib/assistant/types';
 // El hash nunca sale de aquí y el secreto en claro solo aparece una vez, en la
 // respuesta del POST. Ver docs/assistant.md.
 
-// Nunca key_hash.
+// Nunca key_hash ni refresh_hash. Las conexiones OAuth (kind = 'oauth',
+// lib/assistant/oauth.ts) salen en la misma lista para poder revocarlas.
 const LIST_COLUMNS =
-  'id, name, key_prefix, scopes, brand_id, created_by, last_used_at, expires_at, revoked_at, created_at, kefy_users(name, email)';
+  'id, name, kind, key_prefix, scopes, brand_id, created_by, last_used_at, expires_at, revoked_at, created_at, kefy_users(name, email)';
 
 type KeyStatus = 'active' | 'revoked' | 'expired';
 
@@ -58,6 +59,7 @@ export async function GET(req: NextRequest) {
     return {
       id: k.id,
       name: k.name,
+      kind: k.kind === 'oauth' ? 'oauth' : 'key',
       key_prefix: k.key_prefix,
       scopes: k.scopes,
       brand_id: k.brand_id,
@@ -126,6 +128,8 @@ export async function POST(req: NextRequest) {
     .from('kefy_api_keys')
     .select('id', { count: 'exact', head: true })
     .eq('org_id', auth.orgId)
+    // Las conexiones OAuth no cuentan: se crean al autorizar, no aquí.
+    .neq('kind', 'oauth')
     .is('revoked_at', null)
     .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
 

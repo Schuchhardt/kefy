@@ -288,7 +288,8 @@ curl -s -X POST "$KEFY/api/v1/tools/list_content" \
 ## 7. Servidor MCP
 
 URL: `https://<host>/api/mcp`, con la misma cabecera `Authorization: Bearer
-kefy_sk_…`. Transporte *Streamable HTTP* sin estado:
+kefy_sk_…` o con un access token OAuth (`kefy_at_…`, ver *OAuth* más abajo).
+Transporte *Streamable HTTP* sin estado:
 
 - Un mensaje JSON-RPC 2.0 por `POST`; la respuesta es siempre
   `application/json` (sin SSE ni `Mcp-Session-Id`). Los lotes (arrays) se
@@ -301,7 +302,10 @@ kefy_sk_…`. Transporte *Streamable HTTP* sin estado:
   versiones (400 si no). Un `Origin` distinto del de la app → 403 (protección
   contra DNS rebinding). `GET` y `DELETE` → 405.
 - Autenticación fallida → 401 con `WWW-Authenticate: Bearer realm="kefy",
-  error="invalid_token"`. Rate limit → 429 con `Retry-After`.
+  error="invalid_token", resource_metadata="<host>/.well-known/oauth-protected-resource/api/mcp"`
+  (sin `error` si no vino cabecera). `resource_metadata` es lo que hace que un
+  conector de claude.ai arranque el OAuth en vez de quedarse en «requiere
+  autenticación». Rate limit → 429 con `Retry-After`.
 - `tools/list` devuelve solo las herramientas que permite la key, con
   `inputSchema` y `annotations` (`readOnlyHint`, `destructiveHint` para las de
   publicar, `openWorldHint`).
@@ -312,6 +316,47 @@ kefy_sk_…`. Transporte *Streamable HTTP* sin estado:
   `brand_required`). Herramienta desconocida → error JSON-RPC `-32602`.
 - Idempotencia: `params._meta.idempotencyKey` (string ≤ 200) funciona como la
   cabecera `Idempotency-Key` de la API REST.
+
+### OAuth (conectores de claude.ai y clientes que sigan la especificación)
+
+Los conectores personalizados de claude.ai no dejan pegar una cabecera: solo
+conectan por OAuth. Kefy implementa lo que pide la especificación de
+autorización de MCP (`lib/assistant/oauth.ts`):
+
+| Paso | Endpoint |
+|---|---|
+| Metadatos del recurso (RFC 9728) | `GET /.well-known/oauth-protected-resource` y `…/oauth-protected-resource/api/mcp` |
+| Metadatos del servidor (RFC 8414) | `GET /.well-known/oauth-authorization-server` |
+| Registro dinámico (RFC 7591) | `POST /api/oauth/register`: solo clientes públicos (`token_endpoint_auth_method: "none"`), redirect_uris https, http en loopback o esquema de app. 20/hora por IP |
+| Consentimiento | `/oauth/authorize` → `/{lang}/oauth/authorize` (sesión de Kefy; sin ella, login con `?next=`). La página habla con `GET/POST /api/oauth/consent` |
+| Token | `POST /api/oauth/token`: `authorization_code` (PKCE S256 obligatorio) y `refresh_token`. 60 cada 5 min por IP |
+
+- **Una conexión = una fila de `kefy_api_keys` con `kind = 'oauth'`.** El access
+  token pasa por el mismo `authenticateApiKey` que una key: rol ACTUAL de quien
+  autorizó, marca atada, scopes, rate limit, auditoría e idempotencia. Sale en
+  Ajustes → API y MCP con la etiqueta «Conexión OAuth» y se revoca igual; no
+  cuenta para el tope de 10 keys.
+- **Tokens.** Access `kefy_at_…` (1 hora, `access_expires_at`); refresh
+  `kefy_rt_…` que rota en cada uso: el anterior deja de valer en el acto. La
+  conexión caduca a los 90 días sin usar (`expires_at`, se renueva en cada
+  refresh). Código `kefy_ac_…`: un solo uso, 10 minutos. Solo se guardan hashes.
+- **Quién autoriza.** Igual que para crear una key: dueño o administrador, con
+  suscripción activa. Un miembro ve la pantalla pero no puede aprobar.
+- **Permisos.** La persona elige scopes y marca en el consentimiento. Lectura y
+  escritura vienen marcados; publicación nunca, aunque el cliente lo pida (por
+  MCP no hay confirmación humana).
+- **URLs.** Se construyen con el origen de la petición, no con `appUrl()`: el
+  cliente comprueba que `resource` sea la URL a la que se conectó (con o sin
+  `www`, previews). `resource` (RFC 8707) solo puede ser este servidor MCP.
+- **Errores de `/oauth/authorize`.** Cliente o redirect_uri desconocidos se
+  muestran en la página y no redirigen; el resto (sin PKCE, `response_type`,
+  `resource` ajeno, «Cancelar») vuelven al cliente con `error=`, `state` e `iss`.
+
+### claude.ai
+
+Ajustes → Conectores → *Añadir conector personalizado* → URL
+`https://<host>/api/mcp`, sin key. claude.ai abre la pantalla de autorización
+de Kefy.
 
 ### Claude Code
 
@@ -405,9 +450,7 @@ el turno (las escrituras siguientes piden confirmación).
 Los links del asistente abren la página en la opción concreta:
 `/brand/strategy?objective=<id>&industry=<id>` (catálogo) o `?custom=<id>`.
 
-**Pendiente (v2):** OAuth (RFC 9728, metadatos del recurso protegido) para
-conectar Kefy como conector de claude.ai sin copiar una key, lotes JSON-RPC y
-notificaciones del servidor.
+**Pendiente (v2):** lotes JSON-RPC y notificaciones del servidor.
 
 ## 8. Archivos
 
@@ -415,7 +458,10 @@ notificaciones del servidor.
 |---|---|
 | `lib/assistant/registry.ts` | `defineTool`, `listTools`, `toolJsonSchema`, `executeTool` |
 | `lib/assistant/tools/*.ts` | Las herramientas, por área; `index.ts` las registra |
-| `lib/assistant/api-keys.ts` | `generateApiKey`, `authenticateApiKey`, `apiToolContext` |
+| `lib/assistant/api-keys.ts` | `generateApiKey`, `authenticateApiKey` (keys y access tokens OAuth), `apiToolContext` |
+| `lib/assistant/oauth.ts` | OAuth 2.1 del MCP: metadatos, registro dinámico, validación de `/oauth/authorize`, códigos, canje y refresh |
+| `app/.well-known/**`, `app/api/oauth/**`, `app/[lang]/oauth/authorize`, `components/auth/OAuthConsentView.tsx` | Endpoints OAuth y pantalla de consentimiento |
+| `db/migrations/20261021000001_create_oauth.sql` | `kefy_oauth_clients`, `kefy_oauth_codes` y `kind = 'oauth'` en `kefy_api_keys` |
 | `lib/assistant/http.ts` | `withApiKey`, `toolErrorResponse`: formato común de `/api/v1` |
 | `lib/assistant/mcp.ts` | Despachador JSON-RPC puro (`handleMcpMessage`) |
 | `lib/assistant/audit.ts` | Filas de `kefy_assistant_actions`: confirmaciones, idempotencia, auditoría |
@@ -425,7 +471,7 @@ notificaciones del servidor.
 | `db/migrations/20260922000001_create_assistant_and_api_keys.sql` | Tablas y RPCs |
 | `lib/services/custom-strategy.ts`, `app/api/strategies/custom/**` | Estrategias propias de la org |
 | `lib/services/autopilot.ts`, `app/api/autopilot/**` | Reglas y ejecución del autopilot |
-| `lib/safe-redirect.ts` | `?next=` del login y del registro: solo rutas propias del idioma (dashboard, onboarding, invitación) |
+| `lib/safe-redirect.ts` | `?next=` del login y del registro: solo rutas propias del idioma (dashboard, onboarding, invitación, consentimiento OAuth) |
 | `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, el onboarding y `import_brand_from_website` |
 | `lib/services/onboarding.ts`, `app/api/onboarding/starter` | «Pega tu web → 3 posts» (`createStarterPosts`): lee la web si la hay, completa lo vacío del Brand Kit y escribe 3 borradores. La usan la página `/{lang}/onboarding` y `create_starter_posts` |
 | `db/migrations/20260925000001_create_custom_strategies.sql` | `kefy_custom_strategies` y `kefy_org_strategies.custom_strategy_id` |

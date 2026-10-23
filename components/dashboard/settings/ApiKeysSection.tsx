@@ -8,7 +8,10 @@
 //
 // El secreto en claro llega una única vez, en la respuesta del POST: se
 // muestra en el modal de creación y se olvida al cerrarlo. Después solo queda
-// el prefijo. Ver docs/assistant.md.
+// el prefijo. Las conexiones OAuth (un conector de claude.ai autorizado en
+// /oauth/authorize) salen en la misma lista para poder revocarlas; no tienen
+// prefijo fijo (el token rota cada hora) ni cuentan para el tope de keys.
+// Ver docs/assistant.md.
 //
 // No se importa nada de lib/assistant/api-keys.ts: usa node:crypto y no puede
 // entrar en el bundle del navegador. Los scopes se repiten aquí.
@@ -42,6 +45,7 @@ type KeyStatus = 'active' | 'revoked' | 'expired';
 interface ApiKeyRow {
   id: string;
   name: string;
+  kind: 'key' | 'oauth';
   key_prefix: string;
   scopes: Scope[];
   brand_id: string | null;
@@ -168,7 +172,9 @@ function KeyRow({
       <div className={styles.keyMain}>
         <div className={styles.keyTitle}>
           <span className={styles.keyName}>{k.name}</span>
-          <code className={`${styles.mono} ${styles.prefix}`}>{k.key_prefix}…</code>
+          {k.kind === 'oauth'
+            ? <span className="ui-badge">{t.oauthBadge}</span>
+            : <code className={`${styles.mono} ${styles.prefix}`}>{k.key_prefix}…</code>}
           {!active && (
             <span className="ui-badge">
               {k.status === 'revoked' ? t.statusRevoked : t.statusExpired}
@@ -437,8 +443,12 @@ function RevokeKeyModal({
     >
       {target && (
         <div className={styles.stack}>
-          <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>{t.revokeBody(target.name)}</p>
-          <code className={`${styles.mono} ${styles.prefix}`}>{target.key_prefix}…</code>
+          <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>
+            {target.kind === 'oauth' ? t.revokeOauthBody(target.name) : t.revokeBody(target.name)}
+          </p>
+          {target.kind !== 'oauth' && (
+            <code className={`${styles.mono} ${styles.prefix}`}>{target.key_prefix}…</code>
+          )}
           {error && <Notice tone="danger">{error}</Notice>}
         </div>
       )}
@@ -448,16 +458,18 @@ function RevokeKeyModal({
 
 // ─── Conexión MCP ─────────────────────────────────────────────────────────────
 
-type SnippetKey = 'claudeCode' | 'cursor' | 'claudeDesktop' | 'curl';
+type SnippetKey = 'claudeAi' | 'claudeCode' | 'cursor' | 'claudeDesktop' | 'curl';
 
 const SNIPPET_TABS: { key: SnippetKey; label: string }[] = [
+  { key: 'claudeAi', label: 'claude.ai' },
   { key: 'claudeCode', label: 'Claude Code' },
   { key: 'cursor', label: 'Cursor' },
   { key: 'claudeDesktop', label: 'Claude Desktop' },
   { key: 'curl', label: 'curl' },
 ];
 
-function buildSnippets(origin: string): Record<SnippetKey, string> {
+/** claude.ai no lleva fragmento: basta la URL de arriba y autorizar por OAuth. */
+function buildSnippets(origin: string): Record<Exclude<SnippetKey, 'claudeAi'>, string> {
   const mcpUrl = `${origin}/api/mcp`;
   return {
     claudeCode:
@@ -486,7 +498,7 @@ function ConnectPanel({ t }: { t: Copy }) {
   // window solo existe en el cliente: el origen se resuelve tras montar para
   // no desalinear el HTML del servidor.
   const [origin, setOrigin] = useState('');
-  const [tab, setTab] = useState<SnippetKey>('claudeCode');
+  const [tab, setTab] = useState<SnippetKey>('claudeAi');
   const baseId = useId();
   const tabRefs = useRef<Partial<Record<SnippetKey, HTMLButtonElement | null>>>({});
 
@@ -545,7 +557,7 @@ function ConnectPanel({ t }: { t: Copy }) {
       </div>
       <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)}>
         <p className={styles.snippetHint}>{t.snippetHints[tab]}</p>
-        <CodeBlock code={snippets[tab]} t={t} />
+        {tab !== 'claudeAi' && <CodeBlock code={snippets[tab]} t={t} />}
       </div>
     </div>
   );
@@ -584,7 +596,7 @@ export default function ApiKeysSection({ lang }: { lang: 'es' | 'en' }) {
 
   const active = (keys ?? []).filter((k) => k.status === 'active');
   const inactive = (keys ?? []).filter((k) => k.status !== 'active');
-  const atLimit = active.length >= MAX_ACTIVE_KEYS;
+  const atLimit = active.filter((k) => k.kind !== 'oauth').length >= MAX_ACTIVE_KEYS;
 
   function brandLabel(brandId: string | null): string {
     if (!brandId) return t.allBrands;

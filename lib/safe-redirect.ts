@@ -8,10 +8,11 @@
 //
 // Además del dashboard se aceptan el onboarding y la página de invitación: la
 // invitación manda a iniciar sesión con `?next=/es/invitacion?token=…` para
-// volver a aceptarla después.
+// volver a aceptarla después. El consentimiento OAuth del servidor MCP
+// (`/{lang}/oauth/authorize?…`) vuelve igual tras el login.
 
 /** Secciones a las que se puede volver, bajo `/{lang}/`. */
-const ALLOWED_ROOTS = ['dashboard', 'onboarding', 'invitacion', 'invitation'] as const;
+const ALLOWED_ROOTS = ['dashboard', 'onboarding', 'invitacion', 'invitation', 'oauth'] as const;
 
 /** `next` si es una ruta segura de `lang`; si no, null. */
 export function safeNextPath(next: string | null | undefined, lang: string): string | null {

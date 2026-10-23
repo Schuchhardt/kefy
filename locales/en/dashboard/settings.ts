@@ -104,12 +104,14 @@ const en: SettingsCopy = {
     noExpiry: 'No expiry',
     statusRevoked: 'Revoked',
     statusExpired: 'Expired',
+    oauthBadge: 'OAuth connection',
     showInactive: (n: number) => `Show revoked and expired (${n})`,
     hideInactive: 'Hide revoked and expired',
     // Revoke
     revoke: 'Revoke',
     revokeTitle: 'Revoke API key',
     revokeBody: (name: string) => `"${name}" will stop working immediately and any integration using it will start getting 401 errors. This cannot be undone.`,
+    revokeOauthBody: (name: string) => `"${name}" will lose access to Kefy immediately. To use it again, it will have to be authorized again from the app.`,
     revokeConfirm: 'Yes, revoke',
     revoking: 'Revoking…',
     revokeError: 'Could not revoke the key.',
@@ -147,10 +149,11 @@ const en: SettingsCopy = {
     done: 'I saved it',
     // Connect
     connectTitle: 'Connect via MCP',
-    connectIntro: 'Use this URL with the "Authorization: Bearer" header and your key. In the examples, replace kefy_sk_... with the key you created.',
+    connectIntro: 'On claude.ai the URL is all you need: Kefy will ask you to authorize access. For other clients, use the "Authorization: Bearer" header with your key; in the examples, replace kefy_sk_... with the key you created.',
     mcpUrlLabel: 'MCP server URL',
     snippetsLabel: 'Setup examples by client',
     snippetHints: {
+      claudeAi: 'On claude.ai go to Settings → Connectors → Add custom connector, paste this URL and authorize (no key needed):',
       claudeCode: 'Run in your terminal:',
       cursor: 'Add to ~/.cursor/mcp.json:',
       claudeDesktop: 'Add to claude_desktop_config.json (uses the mcp-remote bridge):',
