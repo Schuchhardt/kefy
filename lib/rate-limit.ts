@@ -169,6 +169,10 @@ export const RATE_LIMITS = {
   apiKey:         { limit: 120, windowSeconds: 60 },
   /** Sincronizaciones con Zernio (analytics, DMs, comentarios) por organización. */
   sync:           { limit: 6,  windowSeconds: 300 },
+  /** Registro dinámico de clientes OAuth por IP: cada uno es una fila nueva. */
+  oauthRegister:  { limit: 20, windowSeconds: 3600 },
+  /** Canje de códigos y refresh tokens OAuth por IP: frena el sondeo. */
+  oauthToken:     { limit: 60, windowSeconds: 300 },
 } as const;
 
 /** Regla de login para una IP. */
@@ -209,4 +213,12 @@ export function apiKeyRule(keyId: string): RateLimitRule {
 
 export function syncRule(orgId: string): RateLimitRule {
   return { bucket: `sync:org:${orgId}`, ...RATE_LIMITS.sync };
+}
+
+export function oauthRegisterRule(ip: string): RateLimitRule {
+  return { bucket: `oauth-register:ip:${ip}`, ...RATE_LIMITS.oauthRegister };
+}
+
+export function oauthTokenRule(ip: string): RateLimitRule {
+  return { bucket: `oauth-token:ip:${ip}`, ...RATE_LIMITS.oauthToken };
 }

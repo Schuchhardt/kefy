@@ -24,6 +24,13 @@ import type { Scope, ToolContext } from '@/lib/assistant/types';
 
 export const API_KEY_PREFIX = 'kefy_sk_';
 export const API_KEY_RE = /^kefy_sk_[A-Za-z0-9_-]{43}$/;
+/**
+ * Access token de una conexión OAuth (lib/assistant/oauth.ts). Vive en la
+ * misma tabla que las keys (kind = 'oauth') y caduca en una hora
+ * (access_expires_at); el cliente lo renueva con su refresh token.
+ */
+export const OAUTH_ACCESS_TOKEN_PREFIX = 'kefy_at_';
+export const OAUTH_ACCESS_TOKEN_RE = /^kefy_at_[A-Za-z0-9_-]{43}$/;
 export const API_KEY_SCOPES: readonly Scope[] = ['read', 'write', 'publish'];
 /** Keys activas (no revocadas ni caducadas) por organización. */
 export const MAX_ACTIVE_API_KEYS = 10;
@@ -64,6 +71,7 @@ interface ApiKeyRow {
   scopes: string[] | null;
   key_prefix: string;
   expires_at: string | null;
+  access_expires_at: string | null;
   revoked_at: string | null;
   last_used_at: string | null;
 }
@@ -85,7 +93,8 @@ function isRole(r: unknown): r is OrgRole {
 }
 
 /**
- * Autentica una petición con `Authorization: Bearer kefy_sk_…`.
+ * Autentica una petición con `Authorization: Bearer kefy_sk_…` o con el access
+ * token de una conexión OAuth (`kefy_at_…`).
  *
  * Orden: formato → key (por hash) → membresía y plan del creador → marca
  * atada → rate limit de la key → last_used_at (sin bloquear).
@@ -94,7 +103,9 @@ export async function authenticateApiKey(req: Request, now = new Date()): Promis
   const header = req.headers.get('authorization') ?? '';
   const match = /^Bearer (\S+)$/.exec(header.trim());
   const token = match?.[1];
-  if (!token || !API_KEY_RE.test(token)) return unauthorized('Missing or malformed API key');
+  if (!token || !(API_KEY_RE.test(token) || OAUTH_ACCESS_TOKEN_RE.test(token))) {
+    return unauthorized('Missing or malformed API key');
+  }
 
   const db = createSupabaseServer();
 
@@ -103,7 +114,7 @@ export async function authenticateApiKey(req: Request, now = new Date()): Promis
   try {
     const { data, error } = await db
       .from('kefy_api_keys')
-      .select('id, org_id, brand_id, created_by, scopes, key_prefix, expires_at, revoked_at, last_used_at')
+      .select('id, org_id, brand_id, created_by, scopes, key_prefix, expires_at, access_expires_at, revoked_at, last_used_at')
       .eq('key_hash', hashToken(token))
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -120,6 +131,10 @@ export async function authenticateApiKey(req: Request, now = new Date()): Promis
     || !key.created_by
   ) {
     return unauthorized('Invalid API key');
+  }
+  // Un access token OAuth caducado: el cliente pide otro con su refresh token.
+  if (key.access_expires_at && new Date(key.access_expires_at).getTime() <= now.getTime()) {
+    return unauthorized('Access token expired');
   }
 
   const logExtra = { keyId: key.id, keyPrefix: key.key_prefix };

@@ -405,20 +405,25 @@ describe('ApiKeysSection — pestañas de ejemplos', () => {
     await renderSection();
     const tablist = await screen.findByRole('tablist', { name: 'Ejemplos de configuración por cliente' });
     const tabs = within(tablist).getAllByRole('tab');
-    expect(tabs.map((t) => t.getAttribute('tabindex'))).toEqual(['0', '-1', '-1', '-1']);
+    expect(tabs.map((t) => t.getAttribute('tabindex'))).toEqual(['0', '-1', '-1', '-1', '-1']);
 
+    // claude.ai va primero: se conecta por OAuth, sin key ni fragmento.
     const panel = screen.getByRole('tabpanel');
     expect(panel).toHaveAttribute('aria-labelledby', tabs[0].id);
-    expect(panel).toHaveTextContent('claude mcp add');
+    expect(panel).toHaveTextContent('Añadir conector personalizado');
 
     fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
+    expect(within(tablist).getByRole('tab', { name: 'Claude Code' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('claude mcp add');
+
+    fireEvent.keyDown(tabs[1], { key: 'ArrowRight' });
     expect(within(tablist).getByRole('tab', { name: 'Cursor' })).toHaveAttribute('aria-selected', 'true');
     expect(document.activeElement).toBe(within(tablist).getByRole('tab', { name: 'Cursor' }));
     expect(screen.getByRole('tabpanel')).toHaveTextContent('mcpServers');
 
-    fireEvent.keyDown(tabs[1], { key: 'End' });
+    fireEvent.keyDown(tabs[2], { key: 'End' });
     expect(within(tablist).getByRole('tab', { name: 'curl' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.keyDown(tabs[3], { key: 'ArrowRight' });
-    expect(within(tablist).getByRole('tab', { name: 'Claude Code' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(tabs[4], { key: 'ArrowRight' });
+    expect(within(tablist).getByRole('tab', { name: 'claude.ai' })).toHaveAttribute('aria-selected', 'true');
   });
 });

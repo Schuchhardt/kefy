@@ -12,7 +12,7 @@ import enAuth from '@/locales/en/auth';
 type AuthScreen = keyof typeof esAuth.meta;
 
 /** Pantallas que no tienen sentido en un buscador. */
-const NOINDEX: ReadonlySet<AuthScreen> = new Set(['forgot', 'reset', 'invitation', 'onboarding']);
+const NOINDEX: ReadonlySet<AuthScreen> = new Set(['forgot', 'reset', 'invitation', 'onboarding', 'oauth']);
 
 export function authMetadata(lang: string, screen: AuthScreen): Metadata {
   const t = lang === 'en' ? enAuth : esAuth;

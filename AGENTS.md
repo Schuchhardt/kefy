@@ -26,7 +26,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 | Beta abierta: créditos, trial, rate limiting y Sentry | [`docs/beta-abierta.md`](docs/beta-abierta.md) | Antes de tocar `lib/rate-limit.ts`, `lib/usage.ts`, `lib/ai-guard.ts`, `lib/subscription.ts`, `lib/observability.ts`, `lib/sentry-scrub.ts`, los planes, o **al añadir cualquier ruta que gaste dinero** (IA, render, envío de correo) |
 | Landing, auth y UX mobile del dashboard | [`docs/auditoria-ux.md`](docs/auditoria-ux.md) | Antes de tocar `components/landing/**`, `locales/*/landing.ts`, las páginas de auth, el onboarding o el layout/mobile del dashboard: lista lo que la landing no puede prometer, qué se implementó de la auditoría y las métricas que vigilan los tests |
 | Idiomas | [`docs/i18n.md`](docs/i18n.md) | Antes de añadir textos de interfaz o tocar `locales/**` |
-| Asistente / API pública / MCP | [`docs/assistant.md`](docs/assistant.md) | Antes de tocar `lib/assistant/**`, `lib/services/**`, `app/api/assistant/**`, `app/api/v1/**`, `app/api/mcp/**` o `app/api/api-keys/**` |
+| Asistente / API pública / MCP | [`docs/assistant.md`](docs/assistant.md) | Antes de tocar `lib/assistant/**`, `lib/services/**`, `app/api/assistant/**`, `app/api/v1/**`, `app/api/mcp/**`, `app/api/oauth/**`, `app/.well-known/**` o `app/api/api-keys/**` |
 
 ## Regla: Zernio
 

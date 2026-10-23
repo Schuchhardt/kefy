@@ -3,6 +3,7 @@ import { appUrl } from '@/lib/app-url';
 import { reportError } from '@/lib/observability';
 import { ensureToolsRegistered } from '@/lib/assistant/tools';
 import { apiLanguage, apiToolContext, authenticateApiKey } from '@/lib/assistant/api-keys';
+import { resourceMetadataUrl } from '@/lib/assistant/oauth';
 import {
   handleMcpMessage, isSupportedProtocolVersion, jsonRpcError, JSONRPC_ERRORS,
 } from '@/lib/assistant/mcp';
@@ -10,8 +11,9 @@ import {
 // ─── /api/mcp ────────────────────────────────────────────────────────────────
 // Servidor MCP (Streamable HTTP, sin estado, solo respuestas JSON).
 //
-// Se autentica con `Authorization: Bearer kefy_sk_…` (lib/assistant/api-keys.ts);
-// no acepta la cookie de sesión y por eso está en PUBLIC_API_PATHS de proxy.ts.
+// Se autentica con `Authorization: Bearer kefy_sk_…` (lib/assistant/api-keys.ts)
+// o con el access token de una conexión OAuth (lib/assistant/oauth.ts); no
+// acepta la cookie de sesión y por eso está en PUBLIC_API_PATHS de proxy.ts.
 // Un mensaje JSON-RPC por POST: los lotes (arrays) se rechazan. No hay stream
 // SSE del servidor, así que GET y DELETE responden 405.
 //
@@ -41,6 +43,18 @@ function isAllowedOrigin(origin: string | null): boolean {
   }
 }
 
+/**
+ * Cabecera del 401. `resource_metadata` es lo que permite a un cliente MCP
+ * (los conectores de claude.ai) descubrir el OAuth de Kefy en vez de pedir
+ * una key a mano. Sin credenciales no va `error` (RFC 6750 §3.1).
+ */
+function wwwAuthenticate(req: NextRequest): string {
+  const params = [`realm="kefy"`];
+  if (req.headers.get('authorization')) params.push('error="invalid_token"');
+  params.push(`resource_metadata="${resourceMetadataUrl(req.nextUrl.origin)}"`);
+  return `Bearer ${params.join(', ')}`;
+}
+
 export async function POST(req: NextRequest) {
   if (!isAllowedOrigin(req.headers.get('origin'))) {
     return json({ error: 'Forbidden origin' }, 403);
@@ -56,7 +70,7 @@ export async function POST(req: NextRequest) {
   const auth = await authenticateApiKey(req);
   if (!auth.ok) {
     const headers: Record<string, string> = { ...(auth.headers ?? {}) };
-    if (auth.status === 401) headers['WWW-Authenticate'] = 'Bearer realm="kefy", error="invalid_token"';
+    if (auth.status === 401) headers['WWW-Authenticate'] = wwwAuthenticate(req);
     return json(auth.body, auth.status, headers);
   }
 

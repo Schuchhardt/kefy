@@ -26,6 +26,11 @@ const PUBLIC_API_PATHS = [
   // (lib/assistant/api-keys.ts). No aceptan la cookie de sesión.
   '/api/v1/',
   '/api/mcp',
+  // OAuth del servidor MCP (lib/assistant/oauth.ts): el registro de clientes
+  // y el token endpoint los llama el cliente MCP, sin cookie. El
+  // consentimiento (/api/oauth/consent) sí exige sesión y no va aquí.
+  '/api/oauth/register',
+  '/api/oauth/token',
 ];
 
 /**
@@ -69,8 +74,9 @@ export async function proxy(req: NextRequest) {
 
   // ── Auth protection ─────────────────────────────────────────────────────────
   // El onboarding («pega tu web → 3 posts») también exige sesión: sin ella la
-  // página cargaba y fallaba al primer fetch.
-  const isDashboard    = /^\/[a-z]{2}\/(dashboard|onboarding)(\/|$)/.test(pathname);
+  // página cargaba y fallaba al primer fetch. El consentimiento OAuth
+  // (/{lang}/oauth/authorize) igual: sin sesión, login y vuelta con `?next=`.
+  const isDashboard    = /^\/[a-z]{2}\/(dashboard|onboarding|oauth)(\/|$)/.test(pathname);
   const isProtectedApi = pathname.startsWith('/api/') && !isPublicApiPath(pathname);
 
   if (isDashboard || isProtectedApi) {

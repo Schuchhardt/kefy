@@ -78,15 +78,20 @@ describe('transporte HTTP', () => {
     expect((await mcp(rpc('ping'), { headers: { 'mcp-protocol-version': v } })).status).toBe(200);
   });
 
-  it('sin key → 401 con WWW-Authenticate invalid_token', async () => {
+  it('sin key → 401 que anuncia los metadatos OAuth (así conecta claude.ai)', async () => {
     const res = await mcp(rpc('initialize', { protocolVersion: '2025-06-18' }), { token: null });
 
     expect(res.status).toBe(401);
-    expect(res.headers.get('WWW-Authenticate')).toBe('Bearer realm="kefy", error="invalid_token"');
+    expect(res.headers.get('WWW-Authenticate')).toBe(
+      'Bearer realm="kefy", resource_metadata="http://localhost:3099/.well-known/oauth-protected-resource/api/mcp"',
+    );
   });
 
-  it('una key inválida o revocada → 401', async () => {
-    expect((await mcp(rpc('ping'), { token: generateApiKey().raw })).status).toBe(401);
+  it('una key inválida o revocada → 401 invalid_token', async () => {
+    const res = await mcp(rpc('ping'), { token: generateApiKey().raw });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('WWW-Authenticate')).toContain('error="invalid_token"');
+    expect(res.headers.get('WWW-Authenticate')).toContain('resource_metadata=');
 
     db.rows('kefy_api_keys')[0].revoked_at = new Date().toISOString();
     expect((await mcp(rpc('ping'))).status).toBe(401);
