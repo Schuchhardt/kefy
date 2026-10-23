@@ -23,6 +23,7 @@ vi.mock('@/lib/publish-images', () => ({
 }));
 
 import { publishContent, cancelScheduledPost } from '@/lib/services/publish';
+import { prepareSingleImage } from '@/lib/publish-images';
 import { serviceContext } from '@/lib/services/context';
 import { ServiceError } from '@/lib/services/errors';
 import { executeTool } from '@/lib/assistant/registry';
@@ -150,6 +151,52 @@ describe('publishContent (now)', () => {
 
     expect(out.status).toBe(200);
     expect(out.body.results.map((r) => r.status)).toEqual(['failed', 'published']);
+  });
+});
+
+// Regresión: una story subida a mano con solo una imagen fallaba al publicar o
+// programar con «Content has no body text».
+describe('publishContent — story solo imagen', () => {
+  const STORY = IDS.uuid(210);
+  const seedStory = (fields: Record<string, unknown>) => db.seed('kefy_content_items', [{
+    id: STORY, org_id: IDS.ORG, brand_id: IDS.BRAND, title: null, body: null,
+    image_url: 'https://cdn.test/story.jpg', hashtags: [], channel: 'generic', status: 'approved',
+    content_type: 'story', slides: null, video_url: null, mux_playback_id: null, ...fields,
+  }]);
+
+  it('se publica con la imagen y sin texto, y no se quema un caption vacío', async () => {
+    seedStory({});
+    const out = await publishContent(strict, { itemId: STORY, accountIds: [ACC], mode: 'now' });
+
+    expect(out.status).toBe(200);
+    const payload = zernio.publishPost.mock.calls[0][0] as { text: string; image_url?: string; content_type: string };
+    expect(payload.text).toBe('');
+    expect(payload.image_url).toBe('https://cdn.test/story.jpg');
+    expect(payload.content_type).toBe('story');
+    expect(vi.mocked(prepareSingleImage).mock.calls[0][5]).toBeFalsy();
+  });
+
+  it('también se programa', async () => {
+    seedStory({});
+    const out = await publishContent(strict, {
+      itemId: STORY, accountIds: [ACC], mode: 'schedule',
+      scheduledAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(out.status).toBe(201);
+    expect((zernio.publishPost.mock.calls[0][0] as { image_url?: string }).image_url).toBe('https://cdn.test/story.jpg');
+  });
+
+  it('una story sin imagen ni video → 422 sin tocar Zernio', async () => {
+    seedStory({ body: 'Solo texto', image_url: null });
+    await expect(publishContent(strict, { itemId: STORY, accountIds: [ACC], mode: 'now' }))
+      .rejects.toMatchObject({ status: 422 });
+    expect(zernio.publishPost).not.toHaveBeenCalled();
+  });
+
+  it('un post solo imagen también se publica', async () => {
+    seedStory({ content_type: 'post' });
+    const out = await publishContent(strict, { itemId: STORY, accountIds: [ACC], mode: 'now' });
+    expect(out.status).toBe(200);
   });
 });
 

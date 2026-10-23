@@ -5,6 +5,7 @@ import {
   buildDerivedTopic,
   buildSourceBlock,
   buildSourceContext,
+  topicImageFor,
   withSourceBlock,
 } from '@/lib/content-source';
 
@@ -135,6 +136,38 @@ describe('buildDerivedTopic', () => {
 
   it('devuelve cadena vacía cuando no hay nada de lo que partir', () => {
     expect(buildDerivedTopic({ content_type: 'post' })).toBe('');
+  });
+
+  it('sin título ni cuerpo usa el texto de las slides', () => {
+    const topic = buildDerivedTopic({
+      content_type: 'carousel',
+      slides: [{ title: 'Uno', body: 'primero' }, { title: '', body: 'dos' }, { title: null, body: null }],
+    });
+    expect(topic).toBe('Uno — primero. dos');
+  });
+
+  it('cuerpo con solo espacios cuenta como vacío', () => {
+    expect(buildDerivedTopic({ content_type: 'story', body: '   ' })).toBe('');
+  });
+});
+
+describe('topicImageFor', () => {
+  it('pieza solo imagen: devuelve la imagen de la que sacar el tema', () => {
+    expect(topicImageFor({ content_type: 'story', body: null, image_url: 'https://cdn.example.com/a.jpg' }))
+      .toBe('https://cdn.example.com/a.jpg');
+  });
+
+  it('sin portada usa la imagen de la primera slide', () => {
+    expect(topicImageFor({ content_type: 'carousel', slides: [{ image_url: 'https://cdn.example.com/s1.jpg' }] }))
+      .toBe('https://cdn.example.com/s1.jpg');
+  });
+
+  it('con texto no hace falta mirar la imagen', () => {
+    expect(topicImageFor({ content_type: 'story', body: 'Hola', image_url: 'https://cdn.example.com/a.jpg' })).toBeNull();
+  });
+
+  it('sin texto ni imagen: null', () => {
+    expect(topicImageFor({ content_type: 'story', image_url: null })).toBeNull();
   });
 });
 

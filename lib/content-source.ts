@@ -125,9 +125,25 @@ export function buildDerivedTopic(row: SourceRow, maxChars = 500): string {
   const body  = row.body?.trim() ?? '';
   if (title) return title.slice(0, maxChars);
 
-  const firstSentence = body.split(/(?<=[.!?])\s/)[0] ?? '';
-  const topic = firstSentence.length >= 20 ? firstSentence : body;
-  return topic.slice(0, maxChars);
+  if (body) {
+    const firstSentence = body.split(/(?<=[.!?])\s/)[0] ?? '';
+    const topic = firstSentence.length >= 20 ? firstSentence : body;
+    return topic.slice(0, maxChars);
+  }
+
+  // Un carrusel o un reel puede no tener cuerpo pero sí texto en sus slides.
+  const slides = Array.isArray(row.slides) ? (row.slides as Array<CarouselSlide | ReelScene>) : [];
+  return slides.map(slideText).filter(Boolean).join('. ').slice(0, maxChars);
+}
+
+/**
+ * La imagen de la que sacar el tema cuando la pieza no tiene ningún texto
+ * (p. ej. una story que es solo una foto subida a mano). `null` si hay texto
+ * —no hace falta mirar la imagen— o si tampoco hay imagen.
+ */
+export function topicImageFor(row: SourceRow): string | null {
+  if (buildDerivedTopic(row)) return null;
+  return buildSourceContext(row).imageUrls?.[0] ?? null;
 }
 
 /**

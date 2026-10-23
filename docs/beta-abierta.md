@@ -186,6 +186,16 @@ leer la web (si se da) y 1 por cada uno de los 3 posts. La página de onboarding
 dice cuánto va a usar antes de gastar (con las 3 imágenes que pide después a
 `/api/content/image`: 12 créditos, 13 con web).
 
+**Convertir a otro formato también es gasto.**
+`POST /api/content/[itemId]/renditions` generaba texto e imágenes sin ninguna
+guardia. Ahora cobra como una generación normal: 1 crédito de texto (incluida la
+lectura de la imagen cuando la pieza no tiene texto) y 3 por cada imagen. En
+post/story la imagen es la pieza, así que se cobra antes de empezar y sin
+créditos para ella responde 429 (devolviendo el texto). En carrusel/reel las
+slides que no alcancen salen sin imagen. Un fallo devuelve todo lo no entregado.
+Devolver el formato propio o una rendición ya lista no cobra. Cubierto por
+`tests/unit/api/content-renditions.test.ts`.
+
 ### Los tres bloqueos, y qué debe hacer la UI
 
 | Respuesta | Campo | Significa | La UI debe |

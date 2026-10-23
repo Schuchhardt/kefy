@@ -274,6 +274,15 @@ Solo **Instagram**, **Facebook** y **Snapchat** tienen superficie de Stories en 
 
 > ⚠️ Las Stories no muestran texto/caption (Instagram y Facebook), no permiten link stickers vía API, y expiran a las 24h. `firstComment`, `collaborators` y `userTags` no aplican a Stories.
 
+> **Regla: el texto es opcional cuando hay media.** Una story (o un post) puede
+> ser solo una imagen subida a mano. `lib/publish-media.ts::resolvePublishMedia`
+> solo rechaza una story sin imagen ni video, o una pieza sin texto ni media; y
+> `publishPost` omite `content` si va vacío (solo es obligatorio en posts de
+> solo texto). Antes se exigía texto siempre y las stories de solo imagen
+> fallaban con «Content has no body text». Lo cubren
+> `tests/unit/lib/publish-media.test.ts`, `tests/unit/lib/zernio.test.ts` y
+> `tests/unit/lib/services/publish.test.ts`.
+
 ### Reels (`content_type = 'reel'`)
 
 Un reel es **siempre** un vídeo. Reglas implementadas:

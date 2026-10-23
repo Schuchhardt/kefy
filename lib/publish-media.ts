@@ -74,14 +74,16 @@ function stripMarkdownFormatting(text: string): string {
  *   post     → the single image.
  * A video post never carries an image alongside it — Zernio would publish two
  * separate media items (a photo *and* a video).
+ *
+ * The caption is optional whenever there is media: a story is often just an
+ * uploaded image. Only a piece with neither text nor media is rejected (and a
+ * story always needs an image or a video).
  */
 export function resolvePublishMedia(
   format: ContentType,
   source: PublishMediaSource,
 ): PublishMediaResult {
-  if (!source.body) return { ok: false, error: 'Content has no body text' };
-
-  const body = stripMarkdownFormatting(source.body);
+  const body = stripMarkdownFormatting(source.body?.trim() ?? '');
   const hashtags = source.hashtags ?? [];
   const videoUrl = isPublishableVideoUrl(source.video_url) ? source.video_url.trim() : null;
 
@@ -93,7 +95,7 @@ export function resolvePublishMedia(
     return {
       ok: true,
       media: {
-        text:      hashtagLine ? `${body}\n\n${hashtagLine}` : body,
+        text:      [body, hashtagLine].filter(Boolean).join('\n\n'),
         hashtags:  [],
         video_url: videoUrl,
         is_video:  true,
@@ -128,6 +130,11 @@ export function resolvePublishMedia(
     if (!imageUrl) return { ok: false, error: 'The carousel has no slide images to publish' };
     return { ok: true, media: { text: body, hashtags, image_url: imageUrl, is_video: false } };
   }
+
+  if (format === 'story' && !imageUrl) {
+    return { ok: false, error: 'A story needs an image or a video to publish' };
+  }
+  if (!body && !imageUrl) return { ok: false, error: 'Content has no text or media to publish' };
 
   return { ok: true, media: { text: body, hashtags, image_url: imageUrl, is_video: false } };
 }

@@ -6,13 +6,18 @@ import {
   generateContentImage,
   generateCarouselSlides,
   generateReelScript,
+  describeImageAsTopic,
 } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 import {
   buildDerivedImagePrompt,
   buildDerivedTopic,
   buildSourceContext,
+  topicImageFor,
 } from '@/lib/content-source';
+import { reportError } from '@/lib/observability';
+import { guardAiRequest } from '@/lib/ai-guard';
+import { consumeCredits, refundCredits, creditsExhaustedBody } from '@/lib/usage';
 import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
 
@@ -20,6 +25,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 180;
 
 const FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
+const ROUTE = 'POST /api/content/[itemId]/renditions';
 
 type ItemRow = {
   id:           string;
@@ -104,7 +110,13 @@ export async function GET(
 // so the same topic can be published as post/carousel/reel/story depending
 // on the destination network, without re-typing the idea from scratch.
 //
-// Body: { format: 'post' | 'carousel' | 'reel' | 'story' }
+// Body: { format: 'post' | 'carousel' | 'reel' | 'story', language?: 'es' | 'en' }
+//
+// Gasta como cualquier generación (docs/beta-abierta.md): `text` por la
+// llamada de texto (incluida, si hace falta, la lectura de la imagen) y
+// `image` por cada imagen. En post/story la imagen es la pieza: sin créditos
+// para ella no se convierte. En carrusel/reel las slides que no alcancen salen
+// sin imagen, igual que al generar un carrusel.
 
 export async function POST(
   req: NextRequest,
@@ -121,6 +133,7 @@ export async function POST(
   }
   const input  = body as Record<string, unknown>;
   const format = input.format as ContentType;
+  const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
   if (!FORMATS.includes(format)) {
     return NextResponse.json({ error: `format must be one of: ${FORMATS.join(', ')}` }, { status: 422 });
   }
@@ -155,8 +168,59 @@ export async function POST(
   // de sus slides y sus imágenes. Sin esto el carrusel generado a partir de un
   // post hablaba de otra cosa y traía fotos que no tenían nada que ver.
   const source = buildSourceContext(item);
-  const topic  = buildDerivedTopic(item);
-  if (!topic) return NextResponse.json({ error: 'Item has no text to base a new format on' }, { status: 422 });
+  let topic = buildDerivedTopic(item);
+  const imageForTopic = topicImageFor(item);
+  if (!topic && !imageForTopic) {
+    return NextResponse.json({ error: 'Item has no text or image to base a new format on' }, { status: 422 });
+  }
+
+  const guard = await guardAiRequest(req, { auth, operation: 'text', route: ROUTE, language });
+  if (guard.blocked) return guard.blocked;
+
+  // Una pieza que es solo imagen (p. ej. una story subida a mano) se convierte
+  // a partir de lo que muestra la imagen.
+  if (!topic && imageForTopic) {
+    try {
+      topic = await describeImageAsTopic(imageForTopic);
+    } catch (err) {
+      reportError(err, { route: ROUTE, auth, service: 'ai', extra: { itemId, fase: 'tema-imagen' } });
+    }
+    if (!topic) {
+      await guard.refund();
+      return NextResponse.json({ error: 'Could not read the image to base a new format on' }, { status: 502 });
+    }
+  }
+
+  // Imágenes cobradas que todavía no se entregaron: si la conversión falla,
+  // se devuelven todas.
+  let pendingImageCharges = 0;
+  const chargeImage = async (): Promise<boolean> => {
+    const credits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
+    if (!credits?.allowed) return false;
+    pendingImageCharges++;
+    return true;
+  };
+  const imageDelivered = () => { pendingImageCharges--; };
+  // Un fallo nuestro no se le cobra al usuario: texto e imágenes sin entregar.
+  const refundAll = async () => {
+    await guard.refund();
+    for (; pendingImageCharges > 0; pendingImageCharges--) await refundCredits(auth.orgId, 'image');
+  };
+  const refundImage = async () => { pendingImageCharges--; await refundCredits(auth.orgId, 'image'); };
+
+  // En post/story la imagen es la pieza: se cobra antes de generar nada.
+  if (format === 'post' || format === 'story') {
+    const credits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
+    if (!credits?.allowed) {
+      await guard.refund();
+      return credits
+        ? NextResponse.json(creditsExhaustedBody(credits, language), { status: 429 })
+        : NextResponse.json({ error: language === 'en'
+          ? 'Could not verify your AI credits. Try again in a moment.'
+          : 'No pudimos verificar tus créditos de IA. Reintenta en un momento.' }, { status: 503 });
+    }
+    pendingImageCharges++;
+  }
 
   const referenceImages = source.imageUrls ?? [];
   const brandName = brandKit?.name ?? undefined;
@@ -182,12 +246,14 @@ export async function POST(
         size: '1024x1024', quality: 'medium', brand, referenceImages,
       });
       const imageUrl = await uploadBase64Image(img.b64, auth.orgId, `rendition-post-${Date.now()}.jpeg`);
+      imageDelivered();
       patch = { body: text.body, hashtags: text.hashtags, image_url: imageUrl, status: 'ready' };
 
     } else if (format === 'carousel') {
       const generated = await generateCarouselSlides({ channel: item.channel, topic, slide_count: 5, language: 'es', tone, brandName, tagline, extraCtx, source });
       const slides = await Promise.all(generated.slides.map(async (slide) => {
         if (!slide.image_prompt) return { ...slide, image_url: null, text_baked: false };
+        if (!(await chargeImage())) return { ...slide, image_url: null, text_baked: false };
         try {
           // La imagen se guarda LIMPIA: el título/cuerpo se dibujan como HTML
           // encima en la vista previa y se queman recién al publicar.
@@ -196,8 +262,10 @@ export async function POST(
             size: '1024x1024', quality: 'medium', brand, referenceImages,
           });
           const imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `rendition-carousel-slide-${slide.slide_order}-${Date.now()}.jpeg`);
+          imageDelivered();
           return { ...slide, image_url: imageUrl, text_baked: false };
         } catch {
+          await refundImage();
           return { ...slide, image_url: null, text_baked: false };
         }
       }));
@@ -206,6 +274,7 @@ export async function POST(
     } else if (format === 'reel') {
       const generated = await generateReelScript({ channel: item.channel, topic, scene_count: 5, language: 'es', tone, brandName, tagline, extraCtx, source });
       const scenes = await Promise.all(generated.scenes.map(async (scene) => {
+        if (!(await chargeImage())) return { ...scene, image_url: undefined, text_baked: false };
         try {
           const bgPrompt = `Background scene for a reel: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks. Pure cinematic background scene only.`;
           const imgResult = await generateContentImage({
@@ -213,8 +282,10 @@ export async function POST(
             size: '1024x1792', quality: 'medium', brand, referenceImages,
           });
           const imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `rendition-reel-scene-${scene.scene_order}-${Date.now()}.jpeg`);
+          imageDelivered();
           return { ...scene, image_url: imageUrl, text_baked: false };
         } catch {
+          await refundImage();
           return { ...scene, image_url: undefined, text_baked: false };
         }
       }));
@@ -228,6 +299,7 @@ export async function POST(
         size: '1024x1536', quality: 'medium', brand, referenceImages,
       });
       const imageUrl = await uploadBase64Image(img.b64, auth.orgId, `rendition-story-${Date.now()}.jpeg`);
+      imageDelivered();
       patch = { body: text.body, hashtags: text.hashtags, image_url: imageUrl, render_status: 'not_rendered', status: 'ready' };
     }
 
@@ -241,14 +313,18 @@ export async function POST(
       .single();
 
     if (upsertError || !rendition) {
-      console.error('rendition upsert error:', upsertError?.message);
+      await refundAll();
+      reportError(new Error(`rendition upsert error: ${upsertError?.message ?? 'no row'}`), {
+        route: ROUTE, auth, service: 'supabase', extra: { itemId, format },
+      });
       return NextResponse.json({ error: 'Failed to save rendition' }, { status: 500 });
     }
 
     return NextResponse.json({ rendition }, { status: 201 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : `Failed to generate ${format} rendition`;
-    console.error(`rendition generate error (${format}):`, msg);
+    await refundAll();
+    reportError(err, { route: ROUTE, auth, service: 'ai', extra: { itemId, format } });
     await db
       .from('kefy_content_renditions')
       .upsert(
