@@ -29,6 +29,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { toLocale } from '@/lib/i18n';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
+import ViewPublishedLink from '@/components/dashboard/content/ViewPublishedLink';
 import type { ContentItem, ContentType, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
 import esT from '@/locales/es/dashboard/content-detail';
 import enT from '@/locales/en/dashboard/content-detail';
@@ -58,6 +59,7 @@ interface PerformanceEntry {
   scheduled_post_id: string;
   platform: string | null;
   published_at: string | null;
+  post_url: string | null;
   latest_metrics: {
     measured_at: string; impressions: number; reach: number; likes: number;
     comments: number; shares: number; clicks: number; saves: number; engagement_rate: number;
@@ -368,6 +370,11 @@ export default function ContentDetailPage() {
                           </div>
                         ) : (
                           <p className={styles.muted}>{t.noStatsYet}</p>
+                        )}
+                        {p.post_url && (
+                          <div className={styles.viewPublished}>
+                            <ViewPublishedLink url={p.post_url} platform={p.platform} lang={locale} />
+                          </div>
                         )}
                       </li>
                     ))}

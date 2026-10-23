@@ -43,6 +43,7 @@
 .metric { background: var(--bg); border-radius: 8px; padding: 8px 10px; min-width: 0; }
 .metricValue { margin: 0 0 2px; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .metricLabel { margin: 0; font-size: 12px; color: var(--muted); }
+.viewPublished { margin-top: 8px; }
 .statsList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
 .muted { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
 

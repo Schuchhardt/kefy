@@ -358,6 +358,33 @@ imagen concreta y se apela desde el centro de ayuda de X.
 Kefy muestra este aviso bajo las cuentas de X conectadas
 (`components/dashboard/SocialConnectionPanel.tsx`).
 
+### URL pública del post («Ver publicado»)
+
+Cada publicación hecha desde Kefy termina con un botón **Ver publicado** que
+abre el post en la red donde salió: en el modal de publicar (justo después de
+publicar ahora), en el calendario y en la ficha del contenido. La URL se guarda
+en `kefy_scheduled_posts.platform_post_url` y llega por tres caminos
+(verificado contra `docs.zernio.com/posts/*` y `docs.zernio.com/webhooks/posts`):
+
+| Cuándo | De dónde | Campo |
+|--------|----------|-------|
+| Publicar ahora (`publishNow: true`) | respuesta de `POST /v1/posts` | `post.platforms[].platformPostUrl` |
+| Post programado o asíncrono | webhooks `post.published` / `post.platform.published` | `post.platforms[].publishedUrl` y el bloque `platform.publishedUrl` |
+| TikTok (la URL llega minutos después) | webhook `post.tiktok.url_resolved` | `platform.publishedUrl` |
+| Fila publicada que aún no la tiene | `GET /v1/posts/{id}` al leer el calendario o la ficha (`lib/services/post-urls.ts`, máx. 10 por lectura, best-effort) | `post.platforms[].platformPostUrl` |
+
+- Solo se guardan URLs `http(s)` (`safePostUrl` en `lib/zernio.ts`): terminan en
+  un `href`.
+- Un webhook sin URL (TikTok en `post.published`) **no** borra la que ya hubiera.
+- Los webhooks traen el id nativo en `platforms[].platformPostId` /
+  `platform.platformPostId`; antes el handler guardaba el id de Zernio en
+  `platform_post_id`.
+- La API del asistente / REST / MCP devuelve `post_url` en
+  `list_scheduled_posts` y en `scheduled_posts` de `get_content`.
+
+Tests: `tests/unit/lib/zernio.test.ts`, `tests/unit/lib/services/post-urls.test.ts`,
+`tests/unit/lib/services/publish.test.ts` y `tests/unit/api/webhooks-zernio.test.ts`.
+
 ### Listar posts
 
 ```
@@ -659,6 +686,7 @@ Envía un mensaje en una conversación de inbox. Es el endpoint correcto para re
 | Callback OAuth | `app/api/social/oauth/callback/route.ts` | Recibe `?connected=...&accountId=...` y guarda en DB |
 | Listar / desconectar cuentas | `app/api/social/accounts/route.ts` | `GET` lista de DB; `POST` conecta via código OAuth (headless) |
 | Publicar | `app/api/social/publish/route.ts` | Llama `POST /v1/posts` |
+| Estado y URL de los posts | `app/api/webhooks/zernio/route.ts` | Webhooks `post.*`; guarda `platform_post_url` (ver *URL pública del post*) |
 | Sync inbox | `app/api/messaging/sync/route.ts` | Llama `GET /v1/inbox/conversations?sortOrder=desc&limit=100` y hace upsert en `kefy_messages` |
 | Ver historial mensajes | `app/api/messaging/[threadId]/route.ts` (GET) | Al abrir un hilo, llama `GET /v1/inbox/conversations/{id}/messages` y hace upsert en `kefy_messages` |
 | Responder mensaje | `app/api/messaging/[threadId]/route.ts` (POST) | Llama `POST /v1/inbox/conversations/{id}/messages` con `{ accountId, message }` |

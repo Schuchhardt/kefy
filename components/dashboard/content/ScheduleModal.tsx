@@ -22,6 +22,7 @@ import ChannelIcon from '@/components/ui/ChannelIcon';
 import DateTimePicker from './DateTimePicker';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
 import FormatExample from './FormatExample';
+import ViewPublishedLink from './ViewPublishedLink';
 import { RenditionGenerating } from './RenditionGenerating';
 import { notifyLocal, requestNotificationPermission, shouldNotify } from '@/lib/notify';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ContentType, ContentRendition, ReelScene } from '@/types/content';
@@ -76,6 +77,8 @@ interface PublishResult {
   social_account_id: string;
   platform?:         string | null;
   status:            'published' | 'scheduled' | 'failed' | string;
+  /** URL pública del post (solo publicación inmediata, si Zernio ya la dio). */
+  post_url?:         string | null;
   error?:            string;
 }
 
@@ -84,6 +87,8 @@ interface SuccessState {
   ok:     number;
   failed: string[];
   when:   Date | null;
+  /** «Ver publicado» de cada cuenta que ya tiene URL pública. */
+  links:  Array<{ id: string; platform: string | null; url: string }>;
 }
 
 export default function ScheduleModal({
@@ -311,6 +316,9 @@ export default function ScheduleModal({
         ok:     results.length > 0 ? results.length - failed.length : selectedAccountIds.length,
         failed: failed.map((r) => accountLabel(r.social_account_id, r.platform)),
         when:   scheduling ? scheduledAt : null,
+        links:  results
+          .filter((r) => r.status === 'published' && r.post_url)
+          .map((r) => ({ id: r.social_account_id, platform: r.platform ?? null, url: r.post_url! })),
       });
       onSuccess?.(scheduling ? 'scheduled' : 'now');
     } catch (err) {
@@ -532,6 +540,19 @@ function SuccessView({ success, copy, lang }: { success: SuccessState; copy: Cop
       <p className={styles.successDetail}>
         {success.mode === 'scheduled' && when ? t.schedDetail(when, success.ok) : t.nowDetail(success.ok)}
       </p>
+      {success.links.length > 0 && (
+        <div className={styles.successLinks}>
+          {success.links.map((l) => (
+            <ViewPublishedLink
+              key={l.id}
+              url={l.url}
+              platform={l.platform}
+              lang={lang}
+              withNetwork={success.links.length > 1}
+            />
+          ))}
+        </div>
+      )}
       {success.failed.length > 0 && (
         <Notice tone="warning" live={false} icon={<Icon name="alert" size={16} />}>
           {t.partial(success.failed.join(', '))}

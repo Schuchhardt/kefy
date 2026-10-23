@@ -208,6 +208,7 @@ const getContentTool = defineTool({
             status: p.status,
             scheduled_at: p.scheduled_at ?? null,
             published_at: p.published_at ?? null,
+            post_url: p.platform_post_url ?? null,
             platform: account?.platform ?? null,
             username: account?.username ?? null,
           };

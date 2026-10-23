@@ -28,6 +28,7 @@ import { useBrand } from '@/lib/brand-context';
 import { statusColors, TONE_COLORS } from '@/lib/status';
 import { toLocale } from '@/lib/i18n';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
+import ViewPublishedLink from '@/components/dashboard/content/ViewPublishedLink';
 import { NET_LABEL } from '@/components/dashboard/NetworkPreview';
 import type { PostStatus, ScheduledPost } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
@@ -254,6 +255,9 @@ export default function CalendarPage() {
         </div>
         <div className={styles.postSide}>
           <StatusBadge status={post.status} lang={lang} />
+          {post.status === 'published' && (
+            <ViewPublishedLink url={post.platform_post_url} platform={platform} lang={lang} variant="ghost" />
+          )}
           {post.status === 'scheduled' && (
             <Button variant="ghost" size="sm" onClick={() => void handleCancel(post)}>
               {t.cancelPost}

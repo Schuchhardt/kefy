@@ -27,6 +27,7 @@ import type { ZernioPublishPayload } from '@/types/social';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, msg } from '@/lib/services/errors';
 import { loadOwnedItem, loadOwnedScheduledPost } from '@/lib/services/ownership';
+import { fillMissingPostUrls, type PostUrlRow } from '@/lib/services/post-urls';
 
 export type PublishMode = 'now' | 'schedule';
 
@@ -51,6 +52,8 @@ export interface PublishResultEntry {
   platform: string | null;
   status: 'published' | 'scheduled' | 'failed';
   zernio_post_id?: string;
+  /** URL pública del post en la red, si Zernio ya la dio al publicar. */
+  post_url?: string | null;
   post_id?: string;
   scheduled_post_id?: string;
   error?: string;
@@ -259,6 +262,7 @@ export async function publishContent(
           social_account_id: account.id,
           zernio_post_id:    zernioResult.post_id,
           platform_post_id:  zernioResult.platform_post_id ?? null,
+          platform_post_url: zernioResult.platform_post_url ?? null,
           published_at:      new Date().toISOString(),
           status:            'published',
           format,
@@ -270,6 +274,7 @@ export async function publishContent(
           platform:          account.platform,
           status:            'published',
           zernio_post_id:    zernioResult.post_id,
+          post_url:          zernioResult.platform_post_url ?? null,
         });
       } else {
         console.log(
@@ -404,7 +409,7 @@ export async function listScheduledPosts(
     .from('kefy_scheduled_posts')
     .select(`
       id, status, scheduled_at, published_at, error_message,
-      zernio_post_id, platform_post_id, created_at,
+      zernio_post_id, platform_post_id, platform_post_url, created_at,
       ${itemEmbed},
       kefy_social_accounts ( id, platform, username, avatar_url )
     `)
@@ -429,7 +434,8 @@ export async function listScheduledPosts(
     throw new ServiceError('unavailable', 500, 'Failed to fetch schedule');
   }
 
-  return { posts: (data ?? []) as unknown as Record<string, unknown>[] };
+  const posts = await fillMissingPostUrls((data ?? []) as unknown as Array<Record<string, unknown> & PostUrlRow>);
+  return { posts };
 }
 
 // ─── Cancelar ────────────────────────────────────────────────────────────────

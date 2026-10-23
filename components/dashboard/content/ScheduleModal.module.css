@@ -121,5 +121,6 @@
 }
 .successIcon { color: var(--success); display: flex; margin-bottom: 4px; }
 .successTitle { margin: 0; font-family: var(--font-syne), system-ui, sans-serif; font-size: 18px; font-weight: 700; }
+.successLinks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
 .successDetail { margin: 0; font-size: 14px; color: var(--muted); max-width: 420px; }
 .success :global(.ui-notice) { margin-top: 8px; text-align: left; }

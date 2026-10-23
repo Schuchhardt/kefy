@@ -26,6 +26,7 @@ import { ingestExternalMedia } from '@/lib/services/media-ingest';
 import type { AIModel, BrandImageContext, ContentChannel, GenerateTextResult } from '@/types/ai';
 import type { CarouselSlide, ContentStatus, ContentType, SlideInput } from '@/types/content';
 import type { BrandKit } from '@/types/brand-kit';
+import { fillMissingPostUrls, type PostUrlRow } from '@/lib/services/post-urls';
 
 // ─── Valores válidos ──────────────────────────────────────────────────────────
 
@@ -280,11 +281,11 @@ export async function getContent(
   if (opts.withScheduled) {
     const { data: posts } = await db
       .from('kefy_scheduled_posts')
-      .select('id, status, scheduled_at, published_at, kefy_social_accounts(platform, username)')
+      .select('id, status, scheduled_at, published_at, zernio_post_id, platform_post_url, kefy_social_accounts(platform, username)')
       .eq('content_item_id', itemId)
       .eq('org_id', ctx.auth.orgId)
       .order('scheduled_at', { ascending: false });
-    out.scheduled_posts = (posts ?? []) as Record<string, unknown>[];
+    out.scheduled_posts = await fillMissingPostUrls((posts ?? []) as Array<Record<string, unknown> & PostUrlRow>);
   }
 
   return out;

@@ -137,6 +137,8 @@ export interface ScheduledPost {
   status:                 PostStatus;
   scheduled_at:           string | null;
   published_at:           string | null;
+  /** URL pública del post en su red («Ver publicado»). */
+  platform_post_url?:     string | null;
   error_message:          string | null;
   created_at:             string;
   kefy_content_items:     ScheduledPostContent | null;

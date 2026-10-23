@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { executeEngagementRules } from '@/lib/engagement-executor';
+import { safePostUrl } from '@/lib/zernio';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
 // Receives real-time events from Zernio and processes them.
@@ -11,7 +12,8 @@ import { executeEngagementRules } from '@/lib/engagement-executor';
 // Handled events:
 //   Posts:    post.scheduled, post.published, post.failed, post.partial,
 //             post.cancelled, post.recycled,
-//             post.platform.published, post.platform.failed
+//             post.platform.published, post.platform.failed,
+//             post.tiktok.url_resolved
 //   Accounts: account.connected, account.disconnected,
 //             account.ads.initial_sync_completed
 //   Messages: message.received, message.sent, message.edited,
@@ -35,16 +37,27 @@ function normalizePayload(raw: Record<string, unknown>): Data {
     d.username   = a.username;
   }
 
-  // post: { id, platform, accountId, url, content, publishedAt, ... }
+  // post: { id, content, status, publishedAt, platforms: [{ platform, accountId,
+  //         platformPostId, publishedUrl, ... }] }
+  // Los eventos post.platform.* y post.tiktok.url_resolved traen además un
+  // bloque `platform` con el target que cambió. Cada post de Kefy va a una
+  // sola cuenta, así que platforms[0] es ese mismo target.
   if (raw.post && typeof raw.post === 'object') {
     const p = raw.post as Record<string, unknown>;
+    const target = Array.isArray(p.platforms) && p.platforms[0] && typeof p.platforms[0] === 'object'
+      ? p.platforms[0] as Record<string, unknown>
+      : {};
+    const changed = raw.platform && typeof raw.platform === 'object'
+      ? raw.platform as Record<string, unknown>
+      : {};
     d.post_id          = p.id;
-    d.platform_post_id = p.id;
+    d.platform_post_id = changed.platformPostId ?? target.platformPostId ?? p.id;
     if (p.platform)   d.platform   = p.platform;
     if (p.accountId)  d.account_id = p.accountId;
     if (p.publishedAt) d.published_at = p.publishedAt;
     if (p.content)    d.content    = p.content;
-    if (p.url)        d.url        = p.url;
+    const url = safePostUrl(changed.publishedUrl ?? target.publishedUrl ?? target.platformPostUrl ?? p.url);
+    if (url)          d.platform_post_url = url;
   }
 
   // message: { id, conversationId|threadId, text|body, sender:{id,name}|senderId, direction }
@@ -129,6 +142,29 @@ async function resolveAccount(db: DB, zernioAccountId: string) {
 
 // ─── Post handlers ─────────────────────────────────────────────────────────────
 
+// La URL solo se escribe si el evento la trae: un post.published de TikTok
+// llega sin ella y no debe borrar la que ya hubiera.
+function postUrlUpdate(data: Data): { platform_post_url?: string } {
+  const url = str(data.platform_post_url);
+  return url ? { platform_post_url: url } : {};
+}
+
+// post.tiktok.url_resolved: TikTok expone la URL minutos después de publicar.
+async function handlePostUrlResolved(db: DB, data: Data) {
+  const zernioPostId = str(data.post_id);
+  const url          = str(data.platform_post_url);
+  if (!zernioPostId || !url) return;
+
+  const updates: Record<string, unknown> = { platform_post_url: url };
+  if (str(data.platform_post_id) && data.platform_post_id !== zernioPostId) {
+    updates.platform_post_id = data.platform_post_id;
+  }
+  await db
+    .from('kefy_scheduled_posts')
+    .update(updates)
+    .eq('zernio_post_id', zernioPostId);
+}
+
 async function handlePostScheduled(db: DB, data: Data) {
   const zernioPostId = str(data.post_id);
   const scheduledAt  = strOrNull(data.scheduled_at);
@@ -148,7 +184,7 @@ async function handlePostPublished(db: DB, data: Data) {
 
   await db
     .from('kefy_scheduled_posts')
-    .update({ status: 'published', published_at: publishedAt, platform_post_id: platformPostId, error_message: null })
+    .update({ status: 'published', published_at: publishedAt, platform_post_id: platformPostId, error_message: null, ...postUrlUpdate(data) })
     .eq('zernio_post_id', zernioPostId);
 }
 
@@ -211,7 +247,7 @@ async function handlePostPlatformPublished(db: DB, data: Data) {
   // Mark the row for this specific platform as published
   await db
     .from('kefy_scheduled_posts')
-    .update({ status: 'published', published_at: publishedAt, platform_post_id: platformPostId, error_message: null })
+    .update({ status: 'published', published_at: publishedAt, platform_post_id: platformPostId, error_message: null, ...postUrlUpdate(data) })
     .eq('zernio_post_id', zernioPostId);
 }
 
@@ -510,6 +546,8 @@ export async function POST(req: NextRequest) {
       await handlePostPlatformPublished(db, data); break;
     case 'post.platform.failed':
       await handlePostPlatformFailed(db, data); break;
+    case 'post.tiktok.url_resolved':
+      await handlePostUrlResolved(db, data); break;
     case 'post.external.created':
       // Post published outside of Kefy — no local record to update, accept and ignore.
       break;

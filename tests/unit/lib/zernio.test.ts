@@ -15,6 +15,8 @@ const {
   connectAccount,
   disconnectAccount,
   getPostStatus,
+  getPublishedPostUrl,
+  safePostUrl,
   cancelPost,
   ZernioError,
 } = await import('@/lib/zernio');
@@ -86,6 +88,23 @@ describe('getConnectUrl', () => {
 // ─── publishPost ──────────────────────────────────────────────────────────────
 
 describe('publishPost', () => {
+  it('devuelve la URL pública del post (platformPostUrl) para «Ver publicado»', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [
+      { platform: 'instagram', status: 'published', platformPostId: '1789', platformPostUrl: 'https://www.instagram.com/p/AbC123/' },
+    ] } });
+
+    const out = await publishPost({ account_id: 'acc-1', platform: 'instagram', text: 'Hola' });
+    expect(out.platform_post_id).toBe('1789');
+    expect(out.platform_post_url).toBe('https://www.instagram.com/p/AbC123/');
+  });
+
+  it('sin URL (p. ej. TikTok antes de resolverla) devuelve null', async () => {
+    mockOk({ post: { _id: 'post-1', status: 'published', platforms: [{ platform: 'tiktok', status: 'published' }] } });
+
+    const out = await publishPost({ account_id: 'acc-1', platform: 'tiktok', text: 'Hola', video_url: 'https://cdn.test/v.mp4' });
+    expect(out.platform_post_url).toBeNull();
+  });
+
   it('usa POST /posts', async () => {
     mockOk({ post: { _id: 'post-1', status: 'published', platforms: [] } });
 
@@ -438,5 +457,39 @@ describe('cancelPost', () => {
     const [calledUrl, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(calledUrl).toContain('/posts/post-xyz');
     expect(init.method).toBe('DELETE');
+  });
+});
+
+// ─── URL pública del post ─────────────────────────────────────────────────────
+
+describe('safePostUrl', () => {
+  it('acepta http(s) y descarta el resto (termina en un href)', () => {
+    expect(safePostUrl('https://x.com/acme/status/1')).toBe('https://x.com/acme/status/1');
+    expect(safePostUrl('http://example.com/p')).toBe('http://example.com/p');
+    expect(safePostUrl('javascript:alert(1)')).toBeNull();
+    expect(safePostUrl('data:text/html,hi')).toBeNull();
+    expect(safePostUrl('no es una url')).toBeNull();
+    expect(safePostUrl('')).toBeNull();
+    expect(safePostUrl(undefined)).toBeNull();
+  });
+});
+
+describe('getPublishedPostUrl', () => {
+  it('lee GET /posts/{id} y devuelve platformPostUrl y el id nativo', async () => {
+    mockOk({ post: { _id: 'post-1', platforms: [
+      { platform: 'linkedin', platformPostId: 'urn:li:share:1', platformPostUrl: 'https://www.linkedin.com/feed/update/urn:li:share:1' },
+    ] } });
+
+    const out = await getPublishedPostUrl('post-1');
+
+    const [calledUrl, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(calledUrl).toMatch(/\/posts\/post-1$/);
+    expect(init.method).toBe('GET');
+    expect(out).toEqual({ url: 'https://www.linkedin.com/feed/update/urn:li:share:1', platform_post_id: 'urn:li:share:1' });
+  });
+
+  it('sin URL todavía devuelve url null', async () => {
+    mockOk({ post: { _id: 'post-1', platforms: [{ platform: 'tiktok' }] } });
+    expect((await getPublishedPostUrl('post-1')).url).toBeNull();
   });
 });

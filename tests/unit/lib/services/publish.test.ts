@@ -88,6 +88,18 @@ describe('publishContent (now)', () => {
     expect(item().status).toBe('published');
   });
 
+  it('guarda la URL pública que da Zernio y la devuelve para «Ver publicado»', async () => {
+    zernio.publishPost.mockResolvedValueOnce({
+      post_id: 'zp-1', status: 'published', platform_post_id: '1789',
+      platform_post_url: 'https://www.instagram.com/p/AbC123/',
+    });
+
+    const out = await publishContent(strict, { itemId: ITEM, accountIds: [ACC], mode: 'now' });
+
+    expect(out.body.results[0].post_url).toBe('https://www.instagram.com/p/AbC123/');
+    expect(posts()[0].platform_post_url).toBe('https://www.instagram.com/p/AbC123/');
+  });
+
   it('manda a Zernio un request_id estable por cuenta', async () => {
     await publishContent(strict, { itemId: ITEM, accountIds: [ACC, ACC_2], mode: 'now', requestIdBase: 'act-1' });
 

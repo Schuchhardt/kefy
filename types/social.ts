@@ -76,6 +76,8 @@ export interface ZernioPublishPayload {
 export interface ZernioPublishResult {
   post_id:           string;
   platform_post_id:  string | null;
+  /** URL pública del post en la red (solo http/https); null si aún no la hay. */
+  platform_post_url: string | null;
   status:            'published' | 'scheduled' | 'pending';
   published_at:      string | null;
   scheduled_at:      string | null;

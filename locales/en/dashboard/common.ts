@@ -52,6 +52,10 @@ const en: DashboardCommonCopy = {
     later: 'Later',
     remove: (item: string) => `Remove ${item}`,
     add: 'Add',
+    viewPublished: 'View post',
+    viewPublishedOn: (network: string) => `View post on ${network}`,
+    viewOn: (network: string) => `View on ${network}`,
+    opensInNewTab: 'opens in a new tab',
   },
   errors: {
     generic: 'Something went wrong. Please try again.',

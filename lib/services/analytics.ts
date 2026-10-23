@@ -14,6 +14,7 @@ import { reportError } from '@/lib/observability';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError } from '@/lib/services/errors';
 import { pLimit } from '@/lib/services/concurrency';
+import { fillMissingPostUrls } from '@/lib/services/post-urls';
 
 export type AnalyticsScope = 'org' | 'brand';
 
@@ -214,6 +215,8 @@ export interface PostPerformanceItem {
   platform: string | null;
   published_at: string | null;
   zernio_post_id: string | null;
+  /** URL pública del post en su red, para «Ver publicado». */
+  post_url: string | null;
   content: {
     id: string | null;
     channel: string | null;
@@ -271,6 +274,7 @@ export async function listPostPerformance(
       id,
       published_at,
       zernio_post_id,
+      platform_post_url,
       kefy_social_accounts!inner ( platform, brand_id ),
       kefy_content_items!inner ( id, channel, body, image_url ),
       kefy_post_metrics ( id, measured_at, impressions, reach, likes, comments, shares, clicks, saves, engagement_rate )
@@ -335,6 +339,7 @@ export async function listPostPerformance(
       platform:          account?.platform ?? null,
       published_at:      post.published_at,
       zernio_post_id:    post.zernio_post_id,
+      post_url:          post.platform_post_url ?? null,
       content: {
         id:           content?.id ?? null,
         channel:      content?.channel ?? null,
@@ -363,6 +368,13 @@ export async function listPostPerformance(
       sort === 'impressions' ? i.latest_metrics?.impressions ?? -1 : i.latest_metrics?.engagement_rate ?? -1;
     items = items.sort((a, b) => value(b) - value(a)).slice(offset, offset + limit);
   }
+
+  // Solo la página que se devuelve: completar URLs de toda la ventana de orden
+  // haría hasta 500 consultas a Zernio.
+  const withUrls = await fillMissingPostUrls(items.map((i) => ({
+    ...i, id: i.scheduled_post_id, platform_post_url: i.post_url,
+  })));
+  items = withUrls.map(({ id: _id, platform_post_url, ...i }) => ({ ...i, post_url: platform_post_url ?? null }));
 
   return {
     data:  items,

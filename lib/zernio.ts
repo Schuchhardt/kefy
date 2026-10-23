@@ -271,6 +271,7 @@ export async function publishPost(
         status:           string;
         platformPostId?:  string;
         platformPostUrl?: string;
+        publishedUrl?:    string;
         publishedAt?:     string;
       }>;
     };
@@ -294,9 +295,42 @@ export async function publishPost(
   return {
     post_id:          raw.post._id,
     platform_post_id: platformEntry?.platformPostId ?? null,
+    platform_post_url: safePostUrl(platformEntry?.platformPostUrl ?? platformEntry?.publishedUrl),
     status:           mappedStatus,
     published_at:     platformEntry?.publishedAt ?? (payload.scheduled_at ? null : new Date().toISOString()),
     scheduled_at:     raw.post.scheduledFor ?? null,
+  };
+}
+
+/**
+ * URL pública de un post solo si es http(s): termina en el `href` de un botón
+ * y no puede ser `javascript:` ni nada parecido.
+ */
+export function safePostUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * URL pública y id nativo de un post ya publicado (`GET /posts/{id}`). Cada
+ * post de Kefy va a una sola cuenta, así que basta el primer `platforms[]`.
+ * `url` es null mientras la red no la expone (TikTok tarda unos minutos).
+ */
+export async function getPublishedPostUrl(
+  zernioPostId: string,
+): Promise<{ url: string | null; platform_post_id: string | null }> {
+  const raw = await zernioFetch<{
+    post?: { platforms?: Array<{ platformPostId?: string; platformPostUrl?: string; publishedUrl?: string }> };
+  }>('GET', `/posts/${encodeURIComponent(zernioPostId)}`);
+  const entry = raw.post?.platforms?.find((p) => p.platformPostUrl || p.publishedUrl) ?? raw.post?.platforms?.[0];
+  return {
+    url:              safePostUrl(entry?.platformPostUrl ?? entry?.publishedUrl),
+    platform_post_id: entry?.platformPostId ?? null,
   };
 }
 

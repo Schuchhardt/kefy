@@ -58,6 +58,11 @@ const es = {
     later: 'Más tarde',
     remove: (item: string) => `Quitar ${item}`,
     add: 'Añadir',
+    // «Ver publicado»: abre el post en la red donde salió (ViewPublishedLink).
+    viewPublished: 'Ver publicado',
+    viewPublishedOn: (network: string) => `Ver publicado en ${network}`,
+    viewOn: (network: string) => `Ver en ${network}`,
+    opensInNewTab: 'se abre en una pestaña nueva',
   },
   errors: {
     generic: 'Algo salió mal. Inténtalo de nuevo.',
