@@ -418,6 +418,11 @@ test.describe('API keys y MCP en Ajustes', () => {
     const mcpUrl = `${new URL(baseURL!).origin}/api/mcp`;
     await expect(page.getByText(mcpUrl, { exact: true })).toBeVisible({ timeout: 15000 });
     const tab = (name: string) => page.getByRole('tab', { name, exact: true });
+    // claude.ai va primero: se conecta con OAuth, sin key ni comando.
+    await expect(tab('claude.ai')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByText('Añadir conector personalizado', { exact: false })).toBeVisible();
+
+    await tab('Claude Code').click();
     await expect(tab('Claude Code')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByText(`claude mcp add --transport http kefy ${mcpUrl}`, { exact: false })).toBeVisible();
 

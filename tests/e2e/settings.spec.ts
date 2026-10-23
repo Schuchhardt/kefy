@@ -101,11 +101,9 @@ test.describe('Ajustes y cuentas sociales', () => {
   // ─── Perfil ────────────────────────────────────────────────────────────────
 
   test('muestra el formulario de edición de perfil', async ({ authenticatedPage: page }) => {
-    await page.goto('/es/dashboard/settings');
-    // Buscar campos de nombre o email
-    const nameOrEmailInput = page.getByRole('textbox').first();
-    if (await nameOrEmailInput.isVisible()) {
-      await expect(nameOrEmailInput).toBeVisible();
-    }
+    // El perfil vive en su propia página, no en Ajustes.
+    await page.goto('/es/dashboard/profile');
+    await expect(page.getByLabel('Nombre', { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('textbox', { name: /Email|Correo/i })).toBeDisabled();
   });
 });

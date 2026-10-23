@@ -20,6 +20,10 @@ const STARTER = {
   ],
 };
 
+// Con la suite completa en paralelo el segundo por defecto de findBy/waitFor no
+// alcanza: el flujo encadena varias peticiones (texto y luego 3 imágenes).
+const WAIT = { timeout: 5000 };
+
 let starterResponse: () => Response;
 const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
@@ -42,7 +46,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('OnboardingFlow', () => {
   it('dice cuántos créditos usa antes de gastar (13 con web, 12 sin ella)', async () => {
     render(<OnboardingFlow lang="es" />);
-    expect(await screen.findByText('Usa unos 12 créditos (te quedan 150 este mes).')).toBeInTheDocument();
+    expect(await screen.findByText('Usa unos 12 créditos (te quedan 150 este mes).', {}, WAIT)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Web de tu negocio'), { target: { value: 'cafeandes.cl' } });
     expect(screen.getByText('Usa unos 13 créditos (te quedan 150 este mes).')).toBeInTheDocument();
   });
@@ -50,7 +54,7 @@ describe('OnboardingFlow', () => {
   it('sin web ni descripción no envía nada', async () => {
     render(<OnboardingFlow lang="es" />);
     fireEvent.click(screen.getByRole('button', { name: 'Crear mis 3 posts' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Pega tu web o describe tu negocio en una frase.');
+    expect(await screen.findByRole('alert', {}, WAIT)).toHaveTextContent('Pega tu web o describe tu negocio en una frase.');
     expect(fetchMock.mock.calls.some(([u]) => String(u) === '/api/onboarding/starter')).toBe(false);
   });
 
@@ -59,9 +63,9 @@ describe('OnboardingFlow', () => {
     fireEvent.change(screen.getByLabelText('Tu negocio en una frase'), { target: { value: 'Café de especialidad' } });
     fireEvent.click(screen.getByRole('button', { name: 'Crear mis 3 posts' }));
 
-    expect(await screen.findByRole('heading', { name: 'Tus primeros 3 posts' })).toHaveFocus();
+    expect(await screen.findByRole('heading', { name: 'Tus primeros 3 posts' }, WAIT)).toHaveFocus();
     expect(screen.getByText('Somos Café Andes')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(3), WAIT);
     const imageCalls = fetchMock.mock.calls.filter(([u]) => String(u) === '/api/content/image');
     expect(imageCalls.map(([, i]) => JSON.parse(String((i as RequestInit).body)).itemId)).toEqual(['p1', 'p2', 'p3']);
 
