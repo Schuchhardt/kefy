@@ -92,6 +92,18 @@ export function filmIntroOffset(scene: FilmScene, index: number, durationFrames:
   return overlapFor(durationFrames);
 }
 
+/** Más lento que esto, un clip animado se nota en cámara lenta forzada. */
+export const CLIP_MIN_PLAYBACK_RATE = 0.6;
+
+/**
+ * Velocidad de un clip para que cubra su plano. Un clip con audio (lipsync o
+ * clip que dice la línea) va siempre a 1: ralentizarlo desfasaría la voz.
+ */
+export function clipPlaybackRate(clipFrames: number, durationFrames: number, hasAudio: boolean): number {
+  if (hasAudio || clipFrames >= durationFrames) return 1;
+  return Math.max(CLIP_MIN_PLAYBACK_RATE, clipFrames / durationFrames);
+}
+
 /**
  * Agrupa las palabras en «páginas» cortas de subtítulo: hasta
  * CAPTION_MAX_WORDS, cortando antes en una pausa de puntuación.
@@ -285,22 +297,27 @@ function FilmShot({ scene, durationFrames, introOffset, isFirst, fadeOut, theme,
   let visual: React.ReactNode;
   if (scene.visual.type === 'video') {
     // El clip corre una sola vez. Repetirlo con <Loop> se notaba como un salto
-    // y, en un clip con lipsync, repetía las primeras sílabas de la línea. Si
-    // termina antes que el plano, queda congelado su último cuadro (mudo) sobre
-    // la foto del plano.
+    // y, en un clip con lipsync, repetía las primeras sílabas de la línea.
+    // Un clip mudo más corto que el plano (5 s de clip para 6,5 s de voz) se
+    // ralentiza hasta cubrirlo: congelar su último cuadro se veía como un
+    // video pegado antes del corte. Solo si haría falta ir más lento que
+    // CLIP_MIN_PLAYBACK_RATE queda congelado el resto, con la cámara de la
+    // foto encima para que no se vea quieto.
     const clipFrames = Math.max(1, Math.round(scene.visual.clip_seconds * fps));
     const { src, has_audio: hasAudio, poster } = scene.visual;
+    const rate = clipPlaybackRate(clipFrames, durationFrames, hasAudio);
+    const playedFrames = Math.ceil(clipFrames / rate);
     visual = (
       <>
         {poster && <AbsoluteFill>{photo(poster)}</AbsoluteFill>}
-        <Sequence durationInFrames={Math.min(clipFrames, durationFrames)} layout="none">
+        <Sequence durationInFrames={Math.min(playedFrames, durationFrames)} layout="none">
           <AbsoluteFill>
-            <OffthreadVideo src={src} muted={!hasAudio} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <OffthreadVideo src={src} muted={!hasAudio} playbackRate={rate} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </AbsoluteFill>
         </Sequence>
-        {clipFrames < durationFrames && (
-          <Sequence from={clipFrames} layout="none">
-            <AbsoluteFill>
+        {playedFrames < durationFrames && (
+          <Sequence from={playedFrames} layout="none">
+            <AbsoluteFill style={{ transform: camTransform, transformOrigin: 'center' }}>
               <Freeze frame={Math.max(0, clipFrames - 1)}>
                 <OffthreadVideo src={src} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </Freeze>

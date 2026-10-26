@@ -36,7 +36,7 @@ import { resolveFilmTheme, voiceAccent, type VideoBrandKit } from '@/lib/video/b
 import { isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
 import type { VideoToolName } from '@/lib/video/tools/types';
 import {
-  advanceVideoJob, cancelVideoJob, createVideoJob, latestJobFor, snapshotOf, VideoJobConflictError,
+  advanceVideoJob, cancelVideoJob, createVideoJob, latestJobFor, recentMusicTracks, snapshotOf, VideoJobConflictError,
   type JobRow, type RenderContext, type StepRow, type VideoJobSnapshot,
 } from '@/lib/video/engine';
 
@@ -374,11 +374,13 @@ export async function produceVideo(
   const refund = await chargeOrThrow(ctx, 'video', ROUTE);
 
   // Diseño y música de marca, resueltos ahora: editar el Brand Kit a mitad
-  // de la producción no cambia un video que ya se está haciendo.
+  // de la producción no cambia un video que ya se está haciendo. La música
+  // evita las pistas de los últimos videos de la marca.
+  const recentTracks = await recentMusicTracks(db, ctx.auth.orgId, target.brandId);
   const renderContext: RenderContext = {
     plan:       ctx.auth.plan,
     theme:      resolveFilmTheme(kit),
-    musicTrack: pickMusicTrack(target.id, [script.music_mood, ...(kit?.tone ?? [])].filter(Boolean).join(' ')),
+    musicTrack: pickMusicTrack(target.id, [script.music_mood, ...(kit?.tone ?? [])].filter(Boolean).join(' '), recentTracks),
   };
 
   // El trabajo viejo se cancela (y devuelve lo que no llegó a hacer) antes de
