@@ -226,12 +226,25 @@ tabla nueva). Sin `PLATFORM_ALERT_EMAIL` o `RESEND_API_KEY`, no hace nada.
 
 ### Autopilot
 
-«Ejecutar ahora» (botón de la UI, `run_autopilot_now` por API / MCP / chat)
-cobra 1 crédito de texto por regla con `chargeOrThrow` y lo devuelve si la
-ejecución falla (`lib/services/autopilot.ts`). La ejecución programada del
-cron **todavía no cobra**: si cobrara, un autopilot se pararía en silencio al
-acabarse los créditos, y eso necesita antes un aviso en la UI. Es deuda
-conocida.
+Cada ejecución genera la pieza con su media por los mismos servicios que la
+UI (`lib/services/autopilot.ts`), y esos servicios cobran cada operación con
+`chargeOrThrow`: un post con imagen son 4 créditos (texto + imagen), un
+carrusel 1 + 3 por slide y un reel lo que cuesta su producción (~55 con 5
+planos, docs/video-pipeline.md). Antes solo se generaba texto y se publicaba
+sin media; TikTok e Instagram lo convertían en una imagen con puro texto.
+
+**El cron también cobra.** Generar imágenes y videos sin pasar por la guardia
+sería gasto ilimitado. Antes de gastar nada, la ejecución mira la suscripción
+y que el saldo alcance para ese formato (`preflight`). Si no alcanza, no genera
+nada, la ejecución queda en `kefy_autopilot_runs` como fallida con el motivo y
+la regla sigue con su calendario. «Ejecutar ahora» responde 402 / 429 y no
+adelanta la regla. Falta un aviso en la UI cuando una ejecución programada se
+salta por créditos: es deuda conocida.
+
+Una ejecución reclama su hueco (`next_run_at`) antes de gastar, con un
+`UPDATE … WHERE next_run_at = <el leído>`. Así dos vueltas del cron no generan
+la misma regla dos veces, y una ejecución fallida no se reintenta cada 5
+minutos gastando otra vez (antes, un fallo dejaba `next_run_at` en el pasado).
 
 ### Respuestas automáticas (engagement)
 

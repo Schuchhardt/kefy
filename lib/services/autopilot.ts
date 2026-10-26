@@ -10,18 +10,28 @@
 // Antes la creación no guardaba brand_id (la lista filtraba por él, así que
 // una regla nueva no aparecía) y la ejecución leía el kit por org_id.
 //
-// Gasto: una ejecución pedida por una persona (botón «Ejecutar ahora», API,
-// MCP, chat) cobra 1 crédito de texto por regla con chargeOrThrow. El cron no
-// cobra todavía (decisión de producto pendiente: si cobrara, el autopilot se
-// pararía en silencio al acabarse los créditos).
+// Cada ejecución genera la pieza con su media (post con imagen, carrusel o
+// reel en video) por los mismos servicios que la UI, y la publica. Ver la
+// sección «Ejecución».
+//
+// Gasto: los servicios cobran cada operación (texto, imágenes, video) con la
+// guardia de siempre, también en el cron: sin eso, el autopilot generaría
+// imágenes y videos sin límite. Antes de gastar se comprueba que alcancen la
+// suscripción y los créditos; si no, la ejecución queda registrada como
+// fallida y la regla sigue con su calendario.
 
 import { z } from 'zod';
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
-import { generateContentText } from '@/lib/ai';
-import { publishPost } from '@/lib/zernio';
-import type { ServiceContext } from '@/lib/services/context';
-import { ServiceError, chargeOrThrow, msg } from '@/lib/services/errors';
+import { checkSubscription } from '@/lib/subscription';
+import { costOf, getUsage } from '@/lib/usage';
+import { serviceContext, type ServiceContext } from '@/lib/services/context';
+import { ServiceError, msg } from '@/lib/services/errors';
+import { generateCarousel, generateImageForItem, generateTextPost } from '@/lib/services/content';
+import { REEL_SCENE_COUNT_MAX, REEL_SCENE_COUNT_MIN, generateReel } from '@/lib/services/reel';
+import { produceVideo } from '@/lib/services/video';
+import { publishContent } from '@/lib/services/publish';
+import type { JWTPayload } from '@/types/auth';
 import type { Frequency } from '@/types/automations';
 
 const ROUTE = 'lib/services/autopilot';
@@ -352,149 +362,455 @@ export async function deleteAutopilotRule(ctx: ServiceContext, ruleId: string): 
 }
 
 // ─── Ejecución ───────────────────────────────────────────────────────────────
+//
+// Cada ejecución produce una pieza con media, por los mismos servicios que la
+// UI: un post lleva su imagen, un carrusel una imagen por slide y un reel es un
+// video producido por el pipeline (docs/video-pipeline.md). Antes solo se
+// generaba texto y se programaba sin media: TikTok e Instagram lo publicaban
+// como una imagen con puro texto.
+//
+// El formato sale de la etiqueta del tema elegido ([REEL 30s], [CARRUSEL 5
+// slides], [POST]). Sin etiqueta: reel si todas las cuentas son de video
+// (TikTok, YouTube) y post con imagen en el resto.
+//
+// Un reel tarda minutos en producirse: la ejecución deja la pieza esperando
+// (`metadata.autopilot_publish`) y el cron la publica cuando el video está
+// listo (publishReadyAutopilotReels).
+
+export const AUTOPILOT_FORMATS = ['post', 'carousel', 'reel'] as const;
+export type AutopilotFormat = (typeof AUTOPILOT_FORMATS)[number];
+
+/** Redes donde un post sin video no tiene sentido: el formato por defecto es reel. */
+const VIDEO_FIRST_PLATFORMS = new Set(['tiktok', 'youtube']);
+const FORMAT_TAG = /^\s*\[([^\]]*)\]\s*/;
+/** Un plano de reel dura ~5 s: «[REEL 30s]» son 6 planos. */
+const SECONDS_PER_SCENE = 5;
+/** Más cerca que esto del hueco, se publica ya en vez de programar. */
+const MIN_SCHEDULE_LEAD_MS = 60 * 1000;
+/** Un reel que no terminó de producirse en este tiempo no se publica. */
+const REEL_WAIT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+/** El cron no empieza otra regla pasado esto: generar media tarda (maxDuration 300 s). */
+const CRON_RUN_BUDGET_MS = 200 * 1000;
+const MAX_PENDING_REELS_PER_RUN = 10;
+
+const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(n)));
+
+export interface AutopilotTopic {
+  /** null: el tema no lo dice; decide la red (defaultAutopilotFormat). */
+  format: AutopilotFormat | null;
+  topic: string;
+  slideCount?: number;
+  sceneCount?: number;
+}
+
+/** «[REEL 30s] Tip…» → { format: 'reel', topic: 'Tip…', sceneCount: 6 }. */
+export function parseAutopilotTopic(raw: string): AutopilotTopic {
+  const m = FORMAT_TAG.exec(raw);
+  if (!m) return { format: null, topic: raw.trim() };
+  const tag = m[1].toLowerCase();
+  const topic = raw.slice(m[0].length).trim() || raw.trim();
+  const num = (re: RegExp) => {
+    const n = re.exec(tag);
+    return n ? Number(n[1]) : undefined;
+  };
+
+  if (/\b(reels?|videos?|shorts?)\b/.test(tag)) {
+    const seconds = num(/(\d+)\s*(?:s|seg|sec)/);
+    return {
+      format: 'reel',
+      topic,
+      sceneCount: seconds ? clamp(seconds / SECONDS_PER_SCENE, REEL_SCENE_COUNT_MIN, REEL_SCENE_COUNT_MAX) : undefined,
+    };
+  }
+  if (/\b(carrusel|carousel)\b/.test(tag)) {
+    const slides = num(/(\d+)/);
+    return { format: 'carousel', topic, slideCount: slides ? clamp(slides, 3, 10) : undefined };
+  }
+  if (/\b(post|imagen|image|foto|photo)\b/.test(tag)) return { format: 'post', topic };
+  // Una etiqueta que no es de formato es parte del tema.
+  return { format: null, topic: raw.trim() };
+}
+
+export function defaultAutopilotFormat(platforms: string[]): AutopilotFormat {
+  return platforms.length > 0 && platforms.every((p) => VIDEO_FIRST_PLATFORMS.has(p)) ? 'reel' : 'post';
+}
+
+/**
+ * Créditos que cuesta una ejecución en ese formato. El reel es la estimación
+ * del plan con animación `key` (docs/video-pipeline.md, «Costo») más el guion.
+ */
+export function estimateAutopilotCredits(
+  format: AutopilotFormat,
+  opts: { slideCount?: number; sceneCount?: number } = {},
+): number {
+  if (format === 'post') return costOf('text') + costOf('image');
+  if (format === 'carousel') return costOf('text') + costOf('image') * (opts.slideCount ?? 5);
+  const scenes = opts.sceneCount ?? 5;
+  return costOf('text')
+    + scenes * (costOf('image') + costOf('voice'))
+    + Math.min(3, scenes) * costOf('animation')
+    + costOf('video');
+}
+
+type AccountRow = { id: string; zernio_account_id: string | null; platform: string };
+
+async function activeAccounts(db: Db, rule: AutopilotRuleRow): Promise<AccountRow[]> {
+  if (rule.social_account_ids.length === 0) return [];
+  let q = db
+    .from('kefy_social_accounts')
+    .select('id, zernio_account_id, platform')
+    .in('id', rule.social_account_ids)
+    .eq('org_id', rule.org_id)
+    .eq('status', 'active');
+  if (rule.brand_id) q = q.eq('brand_id', rule.brand_id);
+  const { data } = await q;
+  return (data ?? []) as AccountRow[];
+}
+
+/**
+ * Lo más caro que puede costar una ejecución de la regla (cada una elige un
+ * tema al azar). Es lo que la tarjeta de confirmación del chat anuncia.
+ */
+export async function estimateAutopilotRuleCredits(rule: AutopilotRuleRow): Promise<number> {
+  const db = createSupabaseServer();
+  const fallback = defaultAutopilotFormat((await activeAccounts(db, rule)).map((a) => a.platform));
+  const topics = rule.topic_hints.length > 0 ? rule.topic_hints.map(parseAutopilotTopic) : [parseAutopilotTopic(rule.name)];
+  return Math.max(...topics.map((t) => estimateAutopilotCredits(t.format ?? fallback, t)));
+}
+
+/**
+ * Identidad con la que corre una regla. Una persona («Ejecutar ahora») usa la
+ * suya; el cron, la de quien creó la regla (o el owner) con el plan de la
+ * organización, como lib/engagement-executor. Los servicios cobran a la org
+ * con la misma guardia que la UI (suscripción → rate limit → créditos).
+ */
+async function ruleContext(db: Db, rule: AutopilotRuleRow, base?: ServiceContext): Promise<ServiceContext> {
+  const { data: kit } = rule.brand_id
+    ? await db.from('kefy_brand_kits').select('language').eq('brand_id', rule.brand_id).maybeSingle()
+    : { data: null };
+  const language: 'es' | 'en' = kit?.language === 'en' ? 'en' : kit?.language === 'es' ? 'es' : (base?.language ?? 'es');
+
+  if (base) return { ...base, brandId: rule.brand_id ?? base.brandId, language };
+
+  const { data: org } = await db.from('kefy_organizations').select('plan').eq('id', rule.org_id).maybeSingle();
+  const plan = (org?.plan as JWTPayload['plan'] | undefined) ?? 'starter';
+
+  let userId = rule.created_by;
+  if (!userId) {
+    const { data: owner } = await db
+      .from('kefy_org_memberships')
+      .select('user_id')
+      .eq('org_id', rule.org_id)
+      .eq('role', 'owner')
+      .limit(1)
+      .maybeSingle();
+    userId = (owner?.user_id as string | undefined) ?? null;
+  }
+  if (!userId) throw new Error('La organización no tiene owner con quien ejecutar la regla');
+
+  return serviceContext({ userId, orgId: rule.org_id, role: 'owner', plan }, rule.brand_id ?? '', language, {
+    brandScope: 'org', source: 'route',
+  });
+}
+
+/**
+ * ¿Alcanza la suscripción y el saldo para esta ejecución? Se mira antes de
+ * gastar nada: un post a medias (texto sin imagen) es justo lo que no se
+ * quiere publicar.
+ */
+async function preflight(ctx: ServiceContext, credits: number): Promise<ServiceError | null> {
+  const sub = await checkSubscription(ctx.auth.orgId, ctx.language);
+  if (!sub.ok) {
+    return new ServiceError(sub.status === 402 ? 'subscription_required' : 'unavailable', sub.status, String(sub.body.error), sub.body);
+  }
+  const usage = await getUsage(ctx.auth.orgId, ctx.auth.plan);
+  if (usage.remaining < credits) {
+    const message = msg(ctx.language,
+      `Esta publicación necesita ${credits} créditos y te quedan ${usage.remaining}.`,
+      `This post needs ${credits} credits and you have ${usage.remaining} left.`);
+    return new ServiceError('credits_exhausted', 429, message, {
+      error: message, creditsExhausted: true, required: credits, remaining: usage.remaining,
+    });
+  }
+  return null;
+}
+
+/**
+ * Reclama el hueco: adelanta next_run_at solo si nadie lo hizo antes. Dos
+ * vueltas del cron que se pisan no generan la misma regla dos veces, y una
+ * ejecución fallida no se reintenta cada 5 minutos gastando otra vez.
+ */
+async function claimSlot(db: Db, rule: AutopilotRuleRow, now: Date): Promise<boolean> {
+  const nextRun = computeNextRun(rule.frequency, rule.day_of_week ?? null, rule.time_of_day, rule.timezone, now);
+  let q = db
+    .from('kefy_autopilot_rules')
+    .update({ last_run_at: now.toISOString(), next_run_at: nextRun.toISOString() })
+    .eq('id', rule.id);
+  q = rule.next_run_at ? q.eq('next_run_at', rule.next_run_at) : q.is('next_run_at', null);
+  const { data } = await q.select('id');
+  return (data ?? []).length > 0;
+}
+
+async function mergeItemMetadata(db: Db, itemId: string, patch: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+  const { data } = await db.from('kefy_content_items').select('metadata').eq('id', itemId).maybeSingle();
+  const metadata = { ...((data?.metadata as Record<string, unknown> | null) ?? {}), ...patch };
+  await db.from('kefy_content_items').update({ metadata, ...extra }).eq('id', itemId);
+}
+
+/** Publica la pieza en el hueco (o ya, si el hueco pasó). Devuelve los ids programados. */
+async function publishToAccounts(
+  ctx: ServiceContext,
+  itemId: string,
+  format: AutopilotFormat,
+  accountIds: string[],
+  slot: string | null,
+): Promise<string[]> {
+  const scheduled = !!slot && new Date(slot).getTime() > Date.now() + MIN_SCHEDULE_LEAD_MS;
+  const { body } = await publishContent(ctx, {
+    itemId,
+    accountIds,
+    format,
+    mode: scheduled ? 'schedule' : 'now',
+    scheduledAt: scheduled ? new Date(slot!).toISOString() : undefined,
+  });
+  const ok = body.results.filter((r) => r.status !== 'failed');
+  if (ok.length === 0) throw new Error(body.results.find((r) => r.error)?.error ?? 'Publish failed');
+  return ok.map((r) => r.scheduled_post_id).filter((id): id is string => !!id);
+}
+
+/** Genera la pieza con su media. Devuelve el id; un reel queda produciéndose. */
+async function produceItem(ctx: ServiceContext, rule: AutopilotRuleRow, pick: AutopilotTopic, format: AutopilotFormat): Promise<string> {
+  const topic = rule.tone ? `${pick.topic}\n(${msg(ctx.language, 'Tono', 'Tone')}: ${rule.tone})` : pick.topic;
+  const channel = rule.channel;
+
+  if (format === 'post') {
+    const { itemId, result } = await generateTextPost(ctx, {
+      topic, channel, model: rule.ai_model === 'gpt' ? 'gpt' : 'claude',
+    });
+    if (!itemId) throw new Error('Failed to save content item');
+    try {
+      // El mismo prompt que usa la UI para la imagen de un post: su texto.
+      await generateImageForItem(ctx, { itemId, prompt: result.body.slice(0, 400) || pick.topic });
+    } catch (err) {
+      throw withItem(err, itemId);
+    }
+    return itemId;
+  }
+
+  if (format === 'carousel') {
+    const out = await generateCarousel(ctx, { topic, channel, slideCount: pick.slideCount });
+    if (!out.itemId) throw new Error('Failed to save carousel');
+    // Slides sin imagen se publicarían como texto sobre un fondo: no.
+    if (out.slides.some((s) => !s.image_url)) {
+      throw withItem(new Error(msg(ctx.language,
+        'El carrusel quedó con slides sin imagen; queda como borrador.',
+        'Some carousel slides have no image; it stays as a draft.')), out.itemId);
+    }
+    return out.itemId;
+  }
+
+  const out = await generateReel(ctx, { topic, channel, scene_count: pick.sceneCount });
+  const itemId = out.variants[0]!.itemId;
+  try {
+    await produceVideo(ctx, { itemId });
+  } catch (err) {
+    throw withItem(err, itemId);
+  }
+  return itemId;
+}
+
+/** Un fallo que deja una pieza a medias: se anota en la ejecución para encontrarla. */
+function withItem(err: unknown, itemId: string): Error {
+  const e = err instanceof Error ? err : new Error(String(err));
+  (e as Error & { itemId?: string }).itemId = itemId;
+  return e;
+}
 
 export interface AutopilotRunResult {
   rule_id: string;
   rule_name: string;
   status: 'success' | 'failed';
+  format?: AutopilotFormat;
   content_item_id?: string;
   scheduled_post_ids?: string[];
+  /** Reel: se publica cuando el video esté listo. */
+  pending_video?: boolean;
   error?: string;
 }
 
+export interface ExecuteOptions {
+  /** Contexto de la persona que lo pidió. Sin él, es el cron. */
+  ctx?: ServiceContext;
+  /** Si no alcanzan los créditos o la suscripción, lanzar en vez de registrar el fallo. */
+  throwIfBlocked?: boolean;
+}
+
 /**
- * Ejecuta una regla: genera el post con el brand kit de su marca, lo guarda en
- * esa marca y lo programa en sus cuentas activas. Registra la ejecución en
- * kefy_autopilot_runs y adelanta next_run_at. No cobra: quien llama decide.
+ * Ejecuta una regla: genera la pieza con su media en la marca de la regla, la
+ * publica en sus cuentas activas para el hueco de la regla (un reel, cuando
+ * su video esté listo) y adelanta next_run_at. Registra la ejecución en
+ * kefy_autopilot_runs. Cobra por los servicios, como la UI.
  */
 export async function executeAutopilotRule(
   db: Db,
   rule: AutopilotRuleRow,
   now: Date = new Date(),
+  opts: ExecuteOptions = {},
 ): Promise<AutopilotRunResult> {
-  try {
-    const { data: brandKit } = rule.brand_id
-      ? await db
-          .from('kefy_brand_kits')
-          .select('tone, tagline, industry, notes')
-          .eq('brand_id', rule.brand_id)
-          .maybeSingle()
-      : { data: null };
-
-    const topicHints: string[] = Array.isArray(rule.topic_hints) ? rule.topic_hints : [];
-    const topicHint = topicHints.length > 0
-      ? topicHints[Math.floor(Math.random() * topicHints.length)]
-      : undefined;
-
-    const generated = await generateContentText({
-      channel: rule.channel,
-      model: rule.ai_model === 'gpt' ? 'gpt' : 'claude',
-      tone: rule.tone ? [rule.tone] : (brandKit?.tone ?? undefined),
-      topic: topicHint ?? rule.name,
-      tagline: brandKit?.tagline ?? undefined,
-      extraCtx: brandKit?.notes ?? undefined,
+  const base = { rule_id: rule.id, rule_name: rule.name };
+  const fail = async (message: string, itemId?: string): Promise<AutopilotRunResult> => {
+    await db.from('kefy_autopilot_runs').insert({
+      rule_id: rule.id, org_id: rule.org_id, brand_id: rule.brand_id,
+      content_item_id: itemId ?? null, status: 'failed', error_message: message,
     });
+    return { ...base, status: 'failed', content_item_id: itemId, error: message };
+  };
 
-    const { data: contentItem, error: contentError } = await db
-      .from('kefy_content_items')
-      .insert({
-        org_id: rule.org_id,
-        brand_id: rule.brand_id,
-        channel: rule.channel,
-        body: generated.body,
-        hashtags: generated.hashtags,
-        status: 'approved',
-        metadata: { autopilot: true, rule_id: rule.id, model: rule.ai_model },
-        created_by: null,
-      })
-      .select('id')
-      .single();
-    if (contentError || !contentItem) throw new Error(contentError?.message ?? 'Failed to create content item');
+  let ctx: ServiceContext;
+  let accounts: AccountRow[];
+  try {
+    ctx = await ruleContext(db, rule, opts.ctx);
+    accounts = await activeAccounts(db, rule);
+  } catch (err) {
+    reportError(err, { route: ROUTE, service: 'autopilot', extra: { ruleId: rule.id, orgId: rule.org_id } });
+    return { ...base, status: 'failed', error: err instanceof Error ? err.message : 'Unknown error' };
+  }
 
-    let accountsQ = db
-      .from('kefy_social_accounts')
-      .select('id, zernio_account_id, platform')
-      .in('id', rule.social_account_ids)
-      .eq('org_id', rule.org_id)
-      .eq('status', 'active');
-    if (rule.brand_id) accountsQ = accountsQ.eq('brand_id', rule.brand_id);
-    const { data: accounts } = await accountsQ;
+  const topicHints: string[] = Array.isArray(rule.topic_hints) ? rule.topic_hints : [];
+  const pick = parseAutopilotTopic(
+    topicHints.length > 0 ? topicHints[Math.floor(Math.random() * topicHints.length)] : rule.name,
+  );
+  const format = pick.format ?? defaultAutopilotFormat(accounts.map((a) => a.platform));
 
-    // Se programa para el hueco de la regla (next_run_at), también al
-    // ejecutarla a mano: «Ejecutar ahora» genera ya y adelanta el calendario.
-    const scheduledAt = rule.next_run_at ?? now.toISOString();
-    const scheduledPostIds: string[] = [];
-    for (const account of (accounts ?? []) as Array<{ id: string; zernio_account_id: string | null; platform: string }>) {
-      try {
-        const zResult = await publishPost({
-          account_id: account.zernio_account_id!,
-          platform: account.platform,
-          text: generated.body,
-          hashtags: generated.hashtags,
-          scheduled_at: scheduledAt,
-        });
+  const blocked = accounts.length === 0
+    ? new ServiceError('invalid_input', 422, msg(ctx.language,
+      'La regla no tiene cuentas activas donde publicar.', 'The rule has no active accounts to post to.'))
+    : await preflight(ctx, estimateAutopilotCredits(format, pick));
+  if (blocked && opts.throwIfBlocked) throw blocked;
 
-        const { data: sp } = await db
-          .from('kefy_scheduled_posts')
-          .insert({
-            org_id: rule.org_id,
-            brand_id: rule.brand_id,
-            content_item_id: contentItem.id,
-            social_account_id: account.id,
-            scheduled_at: scheduledAt,
-            zernio_post_id: zResult.post_id,
-            platform_post_id: zResult.platform_post_id ?? null,
-            status: 'scheduled',
-            created_by: null,
-          })
-          .select('id')
-          .single();
-        if (sp) scheduledPostIds.push(sp.id);
-      } catch (accountErr) {
-        reportError(accountErr, {
-          route: ROUTE, service: 'zernio', extra: { ruleId: rule.id, accountId: account.id },
-        });
-      }
+  // Se reclama el hueco antes de gastar: si otra vuelta ya lo tomó, nada.
+  const slot = rule.next_run_at;
+  if (!(await claimSlot(db, rule, now))) return { ...base, status: 'failed', error: 'Already running' };
+  if (blocked) return fail(blocked.message);
+
+  let itemId: string | undefined;
+  try {
+    itemId = await produceItem(ctx, rule, pick, format);
+    const autopilotMeta = { autopilot: true, rule_id: rule.id, model: rule.ai_model, autopilot_format: format };
+
+    if (format === 'reel') {
+      const { data: run } = await db.from('kefy_autopilot_runs').insert({
+        rule_id: rule.id, org_id: rule.org_id, brand_id: rule.brand_id,
+        content_item_id: itemId, scheduled_post_ids: [], status: 'success',
+      }).select('id').single();
+      await mergeItemMetadata(db, itemId, {
+        ...autopilotMeta,
+        autopilot_publish: {
+          status: 'waiting',
+          rule_id: rule.id,
+          run_id: (run as { id?: string } | null)?.id ?? null,
+          account_ids: accounts.map((a) => a.id),
+          scheduled_at: slot ?? now.toISOString(),
+          requested_at: now.toISOString(),
+        },
+      }, { status: 'approved' });
+      return { ...base, status: 'success', format, content_item_id: itemId, scheduled_post_ids: [], pending_video: true };
     }
 
-    await db.from('kefy_content_items').update({ status: 'scheduled' }).eq('id', contentItem.id);
-
-    const nextRun = computeNextRun(rule.frequency, rule.day_of_week ?? null, rule.time_of_day, rule.timezone, now);
-    await db
-      .from('kefy_autopilot_rules')
-      .update({ last_run_at: now.toISOString(), next_run_at: nextRun.toISOString() })
-      .eq('id', rule.id);
+    await mergeItemMetadata(db, itemId, autopilotMeta, { status: 'approved', content_type: format });
+    const scheduledPostIds = await publishToAccounts(ctx, itemId, format, accounts.map((a) => a.id), slot);
 
     await db.from('kefy_autopilot_runs').insert({
-      rule_id: rule.id,
-      org_id: rule.org_id,
-      brand_id: rule.brand_id,
-      content_item_id: contentItem.id,
-      scheduled_post_ids: scheduledPostIds,
-      status: 'success',
+      rule_id: rule.id, org_id: rule.org_id, brand_id: rule.brand_id,
+      content_item_id: itemId, scheduled_post_ids: scheduledPostIds, status: 'success',
     });
-
-    return {
-      rule_id: rule.id,
-      rule_name: rule.name,
-      status: 'success',
-      content_item_id: contentItem.id,
-      scheduled_post_ids: scheduledPostIds,
-    };
+    return { ...base, status: 'success', format, content_item_id: itemId, scheduled_post_ids: scheduledPostIds };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    reportError(err, { route: ROUTE, service: 'autopilot', extra: { ruleId: rule.id, orgId: rule.org_id } });
-
-    await db.from('kefy_autopilot_runs').insert({
-      rule_id: rule.id,
-      org_id: rule.org_id,
-      brand_id: rule.brand_id,
-      status: 'failed',
-      error_message: message,
-    });
-
-    return { rule_id: rule.id, rule_name: rule.name, status: 'failed', error: message };
+    if (!(err instanceof ServiceError && err.reported)) {
+      reportError(err, { route: ROUTE, service: 'autopilot', extra: { ruleId: rule.id, orgId: rule.org_id, format } });
+    }
+    return fail(message, itemId ?? (err as { itemId?: string }).itemId);
   }
+}
+
+type PendingPublish = {
+  status: 'waiting' | 'publishing' | 'done' | 'failed' | 'cancelled';
+  rule_id: string;
+  run_id: string | null;
+  account_ids: string[];
+  scheduled_at: string;
+  requested_at: string;
+  error?: string;
+};
+
+/**
+ * Publica los reels del autopilot cuyo video ya está listo, y cierra los que
+ * no van a estarlo (la producción falló o lleva demasiado). Lo llama el cron.
+ */
+export async function publishReadyAutopilotReels(now: Date = new Date()): Promise<AutopilotRunResult[]> {
+  const db = createSupabaseServer();
+  const { data } = await db
+    .from('kefy_content_items')
+    .select('id, org_id, render_status, video_url, metadata')
+    .eq('metadata->autopilot_publish->>status', 'waiting')
+    .limit(MAX_PENDING_REELS_PER_RUN);
+
+  const results: AutopilotRunResult[] = [];
+  for (const item of (data ?? []) as Array<{
+    id: string; org_id: string; render_status: string | null; video_url: string | null; metadata: Record<string, unknown>;
+  }>) {
+    const pending = item.metadata.autopilot_publish as PendingPublish;
+    const ready = item.render_status === 'ready' && !!item.video_url;
+    const timedOut = now.getTime() - new Date(pending.requested_at).getTime() > REEL_WAIT_TIMEOUT_MS;
+    if (!ready && item.render_status === 'rendering' && !timedOut) continue;
+
+    // Reclamo: solo una vuelta pasa de 'waiting' a 'publishing'.
+    const { data: claimed } = await db
+      .from('kefy_content_items')
+      .update({ metadata: { ...item.metadata, autopilot_publish: { ...pending, status: 'publishing' } } })
+      .eq('id', item.id)
+      .eq('metadata->autopilot_publish->>status', 'waiting')
+      .select('id');
+    if (!claimed?.length) continue;
+
+    const { data: rule } = await db.from('kefy_autopilot_rules').select('*').eq('id', pending.rule_id).maybeSingle();
+    const ruleRow = rule as AutopilotRuleRow | null;
+    const base = { rule_id: pending.rule_id, rule_name: ruleRow?.name ?? '', format: 'reel' as const, content_item_id: item.id };
+
+    const close = async (status: PendingPublish['status'], patch: { error?: string; scheduled_post_ids?: string[] }) => {
+      await mergeItemMetadata(db, item.id, { autopilot_publish: { ...pending, status, ...(patch.error ? { error: patch.error } : {}) } });
+      if (!pending.run_id) return;
+      await db.from('kefy_autopilot_runs').update(patch.error
+        ? { status: 'failed', error_message: patch.error }
+        : { scheduled_post_ids: patch.scheduled_post_ids ?? [] }).eq('id', pending.run_id);
+    };
+
+    if (!ruleRow) {
+      // La regla se borró mientras se producía: el video queda en la biblioteca.
+      await close('cancelled', { error: 'Rule deleted' });
+      continue;
+    }
+    if (!ready) {
+      const error = timedOut ? 'El video no terminó de producirse a tiempo' : 'La producción del video falló';
+      await close('failed', { error });
+      results.push({ ...base, status: 'failed', error });
+      continue;
+    }
+
+    try {
+      const ctx = await ruleContext(db, ruleRow);
+      const ids = await publishToAccounts(ctx, item.id, 'reel', pending.account_ids, pending.scheduled_at);
+      await close('done', { scheduled_post_ids: ids });
+      results.push({ ...base, status: 'success', scheduled_post_ids: ids });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Publish failed';
+      reportError(err, { route: ROUTE, service: 'zernio', extra: { itemId: item.id, ruleId: pending.rule_id } });
+      await close('failed', { error });
+      results.push({ ...base, status: 'failed', error });
+    }
+  }
+  return results;
 }
 
 export interface AutopilotRunSummary {
@@ -513,10 +829,10 @@ function summarize(results: AutopilotRunResult[]): AutopilotRunSummary {
  * reglas (como mucho MAX_MANUAL_RUN); sin ellos, las vencidas de la org.
  * Siempre activas, de la org, y de la marca con brandScope 'strict'.
  *
- * Cobra 1 crédito de texto por regla antes de generar y lo devuelve si la
- * ejecución falla. Si los créditos o la suscripción cortan a mitad, las
- * reglas que ya corrieron se conservan en el resultado; si cortan en la
- * primera, se lanza el error de la guardia (402 / 429).
+ * Cobra lo que cuesta cada formato (texto, imágenes, video) por los
+ * servicios. Antes de gastar mira que alcancen la suscripción y los créditos:
+ * si no alcanzan para la primera regla se lanza el error (402 / 429); para
+ * las siguientes, esas quedan como fallidas y las que corrieron se conservan.
  */
 export async function runAutopilotNow(
   ctx: ServiceContext,
@@ -547,38 +863,39 @@ export async function runAutopilotNow(
 
   const results: AutopilotRunResult[] = [];
   for (const rule of (rules ?? []) as AutopilotRuleRow[]) {
-    let refund: () => Promise<void>;
     try {
-      refund = await chargeOrThrow(ctx, 'text', route);
+      results.push(await executeAutopilotRule(db, rule, now, { ctx, throwIfBlocked: true }));
     } catch (err) {
       if (results.length === 0) throw err;
       const message = err instanceof Error ? err.message : 'Blocked';
       results.push({ rule_id: rule.id, rule_name: rule.name, status: 'failed', error: message });
-      continue;
     }
-    const result = await executeAutopilotRule(db, rule, now);
-    if (result.status === 'failed') await refund();
-    results.push(result);
   }
   return summarize(results);
 }
 
 /**
- * Cron: reglas activas vencidas de todas las orgs, o las `ruleIds` pedidas con
- * el secreto del cron. No cobra (ver cabecera).
+ * Cron: primero publica los reels que ya terminaron; después ejecuta las
+ * reglas activas vencidas de todas las orgs (o las `ruleIds` pedidas con el
+ * secreto del cron). Cobra a cada org como la UI; sin saldo, la ejecución
+ * queda registrada como fallida y la regla sigue con su calendario.
  */
 export async function runScheduledAutopilot(
   ruleIds: string[] | null,
   now: Date = new Date(),
 ): Promise<AutopilotRunSummary> {
+  const startedAt = Date.now();
+  const results: AutopilotRunResult[] = await publishReadyAutopilotReels(now);
+
   const db = createSupabaseServer();
   let q = db.from('kefy_autopilot_rules').select('*').eq('status', 'active');
   q = ruleIds?.length ? q.in('id', ruleIds) : q.lte('next_run_at', now.toISOString());
-  const { data: rules, error } = await q;
+  const { data: rules, error } = await q.order('next_run_at', { ascending: true });
   if (error) throw dbError('Failed to fetch rules', null, error);
 
-  const results: AutopilotRunResult[] = [];
   for (const rule of (rules ?? []) as AutopilotRuleRow[]) {
+    // Las que no alcanzan siguen vencidas: las toma la próxima vuelta.
+    if (Date.now() - startedAt > CRON_RUN_BUDGET_MS) break;
     results.push(await executeAutopilotRule(db, rule, now));
   }
   return summarize(results);

@@ -46,6 +46,8 @@ interface TableConfig {
 
 /** Valor de una columna, admitiendo rutas con punto sobre embebidos. */
 function getPath(row: Row, path: string): unknown {
+  // Rutas JSON de PostgREST: `metadata->a->>b` es `metadata.a.b`.
+  if (path.includes('->')) path = path.replace(/->>?/g, '.');
   if (!path.includes('.')) return row[path];
   let cur: unknown = row;
   for (const part of path.split('.')) {
