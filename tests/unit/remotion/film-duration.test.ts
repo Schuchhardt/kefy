@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateFilmMetadata, captionPages, filmIntroOffset, getFilmTotalFrames } from '@/remotion/FilmComposition';
+import { CLIP_MIN_PLAYBACK_RATE, calculateFilmMetadata, captionPages, clipPlaybackRate, filmIntroOffset, getFilmTotalFrames } from '@/remotion/FilmComposition';
 import type { FilmScene } from '@/remotion/film-types';
 
 const FPS = 30;
@@ -45,5 +45,23 @@ describe('captionPages', () => {
   it('agrupa de a 3 palabras y corta antes en la puntuación', () => {
     const pages = captionPages(['Hola,', 'esto', 'es', 'Kefy', 'para', 'ti'].map(w));
     expect(pages.map((p) => p.map((x) => x.text).join(' '))).toEqual(['Hola,', 'esto es Kefy', 'para ti']);
+  });
+});
+
+describe('KefyFilm: clip más corto que el plano', () => {
+  it('un clip mudo se ralentiza hasta cubrir el plano en vez de congelarse', () => {
+    // 5 s de clip para 6,95 s de plano (voz de 6,4 s)
+    const rate = clipPlaybackRate(5 * FPS, Math.round(6.95 * FPS), false);
+    expect(rate).toBeLessThan(1);
+    expect(Math.ceil((5 * FPS) / rate)).toBeGreaterThanOrEqual(Math.round(6.95 * FPS));
+  });
+
+  it('no va más lento que el mínimo ni acelera un clip largo', () => {
+    expect(clipPlaybackRate(5 * FPS, 15 * FPS, false)).toBe(CLIP_MIN_PLAYBACK_RATE);
+    expect(clipPlaybackRate(10 * FPS, 4 * FPS, false)).toBe(1);
+  });
+
+  it('un clip con audio va siempre a velocidad normal', () => {
+    expect(clipPlaybackRate(5 * FPS, 6 * FPS, true)).toBe(1);
   });
 });

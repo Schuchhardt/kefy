@@ -45,7 +45,7 @@ const MOOD_KEYWORDS: Array<[string, RegExp]> = [
   ['elegant',   /elegan|premium|luxur|lujo|sofistic|minimal|refin/i],
   ['emotional', /emoti|inspir|warm|c[aá]lid|cercan|human|nostalg|heart/i],
   ['tech',      /tech|tecno|modern|futur|innov|digital|startup/i],
-  ['friendly',  /friend|amig|playful|juguet|casual|cozy/i],
+  ['friendly',  /friend|amig|playful|juguet|casual|cozy|uplift|hope|esperanz|optimis|positiv|alegr|cheer/i],
   ['epic',      /epic|[eé]pic|dramat|cinemat|power|poder/i],
 ];
 
@@ -61,13 +61,19 @@ function hashOf(seed: string): number {
  * Elección determinística: el mismo id siempre cae en la misma pista. Con
  * `mood` (el del guion, el tono de la marca…), elige entre las pistas de ese
  * ánimo; si ninguna coincide, entre todas.
+ *
+ * `avoid`: pistas que la marca usó hace poco. Con un ánimo fijo de marca el
+ * grupo es de 3-4 pistas y el hash repetía la misma video tras video; así
+ * rotan. Si evitarlas deja el grupo vacío, se usan las del ánimo de todos
+ * modos, y si el ánimo solo tiene pistas recientes, se pasa a las demás.
  */
-export function pickMusicTrack(seed: string, mood?: string | null): string | undefined {
+export function pickMusicTrack(seed: string, mood?: string | null, avoid: string[] = []): string | undefined {
   if (MUSIC_TRACKS.length === 0) return undefined;
   const moods = mood ? MOOD_KEYWORDS.filter(([, re]) => re.test(mood)).map(([m]) => m) : [];
   const matching = moods.length
     ? MUSIC_TRACKS.filter((t) => (TRACK_MOODS[t] ?? []).some((m) => moods.includes(m)))
     : [];
-  const pool = matching.length ? matching : MUSIC_TRACKS;
+  const fresh = (pool: string[]) => pool.filter((t) => !avoid.includes(t));
+  const pool = [fresh(matching), fresh(MUSIC_TRACKS), matching, MUSIC_TRACKS].find((p) => p.length)!;
   return pool[hashOf(seed) % pool.length];
 }

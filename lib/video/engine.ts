@@ -234,6 +234,25 @@ export async function latestJobFor(db: Db, table: RenderTable, targetId: string)
   return (data as JobRow | null) ?? null;
 }
 
+/** Cuántas pistas recientes de la marca evita la música de un video nuevo. */
+export const RECENT_MUSIC_WINDOW = 3;
+
+/**
+ * Pistas de música de los últimos videos de la marca, la más reciente
+ * primero, para no repetir la misma en videos seguidos.
+ */
+export async function recentMusicTracks(db: Db, orgId: string, brandId: string | null, limit = RECENT_MUSIC_WINDOW): Promise<string[]> {
+  let query = db
+    .from('kefy_video_jobs')
+    .select('render_context')
+    .eq('org_id', orgId);
+  query = brandId ? query.eq('brand_id', brandId) : query.is('brand_id', null);
+  const { data } = await query.order('created_at', { ascending: false }).limit(limit);
+  return ((data ?? []) as Array<{ render_context: { musicTrack?: unknown } | null }>)
+    .map((row) => row.render_context?.musicTrack)
+    .filter((t): t is string => typeof t === 'string');
+}
+
 export function snapshotOf(job: JobRow, steps: StepRow[]): VideoJobSnapshot {
   const compose = steps.find((s) => s.key === COMPOSE_STEP_KEY);
   const others  = steps.filter((s) => s.key !== COMPOSE_STEP_KEY);

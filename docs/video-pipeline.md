@@ -146,7 +146,7 @@ un hueco: un video sin Brand Kit tiene que verse bien igual.
 | Cierre (2,2 s) | Logo o nombre, `tagline` y contacto: la web (`depando.cl`) o el @ de Instagram | Sin nombre ni logo, no hay cierre: el último plano funde a negro |
 | Copy del guion | `videoBrandBrief`: audiencia, diferenciales, misión, tono, estilo, ubicación, contacto para el CTA y si usa emojis. Prohíbe inventar precios o promesas | Guía de respaldo: experto local cercano, beneficios concretos, CTA simple, estilo visual coherente con el tema |
 | Voz | `voiceAccent` según `customer_locations` (España, México, Argentina) | Español latinoamericano neutro y un estilo de locución de reel |
-| Música | `pickMusicTrack(id, ánimo)`: el ánimo sale del `music_mood` del guion más el tono de la marca (`TRACK_MOODS`) | Cualquier pista, la misma siempre para la misma pieza |
+| Música | `pickMusicTrack(id, ánimo, recientes)`: el ánimo sale del `music_mood` del guion más el tono de la marca (`TRACK_MOODS`); evita las pistas de los últimos 3 videos de la marca (`recentMusicTracks`) para que no suene siempre la misma | Cualquier pista que no se haya usado hace poco |
 
 El tema se resuelve al crear el trabajo y viaja en su `render_context`: editar
 el Brand Kit a mitad de producción no cambia un video que ya se está haciendo.
@@ -262,9 +262,12 @@ Garantías:
   y una voz larga nunca se corta.
 
   Un clip corre una sola vez, sin `<Loop>`. Repetirlo se notaba como un salto
-  y, en un clip con lipsync, repetía las primeras sílabas de la línea. Si el
-  clip termina antes que el plano, queda congelado su último cuadro (mudo)
-  sobre la foto del plano (`poster`).
+  y, en un clip con lipsync, repetía las primeras sílabas de la línea. Un clip
+  mudo más corto que el plano (el clip de 5 s bajo una voz de 6,5 s) se
+  ralentiza hasta cubrirlo (`clipPlaybackRate`, como mínimo a 0,6×): congelar
+  su último cuadro se veía como un video pegado antes del corte. Solo si haría
+  falta ir más lento queda congelado el resto, con el movimiento de cámara
+  encima. Un clip con audio (lipsync o el que dice la línea) va siempre a 1×.
 - **Cierre.** Al terminar el montaje, el video se escribe en `video_url`, con
   `render_status = 'ready'`. Antes de montar, las fotos se copian a `slides` y
   a `image_url` (la portada, solo si no tenía). Al reemplazar un video

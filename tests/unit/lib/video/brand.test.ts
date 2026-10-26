@@ -123,4 +123,19 @@ describe('pickMusicTrack', () => {
     for (const t of MUSIC_TRACKS) expect(TRACK_MOODS[t]?.length).toBeGreaterThan(0);
     expect(MUSIC_TRACKS).toContain(pickMusicTrack('x', 'qwerty'));
   });
+
+  it('no repite las pistas recientes de la marca mientras el ánimo tenga otras', () => {
+    const mood = 'uplifting hopeful inspirational friendly';
+    const recent: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const track = pickMusicTrack(`item-${i}`, mood, recent)!;
+      expect(recent).not.toContain(track);
+      expect(TRACK_MOODS[track]!.some((m) => m === 'friendly' || m === 'emotional')).toBe(true);
+      recent.unshift(track);
+    }
+  });
+
+  it('si todas las pistas son recientes, igual elige una', () => {
+    expect(MUSIC_TRACKS).toContain(pickMusicTrack('x', 'calm', MUSIC_TRACKS));
+  });
 });
