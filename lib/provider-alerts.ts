@@ -21,7 +21,7 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { reportWarning } from '@/lib/observability';
 import ProviderCreditsLow from '@/emails/ProviderCreditsLow';
 
-export type AiProvider = 'anthropic' | 'openai' | 'fal' | 'higgsfield';
+export type AiProvider = 'anthropic' | 'openai' | 'fal' | 'higgsfield' | 'elevenlabs';
 
 const ALERT_WINDOW_SECONDS = 60 * 60; // como mucho 1 correo por proveedor por hora
 
@@ -32,6 +32,8 @@ const EXHAUSTION_STATUS: Record<AiProvider, ReadonlySet<number>> = {
   fal:       new Set([402, 403]),
   // Higgsfield responde 403 cuando no quedan créditos en la cuenta de la API.
   higgsfield: new Set([402, 403]),
+  // ElevenLabs responde 401 con `quota_exceeded` cuando se acaban los caracteres.
+  elevenlabs: new Set([401, 402]),
 };
 
 const EXHAUSTION_PATTERN: Record<AiProvider, RegExp> = {
@@ -39,6 +41,7 @@ const EXHAUSTION_PATTERN: Record<AiProvider, RegExp> = {
   anthropic: /credit balance is too low|insufficient credit/i,
   fal:       /exhausted balance|insufficient (balance|credits)/i,
   higgsfield: /insufficient|not enough credits|credit/i,
+  elevenlabs: /quota_exceeded|exceeds your quota|insufficient/i,
 };
 
 const PROVIDER_LABEL: Record<AiProvider, string> = {
@@ -46,6 +49,7 @@ const PROVIDER_LABEL: Record<AiProvider, string> = {
   openai:     'OpenAI',
   fal:        'fal.ai',
   higgsfield: 'Higgsfield',
+  elevenlabs: 'ElevenLabs',
 };
 
 function looksExhausted(provider: AiProvider, status: number, body: string): boolean {

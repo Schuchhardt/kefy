@@ -26,7 +26,7 @@ import { getBrandKitForBrand } from '@/lib/services/brand-kit';
 import { pickMusicTrack } from '@/remotion/audio-tracks';
 import type { RenderTable } from '@/lib/reel-render';
 import {
-  mergeSlideEdits, readVideoScript, scriptFromSlides, type VideoScript,
+  mergeSlideEdits, narratorOnly, readVideoScript, scriptFromSlides, type VideoScript,
 } from '@/lib/video/script';
 import {
   compileVideoPlan, MOTION_LEVELS, type MotionLevel, type PlanNote, type VideoPlan,
@@ -111,13 +111,16 @@ export async function resolveVideoTarget(
 /**
  * Guion vigente de la pieza, con las ediciones de sus escenas aplicadas. Solo
  * se reutilizan fotos del Storage de Kefy: una URL cualquiera pegada en una
- * escena no se manda a fal.ai ni a Lambda (SSRF).
+ * escena no se manda a fal.ai ni a Lambda (SSRF). Solo narrador: nadie habla
+ * a cámara (`narratorOnly`).
  */
 export function scriptForTarget(target: VideoTarget, language: 'es' | 'en'): VideoScript | null {
   const opts = { isReusableImage: isKefyStorageUrl };
   const stored = readVideoScript(target.metadata);
-  if (stored) return mergeSlideEdits(stored, target.slides, opts);
-  return scriptFromSlides(target.slides, language, { title: target.title, hook: target.hook, hashtags: target.hashtags }, opts);
+  const script = stored
+    ? mergeSlideEdits(stored, target.slides, opts)
+    : scriptFromSlides(target.slides, language, { title: target.title, hook: target.hook, hashtags: target.hashtags }, opts);
+  return script ? narratorOnly(script) : null;
 }
 
 /** Lo que cambia el video: si difiere, una producción en curso ya no sirve. */

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  mergeSlideEdits, normalizeVideoScript, readVideoScript, scriptFromSlides, scriptToReelScenes,
+  mergeSlideEdits, narratorOnly, normalizeVideoScript, readVideoScript, scriptFromSlides, scriptToReelScenes,
 } from '@/lib/video/script';
 
 const raw = {
@@ -53,6 +53,16 @@ describe('normalizeVideoScript', () => {
 
   it('lanza si no hay ningún plano utilizable', () => {
     expect(() => normalizeVideoScript({ scenes: [{}] }, 'es')).toThrow();
+  });
+});
+
+describe('narratorOnly', () => {
+  it('toda línea la dice el narrador y nadie habla a cámara; el personaje sigue en cuadro', () => {
+    const script = narratorOnly(normalizeVideoScript(raw, 'es'));
+    expect(script.scenes.map((s) => s.speaker)).toEqual(['narrator', 'narrator', 'narrator']);
+    expect(script.scenes.map((s) => s.visual.kind)).toEqual(['animated', 'animated', 'animated']);
+    expect(script.scenes[1]!.visual.character_ids).toEqual(['ana']);
+    expect(script.characters.map((c) => c.id)).toEqual(['ana']);
   });
 });
 

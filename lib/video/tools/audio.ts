@@ -88,6 +88,39 @@ export function alignWords(
   });
 }
 
+/**
+ * Tramos de cada palabra a partir de la alineación por carácter de ElevenLabs
+ * (`/with-timestamps`): cada racha de caracteres sin espacio es una palabra.
+ * Es lo mismo que devuelve whisper, sin tener que transcribir el audio.
+ */
+export function alignmentWordSpans(alignment: {
+  characters?:                    unknown;
+  character_start_times_seconds?: unknown;
+  character_end_times_seconds?:   unknown;
+} | null | undefined): Array<{ start: number; end: number }> {
+  const chars  = Array.isArray(alignment?.characters) ? alignment.characters : [];
+  const starts = Array.isArray(alignment?.character_start_times_seconds) ? alignment.character_start_times_seconds : [];
+  const ends   = Array.isArray(alignment?.character_end_times_seconds) ? alignment.character_end_times_seconds : [];
+  const spans: Array<{ start: number; end: number }> = [];
+  let current: { start: number; end: number } | null = null;
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    const start = starts[i];
+    const end = ends[i];
+    if (typeof ch !== 'string' || typeof start !== 'number' || typeof end !== 'number') continue;
+    if (/\s/.test(ch)) {
+      current = null;
+      continue;
+    }
+    if (current) current.end = end;
+    else {
+      current = { start, end };
+      spans.push(current);
+    }
+  }
+  return spans;
+}
+
 function round(n: number): number {
   return Math.round(n * 1000) / 1000;
 }

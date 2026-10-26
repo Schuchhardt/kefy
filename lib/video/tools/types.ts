@@ -50,7 +50,7 @@ export interface VideoTool {
   label:    { es: string; en: string };
   /** Qué hace, en una línea, para el panel del plan y la documentación del asistente. */
   summary:  { es: string; en: string };
-  provider: 'openai' | 'fal' | 'higgsfield' | 'remotion';
+  provider: 'openai' | 'elevenlabs' | 'fal' | 'higgsfield' | 'remotion';
   /** Operación de créditos que cuesta cada llamada. */
   credit:   CreditOperation;
   mode:     'sync' | 'async';

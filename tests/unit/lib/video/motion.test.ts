@@ -5,7 +5,7 @@ vi.mock('@/lib/video/tools/voice', () => ({
 }));
 vi.mock('@/lib/observability', () => ({ reportError: vi.fn() }));
 
-import { animateImageTool } from '@/lib/video/tools/motion';
+import { animateImageTool, speechInClipAvailable } from '@/lib/video/tools/motion';
 import { transcribeWordTimings } from '@/lib/video/tools/voice';
 
 const ctx = { orgId: 'o', jobId: 'j', stepKey: 'anim_s1', attempt: 2, webhookUrl: 'https://app/hook' };
@@ -20,7 +20,10 @@ function queue(...responses: Response[]) {
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
 beforeEach(() => { process.env.HIGGSFIELD_API_KEY = 'id:secret'; });
-afterEach(() => { vi.unstubAllGlobals(); delete process.env.HIGGSFIELD_API_KEY; delete process.env.FAL_KEY; });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.HIGGSFIELD_API_KEY; delete process.env.HIGGSFIELD_ANIMATE_MODEL; delete process.env.FAL_KEY;
+});
 
 describe('animate_image con Higgsfield', () => {
   it('usa Higgsfield si está configurado, aunque también haya FAL_KEY', () => {
@@ -29,7 +32,27 @@ describe('animate_image con Higgsfield', () => {
     expect(animateImageTool.available()).toBe(true);
   });
 
-  it('un plano mudo no pide audio; uno que habla sí, y el clip queda dentro de 4–15 s', async () => {
+  it('por defecto usa Kling 2.5 Turbo: clip mudo de 5 o 10 s, sin resolución ni audio', async () => {
+    const fetch = queue(
+      json({ status: 'queued', request_id: 'r1', status_url: STATUS_URL }),
+      json({ status: 'queued', request_id: 'r2', status_url: STATUS_URL }),
+    );
+    const res = await animateImageTool.run(ctx, { image_url: 'https://i.jpg', prompt: 'drift', duration: 10 });
+    await animateImageTool.run(ctx, { image_url: 'https://i.jpg', prompt: 'says', duration: 7, speech: 'Hola', language: 'es' });
+
+    expect(String(fetch.mock.calls[0]![0])).toBe('https://api.higgsfield.ai/kling-video/v2.5-turbo/standard/image-to-video?hf_webhook=https%3A%2F%2Fapp%2Fhook');
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({
+      image_url: 'https://i.jpg', prompt: 'drift', duration: 10, negative_prompt: expect.any(String),
+    });
+    // Kling no dice líneas: la voz no viaja en el handle y la duración se redondea a 5.
+    expect(JSON.parse(fetch.mock.calls[1]![1].body)).toMatchObject({ duration: 5 });
+    expect(res).toMatchObject({ status: 'pending', handle: { clip_seconds: 10 } });
+    expect(speechInClipAvailable()).toBe(false);
+  });
+
+  it('con Seedance, un plano mudo no pide audio; uno que habla sí, y el clip queda dentro de 4–15 s', async () => {
+    process.env.HIGGSFIELD_ANIMATE_MODEL = 'bytedance/seedance-2.0/image-to-video';
+    expect(speechInClipAvailable()).toBe(true);
     const fetch = queue(
       json({ status: 'queued', request_id: 'r1', status_url: STATUS_URL }),
       json({ status: 'queued', request_id: 'r2', status_url: STATUS_URL }),

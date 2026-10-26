@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { alignWords, wavDurationSeconds } from '@/lib/video/tools/audio';
+import { alignWords, alignmentWordSpans, wavDurationSeconds } from '@/lib/video/tools/audio';
 
 function wav(seconds: number, opts: { streamed?: boolean } = {}): Buffer {
   const sampleRate = 24000;
@@ -64,5 +64,20 @@ describe('alignWords', () => {
     expect(words[0]!.start).toBe(0);
     expect(words[1]!.end).toBeCloseTo(2, 5);
     expect(words[1]!.end - words[1]!.start).toBeGreaterThan(words[0]!.end - words[0]!.start);
+  });
+});
+
+describe('alignmentWordSpans', () => {
+  it('agrupa los caracteres de ElevenLabs en palabras, saltando los espacios', () => {
+    expect(alignmentWordSpans({
+      characters:                    ['H', 'o', 'l', 'a', ' ', 'y', 'a', '.'],
+      character_start_times_seconds: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+      character_end_times_seconds:   [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+    })).toEqual([{ start: 0, end: 0.4 }, { start: 0.5, end: 0.8 }]);
+  });
+
+  it('sin alineación, ninguna palabra', () => {
+    expect(alignmentWordSpans(null)).toEqual([]);
+    expect(alignmentWordSpans({ characters: 'nope' })).toEqual([]);
   });
 });

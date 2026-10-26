@@ -21,6 +21,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   openai:    'OpenAI',
   fal:       'fal.ai',
   higgsfield: 'Higgsfield',
+  elevenlabs: 'ElevenLabs',
 };
 
 export default function ProviderCreditsLow({ provider, detail }: ProviderCreditsLowProps) {

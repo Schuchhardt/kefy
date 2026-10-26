@@ -2,9 +2,11 @@
 // Asíncronos: run() encola y devuelve el handle; poll() mira si terminó.
 //
 // animate_image corre en Higgsfield si está configurado (HIGGSFIELD_API_KEY),
-// si no en fal.ai. Con Higgsfield el modelo (Seedance 2.0) genera el audio del
-// clip: en un plano donde habla un personaje, el clip ya trae su línea dicha
-// con los labios sincronizados, sin TTS ni lipsync aparte. Después se
+// si no en fal.ai. En Higgsfield el modelo por defecto es Kling 2.5 Turbo:
+// clips mudos de 5 o 10 s, que es lo que usan los videos con narrador. Si se
+// configura Seedance 2.0 (HIGGSFIELD_ANIMATE_MODEL), el modelo genera el audio
+// del clip: en un plano donde habla un personaje, el clip ya trae su línea
+// dicha con los labios sincronizados, sin TTS ni lipsync aparte. Después se
 // transcribe el clip con whisper para los subtítulos palabra a palabra.
 //
 // lip_sync solo existe en fal: el plan no lo usa cuando el clip trae la voz.
@@ -22,7 +24,18 @@ import { TOOL_CREDIT_OPERATION, type ToolResult, type ToolRunContext, type Video
 
 export const ANIMATE_MODEL = process.env.FAL_ANIMATE_MODEL ?? 'fal-ai/kling-video/v2.1/standard/image-to-video';
 export const LIPSYNC_MODEL = process.env.FAL_LIPSYNC_MODEL ?? 'fal-ai/sync-lipsync/v2';
-export const HIGGSFIELD_ANIMATE_MODEL = process.env.HIGGSFIELD_ANIMATE_MODEL ?? 'bytedance/seedance-2.0/image-to-video';
+/** Kling 2.5 Turbo: ~$0,036/s, clips mudos de 5 o 10 s (docs/video-pipeline.md, «Costo»). */
+export const HIGGSFIELD_DEFAULT_ANIMATE_MODEL = 'kling-video/v2.5-turbo/standard/image-to-video';
+
+/** Modelo de Higgsfield para animar. Se lee en cada llamada: el env manda. */
+export function higgsfieldAnimateModel(): string {
+  return process.env.HIGGSFIELD_ANIMATE_MODEL?.trim() || HIGGSFIELD_DEFAULT_ANIMATE_MODEL;
+}
+
+/** Seedance genera el audio del clip; Kling y los demás, clips mudos. */
+function modelSpeaks(model: string): boolean {
+  return model.startsWith('bytedance/seedance');
+}
 
 /** Seedance acepta clips de 4 a 15 s. */
 const HF_MIN_SECONDS = 4;
@@ -91,19 +104,20 @@ async function speechWords(
 }
 
 async function runHiggsfield(ctx: ToolRunContext, input: Record<string, unknown>, imageUrl: string): Promise<ToolResult> {
-  const speech = typeof input.speech === 'string' ? input.speech.trim() : '';
-  const clipSeconds = clipSecondsFor(input);
+  const model = higgsfieldAnimateModel();
+  const speaks = modelSpeaks(model);
+  // Un modelo mudo no puede decir la línea: el clip sale sin voz.
+  const speech = speaks && typeof input.speech === 'string' ? input.speech.trim() : '';
   const basePrompt = typeof input.prompt === 'string' && input.prompt ? input.prompt : 'subtle cinematic motion';
-  // El audio del clip solo se usa cuando el personaje habla. En los demás
-  // planos suenan la música y el narrador del montaje: un audio inventado por
-  // el modelo debajo chocaría con los dos.
-  const handle = await higgsfieldSubmit(HIGGSFIELD_ANIMATE_MODEL, {
-    image_url:      imageUrl,
-    prompt:         basePrompt,
-    duration:       clipSeconds,
-    resolution:     '720p',
-    generate_audio: !!speech,
-  }, {
+  // Kling acepta solo 5 o 10 s (`duration` en el esquema de Higgsfield) y no
+  // tiene resolución ni audio. Seedance: 4–15 s, y el audio del clip solo
+  // cuando el personaje habla. En los demás planos suenan la música y el
+  // narrador del montaje: un audio inventado por el modelo chocaría con los dos.
+  const clipSeconds = speaks ? clipSecondsFor(input) : input.duration === 10 ? 10 : 5;
+  const body = speaks
+    ? { image_url: imageUrl, prompt: basePrompt, duration: clipSeconds, resolution: '720p', generate_audio: !!speech }
+    : { image_url: imageUrl, prompt: basePrompt, duration: clipSeconds, negative_prompt: NEGATIVE_PROMPT };
+  const handle = await higgsfieldSubmit(model, body, {
     webhookUrl:     ctx.webhookUrl,
     idempotencyKey: `kefy-${ctx.jobId}-${ctx.stepKey}-${ctx.attempt ?? 1}`,
   });
@@ -146,8 +160,8 @@ export const animateImageTool: VideoTool = {
   name:     'animate_image',
   label:    { es: 'Animar imagen', en: 'Animate image' },
   summary:  {
-    es: 'Convierte la foto del plano en un clip de video con el movimiento del guion; si el personaje habla, el clip trae su voz.',
-    en: 'Turns the shot picture into a video clip with the scripted motion; when the character speaks, the clip carries their voice.',
+    es: 'Convierte la foto del plano en un clip de video con el movimiento del guion.',
+    en: 'Turns the shot picture into a video clip with the scripted motion.',
   },
   // Se lee al listar el plan: muestra el proveedor que de verdad se va a usar.
   get provider() { return higgsfieldConfigured() ? 'higgsfield' as const : 'fal' as const; },
@@ -179,7 +193,7 @@ export const animateImageTool: VideoTool = {
 
 /** true si el clip animado trae la voz del personaje (no hace falta TTS ni lipsync). */
 export function speechInClipAvailable(): boolean {
-  return higgsfieldConfigured();
+  return higgsfieldConfigured() && modelSpeaks(higgsfieldAnimateModel());
 }
 
 export const lipSyncTool: VideoTool = {
