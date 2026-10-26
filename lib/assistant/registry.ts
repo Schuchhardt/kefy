@@ -57,7 +57,8 @@ export interface ToolDef<S extends z.ZodObject<any>> {
    */
   brandless?: boolean;
   confirm: 'never' | 'always' | ((ctx: ToolContext, input: z.infer<S>, preview?: Record<string, unknown>) => boolean);
-  estimateCredits?: (input: z.infer<S>) => number;
+  /** Recibe también la vista previa de `describe`, por si el costo depende de datos guardados. */
+  estimateCredits?: (input: z.infer<S>, preview: Record<string, unknown>) => number;
   /** Si el resultado trae contenido de terceros que debe «contaminar» el turno. */
   taints?: 'always' | ((data: unknown) => boolean);
   /** Vista previa para la tarjeta de confirmación (título, usuarios, texto). */
@@ -341,7 +342,7 @@ export async function executeTool(
   if (ctx.source === 'chat' && !opts.confirmed) {
     try {
       const preview = def.describe ? await def.describe(ctx, input) : {};
-      const credits = def.estimateCredits?.(input) ?? 0;
+      const credits = def.estimateCredits?.(input, preview) ?? 0;
 
       if (needsConfirmation(def, ctx, input, preview, credits)) {
         const summary = summarizeTool(name, lang, input, preview, def.title);

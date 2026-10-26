@@ -15,8 +15,9 @@ import { buildDashboardHref } from '@/lib/assistant/links';
 import type { ToolLink } from '@/lib/assistant/types';
 import { ServiceError, msg } from '@/lib/services/errors';
 import {
-  MAX_MANUAL_RUN, autopilotRuleFields, createAutopilotRule, deleteAutopilotRule, getAutopilotRule,
-  listAutopilotRules, runAutopilotNow, updateAutopilotRule, type AutopilotRuleRow,
+  MAX_MANUAL_RUN, autopilotRuleFields, createAutopilotRule, deleteAutopilotRule, estimateAutopilotCredits,
+  estimateAutopilotRuleCredits, getAutopilotRule, listAutopilotRules, runAutopilotNow, updateAutopilotRule,
+  type AutopilotRuleRow,
 } from '@/lib/services/autopilot';
 
 function autopilotLink(lang: 'es' | 'en'): ToolLink {
@@ -150,18 +151,27 @@ const runAutopilotNowTool = defineTool({
   kind: 'publish',
   roles: ['owner', 'admin'],
   description:
-    `Runs active autopilot rules of the brand right now (at most ${MAX_MANUAL_RUN}): each one generates a post with AI ` +
-    "and schedules it on its accounts for the rule's next slot, then advances the schedule. Costs 1 AI credit per " +
-    'rule (refunded if the run fails). Always requires user confirmation.',
+    `Runs active autopilot rules of the brand right now (at most ${MAX_MANUAL_RUN}): each one generates a piece with ` +
+    'its media in the format of the picked topic ([POST] = post with image, [CARRUSEL n slides] = carousel with one ' +
+    'image per slide, [REEL 30s] = produced video; untagged = reel for TikTok/YouTube-only rules, post with image ' +
+    "otherwise) and schedules it on its accounts for the rule's next slot (a reel, once its video is ready), then " +
+    'advances the schedule. Costs the credits of that format (~4 for a post, up to ~60 for a reel). Always requires ' +
+    'user confirmation.',
   input: z.object({
     rule_ids: z.array(z.string().uuid()).min(1).max(MAX_MANUAL_RUN),
   }).strict(),
   confirm: 'always',
-  estimateCredits: (input) => input.rule_ids.length,
+  estimateCredits: (input, preview) =>
+    typeof preview.max_credits === 'number' ? preview.max_credits : input.rule_ids.length * estimateAutopilotCredits('post'),
   describe: async (ctx, input) => {
     const names: string[] = [];
-    for (const id of input.rule_ids) names.push((await getAutopilotRule(ctx, id)).name);
-    return { title: names.join(' · ') };
+    let maxCredits = 0;
+    for (const id of input.rule_ids) {
+      const rule = await getAutopilotRule(ctx, id);
+      names.push(rule.name);
+      maxCredits += await estimateAutopilotRuleCredits(rule);
+    }
+    return { title: names.join(' · '), max_credits: maxCredits };
   },
   handler: async (ctx, input) => {
     const summary = await runAutopilotNow(ctx, input.rule_ids, 'tool:run_autopilot_now');

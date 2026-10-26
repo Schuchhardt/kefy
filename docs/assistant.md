@@ -221,9 +221,13 @@ protecciones de `lib/services/media-ingest.ts` y se re-aloja antes de usarla.
 
 **Autopilot.** Las reglas son de una marca. `save_autopilot_rule` crea (sin
 `id`) o edita (con `id`, incluido `status: "paused" | "active"`).
-`run_autopilot_now` genera y programa ahora y cuesta 1 crédito de IA por regla
-(se devuelve si falla); la ejecución programada del cron no cobra créditos por
-ahora.
+`run_autopilot_now` genera y programa ahora. Cada ejecución sale con su media
+en el formato que marque el tema elegido (`[POST]` post con imagen,
+`[CARRUSEL 5 slides]`, `[REEL 30s]`; sin etiqueta, reel si todas las cuentas son
+de TikTok/YouTube y post con imagen si no) y cuesta lo de ese formato. La
+tarjeta de confirmación anuncia el peor caso entre los temas de la regla
+(`estimateAutopilotRuleCredits`). Un reel se publica cuando su video está listo
+(lo hace el cron). La ejecución programada del cron cobra igual.
 
 Recomendaciones:
 

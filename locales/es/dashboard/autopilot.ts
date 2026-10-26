@@ -21,6 +21,7 @@ const es = {
   tzHint: 'Formato IANA, p. ej. America/Mexico_City o Europe/Madrid.',
   hintLabel: 'Pista para la IA (opcional)',
   hintPlaceholder: 'Escribe sobre noticias de la industria, tendencias, tips…',
+  hintFormat: 'Cada publicación sale con imagen o video. Empieza la pista con [POST], [CARRUSEL 5 slides] o [REEL 30s] para elegir el formato; sin etiqueta, TikTok recibe un reel y el resto un post con imagen.',
   saving: 'Guardando…',
   createBtn: 'Crear regla',
   loading: 'Cargando…',

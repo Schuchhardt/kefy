@@ -22,6 +22,7 @@ const en: AutopilotCopy = {
   tzHint: 'IANA format, e.g. America/New_York or Europe/London.',
   hintLabel: 'AI hint (optional)',
   hintPlaceholder: 'Write about industry news, trends, tips…',
+  hintFormat: 'Every post comes with an image or video. Start the hint with [POST], [CAROUSEL 5 slides] or [REEL 30s] to pick the format; untagged, TikTok gets a reel and the rest a post with an image.',
   saving: 'Saving…',
   createBtn: 'Create rule',
   loading: 'Loading…',

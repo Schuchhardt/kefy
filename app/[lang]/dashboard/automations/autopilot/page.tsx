@@ -336,7 +336,7 @@ export default function AutopilotPage() {
               />
             </Field>
 
-            <Field label={t.hintLabel}>
+            <Field label={t.hintLabel} hint={t.hintFormat}>
               <Textarea
                 rows={3}
                 value={formHint}
