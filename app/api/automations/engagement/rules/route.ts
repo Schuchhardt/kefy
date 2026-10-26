@@ -1,74 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
-import { createSupabaseServer } from '@/lib/supabase';
+import { getBrandFromRequest } from '@/lib/brands';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { createEngagementRule, listEngagementRules } from '@/lib/services/engagement';
+
+// ─── /api/automations/engagement/rules ───────────────────────────────────────
+// Reglas de respuesta automática de la marca activa (y las antiguas de toda la
+// organización). La lógica vive en lib/services/engagement.ts.
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const supabase = createSupabaseServer();
-  const { data, error } = await supabase
-    .from('kefy_engagement_rules')
-    .select('*')
-    .eq('org_id', auth.orgId)
-    .order('created_at', { ascending: false });
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rules: data });
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const res = NextResponse.json({ rules: await listEngagementRules(ctx) });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/automations/engagement/rules', auth });
+  }
 }
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = await req.json() as {
-    name: string;
-    trigger_type: string;
-    trigger_config?: Record<string, unknown>;
-    conditions?: unknown[];
-    action_type: string;
-    action_config?: Record<string, unknown>;
-    action_template?: string;
-    ai_context?: string | null;
-    delay_minutes?: number;
-    is_active?: boolean;
-    condition_platform?: string | null;
-    condition_keyword?: string | null;
-    condition_rating?: number | null;
-    lead_action_type?: string | null;
-    lead_action_score_delta?: number;
-    lead_action_stage?: string | null;
-  };
-
-  if (!body.name?.trim() || !body.trigger_type || !body.action_type) {
-    return NextResponse.json({ error: 'name, trigger_type and action_type are required' }, { status: 400 });
+  let body: unknown;
+  try { body = await req.json(); } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const supabase = createSupabaseServer();
-  const { data, error } = await supabase
-    .from('kefy_engagement_rules')
-    .insert({
-      org_id:                  auth.orgId,
-      name:                    body.name.trim(),
-      trigger_type:            body.trigger_type,
-      trigger_config:          body.trigger_config          ?? {},
-      conditions:              body.conditions              ?? [],
-      action_type:             body.action_type,
-      action_config:           body.action_config           ?? {},
-      action_template:         body.action_template         ?? '',
-      ai_context:              body.ai_context              ?? null,
-      delay_minutes:           body.delay_minutes           ?? 0,
-      is_active:               body.is_active               ?? true,
-      condition_platform:      body.condition_platform      ?? null,
-      condition_keyword:       body.condition_keyword       ?? null,
-      condition_rating:        body.condition_rating        ?? null,
-      lead_action_type:        body.lead_action_type        ?? null,
-      lead_action_score_delta: body.lead_action_score_delta ?? 0,
-      lead_action_stage:       body.lead_action_stage       ?? null,
-    })
-    .select()
-    .single();
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rule: data }, { status: 201 });
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const res = NextResponse.json({ rule: await createEngagementRule(ctx, body) }, { status: 201 });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'POST /api/automations/engagement/rules', auth });
+  }
 }

@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText, generateContentImage, generateVideoScript, describeImageAsTopic } from '@/lib/ai';
-import { buildDerivedTopic, topicImageFor } from '@/lib/content-source';
-import { guardAiRequest } from '@/lib/ai-guard';
-import { consumeCredits, refundCredits } from '@/lib/usage';
-import { reportError } from '@/lib/observability';
 import type { ContentChannel } from '@/types/ai';
-import { uploadBase64Image } from '@/lib/storage';
-import { getBrandKitForBrand } from '@/lib/services/brand-kit';
-import { scriptToReelScenes } from '@/lib/video/script';
-import { videoBrandBrief } from '@/lib/video/brand';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { generateStory, writeStoryVideoScript } from '@/lib/services/story';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -63,117 +56,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'topic is required' }, { status: 422 });
   }
 
-  const topic    = (input.topic as string).trim().slice(0, 500);
   const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
 
-  const db = createSupabaseServer();
-
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select('id, name, tagline, tone, industry, primary_color, secondary_color, accent_color, logo_url')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  const guard = await guardAiRequest(req, {
-    auth, operation: 'text', route: 'POST /api/content/story', language,
-  });
-  if (guard.blocked) return guard.blocked;
-
-  // 1. Short caption — same copywriter used for posts.
-  let text;
+  // Texto, imagen vertical, cobro y guardado: generateStory.
+  const ctx = serviceContext(auth, brand?.id ?? '', language, { brandScope: 'org', source: 'route' });
   try {
-    text = await generateContentText({
+    const out = await generateStory(ctx, {
+      topic:   input.topic as string,
       channel,
-      topic,
-      language,
-      tone:      brandKit?.tone ?? [],
-      brandName: brandKit?.name    ?? undefined,
-      tagline:   brandKit?.tagline ?? undefined,
-      extraCtx:  brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined,
+      save:    input.save !== false,
     });
+    const payload = {
+      ...(out.itemId ? { itemId: out.itemId } : {}),
+      body:       out.body,
+      hashtags:   out.hashtags,
+      image_url:  out.image_url,
+      model:      out.model,
+      tokensUsed: out.tokensUsed,
+    };
+    const res = NextResponse.json(payload, { status: out.itemId ? 201 : 200 });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
   } catch (err) {
-    await guard.refund();
-    reportError(err, { route: 'POST /api/content/story', auth, service: 'ai' });
-    const msg = err instanceof Error ? err.message : 'Story text generation failed';
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return serviceErrorResponse(err, { route: 'POST /api/content/story', auth });
   }
-
-  // 2. One vertical (9:16) image for the story.
-  // La imagen ya es opcional en este flujo (si falla, la story se guarda solo
-  // con texto), así que quedarse sin cuota de imagen se trata igual.
-  const imageCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
-  let imageUrl: string | null = null;
-  try {
-    if (!imageCredits?.allowed) throw new Error('Cuota de imágenes agotada');
-    const imgResult = await generateContentImage({
-      prompt: `Vertical story visual for: ${topic}. Eye-catching, mobile-first composition, no captions baked in.`,
-      size:    '1024x1536',
-      quality: 'medium',
-      brand: {
-        name:           brandKit?.name           ?? undefined,
-        primaryColor:   brandKit?.primary_color  ?? undefined,
-        secondaryColor: brandKit?.secondary_color ?? undefined,
-        accentColor:    brandKit?.accent_color   ?? undefined,
-        tone:           brandKit?.tone           ?? undefined,
-      },
-    });
-    imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `story-${Date.now()}.jpeg`);
-  } catch (imgErr) {
-    // Solo hay que devolver la cuota si llegó a consumirse: cuando ya estaba
-    // agotada, el `throw` de arriba entra aquí sin haber cobrado nada.
-    if (imageCredits?.allowed) {
-      await refundCredits(auth.orgId, 'image');
-      reportError(imgErr, { route: 'POST /api/content/story', auth, service: 'ai', extra: { fase: 'imagen' } });
-    }
-  }
-
-  if (input.save === false) {
-    return NextResponse.json({
-      body:       text.body,
-      hashtags:   text.hashtags,
-      image_url:  imageUrl,
-      model:      text.model,
-      tokensUsed: text.tokensUsed,
-    });
-  }
-
-  const { data: item, error: itemError } = await db
-    .from('kefy_content_items')
-    .insert({
-      org_id:        auth.orgId,
-      brand_id:      brand?.id ?? null,
-      brand_kit_id:  brandKit?.id ?? null,
-      created_by:    auth.userId,
-      channel,
-      content_type:  'story',
-      body:          text.body,
-      image_url:     imageUrl,
-      hashtags:      text.hashtags,
-      status:        'draft',
-      render_status: 'not_rendered',
-      metadata:      { model: text.model },
-    })
-    .select('id, content_type, channel, status, created_at')
-    .single();
-
-  if (itemError || !item) {
-    console.error('story item insert error:', itemError?.message);
-    return NextResponse.json({ error: 'Failed to save story' }, { status: 500 });
-  }
-
-  const res = NextResponse.json(
-    {
-      itemId:     item.id,
-      body:       text.body,
-      hashtags:   text.hashtags,
-      image_url:  imageUrl,
-      model:      text.model,
-      tokensUsed: text.tokensUsed,
-    },
-    { status: 201 },
-  );
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
 }
 
 // ─── PATCH /api/content/story ──────────────────────────────────────────────────
@@ -199,88 +105,10 @@ export async function PATCH(req: NextRequest) {
   if (!itemId) return NextResponse.json({ error: 'itemId is required' }, { status: 422 });
   const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
 
-  const db = createSupabaseServer();
-
-  const { data: item, error: fetchError } = await db
-    .from('kefy_content_items')
-    .select('id, content_type, channel, body, title, image_url, metadata, brand_id')
-    .eq('id', itemId)
-    .eq('org_id', auth.orgId)
-    .single();
-
-  if (fetchError || !item) return NextResponse.json({ error: 'Content item not found' }, { status: 404 });
-  if (item.content_type !== 'story') {
-    return NextResponse.json({ error: 'Only story items can generate a video script' }, { status: 422 });
-  }
-
-  const { data: brandKit } = item.brand_id
-    ? await getBrandKitForBrand(db, item.brand_id)
-    : { data: null };
-
-  const sourceRow = { ...item, content_type: 'story' as const };
-  let topic = buildDerivedTopic(sourceRow);
-  const imageForTopic = topicImageFor(sourceRow);
-  if (!topic && !imageForTopic) {
-    return NextResponse.json({ error: 'Story has no text or image to base the video on' }, { status: 422 });
-  }
-
-  const videoGuard = await guardAiRequest(req, {
-    auth, operation: 'text', route: 'PATCH /api/content/story',
-  });
-  if (videoGuard.blocked) return videoGuard.blocked;
-
-  // Una story que es solo una imagen: el tema sale de lo que muestra la imagen.
-  if (!topic && imageForTopic) {
-    try {
-      topic = await describeImageAsTopic(imageForTopic, language);
-    } catch (err) {
-      reportError(err, { route: 'PATCH /api/content/story', auth, service: 'ai', extra: { itemId, fase: 'tema-imagen' } });
-    }
-    if (!topic) {
-      await videoGuard.refund();
-      return NextResponse.json({ error: 'Could not read the story image to base the video on' }, { status: 502 });
-    }
-  }
-
-  let script;
+  const ctx = serviceContext(auth, '', language, { brandScope: 'org', source: 'route' });
   try {
-    const storyCtx = 'This is a Story, not a full Reel: 1-3 shots, under 12 seconds in total, one clear message.';
-    ({ script } = await generateVideoScript({
-      channel:     (item.channel as ContentChannel) ?? 'generic',
-      topic,
-      scene_count: 2,
-      language,
-      tone:        brandKit?.tone ?? [],
-      brandName:   brandKit?.name    ?? undefined,
-      tagline:     brandKit?.tagline ?? undefined,
-      brandBrief:  videoBrandBrief(brandKit, language),
-      extraCtx:    storyCtx,
-    }));
+    return NextResponse.json(await writeStoryVideoScript(ctx, { itemId }));
   } catch (err) {
-    await videoGuard.refund();
-    reportError(err, { route: 'PATCH /api/content/story', auth, service: 'ai', extra: { itemId } });
-    const msg = err instanceof Error ? err.message : 'Story video script generation failed';
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return serviceErrorResponse(err, { route: 'PATCH /api/content/story', auth });
   }
-
-  // La imagen de la story es el primer plano: no se paga otra.
-  const storyImage = typeof item.image_url === 'string' && item.image_url ? item.image_url : null;
-  if (storyImage && script.scenes[0]) script.scenes[0].visual.image_url = storyImage;
-  const scenes = scriptToReelScenes(script, storyImage ? { s1: storyImage } : {});
-
-  const { error: updateError } = await db
-    .from('kefy_content_items')
-    .update({
-      slides:        scenes,
-      render_status: 'not_rendered',
-      metadata:      { ...((item.metadata ?? {}) as Record<string, unknown>), video_script: script },
-    })
-    .eq('id', itemId);
-
-  if (updateError) {
-    console.error('story slides update error:', updateError.message);
-    return NextResponse.json({ error: 'Failed to save story video script' }, { status: 500 });
-  }
-
-  return NextResponse.json({ itemId, scenes, script });
 }

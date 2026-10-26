@@ -1,76 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
 import {
-  generateContentText,
-  generateContentImage,
-  generateCarouselSlides,
-  generateReelScript,
-  describeImageAsTopic,
-} from '@/lib/ai';
-import { uploadBase64Image } from '@/lib/storage';
-import {
-  buildDerivedImagePrompt,
-  buildDerivedTopic,
-  buildSourceContext,
-  topicImageFor,
-} from '@/lib/content-source';
-import { reportError } from '@/lib/observability';
-import { guardAiRequest } from '@/lib/ai-guard';
-import { consumeCredits, refundCredits, creditsExhaustedBody } from '@/lib/usage';
-import type { ContentChannel } from '@/types/ai';
-import type { ContentType } from '@/types/content';
+  RENDITION_FORMATS, generateRendition, listRenditions, type RenditionFormat,
+} from '@/lib/services/renditions';
 
 export const runtime = 'nodejs';
 export const maxDuration = 180;
 
-const FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 const ROUTE = 'POST /api/content/[itemId]/renditions';
-
-type ItemRow = {
-  id:           string;
-  content_type: ContentType;
-  channel:      ContentChannel;
-  title:        string | null;
-  body:         string | null;
-  hashtags:     string[];
-  image_url:    string | null;
-  slides:       unknown;
-  video_url:    string | null;
-  mux_playback_id: string | null;
-  mux_asset_id:    string | null;
-  render_status:   string | null;
-};
-
-/** The item's own columns, presented as its "primary" rendition. */
-function primaryRendition(item: ItemRow) {
-  return {
-    id:              item.id,           // same id as the item — it IS the primary rendition
-    content_item_id: item.id,
-    format:          item.content_type,
-    status:          'ready' as const,
-    body:            item.body,
-    hashtags:        item.hashtags ?? [],
-    image_url:       item.image_url,
-    slides:          item.slides ?? null,
-    video_url:       item.video_url,
-    mux_playback_id: item.mux_playback_id,
-    mux_asset_id:    item.mux_asset_id,
-    render_status:   item.render_status,
-    error_message:   null,
-    is_primary:      true,
-  };
-}
-
-async function fetchItem(db: ReturnType<typeof createSupabaseServer>, itemId: string, orgId: string): Promise<ItemRow | null> {
-  const { data } = await db
-    .from('kefy_content_items')
-    .select('id, content_type, channel, title, body, hashtags, image_url, slides, video_url, mux_playback_id, mux_asset_id, render_status')
-    .eq('id', itemId)
-    .eq('org_id', orgId)
-    .maybeSingle();
-  return (data as ItemRow | null) ?? null;
-}
 
 // ─── GET /api/content/[itemId]/renditions ─────────────────────────────────────
 // Lists every format generated so far for this item: the primary format
@@ -85,24 +24,13 @@ export async function GET(
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { itemId } = await params;
-  const db = createSupabaseServer();
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
 
-  const item = await fetchItem(db, itemId, auth.orgId);
-  if (!item) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  const { data: rows } = await db
-    .from('kefy_content_renditions')
-    .select('*')
-    .eq('content_item_id', itemId);
-
-  const renditions = [primaryRendition(item)];
-  for (const format of FORMATS) {
-    if (format === item.content_type) continue; // already covered by the primary
-    const row = (rows ?? []).find((r: { format: string }) => r.format === format);
-    if (row) renditions.push({ ...row, is_primary: false });
+  try {
+    return NextResponse.json({ renditions: await listRenditions(ctx, itemId) });
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/content/[itemId]/renditions', auth });
   }
-
-  return NextResponse.json({ renditions });
 }
 
 // ─── POST /api/content/[itemId]/renditions ────────────────────────────────────
@@ -112,11 +40,8 @@ export async function GET(
 //
 // Body: { format: 'post' | 'carousel' | 'reel' | 'story', language?: 'es' | 'en' }
 //
-// Gasta como cualquier generación (docs/beta-abierta.md): `text` por la
-// llamada de texto (incluida, si hace falta, la lectura de la imagen) y
-// `image` por cada imagen. En post/story la imagen es la pieza: sin créditos
-// para ella no se convierte. En carrusel/reel las slides que no alcancen salen
-// sin imagen, igual que al generar un carrusel.
+// La generación, el cobro y las devoluciones viven en generateRendition
+// (lib/services/renditions.ts).
 
 export async function POST(
   req: NextRequest,
@@ -131,206 +56,18 @@ export async function POST(
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
-  const input  = body as Record<string, unknown>;
-  const format = input.format as ContentType;
+  const input  = (body ?? {}) as Record<string, unknown>;
+  const format = input.format as RenditionFormat;
   const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
-  if (!FORMATS.includes(format)) {
-    return NextResponse.json({ error: `format must be one of: ${FORMATS.join(', ')}` }, { status: 422 });
+  if (!RENDITION_FORMATS.includes(format)) {
+    return NextResponse.json({ error: `format must be one of: ${RENDITION_FORMATS.join(', ')}` }, { status: 422 });
   }
 
-  const db = createSupabaseServer();
-  const item = await fetchItem(db, itemId, auth.orgId);
-  if (!item) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  // Already the primary format — nothing to generate.
-  if (format === item.content_type) {
-    return NextResponse.json({ rendition: primaryRendition(item) });
-  }
-
-  // Already generated and ready — return as-is (idempotent).
-  const { data: existing } = await db
-    .from('kefy_content_renditions')
-    .select('*')
-    .eq('content_item_id', itemId)
-    .eq('format', format)
-    .maybeSingle();
-  if (existing?.status === 'ready') {
-    return NextResponse.json({ rendition: existing });
-  }
-
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select('id, name, tagline, tone, industry, primary_color, secondary_color, accent_color')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  // La pieza original es la referencia de la conversión: su texto completo, el
-  // de sus slides y sus imágenes. Sin esto el carrusel generado a partir de un
-  // post hablaba de otra cosa y traía fotos que no tenían nada que ver.
-  const source = buildSourceContext(item);
-  let topic = buildDerivedTopic(item);
-  const imageForTopic = topicImageFor(item);
-  if (!topic && !imageForTopic) {
-    return NextResponse.json({ error: 'Item has no text or image to base a new format on' }, { status: 422 });
-  }
-
-  const guard = await guardAiRequest(req, { auth, operation: 'text', route: ROUTE, language });
-  if (guard.blocked) return guard.blocked;
-
-  // Una pieza que es solo imagen (p. ej. una story subida a mano) se convierte
-  // a partir de lo que muestra la imagen.
-  if (!topic && imageForTopic) {
-    try {
-      topic = await describeImageAsTopic(imageForTopic);
-    } catch (err) {
-      reportError(err, { route: ROUTE, auth, service: 'ai', extra: { itemId, fase: 'tema-imagen' } });
-    }
-    if (!topic) {
-      await guard.refund();
-      return NextResponse.json({ error: 'Could not read the image to base a new format on' }, { status: 502 });
-    }
-  }
-
-  // Imágenes cobradas que todavía no se entregaron: si la conversión falla,
-  // se devuelven todas.
-  let pendingImageCharges = 0;
-  const chargeImage = async (): Promise<boolean> => {
-    const credits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
-    if (!credits?.allowed) return false;
-    pendingImageCharges++;
-    return true;
-  };
-  const imageDelivered = () => { pendingImageCharges--; };
-  // Un fallo nuestro no se le cobra al usuario: texto e imágenes sin entregar.
-  const refundAll = async () => {
-    await guard.refund();
-    for (; pendingImageCharges > 0; pendingImageCharges--) await refundCredits(auth.orgId, 'image');
-  };
-  const refundImage = async () => { pendingImageCharges--; await refundCredits(auth.orgId, 'image'); };
-
-  // En post/story la imagen es la pieza: se cobra antes de generar nada.
-  if (format === 'post' || format === 'story') {
-    const credits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
-    if (!credits?.allowed) {
-      await guard.refund();
-      return credits
-        ? NextResponse.json(creditsExhaustedBody(credits, language), { status: 429 })
-        : NextResponse.json({ error: language === 'en'
-          ? 'Could not verify your AI credits. Try again in a moment.'
-          : 'No pudimos verificar tus créditos de IA. Reintenta en un momento.' }, { status: 503 });
-    }
-    pendingImageCharges++;
-  }
-
-  const referenceImages = source.imageUrls ?? [];
-  const brandName = brandKit?.name ?? undefined;
-  const tagline   = brandKit?.tagline ?? undefined;
-  const tone      = brandKit?.tone ?? [];
-  const extraCtx  = brandKit?.industry ? `Industry: ${brandKit.industry}.` : undefined;
-
+  const ctx = serviceContext(auth, '', language, { brandScope: 'org', source: 'route' });
   try {
-    let patch: Record<string, unknown>;
-
-    const brand = {
-      name:           brandName,
-      primaryColor:   brandKit?.primary_color   ?? undefined,
-      secondaryColor: brandKit?.secondary_color ?? undefined,
-      accentColor:    brandKit?.accent_color    ?? undefined,
-      tone,
-    };
-
-    if (format === 'post') {
-      const text = await generateContentText({ channel: item.channel, topic, language: 'es', tone, brandName, tagline, extraCtx, source });
-      const img  = await generateContentImage({
-        prompt: buildDerivedImagePrompt(`${topic}. ${text.body.slice(0, 200)}`, source),
-        size: '1024x1024', quality: 'medium', brand, referenceImages,
-      });
-      const imageUrl = await uploadBase64Image(img.b64, auth.orgId, `rendition-post-${Date.now()}.jpeg`);
-      imageDelivered();
-      patch = { body: text.body, hashtags: text.hashtags, image_url: imageUrl, status: 'ready' };
-
-    } else if (format === 'carousel') {
-      const generated = await generateCarouselSlides({ channel: item.channel, topic, slide_count: 5, language: 'es', tone, brandName, tagline, extraCtx, source });
-      const slides = await Promise.all(generated.slides.map(async (slide) => {
-        if (!slide.image_prompt) return { ...slide, image_url: null, text_baked: false };
-        if (!(await chargeImage())) return { ...slide, image_url: null, text_baked: false };
-        try {
-          // La imagen se guarda LIMPIA: el título/cuerpo se dibujan como HTML
-          // encima en la vista previa y se queman recién al publicar.
-          const imgResult = await generateContentImage({
-            prompt: buildDerivedImagePrompt(slide.image_prompt, source),
-            size: '1024x1024', quality: 'medium', brand, referenceImages,
-          });
-          const imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `rendition-carousel-slide-${slide.slide_order}-${Date.now()}.jpeg`);
-          imageDelivered();
-          return { ...slide, image_url: imageUrl, text_baked: false };
-        } catch {
-          await refundImage();
-          return { ...slide, image_url: null, text_baked: false };
-        }
-      }));
-      patch = { body: generated.description, hashtags: generated.hashtags, slides, image_url: slides[0]?.image_url ?? null, status: 'ready' };
-
-    } else if (format === 'reel') {
-      const generated = await generateReelScript({ channel: item.channel, topic, scene_count: 5, language: 'es', tone, brandName, tagline, extraCtx, source });
-      const scenes = await Promise.all(generated.scenes.map(async (scene) => {
-        if (!(await chargeImage())) return { ...scene, image_url: undefined, text_baked: false };
-        try {
-          const bgPrompt = `Background scene for a reel: ${scene.image_prompt}. NO text, NO words, NO letters, NO logos, NO watermarks. Pure cinematic background scene only.`;
-          const imgResult = await generateContentImage({
-            prompt: buildDerivedImagePrompt(bgPrompt, source),
-            size: '1024x1792', quality: 'medium', brand, referenceImages,
-          });
-          const imageUrl = await uploadBase64Image(imgResult.b64, auth.orgId, `rendition-reel-scene-${scene.scene_order}-${Date.now()}.jpeg`);
-          imageDelivered();
-          return { ...scene, image_url: imageUrl, text_baked: false };
-        } catch {
-          await refundImage();
-          return { ...scene, image_url: undefined, text_baked: false };
-        }
-      }));
-      patch = { body: generated.hook, hashtags: generated.hashtags, slides: scenes, image_url: scenes.find((s) => s.image_url)?.image_url ?? null, render_status: 'not_rendered', status: 'ready' };
-
-    } else {
-      // story
-      const text = await generateContentText({ channel: item.channel, topic, language: 'es', tone, brandName, tagline, extraCtx, source });
-      const img  = await generateContentImage({
-        prompt: buildDerivedImagePrompt(`Vertical story visual for: ${topic}. Eye-catching, mobile-first composition, no captions baked in.`, source),
-        size: '1024x1536', quality: 'medium', brand, referenceImages,
-      });
-      const imageUrl = await uploadBase64Image(img.b64, auth.orgId, `rendition-story-${Date.now()}.jpeg`);
-      imageDelivered();
-      patch = { body: text.body, hashtags: text.hashtags, image_url: imageUrl, render_status: 'not_rendered', status: 'ready' };
-    }
-
-    const { data: rendition, error: upsertError } = await db
-      .from('kefy_content_renditions')
-      .upsert(
-        { content_item_id: itemId, format, ...patch },
-        { onConflict: 'content_item_id,format' },
-      )
-      .select('*')
-      .single();
-
-    if (upsertError || !rendition) {
-      await refundAll();
-      reportError(new Error(`rendition upsert error: ${upsertError?.message ?? 'no row'}`), {
-        route: ROUTE, auth, service: 'supabase', extra: { itemId, format },
-      });
-      return NextResponse.json({ error: 'Failed to save rendition' }, { status: 500 });
-    }
-
-    return NextResponse.json({ rendition }, { status: 201 });
+    const { rendition, created } = await generateRendition(ctx, { itemId, format });
+    return NextResponse.json({ rendition }, { status: created ? 201 : 200 });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : `Failed to generate ${format} rendition`;
-    await refundAll();
-    reportError(err, { route: ROUTE, auth, service: 'ai', extra: { itemId, format } });
-    await db
-      .from('kefy_content_renditions')
-      .upsert(
-        { content_item_id: itemId, format, status: 'error', error_message: msg },
-        { onConflict: 'content_item_id,format' },
-      );
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return serviceErrorResponse(err, { route: ROUTE, auth });
   }
 }

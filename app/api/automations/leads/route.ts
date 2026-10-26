@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { createSupabaseServer } from '@/lib/supabase';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { listLeads, upsertLead } from '@/lib/services/leads';
 
 // GET /api/automations/leads
 // Query params: stage?, channel?, search?, limit?, offset?
@@ -13,31 +15,22 @@ export async function GET(req: NextRequest) {
   if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
   const { searchParams } = new URL(req.url);
-  const stage   = searchParams.get('stage');
-  const channel = searchParams.get('channel');
-  const search  = searchParams.get('search');
-  const limit   = Math.min(parseInt(searchParams.get('limit') ?? '100', 10), 200);
-  const offset  = parseInt(searchParams.get('offset') ?? '0', 10);
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
 
-  const supabase = createSupabaseServer();
-
-  let query = supabase
-    .from('kefy_leads')
-    .select('*', { count: 'exact' })
-    .eq('brand_id', brand.id)
-    .order('last_interaction_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (stage)   query = query.eq('stage', stage);
-  if (channel) query = query.eq('channel', channel);
-  if (search)  query = query.ilike('username', `%${search}%`);
-
-  const { data, error, count } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const res = NextResponse.json({ leads: data ?? [], total: count ?? 0 });
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
+  try {
+    const out = await listLeads(ctx, {
+      stage:   searchParams.get('stage'),
+      channel: searchParams.get('channel'),
+      search:  searchParams.get('search'),
+      limit:   parseInt(searchParams.get('limit') ?? '100', 10),
+      offset:  parseInt(searchParams.get('offset') ?? '0', 10),
+    });
+    const res = NextResponse.json(out);
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/automations/leads', auth });
+  }
 }
 
 // POST /api/automations/leads
@@ -46,53 +39,20 @@ export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
-  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
-
-  let body: {
-    username:      string;
-    channel:       string;
-    display_name?: string;
-    avatar_url?:   string;
-    stage?:        string;
-    score?:        number;
-    notes?:        string;
-    tags?:         string[];
-  };
-
-  try {
-    body = await req.json();
-  } catch {
+  let body: unknown;
+  try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  if (!body.username?.trim() || !body.channel?.trim()) {
-    return NextResponse.json({ error: 'username and channel are required' }, { status: 400 });
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const res = NextResponse.json({ lead: await upsertLead(ctx, body) }, { status: 201 });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'POST /api/automations/leads', auth });
   }
-
-  const supabase = createSupabaseServer();
-
-  const { data, error } = await supabase
-    .from('kefy_leads')
-    .upsert({
-      org_id:       auth.orgId,
-      brand_id:     brand.id,
-      username:     body.username.trim(),
-      channel:      body.channel.trim(),
-      display_name: body.display_name ?? null,
-      avatar_url:   body.avatar_url   ?? null,
-      stage:        body.stage        ?? 'frio',
-      score:        body.score        ?? 0,
-      notes:        body.notes        ?? null,
-      tags:         body.tags         ?? [],
-      last_interaction_at: new Date().toISOString(),
-    }, { onConflict: 'brand_id,channel,username' })
-    .select()
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const res = NextResponse.json({ lead: data }, { status: 201 });
-  if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
-  return res;
 }

@@ -21,6 +21,8 @@ export type DashboardPage =
   | 'brand_market'
   | 'brand_strategy'
   | 'automations'
+  | 'automations_engagement'
+  | 'automations_leads'
   | 'settings';
 
 const PAGES: Record<DashboardPage, { path: string; params: string[] }> = {
@@ -33,6 +35,8 @@ const PAGES: Record<DashboardPage, { path: string; params: string[] }> = {
   brand_market:     { path: '/brand/market',         params: [] },
   brand_strategy:   { path: '/brand/strategy',       params: ['objective', 'industry', 'custom'] },
   automations:      { path: '/automations/autopilot', params: [] },
+  automations_engagement: { path: '/automations/engagement', params: [] },
+  automations_leads:      { path: '/automations/leads',      params: [] },
   // connect + brand: el panel de redes arranca la conexión de esa red en esa marca.
   settings:         { path: '/settings',             params: ['connect', 'brand'] },
 };

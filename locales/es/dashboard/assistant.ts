@@ -58,6 +58,8 @@ const fieldLabels: Record<string, string> = {
   body: 'texto',
   hashtags: 'hashtags',
   slides: 'slides',
+  image_url: 'imagen',
+  video_url: 'video',
   status: 'estado',
   name: 'nombre',
   tagline: 'eslogan',
@@ -159,6 +161,22 @@ const es = {
     list_comments: 'Revisando comentarios…',
     reply_to_conversation: 'Enviando respuesta…',
     reply_to_comment: 'Respondiendo comentario…',
+    list_brand_assets: 'Revisando los assets de la marca…',
+    add_brand_asset: 'Guardando el asset…',
+    delete_brand_asset: 'Borrando el asset…',
+    create_brand: 'Creando la marca…',
+    archive_brand: 'Archivando la marca…',
+    set_brand_avatar: 'Cambiando la imagen de la marca…',
+    create_story: 'Creando story…',
+    prepare_story_video: 'Preparando el video de la story…',
+    convert_content_format: 'Convirtiendo a otro formato…',
+    disconnect_social_account: 'Desconectando la cuenta…',
+    list_engagement_rules: 'Revisando las respuestas automáticas…',
+    save_engagement_rule: 'Guardando la respuesta automática…',
+    delete_engagement_rule: 'Borrando la respuesta automática…',
+    list_leads: 'Revisando leads…',
+    save_lead: 'Guardando el lead…',
+    delete_lead: 'Borrando el lead…',
   } satisfies Record<AssistantToolName, string>,
 
   toolSummaries: {
@@ -223,6 +241,7 @@ const es = {
     update_content: (_i, p) => {
       const title = str(p.title, 'contenido');
       if (p.new_status === 'archived') return `Archivar ${quote(title)}`;
+      if (p.new_image_url === null && fields(p.fields) === 'imagen') return `Quitar la imagen de ${quote(title)}`;
       const f = fields(p.fields);
       const warn = p.current_status === 'scheduled' ? ' (está programado)' : '';
       return `Editar ${f || 'el contenido'} de ${quote(title)}${warn}`;
@@ -288,6 +307,49 @@ const es = {
       const from = str(p.account);
       return `Responder públicamente el comentario${to ? ` de ${to}` : ''}${from ? ` en ${from}` : ''}`;
     },
+    list_brand_assets: () => 'Revisar los assets de la marca',
+    add_brand_asset: (i): string => (i.set_as_logo
+      ? 'Añadir la imagen a los assets y usarla como logo de la marca'
+      : 'Añadir una imagen a los assets de la marca'),
+    delete_brand_asset: (_i, p) => {
+      const what = str(p.label) ? quote(p.label) : str(p.type);
+      return what ? `Borrar el asset ${what} de la marca` : 'Borrar un asset de la marca';
+    },
+    create_brand: (i, p) => `Crear la marca ${quote(str(p.name, str(i.name)))}`,
+    archive_brand: (_i, p) => `Archivar la marca ${quote(str(p.name))}: deja de aparecer y nada podrá actuar sobre ella`,
+    set_brand_avatar: (i): string => (i.image_url ? 'Cambiar la imagen de la marca' : 'Quitar la imagen de la marca'),
+    create_story: (i, p) => {
+      const topic = str(p.topic, str(i.topic));
+      const img = (p.with_image ?? i.with_image) !== false ? ' con imagen' : '';
+      return topic ? `Crear una story${img} sobre ${quote(topic)}` : `Crear una story${img}`;
+    },
+    prepare_story_video: () => 'Escribir el guion de video de la story (1 crédito)',
+    convert_content_format: (i, p) => {
+      const credits = Number(p.credits);
+      const cost = Number.isFinite(credits) && credits > 0 ? ` (hasta ${credits} créditos)` : '';
+      const from = str(p.from) ? ` de ${str(p.from)}` : '';
+      return `Convertir ${quote(str(p.title, 'el contenido'))}${from} a ${str(p.format, str(i.format))}${cost}`;
+    },
+    disconnect_social_account: (_i, p) => {
+      const n = Number(p.scheduled_posts);
+      const base = `Desconectar ${str(p.account, 'la cuenta')}`;
+      return n > 0 ? `${base} (se borran ${n} publicaciones programadas)` : base;
+    },
+    list_engagement_rules: () => 'Revisar las respuestas automáticas',
+    save_engagement_rule: (i, p) => {
+      const name = quote(str(p.name, str(i.name)));
+      if (!i.id) {
+        const target = String(p.trigger ?? i.trigger_type ?? '').includes('dm') ? 'DMs' : 'comentarios';
+        return `Crear la respuesta automática ${name}: responderá sola a ${target}`;
+      }
+      if (p.new_status === 'paused') return `Pausar la respuesta automática ${name}`;
+      if (p.new_status === 'active') return `Reanudar la respuesta automática ${name}`;
+      return `Editar la respuesta automática ${name}`;
+    },
+    delete_engagement_rule: (_i, p) => `Borrar la respuesta automática ${quote(str(p.name))}`,
+    list_leads: () => 'Revisar los leads',
+    save_lead: (i): string => (i.id ? 'Actualizar un lead' : `Guardar el lead ${quote(str(i.username))}`),
+    delete_lead: (_i, p) => `Borrar el lead ${quote(str(p.username))}${str(p.channel) ? ` (${str(p.channel)})` : ''}`,
   } satisfies Record<AssistantToolName, ToolSummaryFn>,
 
   /** Etiquetas de los campos de la vista previa en la tarjeta de confirmación. */

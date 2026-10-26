@@ -1,7 +1,12 @@
-// ─── Herramientas del asistente: perfil de marca (Brand Kit) ─────────────────
+// ─── Herramientas del asistente: marca ───────────────────────────────────────
 //
-// get_brand_profile y update_brand_profile. Llaman a lib/services/brand-kit.ts,
-// el mismo servicio que GET/PATCH /api/brand-kit.
+// Perfil (Brand Kit): get_brand_profile, update_brand_profile e
+// import_brand_from_website, con lib/services/brand-kit.ts (el mismo servicio
+// que GET/PATCH /api/brand-kit).
+// Biblioteca de assets: list_brand_assets, add_brand_asset y
+// delete_brand_asset (lib/services/brand-assets.ts, /api/brand-kit/assets).
+// Marcas: create_brand, archive_brand y set_brand_avatar
+// (lib/services/brands.ts, /api/brands/**).
 //
 // Los campos de texto del kit los escribe el usuario o los rellenó el scraper
 // de la web (enrich-url): se envuelven como <untrusted_content> para que el
@@ -15,6 +20,13 @@ import type { BrandKit } from '@/types/brand-kit';
 import { ServiceError, msg } from '@/lib/services/errors';
 import { getOrCreateBrandKit, updateBrandKit } from '@/lib/services/brand-kit';
 import { importBrandFromWebsite } from '@/lib/services/brand-enrich';
+import { downloadExternalMedia, ingestExternalMedia } from '@/lib/services/media-ingest';
+import {
+  ASSET_TYPES, addBrandAssetFromUrl, deleteBrandAsset, getBrandAsset, listBrandAssets,
+} from '@/lib/services/brand-assets';
+import { archiveBrand, clearBrandAvatar, createBrand, setBrandAvatar } from '@/lib/services/brands';
+import { getActiveBrandById } from '@/lib/brands';
+import { isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
 import { CREDIT_COSTS } from '@/lib/usage';
 
 const BRAND_TONES = [
@@ -120,9 +132,11 @@ const updateBrandProfileTool = defineTool({
   kind: 'write',
   roles: ['owner', 'admin'],
   description:
-    "Partially updates the active brand's company profile (brand kit): tagline, mission, tone, audience, colors, niche, " +
-    'competitors and similar fields. Only send the fields that change. sync_org_name also renames the organization and ' +
-    'the brand to `name`. Always requires user confirmation. Costs no credits.',
+    "Partially updates the active brand's company profile (brand kit): tagline, mission, tone, audience, colors, fonts, " +
+    'logo, niche, competitors and similar fields. Only send the fields that change. A logo_url hosted outside Kefy is ' +
+    'downloaded and stored in Kefy (PNG, JPEG, WebP or GIF, up to 10 MB); an asset url from list_brand_assets is used ' +
+    'as is. sync_org_name also renames the organization and the brand to `name`. Always requires user confirmation. ' +
+    'Costs no credits.',
   input: updateBrandProfileInput,
   confirm: 'always',
   describe: async (_ctx, input) => {
@@ -140,6 +154,12 @@ const updateBrandProfileTool = defineTool({
         403,
         'This API key is bound to a brand and cannot change organization-wide data',
       );
+    }
+
+    // Un logo de fuera se copia al Storage de Kefy: si no, cada imagen generada
+    // lo descargaría de un host ajeno que puede cambiarlo o desaparecer.
+    if (typeof patch.logo_url === 'string' && !isKefyStorageUrl(patch.logo_url)) {
+      patch.logo_url = await ingestExternalMedia(ctx, patch.logo_url, 'image');
     }
 
     const { kit } = await updateBrandKit(ctx, patch, { syncOrg: sync_org_name === true });
@@ -183,4 +203,171 @@ const importBrandFromWebsiteTool = defineTool({
   },
 });
 
-export const brandTools = [getBrandProfileTool, updateBrandProfileTool, importBrandFromWebsiteTool];
+// ─── Biblioteca de assets ────────────────────────────────────────────────────
+
+function assetView(a: { id: string; type: string; label: string | null; public_url: string; mime_type: string | null; created_at: string }) {
+  return {
+    id: a.id,
+    type: a.type,
+    label: wrapUntrusted('brand_data', a.label),
+    url: a.public_url,
+    mime_type: a.mime_type,
+    created_at: a.created_at,
+  };
+}
+
+const listBrandAssetsTool = defineTool({
+  name: 'list_brand_assets',
+  title: { es: 'Ver assets de la marca', en: 'List brand assets' },
+  kind: 'read',
+  description:
+    "Lists the brand's asset library (logos, images, icons) with their Kefy-hosted urls. A url from here can be " +
+    'used as logo_url in update_brand_profile or as a reference image when creating content. Costs no credits.',
+  input: z.object({}).strict(),
+  confirm: 'never',
+  handler: async (ctx) => {
+    const { assets } = await listBrandAssets(ctx);
+    return { data: { assets: assets.map(assetView) }, links: brandLinks(ctx.language) };
+  },
+});
+
+const addBrandAssetTool = defineTool({
+  name: 'add_brand_asset',
+  title: { es: 'Añadir asset de marca', en: 'Add brand asset' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    "Downloads an image (https, PNG, JPEG, WebP or GIF, up to 10 MB) and stores it in the brand's asset library. " +
+    'set_as_logo also makes it the brand logo used on generated images and videos. Costs no credits.',
+  input: z.object({
+    image_url: httpsUrl.describe('Public https URL of the image.'),
+    type: z.enum(ASSET_TYPES as [string, ...string[]]).default('image'),
+    label: z.string().trim().max(100).optional(),
+    set_as_logo: z.boolean().default(false),
+  }).strict(),
+  confirm: (_ctx, input) => input.set_as_logo === true,
+  describe: async (_ctx, input) => ({
+    image_url: input.image_url, type: input.type, label: input.label ?? null, set_as_logo: input.set_as_logo,
+  }),
+  handler: async (ctx, input) => {
+    const { asset } = await addBrandAssetFromUrl(ctx, {
+      url: input.image_url,
+      type: input.type as (typeof ASSET_TYPES)[number],
+      label: input.label ?? null,
+    });
+    let logoSet = false;
+    if (input.set_as_logo) {
+      await updateBrandKit(ctx, { logo_url: asset.public_url });
+      logoSet = true;
+    }
+    return {
+      data: { asset: assetView(asset), logo_set: logoSet },
+      links: brandLinks(ctx.language),
+      dataChanged: ['brand-kit'],
+    };
+  },
+});
+
+const deleteBrandAssetTool = defineTool({
+  name: 'delete_brand_asset',
+  title: { es: 'Borrar asset de marca', en: 'Delete brand asset' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    "Deletes an asset (and its file) from the brand's asset library. If it is the current logo, the brand profile " +
+    'keeps pointing to it until logo_url is changed. Always requires user confirmation. Costs no credits.',
+  input: z.object({ asset_id: z.uuid() }).strict(),
+  confirm: 'always',
+  describe: async (ctx, input) => {
+    const asset = await getBrandAsset(ctx, input.asset_id);
+    return { label: asset.label, type: asset.type, url: asset.public_url };
+  },
+  handler: async (ctx, input) => {
+    await deleteBrandAsset(ctx, input.asset_id);
+    return { data: { deleted: input.asset_id }, links: brandLinks(ctx.language), dataChanged: ['brand-kit'] };
+  },
+});
+
+// ─── Marcas ──────────────────────────────────────────────────────────────────
+
+const createBrandTool = defineTool({
+  name: 'create_brand',
+  title: { es: 'Crear marca', en: 'Create brand' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  orgWide: true,
+  // La marca nueva no es la del contexto: fuera del chat no hace falta
+  // brand_id aunque la organización tenga varias marcas.
+  brandless: true,
+  description:
+    'Creates a new brand in the organization (with an empty brand profile), within the plan limit of brands. ' +
+    'It does not switch to it: pass the returned brand.id as brand_id in the next calls (update_brand_profile, ' +
+    'get_connect_account_link…) to set it up. Always requires user confirmation. Costs no credits.',
+  input: z.object({ name: z.string().trim().min(1).max(100) }).strict(),
+  confirm: 'always',
+  describe: async (_ctx, input) => ({ name: input.name }),
+  handler: async (ctx, input) => {
+    const { brand } = await createBrand(ctx, { name: input.name });
+    return {
+      data: { brand: { id: brand.id, name: brand.name }, next: 'Pass brand.id as brand_id to act on the new brand.' },
+      dataChanged: ['brands'],
+    };
+  },
+});
+
+const archiveBrandTool = defineTool({
+  name: 'archive_brand',
+  title: { es: 'Archivar marca', en: 'Archive brand' },
+  kind: 'write',
+  roles: ['owner'],
+  orgWide: true,
+  description:
+    'Archives the brand of this call (brand_id): it disappears from the brand switcher and nothing can act on it ' +
+    'anymore. The only active brand cannot be archived. Always requires user confirmation. Costs no credits.',
+  input: z.object({}).strict(),
+  confirm: 'always',
+  describe: async (ctx) => {
+    const brand = await getActiveBrandById(ctx.brandId, ctx.orgId);
+    return { brand_id: ctx.brandId, name: brand?.name ?? null };
+  },
+  handler: async (ctx) => {
+    await archiveBrand(ctx, ctx.brandId);
+    return { data: { archived: ctx.brandId }, dataChanged: ['brands'] };
+  },
+});
+
+const setBrandAvatarTool = defineTool({
+  name: 'set_brand_avatar',
+  title: { es: 'Cambiar imagen de la marca', en: 'Set brand avatar' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    'Sets the image that identifies the brand in the brand switcher: downloads image_url (https, PNG, JPEG, WebP or ' +
+    'GIF) and crops it to a square. image_url null removes it (the brand logo or initial is shown instead). ' +
+    'This is not the logo used on content: that is logo_url in update_brand_profile. Costs no credits.',
+  input: z.object({
+    image_url: httpsUrl.nullable().describe('Public https URL of the image, or null to remove it.'),
+  }).strict(),
+  confirm: 'never',
+  handler: async (ctx, input) => {
+    const { brand } = input.image_url
+      ? await setBrandAvatar(ctx, ctx.brandId, (await downloadExternalMedia(ctx, input.image_url, 'image')).buffer)
+      : await clearBrandAvatar(ctx, ctx.brandId);
+    return {
+      data: { brand: { id: brand.id, name: brand.name, avatar_url: brand.avatar_url } },
+      dataChanged: ['brands'],
+    };
+  },
+});
+
+export const brandTools = [
+  getBrandProfileTool,
+  updateBrandProfileTool,
+  importBrandFromWebsiteTool,
+  listBrandAssetsTool,
+  addBrandAssetTool,
+  deleteBrandAssetTool,
+  createBrandTool,
+  archiveBrandTool,
+  setBrandAvatarTool,
+];

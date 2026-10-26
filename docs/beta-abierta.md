@@ -231,7 +231,17 @@ cobra 1 crédito de texto por regla con `chargeOrThrow` y lo devuelve si la
 ejecución falla (`lib/services/autopilot.ts`). La ejecución programada del
 cron **todavía no cobra**: si cobrara, un autopilot se pararía en silencio al
 acabarse los créditos, y eso necesita antes un aviso en la UI. Es deuda
-conocida, igual que el motor de engagement.
+conocida.
+
+### Respuestas automáticas (engagement)
+
+Las reglas con respuesta de IA (`reply_comment_ai`, `send_dm_ai_response`)
+cobran 1 crédito de texto por respuesta con `checkAiSpend` — suscripción, rate
+limit `ai:org` y créditos, con el plan leído de la organización porque no hay
+usuario detrás del webhook — y lo devuelven si la IA falla
+(`lib/engagement-executor.ts`). Si la guardia bloquea, la regla no responde ese
+comentario o DM: no hay respaldo con plantilla. Las respuestas con plantilla no
+gastan créditos.
 
 ### Asistente IA: mensajes, no créditos
 

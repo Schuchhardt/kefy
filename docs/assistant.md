@@ -60,6 +60,7 @@ Una herramienta es un `defineTool({...})` en `lib/assistant/tools/*.ts`:
 | `description` | En inglés, para el modelo: qué hace, cuándo usarla y cuántos créditos cuesta |
 | `input` | `z.object(...)`. Se publica como JSON Schema (`z.toJSONSchema`) |
 | `roles`, `sources`, `orgWide` | Restricciones opcionales |
+| `brandless` | No actúa sobre una marca existente (`create_brand`): fuera del chat no exige `brand_id` y su JSON Schema no lo anuncia. Si llega un `brand_id`, se valida igual |
 | `confirm` | `'never'` \| `'always'` \| función. Solo aplica al chat |
 | `estimateCredits` | Créditos estimados; ≥ 10 fuerza la confirmación en el chat |
 | `taints` | Si el resultado trae texto de terceros (ver §3) |
@@ -127,6 +128,8 @@ limita qué puede hacer (scopes). Por eso las recomendaciones de §5.
   (texto + imagen por escena — y eso, multiplicado, por cada variante si se
   pide más de una con `variant_count`). Lo cobra el servicio con
   `chargeOrThrow`.
+  Una story cuesta texto 1 + imagen 3; su guion de video (`prepare_story_video`) 1;
+  convertir a post o story 4 y a carrusel o reel hasta 16 (`renditionCredits`).
 - **Leer una web cuesta 1 crédito** (`import_brand_from_website`, y
   `create_starter_posts` cuando recibe `url`): Firecrawl extrae los datos con un
   modelo en su lado. Se devuelve si la web no se puede leer.
@@ -155,28 +158,33 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 
 | Scope | Permite |
 |---|---|
-| `read` | Herramientas de lectura: contenido, calendario, analytics, bandeja, marca, estrategia, cuentas conectadas, link para conectar una cuenta, reglas de autopilot |
-| `write` | Crear y editar borradores, generar con IA (gasta créditos), sincronizar, cambiar perfil/estrategia, crear estrategias propias, borrar reglas de autopilot |
-| `publish` | Publicar y programar en redes, cancelar publicaciones, responder DMs y comentarios, crear / editar / pausar / reanudar / ejecutar reglas de autopilot |
+| `read` | Herramientas de lectura: contenido, calendario, analytics, bandeja, marca y sus assets, estrategia, cuentas conectadas, link para conectar una cuenta, reglas de autopilot y de respuesta automática, leads |
+| `write` | Crear y editar borradores, generar con IA (gasta créditos), convertir de formato, sincronizar, cambiar perfil/estrategia, assets, avatar, crear y archivar marcas, crear estrategias propias, desconectar cuentas, leads, borrar reglas de autopilot y de respuesta automática |
+| `publish` | Publicar y programar en redes, cancelar publicaciones, responder DMs y comentarios, crear / editar / pausar / reanudar / ejecutar reglas de autopilot, crear / editar / pausar reglas de respuesta automática |
 
 ### Qué se puede hacer desde fuera (API y MCP)
 
 | Quiero… | Herramienta | Scope |
 |---|---|---|
 | Ver el workspace (marcas, plan, créditos, estrategia activa) | `get_workspace_context` | read |
-| Crear contenido con IA | `create_post`, `create_carousel`, `create_reel`, `generate_content_image` | write |
-| Video (guion → herramientas → montaje) | `get_video_plan`, `get_video_status` (read) · `produce_video` (write, siempre con confirmación) — ver `docs/video-pipeline.md` | read / write |
+| Crear contenido con IA | `create_post` (`model`, `image_size`, `reference_image_urls`), `create_carousel`, `create_reel` (`reference_image_urls`), `create_story`, `generate_content_image` (`size`, `reference_image_urls`) | write |
+| Convertir un contenido a otro formato (lo que después publica `publish_content` con `format`) | `convert_content_format` | write |
+| Video (guion → herramientas → montaje) | `get_video_plan`, `get_video_status` (read) · `prepare_story_video` (guion de una story, 1 crédito; obligatorio antes de producirla) · `produce_video` (write, siempre con confirmación) — ver `docs/video-pipeline.md` | read / write |
 | Arrancar una marca nueva: leer su web (opcional) y escribir 3 posts de inicio | `create_starter_posts` | write |
-| Pasar contenido ya escrito desde otro proyecto | `create_manual_content`, `update_content` | write |
+| Pasar contenido ya escrito desde otro proyecto | `create_manual_content`, `update_content` (texto, slides, estado, `image_url`, `video_url`) | write |
 | Ver y buscar contenido | `list_content`, `get_content` | read |
 | Publicar o programar | `publish_content`, `list_scheduled_posts`, `cancel_scheduled_post` | publish |
 | Estrategias (catálogo y propias) | `get_strategy_catalog`, `preview_strategy`, `save_custom_strategy`, `set_active_strategy`, `get_content_ideas` | read / write |
 | Estadísticas de contenido | `get_analytics_overview`, `list_post_performance`, `sync_social_data` | read / write |
-| Cuentas conectadas | `list_social_accounts` | read |
+| Cuentas conectadas | `list_social_accounts` (read) · `disconnect_social_account` (write; borra en cascada sus publicaciones, DMs y comentarios y la quita de las reglas de autopilot) | read / write |
 | Conectar una cuenta nueva | `get_connect_account_link` → link directo (una persona con sesión termina el OAuth de la red) | read |
 | Autopilot | `list_autopilot_rules`, `save_autopilot_rule`, `delete_autopilot_rule`, `run_autopilot_now` | read / publish / write |
+| Respuestas automáticas a comentarios y DMs | `list_engagement_rules` (read), `save_engagement_rule` (publish), `delete_engagement_rule` (write) | read / publish / write |
+| Leads | `list_leads` (read), `save_lead`, `delete_lead` (write) | read / write |
 | Bandeja: DMs y comentarios | `list_conversations`, `get_conversation_messages`, `list_comments`, `reply_to_conversation`, `reply_to_comment` | read / publish |
-| Marca | `get_brand_profile`, `update_brand_profile`, `import_brand_from_website` | read / write |
+| Marca: identidad | `get_brand_profile`, `update_brand_profile` (un `logo_url` externo se copia al Storage de Kefy), `import_brand_from_website` | read / write |
+| Marca: assets (logos, imágenes, íconos) | `list_brand_assets` (read), `add_brand_asset` (desde una URL; `set_as_logo`), `delete_brand_asset` (write) | read / write |
+| Marcas | `create_brand` (`brandless`, orgWide), `archive_brand` (solo dueño, orgWide; archiva la marca de la llamada), `set_brand_avatar` | write |
 
 **Conectar una cuenta.** Conectar una red exige que una persona autorice en el
 navegador de esa red, así que ninguna herramienta la conecta sola:
@@ -184,6 +192,20 @@ navegador de esa red, así que ninguna herramienta la conecta sola:
 `https://<host>/<lang>/dashboard/settings?connect=<red>&brand=<marca>`. Al
 abrirlo con sesión, Kefy cambia a esa marca y lanza la autorización; sin
 sesión, pasa por el login (`?next=`) y sigue después.
+
+**Respuestas automáticas.** Las reglas nuevas son de la marca (`brand_id`); las
+antiguas sin marca valen para toda la organización y una key atada a una marca
+no puede editarlas ni borrarlas (`bound_key_org_write`). El executor
+(`lib/engagement-executor.ts`) solo ejecuta los disparadores `new_comment`,
+`comment_contains_keyword`, `new_dm`, `dm_contains_keyword` y las acciones
+`reply_comment`, `reply_comment_ai`, `send_dm`, `send_dm_ai_response`, y se
+salta las reglas con espera (`delay_minutes > 0`): la herramienta solo acepta
+eso, y `list_engagement_rules` marca con `works: false` las reglas que nunca se
+ejecutarían.
+
+**Medios externos.** Toda URL de imagen o video que no sea del Storage de Kefy
+(referencias, logo, assets, avatar, `update_content`) se descarga con las
+protecciones de `lib/services/media-ingest.ts` y se re-aloja antes de usarla.
 
 **Autopilot.** Las reglas son de una marca. `save_autopilot_rule` crea (sin
 `id`) o edita (con `id`, incluido `status: "paused" | "active"`).
@@ -470,6 +492,12 @@ Los links del asistente abren la página en la opción concreta:
 | `app/api/api-keys/**` | Gestión de keys (cookie de sesión, dueño/admin) |
 | `db/migrations/20260922000001_create_assistant_and_api_keys.sql` | Tablas y RPCs |
 | `lib/services/custom-strategy.ts`, `app/api/strategies/custom/**` | Estrategias propias de la org |
+| `lib/services/brand-assets.ts`, `app/api/brand-kit/assets/**` | Biblioteca de assets de la marca |
+| `lib/services/brands.ts`, `app/api/brands/**` | Listar, crear y archivar marcas; avatar |
+| `lib/services/story.ts`, `app/api/content/story` | Story con IA y su guion de video |
+| `lib/services/renditions.ts`, `app/api/content/[itemId]/renditions` | Conversión de un contenido a otro formato |
+| `lib/services/engagement.ts`, `app/api/automations/engagement/rules/**` | Reglas de respuesta automática (`lib/engagement-executor.ts` las ejecuta) |
+| `lib/services/leads.ts`, `app/api/automations/leads/**` | Leads de la marca |
 | `lib/services/autopilot.ts`, `app/api/autopilot/**` | Reglas y ejecución del autopilot |
 | `lib/safe-redirect.ts` | `?next=` del login y del registro: solo rutas propias del idioma (dashboard, onboarding, invitación, consentimiento OAuth) |
 | `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, el onboarding y `import_brand_from_website` |

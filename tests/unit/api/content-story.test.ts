@@ -225,7 +225,7 @@ describe('PATCH /api/content/story', () => {
     const itemChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: null, error: { message: 'not found' } }),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
     };
     mockSupabaseClient.from.mockReturnValueOnce(itemChain);
 
@@ -240,7 +240,7 @@ describe('PATCH /api/content/story', () => {
     const itemChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: { id: 'post-1', content_type: 'post', channel: 'instagram', body: 'x', title: null }, error: null }),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'post-1', content_type: 'post', channel: 'instagram', body: 'x', title: null }, error: null }),
     };
     mockSupabaseClient.from.mockReturnValueOnce(itemChain);
 
@@ -257,7 +257,7 @@ describe('PATCH /api/content/story', () => {
     const itemChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({
+      maybeSingle: vi.fn().mockResolvedValue({
         data: {
           id: 'story-1', content_type: 'story', channel: 'instagram', body: 'Texto de la story', title: null,
           image_url: 'https://cdn.example.com/story.jpg', metadata: { created_via: 'ui' }, brand_id: 'brand-1',
@@ -310,7 +310,7 @@ describe('PATCH /api/content/story', () => {
     const itemChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data, error: null }),
+      maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
     };
     const updateChain = { update: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ error: null }) };
     mockSupabaseClient.from

@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
-import { createSupabaseServer } from '@/lib/supabase';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { deleteEngagementRule, updateEngagementRule } from '@/lib/services/engagement';
 
-async function getRule(supabase: ReturnType<typeof createSupabaseServer>, id: string, orgId: string) {
-  const { data, error } = await supabase
-    .from('kefy_engagement_rules')
-    .select('*')
-    .eq('id', id)
-    .eq('org_id', orgId)
-    .single();
-  if (error || !data) return null;
-  return data;
-}
+// ─── /api/automations/engagement/rules/[id] ──────────────────────────────────
+// Editar y borrar una regla de la organización (lib/services/engagement.ts).
 
 export async function PATCH(
   req: NextRequest,
@@ -21,36 +15,17 @@ export async function PATCH(
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const supabase = createSupabaseServer();
-
-  const rule = await getRule(supabase, id, auth.orgId);
-  if (!rule) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  const body = await req.json() as Record<string, unknown>;
-
-  const allowed = [
-    'name', 'trigger_type', 'trigger_config', 'conditions',
-    'action_type', 'action_config', 'action_template',
-    'ai_context', 'delay_minutes', 'is_active',
-    'condition_platform', 'condition_keyword', 'condition_rating',
-    'lead_action_type', 'lead_action_score_delta', 'lead_action_stage',
-  ] as const;
-
-  const updates: Record<string, unknown> = {};
-  for (const key of allowed) {
-    if (key in body) updates[key] = body[key];
+  let body: unknown;
+  try { body = await req.json(); } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { data, error } = await supabase
-    .from('kefy_engagement_rules')
-    .update(updates)
-    .eq('id', id)
-    .eq('org_id', auth.orgId)
-    .select()
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rule: data });
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
+  try {
+    return NextResponse.json({ rule: await updateEngagementRule(ctx, id, body) });
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'PATCH /api/automations/engagement/rules/[id]', auth });
+  }
 }
 
 export async function DELETE(
@@ -61,17 +36,11 @@ export async function DELETE(
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const supabase = createSupabaseServer();
-
-  const rule = await getRule(supabase, id, auth.orgId);
-  if (!rule) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  const { error } = await supabase
-    .from('kefy_engagement_rules')
-    .delete()
-    .eq('id', id)
-    .eq('org_id', auth.orgId);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
+  try {
+    await deleteEngagementRule(ctx, id);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'DELETE /api/automations/engagement/rules/[id]', auth });
+  }
 }

@@ -83,16 +83,24 @@ async function readCapped(
   return Buffer.concat(chunks, total);
 }
 
+export interface DownloadedMedia {
+  buffer: Buffer;
+  contentType: string;
+  ext: string;
+}
+
 /**
- * Descarga `url` y la sube a kefy-content-media/{orgId}/imports/. Devuelve la
- * URL pública del archivo re-alojado. Lanza ServiceError 422 si la URL o el
- * archivo no son aceptables.
+ * Descarga `url` con todas las protecciones contra SSRF y valida tipo y
+ * tamaño. No guarda nada: lo usan ingestExternalMedia y los servicios que
+ * suben el archivo a otro bucket (assets de marca) o lo transforman antes
+ * (avatar de la marca). Lanza ServiceError 422 si la URL o el archivo no son
+ * aceptables.
  */
-export async function ingestExternalMedia(
+export async function downloadExternalMedia(
   ctx: ServiceContext,
   url: string,
   kind: MediaKind,
-): Promise<string> {
+): Promise<DownloadedMedia> {
   const lang = ctx.language;
 
   // 1. URL https sin credenciales.
@@ -188,32 +196,48 @@ export async function ingestExternalMedia(
       throw invalid(msg(lang, 'El archivo de media está vacío', 'The media file is empty'));
     }
 
-    // 6. Subida al Storage de Kefy.
-    const path = `${ctx.auth.orgId}/imports/${randomUUID()}.${ext}`;
-    const db = createSupabaseServer();
-    const { error: uploadError } = await db.storage
-      .from(BUCKET)
-      .upload(path, buffer, { contentType, upsert: false });
-    if (uploadError) {
-      reportError(new Error(uploadError.message), {
-        route: 'lib/services/media-ingest', service: 'supabase', auth: ctx.auth,
-        extra: { kind },
-      });
-      throw new ServiceError(
-        'unavailable', 503,
-        msg(lang, 'No se pudo guardar la media. Reintenta.', 'Could not store the media. Try again.'),
-      );
-    }
-
-    const { data } = db.storage.from(BUCKET).getPublicUrl(path);
-    if (!data?.publicUrl) {
-      throw new ServiceError(
-        'unavailable', 503,
-        msg(lang, 'No se pudo guardar la media. Reintenta.', 'Could not store the media. Try again.'),
-      );
-    }
-    return data.publicUrl;
+    return { buffer, contentType, ext };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Descarga `url` y la sube a kefy-content-media/{orgId}/imports/. Devuelve la
+ * URL pública del archivo re-alojado. Lanza ServiceError 422 si la URL o el
+ * archivo no son aceptables.
+ */
+export async function ingestExternalMedia(
+  ctx: ServiceContext,
+  url: string,
+  kind: MediaKind,
+): Promise<string> {
+  const lang = ctx.language;
+  const { buffer, contentType, ext } = await downloadExternalMedia(ctx, url, kind);
+
+  // 6. Subida al Storage de Kefy.
+  const path = `${ctx.auth.orgId}/imports/${randomUUID()}.${ext}`;
+  const db = createSupabaseServer();
+  const { error: uploadError } = await db.storage
+    .from(BUCKET)
+    .upload(path, buffer, { contentType, upsert: false });
+  if (uploadError) {
+    reportError(new Error(uploadError.message), {
+      route: 'lib/services/media-ingest', service: 'supabase', auth: ctx.auth,
+      extra: { kind },
+    });
+    throw new ServiceError(
+      'unavailable', 503,
+      msg(lang, 'No se pudo guardar la media. Reintenta.', 'Could not store the media. Try again.'),
+    );
+  }
+
+  const { data } = db.storage.from(BUCKET).getPublicUrl(path);
+  if (!data?.publicUrl) {
+    throw new ServiceError(
+      'unavailable', 503,
+      msg(lang, 'No se pudo guardar la media. Reintenta.', 'Could not store the media. Try again.'),
+    );
+  }
+  return data.publicUrl;
 }

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { validateBrandAccess } from '@/lib/brands';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { archiveBrand } from '@/lib/services/brands';
 
 // ─── PATCH /api/brands/[id] ───────────────────────────────────────────────────
 // Update brand name and/or avatar_url.
@@ -67,7 +70,7 @@ export async function PATCH(
 }
 
 // ─── DELETE /api/brands/[id] ──────────────────────────────────────────────────
-// Soft-delete (archive) a brand. Cannot archive the last active brand.
+// Soft-delete (archive) a brand. Cannot archive the last active brand (archiveBrand).
 
 export async function DELETE(
   req: NextRequest,
@@ -85,32 +88,11 @@ export async function DELETE(
   const brand = await validateBrandAccess(id, auth);
   if (!brand) return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
 
-  if (brand.archived) {
-    return NextResponse.json({ error: 'Brand is already archived' }, { status: 409 });
+  const ctx = serviceContext(auth, brand.id, 'en', { brandScope: 'org', source: 'route' });
+  try {
+    await archiveBrand(ctx, id);
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'DELETE /api/brands/[id]', auth });
   }
-
-  const db = createSupabaseServer();
-
-  // Prevent archiving the last active brand
-  const { count } = await db
-    .from('kefy_brands')
-    .select('id', { count: 'exact', head: true })
-    .eq('org_id', auth.orgId)
-    .eq('archived', false);
-
-  if ((count ?? 0) <= 1) {
-    return NextResponse.json({ error: 'Cannot archive the only active brand' }, { status: 409 });
-  }
-
-  const { error } = await db
-    .from('kefy_brands')
-    .update({ archived: true })
-    .eq('id', id);
-
-  if (error) {
-    console.error('brands DELETE error:', error.message);
-    return NextResponse.json({ error: 'Failed to archive brand' }, { status: 500 });
-  }
-
-  return NextResponse.json({ success: true });
 }
