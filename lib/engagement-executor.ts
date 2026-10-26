@@ -1,13 +1,20 @@
 // lib/engagement-executor.ts
 // Evaluates active engagement rules for an org and executes matching actions
-// when social events arrive (comments, reviews, DMs).
+// when social events arrive (comments and DMs, the only events Zernio sends).
+//
+// Per event: the matching rules of the account's brand score the sender as a
+// lead (lead_action_* + kefy_lead_scoring_config), then each rule answers right
+// away or, with delay_minutes > 0, is queued in kefy_engagement_jobs for the
+// cron /api/automations/engagement/run (runDueEngagementJobs).
 
 import { createSupabaseServer } from '@/lib/supabase';
 import { generateContentText } from '@/lib/ai';
 import { replyToComment, sendMessage } from '@/lib/zernio';
 import { getBrandKitForBrand } from '@/lib/services/brand-kit';
+import { recordLeadInteraction } from '@/lib/services/lead-scoring';
 import { checkAiSpend } from '@/lib/ai-guard';
 import { reportError } from '@/lib/observability';
+import { engagementRuleIssue, isKeywordTrigger, matchesKeywords, ruleKeywords } from '@/lib/engagement-rules';
 import type { JWTPayload } from '@/types/auth';
 
 type DB = ReturnType<typeof createSupabaseServer>;
@@ -24,6 +31,8 @@ export type EngagementEvent =
       body: string;
       platform: string;
       authorId: string;
+      authorName?: string | null;
+      authorAvatar?: string | null;
     }
   | {
       type: 'new_dm';
@@ -31,54 +40,58 @@ export type EngagementEvent =
       brandId: string | null;
       zernioAccountId: string;
       threadId: string;
+      /** Id del mensaje en la red: identifica el evento al encolarlo. */
+      messageId: string;
       body: string;
       platform: string;
       senderId: string;
+      senderName?: string | null;
+      senderAvatar?: string | null;
     };
 
 type EngagementRule = {
   id: string;
   org_id: string;
+  brand_id: string | null;
+  is_active: boolean;
   trigger_type: string;
+  trigger_config: Record<string, unknown> | null;
   condition_platform: string | null;
   condition_keyword: string | null;
-  condition_rating: number | null;
   action_type: string;
   action_template: string;
   ai_context: string | null;
   delay_minutes: number;
+  lead_action_type: 'create_lead' | 'update_lead' | null;
+  lead_action_score_delta: number | null;
+  lead_action_stage: string | null;
 };
 
+const RULE_COLUMNS =
+  'id, org_id, brand_id, is_active, trigger_type, trigger_config, condition_platform, condition_keyword, ' +
+  'action_type, action_template, ai_context, delay_minutes, lead_action_type, lead_action_score_delta, lead_action_stage';
+
 function matchesTrigger(rule: EngagementRule, event: EngagementEvent): boolean {
-  const t = rule.trigger_type;
-  if (event.type === 'new_comment') {
-    if (t === 'new_comment') return true;
-    if (t === 'comment_contains_keyword' && rule.condition_keyword) {
-      return event.body.toLowerCase().includes(rule.condition_keyword.toLowerCase());
-    }
-    return false;
-  }
-  if (event.type === 'new_dm') {
-    if (t === 'new_dm') return true;
-    if (t === 'dm_contains_keyword' && rule.condition_keyword) {
-      return event.body.toLowerCase().includes(rule.condition_keyword.toLowerCase());
-    }
-    return false;
-  }
+  const isComment = event.type === 'new_comment';
+  if (rule.trigger_type === 'new_comment' || rule.trigger_type === 'comment_contains_keyword') return isComment;
+  if (rule.trigger_type === 'new_dm' || rule.trigger_type === 'dm_contains_keyword') return !isComment;
   return false;
 }
 
 function matchesConditions(rule: EngagementRule, event: EngagementEvent): boolean {
-  if (rule.condition_platform && rule.condition_platform !== event.platform) return false;
-  if (
-    rule.condition_keyword &&
-    rule.trigger_type !== 'comment_contains_keyword' &&
-    rule.trigger_type !== 'dm_contains_keyword'
-  ) {
-    const body = 'body' in event ? (event.body ?? '') : '';
-    if (!body.toLowerCase().includes(rule.condition_keyword.toLowerCase())) return false;
-  }
-  return true;
+  // 'all' lo guardaban versiones antiguas de la UI: es lo mismo que null.
+  const platform = rule.condition_platform && rule.condition_platform !== 'all' ? rule.condition_platform : null;
+  if (platform && platform !== event.platform) return false;
+  // Las palabras clave filtran con cualquier disparador; con los *_keyword
+  // además son obligatorias (sin ninguna, la regla no responde nada).
+  const keywords = ruleKeywords(rule);
+  if (keywords.length === 0) return !isKeywordTrigger(rule.trigger_type);
+  return matchesKeywords(event.body ?? '', keywords);
+}
+
+/** Id del evento en la red: un webhook repetido no encola dos veces. */
+function eventKey(event: EngagementEvent): string {
+  return event.type === 'new_comment' ? `comment:${event.commentId}` : `dm:${event.messageId}`;
 }
 
 const ROUTE = 'lib/engagement-executor';
@@ -201,6 +214,77 @@ async function executeAction(
   }
 }
 
+type RuleOutcome = 'done' | 'skipped';
+
+/** Ejecuta la acción de una regla y suma el contador. Lanza si falla. */
+async function runRule(db: DB, rule: EngagementRule, event: EngagementEvent): Promise<RuleOutcome> {
+  try {
+    await executeAction(db, rule, event);
+  } catch (err) {
+    if (err instanceof SpendBlocked) return 'skipped';
+    throw err;
+  }
+
+  const { data: current } = await db
+    .from('kefy_engagement_rules')
+    .select('times_triggered')
+    .eq('id', rule.id)
+    .single();
+
+  await db
+    .from('kefy_engagement_rules')
+    .update({
+      times_triggered:   (current?.times_triggered ?? 0) + 1,
+      last_triggered_at: new Date().toISOString(),
+    })
+    .eq('id', rule.id);
+  return 'done';
+}
+
+/**
+ * Suma la interacción al lead que la envió, una vez por evento. Manda la
+ * primera regla que crea leads; si no hay, la que solo actualiza; sin ninguna,
+ * solo puntúa a quien ya es lead (con los puntos de la configuración).
+ */
+async function scoreLead(db: DB, orgId: string, event: EngagementEvent, rules: EngagementRule[]): Promise<void> {
+  if (!event.brandId) return;
+  const rule = rules.find((r) => r.lead_action_type === 'create_lead')
+    ?? rules.find((r) => r.lead_action_type === 'update_lead');
+  const isComment = event.type === 'new_comment';
+
+  await recordLeadInteraction(db, {
+    orgId,
+    brandId:     event.brandId,
+    channel:     event.platform,
+    username:    isComment ? event.authorId : event.senderId,
+    displayName: isComment ? event.authorName : event.senderName,
+    avatarUrl:   isComment ? event.authorAvatar : event.senderAvatar,
+    type:        isComment ? 'comment' : 'dm',
+    preview:     event.body,
+    postId:      isComment ? event.postId : null,
+    ruleId:      rule?.id ?? null,
+    // 0 en una regla de pack significa «los puntos por defecto».
+    scoreDelta:  rule?.lead_action_score_delta || null,
+    stage:       rule?.lead_action_stage ?? null,
+    create:      rule?.lead_action_type === 'create_lead',
+  });
+}
+
+async function enqueue(db: DB, rule: EngagementRule, event: EngagementEvent): Promise<void> {
+  const { error } = await db.from('kefy_engagement_jobs').insert({
+    org_id:    rule.org_id,
+    brand_id:  event.brandId,
+    rule_id:   rule.id,
+    event_key: eventKey(event),
+    event,
+    run_at:    new Date(Date.now() + rule.delay_minutes * 60_000).toISOString(),
+  });
+  // 23505: el mismo evento ya estaba en cola (webhook repetido).
+  if (error && error.code !== '23505') {
+    reportError(new Error(error.message), { route: ROUTE, service: 'supabase', extra: { ruleId: rule.id } });
+  }
+}
+
 export async function executeEngagementRules(
   db: DB,
   orgId: string,
@@ -208,9 +292,7 @@ export async function executeEngagementRules(
 ): Promise<void> {
   const { data: rules, error } = await db
     .from('kefy_engagement_rules')
-    .select(
-      'id, org_id, trigger_type, condition_platform, condition_keyword, condition_rating, action_type, action_template, ai_context, delay_minutes',
-    )
+    .select(RULE_COLUMNS)
     .eq('org_id', orgId)
     .eq('is_active', true)
     // Solo las reglas de la marca de la cuenta y las antiguas sin marca (de
@@ -219,41 +301,124 @@ export async function executeEngagementRules(
     .or(event.brandId ? `brand_id.is.null,brand_id.eq.${event.brandId}` : 'brand_id.is.null');
 
   if (error) {
-    console.error('[Engagement] failed to fetch rules:', error.message);
+    reportError(new Error(error.message), { route: ROUTE, service: 'supabase', extra: { orgId } });
     return;
   }
 
-  if (!rules?.length) return;
+  // Una regla antigua con una combinación que no se ejecuta (disparador sin
+  // webhook, comentario respondido por DM…) no responde ni suma puntos.
+  const matched = ((rules ?? []) as unknown as EngagementRule[]).filter((rule) =>
+    engagementRuleIssue(rule) === null && matchesTrigger(rule, event) && matchesConditions(rule, event));
 
-  for (const rule of rules as EngagementRule[]) {
-    if (!matchesTrigger(rule, event)) continue;
-    if (!matchesConditions(rule, event)) continue;
+  try {
+    await scoreLead(db, orgId, event, matched);
+  } catch (err) {
+    reportError(err, { route: ROUTE, extra: { orgId, step: 'lead_scoring' } });
+  }
 
-    // Rules with a delay are not yet executed inline (future: queue them)
+  for (const rule of matched) {
     if (rule.delay_minutes > 0) {
-      console.log(`[Engagement] rule ${rule.id} has delay_minutes=${rule.delay_minutes} — skipping (not yet implemented)`);
+      await enqueue(db, rule, event);
+      continue;
+    }
+    try {
+      await runRule(db, rule, event);
+    } catch (err) {
+      reportError(err, { route: ROUTE, extra: { ruleId: rule.id, orgId } });
+    }
+  }
+}
+
+// ─── Respuestas con espera ────────────────────────────────────────────────────
+
+/** Una respuesta que llega más de esto tarde (cron caído) ya no tiene sentido. */
+const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+type JobRow = {
+  id: string;
+  org_id: string;
+  brand_id: string | null;
+  rule_id: string;
+  event: EngagementEvent;
+  run_at: string;
+  attempts: number;
+};
+
+export interface EngagementJobsSummary {
+  done: number;
+  skipped: number;
+  failed: number;
+}
+
+async function finishJob(db: DB, id: string, status: 'done' | 'skipped' | 'failed', lastError: string | null = null) {
+  await db
+    .from('kefy_engagement_jobs')
+    .update({ status, last_error: lastError, updated_at: new Date().toISOString() })
+    .eq('id', id);
+}
+
+/**
+ * Ejecuta las respuestas encoladas que ya vencieron. La regla se vuelve a leer
+ * al ejecutar: si la pausaron, la borraron o la dejaron en una combinación que
+ * no funciona, el trabajo se salta. La IA se cobra aquí, no al encolar.
+ */
+export async function runDueEngagementJobs(
+  db: DB,
+  opts: { now?: Date; limit?: number } = {},
+): Promise<EngagementJobsSummary> {
+  const now = opts.now ?? new Date();
+  const summary: EngagementJobsSummary = { done: 0, skipped: 0, failed: 0 };
+
+  const { data: jobs, error } = await db
+    .from('kefy_engagement_jobs')
+    .select('id, org_id, brand_id, rule_id, event, run_at, attempts')
+    .eq('status', 'pending')
+    .lte('run_at', now.toISOString())
+    .order('run_at', { ascending: true })
+    .limit(opts.limit ?? 25);
+  if (error) {
+    reportError(new Error(error.message), { route: ROUTE, service: 'supabase', extra: { step: 'jobs' } });
+    return summary;
+  }
+
+  for (const job of (jobs ?? []) as JobRow[]) {
+    // Reclamo atómico: si otra ejecución del cron ya lo tomó, no hay fila.
+    const { data: claimed } = await db
+      .from('kefy_engagement_jobs')
+      .update({ status: 'running', attempts: job.attempts + 1, updated_at: now.toISOString() })
+      .eq('id', job.id)
+      .eq('status', 'pending')
+      .select('id');
+    if (!claimed?.length) continue;
+
+    if (now.getTime() - new Date(job.run_at).getTime() > STALE_AFTER_MS) {
+      await finishJob(db, job.id, 'skipped', 'stale');
+      summary.skipped++;
+      continue;
+    }
+
+    const { data: rule } = await db
+      .from('kefy_engagement_rules')
+      .select(RULE_COLUMNS)
+      .eq('id', job.rule_id)
+      .eq('org_id', job.org_id)
+      .maybeSingle();
+    const r = rule as unknown as EngagementRule | null;
+    if (!r || !r.is_active || engagementRuleIssue(r) !== null || (r.brand_id && r.brand_id !== job.brand_id)) {
+      await finishJob(db, job.id, 'skipped', 'rule_inactive');
+      summary.skipped++;
       continue;
     }
 
     try {
-      await executeAction(db, rule, event);
-
-      const { data: current } = await db
-        .from('kefy_engagement_rules')
-        .select('times_triggered')
-        .eq('id', rule.id)
-        .single();
-
-      await db
-        .from('kefy_engagement_rules')
-        .update({
-          times_triggered:   (current?.times_triggered ?? 0) + 1,
-          last_triggered_at: new Date().toISOString(),
-        })
-        .eq('id', rule.id);
+      const outcome = await runRule(db, r, job.event);
+      await finishJob(db, job.id, outcome, outcome === 'skipped' ? 'spend_blocked' : null);
+      summary[outcome]++;
     } catch (err) {
-      if (err instanceof SpendBlocked) continue;
-      reportError(err, { route: ROUTE, extra: { ruleId: rule.id, orgId } });
+      reportError(err, { route: ROUTE, extra: { ruleId: r.id, orgId: job.org_id, jobId: job.id } });
+      await finishJob(db, job.id, 'failed', err instanceof Error ? err.message.slice(0, 500) : 'error');
+      summary.failed++;
     }
   }
+  return summary;
 }

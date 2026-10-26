@@ -75,6 +75,8 @@ export const ASSISTANT_TOOL_NAMES = [
   'list_leads',
   'save_lead',
   'delete_lead',
+  'get_lead_scoring',
+  'update_lead_scoring',
 ] as const;
 
 export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];

@@ -241,7 +241,9 @@ limit `ai:org` y créditos, con el plan leído de la organización porque no hay
 usuario detrás del webhook — y lo devuelven si la IA falla
 (`lib/engagement-executor.ts`). Si la guardia bloquea, la regla no responde ese
 comentario o DM: no hay respaldo con plantilla. Las respuestas con plantilla no
-gastan créditos.
+gastan créditos. Una respuesta con espera se cobra cuando la manda el cron
+(`/api/automations/engagement/run`), no al encolarla, y un webhook repetido no
+vuelve a cobrar: solo un comentario o mensaje nuevo dispara las reglas.
 
 ### Asistente IA: mensajes, no créditos
 

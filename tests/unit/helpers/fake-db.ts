@@ -198,6 +198,17 @@ const TABLE_CONFIG: Record<string, TableConfig> = {
     unique: [['key_hash']],
     defaults: () => ({ brand_id: null, last_used_at: null, expires_at: null, revoked_at: null }),
   },
+  kefy_engagement_jobs: {
+    unique: [['rule_id', 'event_key']],
+    defaults: () => ({ status: 'pending', attempts: 0, last_error: null, updated_at: new Date().toISOString() }),
+  },
+  kefy_leads: {
+    unique: [['brand_id', 'channel', 'username']],
+    defaults: () => ({
+      display_name: null, avatar_url: null, stage: 'frio', score: 0, notes: null, tags: [],
+      contacted: false, contacted_at: null, converted: false, converted_at: null,
+    }),
+  },
 };
 
 export function createFakeDb(): FakeDb {
@@ -337,7 +348,7 @@ export class QueryBuilder implements PromiseLike<Result> {
   private returning = false;
   private countMode = false;
   private head = false;
-  private upsertOpts: { onConflict?: string } | undefined;
+  private upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } | undefined;
 
   constructor(private name: string, private deps: BuilderDeps) {}
 
@@ -351,7 +362,7 @@ export class QueryBuilder implements PromiseLike<Result> {
     return this;
   }
   insert(rows: Row | Row[]): this { this.op = 'insert'; this.payload = rows; return this; }
-  upsert(rows: Row | Row[], opts?: { onConflict?: string }): this { this.op = 'upsert'; this.payload = rows; this.upsertOpts = opts; return this; }
+  upsert(rows: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }): this { this.op = 'upsert'; this.payload = rows; this.upsertOpts = opts; return this; }
   update(patch: Row): this { this.op = 'update'; this.payload = patch; return this; }
   delete(): this { this.op = 'delete'; return this; }
 
@@ -451,6 +462,8 @@ export class QueryBuilder implements PromiseLike<Result> {
         const out: Row[] = [];
         for (const r of input as Row[]) {
           const existing = deps.table(name).find((x) => keys.every((k) => x[k] === r[k]));
+          // ignoreDuplicates: ON CONFLICT DO NOTHING, que no devuelve la fila.
+          if (existing && this.upsertOpts?.ignoreDuplicates) continue;
           if (existing) { Object.assign(existing, clone(r)); out.push(existing); }
           else { const full = deps.withDefaults(name, r); deps.table(name).push(full); out.push(full); }
         }

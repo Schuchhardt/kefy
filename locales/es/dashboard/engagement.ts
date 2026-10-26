@@ -41,6 +41,8 @@ const es = {
   platformLabel: 'Plataforma',
   platformAll: 'Todas las plataformas',
   keywordLabel: 'Filtrar por keyword (opcional)',
+  keywordRequiredLabel: 'Palabras clave',
+  keywordHint: 'Separa varias con comas: responde si el texto contiene cualquiera.',
   keywordPlaceholder: 'Ej.: precio, envío, gracias…',
   actionLabel: 'Acción',
   actions: {
@@ -60,6 +62,12 @@ const es = {
   delayMinutes:         'minutos',
   delayNone:            'Sin espera',
   delayBadge:           (min: number) => `+${min} min`,
+  delayHint:            'La respuesta sale entre 0 y 5 minutos después de la espera.',
+  // Reglas antiguas que no se ejecutan
+  notRunning:           'Esta regla no se ejecuta',
+  notRunningHint:       'Usa un disparador o una acción que no existe, o le falta la palabra clave o el texto. Bórrala y crea una nueva.',
+  keywordRequired:      'Escribe al menos una palabra clave.',
+  templateRequired:     'Escribe el texto de la respuesta.',
   // Tarjeta de regla
   then:                 'entonces',
   timesTriggered:       (n: number) => (n === 1 ? 'Ejecutada 1 vez' : `Ejecutada ${n} veces`),
@@ -71,6 +79,9 @@ const es = {
   leadActionUpdate:     'Actualizar lead',
   leadScoreDeltaLabel:  'Puntos de score',
   leadStageLabel:       'Asignar etapa',
+  leadScoreDeltaHint:   '0 usa los puntos de Ajustes → Scoring de leads.',
+  leadBadge:            (action: 'create_lead' | 'update_lead', points: number) =>
+    `${action === 'create_lead' ? 'Crea lead' : 'Actualiza lead'}${points ? ` (${points > 0 ? '+' : ''}${points})` : ''}`,
 };
 
 export default es;

@@ -257,7 +257,7 @@ function StrategyPageInner() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pack_id: packId }),
+        body: JSON.stringify({ pack_id: packId, lang: locale }),
       });
       if (res.ok) {
         setInstalledPacks(prev => new Set([...prev, packId]));

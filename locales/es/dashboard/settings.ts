@@ -72,7 +72,7 @@ const es = {
   // Las claves (comment, dm, tibio…) son las de kefy_lead_scoring_config y no
   // se traducen: solo cambia lo que se muestra.
   leadScoring: {
-    subtitle: 'Cada interacción suma puntos a un lead. Cuando su puntaje llega al mínimo de una etapa, pasa a esa etapa.',
+    subtitle: 'De la marca activa. Cada comentario o DM de un lead le suma puntos; cuando su puntaje llega al mínimo de una etapa, pasa a esa etapa. Una respuesta automática que crea leads puede usar sus propios puntos.',
     pointsTitle: 'Puntos por tipo de interacción',
     thresholdsTitle: 'Puntaje mínimo de cada etapa',
     points: (n: number) => (n === 1 ? '1 punto' : `${n} puntos`),

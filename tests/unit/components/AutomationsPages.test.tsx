@@ -126,4 +126,42 @@ describe('Respuestas automáticas', () => {
     expect(screen.getByText('+5 min')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Auto-replies' })).toBeInTheDocument();
   });
+
+  it('solo ofrece disparadores que se ejecutan y las acciones de cada uno', async () => {
+    render(<EngagementPage />);
+    await screen.findByText('Gracias automático');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Nueva regla' })[0]);
+
+    const trigger = screen.getByLabelText('Disparador') as HTMLSelectElement;
+    expect([...trigger.options].map((o) => o.value)).toEqual(
+      ['new_comment', 'comment_contains_keyword', 'new_dm', 'dm_contains_keyword'],
+    );
+    const action = () => [...(screen.getByLabelText('Acción') as HTMLSelectElement).options].map((o) => o.value);
+    expect(action()).toEqual(['reply_comment', 'reply_comment_ai']);
+
+    fireEvent.change(trigger, { target: { value: 'new_dm' } });
+    expect(action()).toEqual(['send_dm', 'send_dm_ai_response']);
+    expect((screen.getByLabelText('Acción') as HTMLSelectElement).value).toBe('send_dm');
+  });
+
+  it('avisa de una regla antigua que no se ejecuta', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => String(input) === '/api/automations/engagement/rules'
+      ? jsonResponse({ rules: [{ ...engagementRule, trigger_type: 'new_follower' }] })
+      : jsonResponse({}));
+    render(<EngagementPage />);
+    expect(await screen.findByText('Esta regla no se ejecuta.')).toBeInTheDocument();
+  });
+
+  it('una regla con palabra clave pide la palabra antes de guardar', async () => {
+    render(<EngagementPage />);
+    await screen.findByText('Gracias automático');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Nueva regla' })[0]);
+    fireEvent.change(screen.getByLabelText(/Nombre de la regla/), { target: { value: 'Precio' } });
+    fireEvent.change(screen.getByLabelText('Disparador'), { target: { value: 'comment_contains_keyword' } });
+    fireEvent.change(screen.getByLabelText('Acción'), { target: { value: 'reply_comment_ai' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar regla' }));
+
+    expect(await screen.findByText('Escribe al menos una palabra clave.')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
 });

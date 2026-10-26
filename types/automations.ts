@@ -61,6 +61,9 @@ export interface EngagementRule {
   ai_context:         string | null;
   delay_minutes:      number;
   is_active:          boolean;
+  trigger_config?:    Record<string, unknown> | null;
+  lead_action_type?:  'create_lead' | 'update_lead' | null;
+  lead_action_score_delta?: number | null;
   times_triggered:    number;
   last_triggered_at:  string | null;
   created_at:         string;

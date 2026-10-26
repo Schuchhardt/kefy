@@ -8,6 +8,7 @@ vi.mock('@/lib/supabase', () => ({ createSupabaseServer: () => db.client }));
 vi.mock('@/lib/engagement-executor', () => ({ executeEngagementRules: vi.fn() }));
 
 import { POST } from '@/app/api/webhooks/zernio/route';
+import { executeEngagementRules } from '@/lib/engagement-executor';
 
 function send(body: unknown) {
   return POST(new NextRequest('http://localhost/api/webhooks/zernio', {
@@ -86,5 +87,42 @@ describe('POST /api/webhooks/zernio — URL pública del post', () => {
 
     expect(post().status).toBe('published');
     expect(post().platform_post_url).toBeNull();
+  });
+});
+
+describe('POST /api/webhooks/zernio — respuestas automáticas', () => {
+  beforeEach(() => {
+    vi.mocked(executeEngagementRules).mockClear();
+    db.seed('kefy_social_accounts', [{ id: 'sa1', org_id: 'o1', brand_id: 'b1', zernio_account_id: 'acc' }]);
+  });
+
+  const comment = {
+    id: 'evt-c', event: 'comment.received', timestamp: '2026-10-22T10:00:00Z',
+    account: { id: 'acc', platform: 'instagram', username: 'acme' },
+    comment: { id: 'c1', postId: 'zp1', platformPostId: '1789', platform: 'instagram', text: '¿Precio?', author: { id: 'u1', username: 'ana', avatar: 'https://x/a.png' } },
+  };
+
+  it('un comentario dispara las reglas una sola vez aunque Zernio reintente el webhook', async () => {
+    await send(comment);
+    await send(comment);
+    expect(db.rows('kefy_comments')).toHaveLength(1);
+    expect(executeEngagementRules).toHaveBeenCalledTimes(1);
+    expect(executeEngagementRules).toHaveBeenCalledWith(expect.anything(), 'o1', expect.objectContaining({
+      type: 'new_comment', brandId: 'b1', commentId: 'c1', authorId: 'u1', authorName: 'ana', authorAvatar: 'https://x/a.png',
+    }));
+  });
+
+  it('un DM repetido tampoco vuelve a responder, y lleva el id del mensaje', async () => {
+    const dm = {
+      id: 'evt-m', event: 'message.received', timestamp: '2026-10-22T10:00:00Z',
+      account: { id: 'acc', platform: 'instagram', username: 'acme' },
+      message: { id: 'm1', conversationId: 't1', text: 'Hola', sender: { id: 'u2', name: 'Beto' }, direction: 'inbound' },
+    };
+    await send(dm);
+    await send(dm);
+    expect(executeEngagementRules).toHaveBeenCalledTimes(1);
+    expect(executeEngagementRules).toHaveBeenCalledWith(expect.anything(), 'o1', expect.objectContaining({
+      type: 'new_dm', messageId: 'm1', senderId: 'u2', senderName: 'Beto',
+    }));
   });
 });

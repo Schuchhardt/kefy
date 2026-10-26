@@ -1,38 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
-import { createSupabaseServer } from '@/lib/supabase';
+import { getBrandFromRequest } from '@/lib/brands';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { listEngagementPacks } from '@/lib/services/engagement';
 
 // GET /api/automations/engagement/packs?objective_id=...
-// Returns automation packs (and their rules) for a given objective
+// Packs de reglas de un objetivo, solo con las reglas que se ejecutan. La
+// lógica vive en lib/services/engagement.ts.
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { searchParams } = new URL(req.url);
-  const objectiveId = searchParams.get('objective_id');
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
-  const supabase = createSupabaseServer();
-
-  let query = supabase
-    .from('kefy_automation_packs')
-    .select(`
-      id, objective_id, name_es, name_en, desc_es, desc_en, icon, sort_order,
-      kefy_automation_pack_rules (
-        id, name_es, name_en, desc_es, desc_en,
-        trigger_type, trigger_config, action_type, action_config,
-        ai_context, delay_minutes,
-        lead_action_type, lead_action_score_delta, lead_action_stage,
-        sort_order
-      )
-    `)
-    .order('sort_order');
-
-  if (objectiveId) {
-    query = query.eq('objective_id', objectiveId);
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const objectiveId = new URL(req.url).searchParams.get('objective_id');
+    const res = NextResponse.json({ packs: await listEngagementPacks(ctx, objectiveId) });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/automations/engagement/packs', auth });
   }
-
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json({ packs: data ?? [] });
 }

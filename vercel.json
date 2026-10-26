@@ -15,6 +15,10 @@
     {
       "path": "/api/content/reel/reconcile",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/automations/engagement/run",
+      "schedule": "*/5 * * * *"
     }
   ],
   "functions": {
@@ -23,6 +27,9 @@
       "memory": 512
     },
     "app/api/autopilot/run/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/automations/engagement/run/route.ts": {
       "maxDuration": 300
     },
     "app/api/content/reel/route.ts": {

@@ -22,11 +22,13 @@ import { generateContentText } from '@/lib/ai';
 import { disconnectAccount, replyToComment, sendMessage } from '@/lib/zernio';
 import { serviceContext } from '@/lib/services/context';
 import {
-  createEngagementRule, deleteEngagementRule, engagementRuleIssue, listEngagementRules, updateEngagementRule,
+  createEngagementRule, deleteEngagementRule, engagementRuleIssue, installEngagementPack, listEngagementPacks,
+  listEngagementRules, updateEngagementRule,
 } from '@/lib/services/engagement';
+import { DEFAULT_LEAD_SCORING, getLeadScoringConfig, updateLeadScoringConfig } from '@/lib/services/lead-scoring';
 import { deleteLead, listLeads, updateLead, upsertLead } from '@/lib/services/leads';
 import { disconnectSocialAccount } from '@/lib/services/social';
-import { executeEngagementRules } from '@/lib/engagement-executor';
+import { executeEngagementRules, runDueEngagementJobs } from '@/lib/engagement-executor';
 import { executeTool, getTool, registerTools } from '@/lib/assistant/registry';
 import { ensureToolsRegistered } from '@/lib/assistant/tools';
 import { engagementTools } from '@/lib/assistant/tools/engagement';
@@ -133,12 +135,24 @@ describe('servicio de engagement', () => {
   });
 
   it('engagementRuleIssue explica por qué una regla no se ejecuta', () => {
-    expect(engagementRuleIssue({ ...RULE, condition_keyword: null, delay_minutes: 0 })).toBeNull();
-    expect(engagementRuleIssue({ ...RULE, trigger_type: 'new_follower', condition_keyword: null, delay_minutes: 0 })).toMatch(/not executed/);
-    expect(engagementRuleIssue({ ...RULE, condition_keyword: null, delay_minutes: 5 })).toMatch(/delay/);
-    expect(engagementRuleIssue({ ...RULE, action_type: 'send_dm', condition_keyword: null, delay_minutes: 0 })).toMatch(/DMs/);
-    expect(engagementRuleIssue({ ...RULE, trigger_type: 'comment_contains_keyword', condition_keyword: null, delay_minutes: 0 })).toMatch(/condition_keyword/);
-    expect(engagementRuleIssue({ ...RULE, action_template: '', condition_keyword: null, delay_minutes: 0 })).toMatch(/action_template/);
+    expect(engagementRuleIssue({ ...RULE, condition_keyword: null })).toBeNull();
+    expect(engagementRuleIssue({ ...RULE, trigger_type: 'new_follower', condition_keyword: null })).toMatch(/never runs/);
+    expect(engagementRuleIssue({ ...RULE, action_type: 'send_dm', condition_keyword: null })).toMatch(/DMs/);
+    expect(engagementRuleIssue({ ...RULE, trigger_type: 'comment_contains_keyword', condition_keyword: null })).toMatch(/condition_keyword/);
+    expect(engagementRuleIssue({ ...RULE, trigger_type: 'comment_contains_keyword', condition_keyword: null, trigger_config: { keywords: ['precio'] } })).toBeNull();
+    expect(engagementRuleIssue({ ...RULE, action_template: '', condition_keyword: null })).toMatch(/action_template/);
+  });
+
+  it('no guarda reglas que no se ejecutan, pero deja pausar una antigua', async () => {
+    await expect(createEngagementRule(ctx(), { ...RULE, trigger_type: 'new_follower' })).rejects.toMatchObject({ status: 422 });
+    await expect(createEngagementRule(ctx(), { ...RULE, action_type: 'send_dm' })).rejects.toMatchObject({ status: 422 });
+    await expect(updateEngagementRule(ctx(IDS.BRAND, 'org'), LEGACY_RULE, { is_active: false })).resolves.toMatchObject({ is_active: false });
+    await expect(updateEngagementRule(ctx(IDS.BRAND, 'org'), LEGACY_RULE, { action_template: 'Hola!' })).rejects.toMatchObject({ status: 422 });
+    await expect(updateEngagementRule(ctx(IDS.BRAND, 'org'), LEGACY_RULE, { trigger_type: 'new_dm' })).resolves.toMatchObject({ trigger_type: 'new_dm' });
+  });
+
+  it('acepta esperas', async () => {
+    await expect(createEngagementRule(ctx(), { ...RULE, delay_minutes: 15 })).resolves.toMatchObject({ delay_minutes: 15 });
   });
 });
 
@@ -338,5 +352,217 @@ describe('disconnect_social_account', () => {
   it('un miembro no puede desconectar', async () => {
     const r = await executeTool('disconnect_social_account', { account_id: ACCOUNT, brand_id: IDS.BRAND }, apiCtx({ role: 'member' }));
     expect(r).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+  });
+});
+
+describe('executor: palabras clave y plataforma', () => {
+  it('varias palabras separadas por comas: basta con una', async () => {
+    await createEngagementRule(ctx(), { ...RULE, trigger_type: 'comment_contains_keyword', condition_keyword: 'precio, envío' });
+    await executeEngagementRules(db.client as never, IDS.ORG, { ...commentEvent(IDS.BRAND), body: 'Hola, ¿hacen ENVÍO?' });
+    expect(replyToComment).toHaveBeenCalledTimes(1);
+    await executeEngagementRules(db.client as never, IDS.ORG, { ...commentEvent(IDS.BRAND), commentId: 'c-2', body: 'Lindo' });
+    expect(replyToComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("condition_platform 'all' de la UI antigua vale para todas las redes", async () => {
+    const rule = await createEngagementRule(ctx(), RULE);
+    db.rows('kefy_engagement_rules').find((r) => r.id === rule.id)!.condition_platform = 'all';
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(replyToComment).toHaveBeenCalled();
+  });
+
+  it('una regla antigua que responde un comentario por DM no hace nada ni suma el contador', async () => {
+    const legacy = db.rows('kefy_engagement_rules').find((r) => r.id === LEGACY_RULE)!;
+    legacy.trigger_type = 'new_comment';
+    legacy.delay_minutes = 0;
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(legacy.times_triggered ?? 0).toBe(0);
+  });
+});
+
+describe('executor: respuestas con espera', () => {
+  const later = (min: number) => new Date(Date.now() + min * 60_000);
+
+  it('encola, no responde antes de tiempo y responde al vencer', async () => {
+    const rule = await createEngagementRule(ctx(), { ...RULE, delay_minutes: 15 });
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(replyToComment).not.toHaveBeenCalled();
+    expect(db.rows('kefy_engagement_jobs')).toHaveLength(1);
+
+    expect(await runDueEngagementJobs(db.client as never, { now: later(5) })).toEqual({ done: 0, skipped: 0, failed: 0 });
+    expect(replyToComment).not.toHaveBeenCalled();
+
+    expect(await runDueEngagementJobs(db.client as never, { now: later(16) })).toEqual({ done: 1, skipped: 0, failed: 0 });
+    expect(replyToComment).toHaveBeenCalledWith('z-1', 'p-1', 'c-1', '¡Gracias por comentar!');
+    expect(db.rows('kefy_engagement_jobs')[0]).toMatchObject({ status: 'done', attempts: 1 });
+    expect(db.rows('kefy_engagement_rules').find((r) => r.id === rule.id)!.times_triggered).toBe(1);
+
+    // Ya hecho: otra pasada del cron no repite.
+    await runDueEngagementJobs(db.client as never, { now: later(20) });
+    expect(replyToComment).toHaveBeenCalledTimes(1);
+  });
+
+  it('el mismo evento repetido se encola una sola vez', async () => {
+    await createEngagementRule(ctx(), { ...RULE, delay_minutes: 5 });
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(db.rows('kefy_engagement_jobs')).toHaveLength(1);
+  });
+
+  it('si pausaron la regla mientras esperaba, se salta', async () => {
+    const rule = await createEngagementRule(ctx(), { ...RULE, delay_minutes: 5 });
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    await updateEngagementRule(ctx(), rule.id, { is_active: false });
+    expect(await runDueEngagementJobs(db.client as never, { now: later(6) })).toMatchObject({ skipped: 1 });
+    expect(replyToComment).not.toHaveBeenCalled();
+  });
+
+  it('una respuesta muy atrasada (cron caído) ya no se manda', async () => {
+    await createEngagementRule(ctx(), { ...RULE, delay_minutes: 5 });
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(await runDueEngagementJobs(db.client as never, { now: later(60 * 7) })).toMatchObject({ skipped: 1 });
+    expect(replyToComment).not.toHaveBeenCalled();
+  });
+
+  it('la IA se cobra al mandar, no al encolar', async () => {
+    vi.mocked(generateContentText).mockResolvedValue({ body: 'Respuesta', hashtags: [], model: 'claude', tokensUsed: 1 } as never);
+    await createEngagementRule(ctx(), { ...RULE, action_type: 'reply_comment_ai', action_template: '', delay_minutes: 5 });
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(creditsSpent()).toBe(0);
+    await runDueEngagementJobs(db.client as never, { now: later(6) });
+    expect(creditsSpent()).toBe(1);
+    expect(replyToComment).toHaveBeenCalledWith('z-1', 'p-1', 'c-1', 'Respuesta');
+  });
+});
+
+describe('executor: scoring de leads', () => {
+  const lead = (username: string, brandId: string = IDS.BRAND) =>
+    db.rows('kefy_leads').find((l) => l.username === username && l.brand_id === brandId);
+
+  it('create_lead agrega al remitente con los puntos y la etapa de la regla', async () => {
+    const rule = await createEngagementRule(ctx(), {
+      ...RULE, lead_action_type: 'create_lead', lead_action_score_delta: 25, lead_action_stage: 'tibio',
+    });
+    await executeEngagementRules(db.client as never, IDS.ORG, { ...commentEvent(IDS.BRAND), authorName: 'Ana P.' });
+    expect(lead('a-1')).toMatchObject({ channel: 'instagram', score: 25, stage: 'tibio', display_name: 'Ana P.', org_id: IDS.ORG });
+    expect(db.rows('kefy_lead_interactions')[0]).toMatchObject({ type: 'comment', score_delta: 25, rule_id: rule.id, brand_id: IDS.BRAND });
+  });
+
+  it('con 0 puntos usa los de la configuración de la marca', async () => {
+    db.seed('kefy_lead_scoring_config', [{ id: IDS.uuid(560), org_id: IDS.ORG, brand_id: IDS.BRAND, defaults: { comment: 7 }, thresholds: {} }]);
+    await createEngagementRule(ctx(), { ...RULE, lead_action_type: 'create_lead' });
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(lead('a-1')!.score).toBe(7);
+  });
+
+  it('sin regla de leads solo puntúa a quien ya es lead, y sube de etapa por umbral', async () => {
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(lead('a-1')).toBeUndefined();
+
+    db.rows('kefy_leads').find((l) => l.id === LEAD)!.score = 48;
+    await executeEngagementRules(db.client as never, IDS.ORG, { ...commentEvent(IDS.BRAND), commentId: 'c-9', authorId: 'ana' });
+    expect(lead('ana')).toMatchObject({ score: 53, stage: 'caliente' });
+  });
+
+  it('update_lead no crea leads', async () => {
+    await createEngagementRule(ctx(), { ...RULE, lead_action_type: 'update_lead', lead_action_score_delta: 10 });
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(lead('a-1')).toBeUndefined();
+  });
+
+  it('un lead no baja de etapa solo', async () => {
+    db.rows('kefy_leads').find((l) => l.id === LEAD)!.stage = 'contactado';
+    await createEngagementRule(ctx(), { ...RULE, lead_action_type: 'update_lead', lead_action_score_delta: -5 });
+    await executeEngagementRules(db.client as never, IDS.ORG, { ...commentEvent(IDS.BRAND), authorId: 'ana' });
+    expect(lead('ana')).toMatchObject({ score: -5, stage: 'contactado' });
+  });
+
+  it('un DM puntúa como dm', async () => {
+    await createEngagementRule(ctx(), { ...RULE, trigger_type: 'new_dm', action_type: 'send_dm', lead_action_type: 'create_lead' });
+    await executeEngagementRules(db.client as never, IDS.ORG, {
+      type: 'new_dm', socialAccountId: ACCOUNT, brandId: IDS.BRAND, zernioAccountId: 'z-1', threadId: 't-1',
+      messageId: 'm-1', body: 'Hola', platform: 'instagram', senderId: 's-1',
+    });
+    expect(lead('s-1')!.score).toBe(15);
+    expect(sendMessage).toHaveBeenCalledWith('z-1', 't-1', '¡Gracias por comentar!');
+  });
+});
+
+describe('scoring de leads: configuración', () => {
+  it('sin fila devuelve los valores por defecto', async () => {
+    await expect(getLeadScoringConfig(ctx())).resolves.toEqual(DEFAULT_LEAD_SCORING);
+  });
+
+  it('cambia solo lo que viene, por marca, y rechaza umbrales desordenados', async () => {
+    const out = await updateLeadScoringConfig(ctx(), { defaults: { dm: 30 }, thresholds: { tibio: 10 } });
+    expect(out.defaults).toMatchObject({ dm: 30, comment: 5 });
+    expect(out.thresholds).toMatchObject({ tibio: 10, caliente: 50 });
+    expect(db.rows('kefy_lead_scoring_config')).toHaveLength(1);
+    expect(db.rows('kefy_lead_scoring_config')[0]).toMatchObject({ brand_id: IDS.BRAND, org_id: IDS.ORG });
+    await expect(getLeadScoringConfig(ctx(IDS.BRAND_2))).resolves.toEqual(DEFAULT_LEAD_SCORING);
+
+    await expect(updateLeadScoringConfig(ctx(), { thresholds: { caliente: 5 } })).rejects.toMatchObject({ status: 422 });
+    await expect(updateLeadScoringConfig(ctx(), { defaults: { comment: 'x' } })).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('las herramientas leen y cambian el scoring', async () => {
+    const upd = await executeTool('update_lead_scoring', { defaults: { comment: 9 }, brand_id: IDS.BRAND }, apiCtx());
+    expect(upd.ok).toBe(true);
+    const got = await executeTool('get_lead_scoring', { brand_id: IDS.BRAND }, apiCtx());
+    expect(got.ok).toBe(true);
+    if (got.ok !== true) return;
+    expect((got.data as { config: { defaults: { comment: number } } }).config.defaults.comment).toBe(9);
+    const member = await executeTool('update_lead_scoring', { defaults: { comment: 1 }, brand_id: IDS.BRAND }, apiCtx({ role: 'member' }));
+    expect(member).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+  });
+});
+
+describe('packs de reglas', () => {
+  const PACK = IDS.uuid(570);
+  const EMPTY_PACK = IDS.uuid(571);
+
+  beforeEach(() => {
+    db.seed('kefy_automation_packs', [
+      { id: PACK, objective_id: 'obj', name_es: 'Leads', name_en: 'Leads', sort_order: 1 },
+      { id: EMPTY_PACK, objective_id: 'obj', name_es: 'Reseñas', name_en: 'Reviews', sort_order: 2 },
+    ]);
+    db.seed('kefy_automation_pack_rules', [
+      {
+        id: IDS.uuid(572), pack_id: PACK, name_es: 'Keyword', name_en: 'Keyword', trigger_type: 'comment_contains_keyword',
+        trigger_config: { keywords: ['precio', 'info'] }, action_type: 'reply_comment_ai', action_config: {}, ai_context: 'CTA',
+        delay_minutes: 0, lead_action_type: 'create_lead', lead_action_score_delta: 10, lead_action_stage: 'frio', sort_order: 1,
+      },
+      {
+        id: IDS.uuid(573), pack_id: PACK, name_es: 'Sin respuesta', name_en: 'Unanswered', trigger_type: 'dm_no_response',
+        trigger_config: {}, action_type: 'notify_team', action_config: {}, ai_context: null, delay_minutes: 0,
+        lead_action_type: null, lead_action_score_delta: 0, lead_action_stage: null, sort_order: 2,
+      },
+      {
+        id: IDS.uuid(574), pack_id: EMPTY_PACK, name_es: 'Seguidor', name_en: 'Follower', trigger_type: 'new_follower',
+        trigger_config: {}, action_type: 'send_dm_ai_response', action_config: {}, ai_context: null, delay_minutes: 5,
+        lead_action_type: null, lead_action_score_delta: 0, lead_action_stage: null, sort_order: 1,
+      },
+    ]);
+  });
+
+  it('solo ofrece las reglas que se ejecutan y oculta los packs sin ninguna', async () => {
+    const packs = await listEngagementPacks(ctx(), 'obj');
+    expect(packs.map((p) => p.id)).toEqual([PACK]);
+    expect(packs[0].kefy_automation_pack_rules.map((r) => r.name_es)).toEqual(['Keyword']);
+  });
+
+  it('instala en la marca, con las palabras clave en condition_keyword, una sola vez', async () => {
+    const out = await installEngagementPack(serviceContext(AUTH, IDS.BRAND, 'en', { brandScope: 'org', source: 'route' }), PACK);
+    expect(out.inserted).toBe(1);
+    expect(out.rules[0]).toMatchObject({
+      brand_id: IDS.BRAND, name: 'Keyword', condition_keyword: 'precio, info', trigger_config: {},
+      lead_action_type: 'create_lead', created_from: `pack:${PACK}`,
+    });
+    expect(engagementRuleIssue(out.rules[0])).toBeNull();
+
+    const again = await installEngagementPack(ctx(), PACK);
+    expect(again.inserted).toBe(0);
+    await expect(installEngagementPack(ctx(), EMPTY_PACK)).rejects.toMatchObject({ status: 404 });
   });
 });
