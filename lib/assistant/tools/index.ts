@@ -15,6 +15,7 @@ import { publishingTools } from './publishing';
 import { analyticsTools } from './analytics';
 import { inboxTools } from './inbox';
 import { autopilotTools } from './autopilot';
+import { engagementTools } from './engagement';
 
 // El chat reutiliza el snapshot de get_workspace_context para cada mensaje.
 export { buildWorkspaceSnapshot, type WorkspaceSnapshot } from './workspace';
@@ -34,6 +35,7 @@ export function ensureToolsRegistered(): void {
     ...analyticsTools,
     ...inboxTools,
     ...autopilotTools,
+    ...engagementTools,
   ]);
   registered = true;
 }

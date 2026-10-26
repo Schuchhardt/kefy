@@ -16,8 +16,8 @@ import { calendarLink, itemLink } from '@/lib/assistant/links';
 import { wrapUntrusted } from '@/lib/assistant/untrusted';
 import type { ToolContext, ToolLink } from '@/lib/assistant/types';
 import { ServiceError, msg } from '@/lib/services/errors';
-import { loadOwnedItem, loadOwnedScheduledPost } from '@/lib/services/ownership';
-import { listSocialAccounts } from '@/lib/services/social';
+import { loadOwnedAccount, loadOwnedItem, loadOwnedScheduledPost } from '@/lib/services/ownership';
+import { disconnectSocialAccount, listSocialAccounts } from '@/lib/services/social';
 import { buildDashboardHref } from '@/lib/assistant/links';
 import { absoluteUrl } from '@/lib/app-url';
 import { getActiveBrandById } from '@/lib/brands';
@@ -237,7 +237,10 @@ const publishInput = z.object({
   format: z
     .enum(FORMATS)
     .optional()
-    .describe("Publish an alternate format of the item (its rendition). Defaults to the item's own format."),
+    .describe(
+      "Publish an alternate format of the item (its rendition). Defaults to the item's own format. The rendition " +
+      'must exist first: generate it with convert_content_format.',
+    ),
 }).strict();
 
 const publishContentTool = defineTool({
@@ -439,6 +442,50 @@ const cancelScheduledPostTool = defineTool({
   },
 });
 
+// ─── disconnect_social_account ───────────────────────────────────────────────
+
+const disconnectSocialAccountTool = defineTool({
+  name: 'disconnect_social_account',
+  title: { es: 'Desconectar cuenta', en: 'Disconnect account' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    "Disconnects one of the brand's social accounts: revokes it in Zernio and removes it from Kefy. This also deletes, " +
+    "in Kefy, the account's pending and scheduled posts, its publishing history, DMs and comments, and removes the " +
+    'account from the autopilot rules that targeted it. Posts already published stay on the network. To use it again ' +
+    'the account has to be reconnected with get_connect_account_link. Always requires user confirmation. Costs no credits.',
+  input: z.object({ account_id: z.uuid().describe('Account id from list_social_accounts.') }).strict(),
+  confirm: 'always',
+  describe: async (ctx, input) => {
+    const account = await loadOwnedAccount<{ platform: string; username: string | null }>(
+      ctx, input.account_id, { select: 'platform, username' },
+    );
+    const { count } = await createSupabaseServer()
+      .from('kefy_scheduled_posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('social_account_id', input.account_id)
+      .eq('org_id', ctx.orgId)
+      .in('status', ['pending', 'scheduled']);
+    return {
+      platform: account.platform,
+      username: account.username,
+      account: accountLabel(account),
+      scheduled_posts: count ?? 0,
+    };
+  },
+  handler: async (ctx, input) => {
+    const out = await disconnectSocialAccount(ctx, input.account_id);
+    return {
+      data: { disconnected: true, ...out },
+      links: [{
+        label: msg(ctx.language, 'Abrir ajustes', 'Open settings'),
+        href: buildDashboardHref(ctx.language, 'settings'),
+      }],
+      dataChanged: ['social-accounts', 'scheduled', 'autopilot'],
+    };
+  },
+});
+
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export const publishingTools = [
@@ -447,4 +494,5 @@ export const publishingTools = [
   publishContentTool,
   listScheduledPostsTool,
   cancelScheduledPostTool,
+  disconnectSocialAccountTool,
 ];

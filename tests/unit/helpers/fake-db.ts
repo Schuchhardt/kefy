@@ -142,19 +142,28 @@ export interface FakeDb {
   failNext(table: string, op: Op | '*', error?: DbError): void;
   /** Sustituye una RPC (el resto va a fakeRpc de helpers/quota). */
   rpcHandlers: Record<string, (args: Record<string, unknown>) => { data: unknown; error: DbError | null }>;
-  storage: { uploads: Array<{ bucket: string; path: string; contentType?: string; size: number }>; failUpload: boolean };
+  storage: {
+    uploads: Array<{ bucket: string; path: string; contentType?: string; size: number }>;
+    removed: Array<{ bucket: string; path: string }>;
+    failUpload: boolean;
+  };
   reset(): void;
   /** Operaciones que modificaron `table` (insert/update/delete/upsert). */
   writes(table?: string): LogEntry[];
 }
 
+type RpcPromise = Promise<{ data: unknown; error: DbError | null }>;
+type RpcResult = RpcPromise & { single: () => RpcPromise };
+
 export type FakeClient = {
   from: (table: string) => QueryBuilder;
-  rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: DbError | null }>;
+  /** Como en supabase-js, admite `.rpc(...).single()`. */
+  rpc: (fn: string, args?: Record<string, unknown>) => RpcResult;
   storage: {
     from: (bucket: string) => {
       upload: (path: string, body: { byteLength?: number; length?: number }, opts?: { contentType?: string }) => Promise<{ data: unknown; error: DbError | null }>;
       getPublicUrl: (path: string) => { data: { publicUrl: string } };
+      remove: (paths: string[]) => Promise<{ data: unknown; error: DbError | null }>;
     };
   };
 };
@@ -197,7 +206,7 @@ export function createFakeDb(): FakeDb {
   const failures: Array<{ table: string; op: Op | '*'; error: DbError }> = [];
   const identities: Record<string, number> = {};
   const rpcHandlers: FakeDb['rpcHandlers'] = {};
-  const storage: FakeDb['storage'] = { uploads: [], failUpload: false };
+  const storage: FakeDb['storage'] = { uploads: [], removed: [], failUpload: false };
   // created_at estrictamente creciente: el orden por created_at es determinista.
   let clock = Date.parse('2026-09-01T00:00:00Z');
   const tick = () => new Date((clock += 1000)).toISOString();
@@ -242,20 +251,25 @@ export function createFakeDb(): FakeDb {
     });
   }
 
+  async function runRpc(fn: string, args: Record<string, unknown>): Promise<{ data: unknown; error: DbError | null }> {
+    const custom = rpcHandlers[fn];
+    if (custom) return custom(args);
+    if (fn === 'kefy_assistant_turn_step') {
+      const fail = takeFailure('rpc:kefy_assistant_turn_step', 'update');
+      if (fail) return { data: null, error: fail };
+      const t = table('kefy_assistant_turns').find((r) => r.id === args.p_turn_id && r.org_id === args.p_org_id);
+      if (!t || Number(t.model_calls) >= Number(t.max_model_calls)) return { data: -1, error: null };
+      t.model_calls = Number(t.model_calls) + 1;
+      return { data: t.model_calls, error: null };
+    }
+    return fakeRpc(fn, args) as Promise<{ data: unknown; error: DbError | null }>;
+  }
+
   const client: FakeClient = {
     from: (name) => builder(name),
-    async rpc(fn, args = {}) {
-      const custom = rpcHandlers[fn];
-      if (custom) return custom(args);
-      if (fn === 'kefy_assistant_turn_step') {
-        const fail = takeFailure('rpc:kefy_assistant_turn_step', 'update');
-        if (fail) return { data: null, error: fail };
-        const t = table('kefy_assistant_turns').find((r) => r.id === args.p_turn_id && r.org_id === args.p_org_id);
-        if (!t || Number(t.model_calls) >= Number(t.max_model_calls)) return { data: -1, error: null };
-        t.model_calls = Number(t.model_calls) + 1;
-        return { data: t.model_calls, error: null };
-      }
-      return fakeRpc(fn, args) as Promise<{ data: unknown; error: DbError | null }>;
+    rpc(fn, args = {}) {
+      const p = runRpc(fn, args);
+      return Object.assign(p, { single: () => p });
     },
     storage: {
       from: (bucket) => ({
@@ -267,6 +281,10 @@ export function createFakeDb(): FakeDb {
         getPublicUrl: (path) => ({
           data: { publicUrl: `https://test.supabase.co/storage/v1/object/public/${bucket}/${path}` },
         }),
+        async remove(paths) {
+          for (const path of paths) storage.removed.push({ bucket, path });
+          return { data: paths.map((name) => ({ name })), error: null };
+        },
       }),
     },
   };
@@ -290,6 +308,7 @@ export function createFakeDb(): FakeDb {
       log.length = 0;
       failures.length = 0;
       storage.uploads.length = 0;
+      storage.removed.length = 0;
       storage.failUpload = false;
     },
     writes: (name) => log.filter((l) => l.op !== 'select' && (!name || l.table === name)),

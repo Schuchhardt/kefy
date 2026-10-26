@@ -50,6 +50,12 @@ export interface ToolDef<S extends z.ZodObject<any>> {
   sources?: Source[];
   /** true → toca datos de toda la organización; se rechaza con keys atadas a una marca. */
   orgWide?: boolean;
+  /**
+   * true → no actúa sobre una marca existente (p. ej. create_brand, que crea
+   * otra). Fuera del chat no exige brand_id aunque la organización tenga
+   * varias marcas, y su JSON Schema no lo anuncia.
+   */
+  brandless?: boolean;
   confirm: 'never' | 'always' | ((ctx: ToolContext, input: z.infer<S>, preview?: Record<string, unknown>) => boolean);
   estimateCredits?: (input: z.infer<S>) => number;
   /** Si el resultado trae contenido de terceros que debe «contaminar» el turno. */
@@ -131,7 +137,7 @@ export function toolJsonSchema(
   const s = z.toJSONSchema(def.input, { target: 'draft-7', io: 'input' }) as Record<string, unknown>;
   delete s.$schema;
 
-  if (ctx.source !== 'chat' && !ctx.boundBrandId) {
+  if (ctx.source !== 'chat' && !ctx.boundBrandId && !def.brandless) {
     const properties = { ...((s.properties as Record<string, unknown> | undefined) ?? {}) };
     properties.brand_id = {
       type: 'string',
@@ -273,7 +279,7 @@ export async function executeTool(
           requestedBrandId = brand_id;
         }
       }
-      if (requestedBrandId || !ctx.brandId) {
+      if (requestedBrandId || (!ctx.brandId && !def.brandless)) {
         const brand = await resolveBrandForContext({
           orgId: ctx.orgId,
           boundBrandId: ctx.boundBrandId,

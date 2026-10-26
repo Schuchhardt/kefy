@@ -1,6 +1,7 @@
 // ─── Herramientas de contenido ────────────────────────────────────────────────
 //
-// list_content, get_content, create_post, create_carousel,
+// list_content, get_content, create_post, create_carousel, create_reel,
+// create_story, prepare_story_video, convert_content_format,
 // create_manual_content, update_content y generate_content_image.
 //
 // Son finas: validan con zod y llaman a lib/services/content.ts, el mismo
@@ -21,14 +22,19 @@ import { isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
 import { ServiceError, msg } from '@/lib/services/errors';
 import { loadOwnedItem } from '@/lib/services/ownership';
 import {
+  IMAGE_SIZES,
   createManualContent,
   generateCarousel,
   generateImageForItem,
   generateTextPost,
   getContent,
   listContent,
+  rehostExternalMedia,
+  resolveReferenceImages,
   updateContent,
 } from '@/lib/services/content';
+import { generateStory, writeStoryVideoScript } from '@/lib/services/story';
+import { RENDITION_FORMATS, generateRendition, renditionCredits } from '@/lib/services/renditions';
 import { generateReel, REEL_SCENE_COUNT_MAX, REEL_SCENE_COUNT_MIN, REEL_VARIANT_COUNT_MAX } from '@/lib/services/reel';
 import { CREDIT_COSTS } from '@/lib/usage';
 import { DESCRIPTION_MAX, STARTER_ANGLES, createStarterPosts } from '@/lib/services/onboarding';
@@ -42,6 +48,17 @@ const contentType = z.enum(['post', 'carousel', 'reel', 'story']);
 const imageQuality = z.enum(['low', 'medium', 'high']);
 const httpsUrl = z.url({ protocol: /^https$/ }).max(2048);
 const hashtags = z.array(z.string().max(100)).max(30);
+const imageSize = z
+  .enum(IMAGE_SIZES)
+  .describe('1024x1024 square (default), 1024x1536 vertical 2:3, 1024x1792 vertical 9:16, 1536x1024 horizontal, 1080x1080, or auto.');
+const referenceImageUrls = (max: number) =>
+  z
+    .array(httpsUrl)
+    .max(max)
+    .describe(
+      `Up to ${max} https image URLs the generated image should follow (product, person, style). ` +
+      'URLs outside Kefy are copied into Kefy storage first.',
+    );
 
 /** Orígenes externos: su texto lo escribió un tercero. */
 const EXTERNAL_ORIGINS = new Set(['api', 'mcp']);
@@ -228,21 +245,30 @@ const createPostTool = defineTool({
   description:
     'Generates a text post (copy plus hashtags) in the brand voice, plus an image unless with_image is false, and saves it as a draft. ' +
     `Cost: ${CREDIT_COSTS.text} credit for the text, plus ${CREDIT_COSTS.image} for the image. ` +
-    'If only the image fails, the draft is kept and data.image_error explains why.',
+    'If only the image fails, the draft is kept and data.image_error explains why. ' +
+    'reference_image_urls guide the image (e.g. the real product); image_size sets its shape.',
   input: z
     .object({
       topic: z.string().trim().min(1).max(500).describe('What the post is about, with any key details to include.'),
       channel: channel.default('generic'),
+      model: z.enum(['claude', 'gpt']).default('claude').describe('Model that writes the copy.'),
       with_image: z.boolean().default(true),
       image_prompt: z.string().max(1000).optional().describe('Image description. Defaults to one derived from the topic and copy.'),
       image_quality: imageQuality.default('medium'),
+      image_size: imageSize.default('1024x1024'),
+      reference_image_urls: referenceImageUrls(3).optional(),
     })
     .strict(),
   confirm: 'never',
   estimateCredits: (input) => CREDIT_COSTS.text + (input.with_image !== false ? CREDIT_COSTS.image : 0),
   describe: async (_ctx, input) => ({ topic: input.topic, channel: input.channel, with_image: input.with_image }),
   handler: async (ctx, input) => {
-    const out = await generateTextPost(ctx, { topic: input.topic, channel: input.channel, model: 'claude', save: true });
+    // Las referencias se re-alojan antes de cobrar nada: una URL inválida no
+    // debe dejar un borrador a medias.
+    const references = input.with_image
+      ? await resolveReferenceImages(ctx, input.reference_image_urls, 3)
+      : undefined;
+    const out = await generateTextPost(ctx, { topic: input.topic, channel: input.channel, model: input.model, save: true });
     const itemId = out.itemId as string;
     const body = out.result.body ?? '';
 
@@ -259,7 +285,8 @@ const createPostTool = defineTool({
           itemId,
           prompt: input.image_prompt?.trim() || `${input.topic}. ${body.slice(0, 300)}`,
           quality: input.image_quality,
-          size: '1024x1024',
+          size: input.image_size,
+          referenceImageUrls: references,
         });
         data.image_url = img.image.url;
       } catch (err) {
@@ -392,7 +419,8 @@ const createReelTool = defineTool({
     'Pass variant_count > 1 to get that many independent takes on the same topic in one call, each saved as its ' +
     'own draft item and grouped so they can be compared side by side. If credits run out mid-way through a later ' +
     'variant, the earlier ones already generated are still returned rather than losing them. ' +
-    'generate_images and image_quality only apply later, when the video is produced.',
+    'generate_images, image_quality and reference_image_urls (e.g. the real product or person, max 2) only apply ' +
+    'later, when the video is produced.',
   input: z
     .object({
       topic: z.string().trim().min(1).max(500),
@@ -401,6 +429,7 @@ const createReelTool = defineTool({
       generate_images: z.boolean().default(true),
       image_quality: imageQuality.default('medium'),
       variant_count: z.number().int().min(1).max(REEL_VARIANT_COUNT_MAX).default(1),
+      reference_image_urls: referenceImageUrls(2).optional(),
     })
     .strict(),
   confirm: 'never',
@@ -412,6 +441,7 @@ const createReelTool = defineTool({
     generate_images: input.generate_images,
   }),
   handler: async (ctx, input) => {
+    const references = await resolveReferenceImages(ctx, input.reference_image_urls, 2);
     const out = await generateReel(ctx, {
       topic:                 input.topic,
       channel:               input.channel,
@@ -419,6 +449,7 @@ const createReelTool = defineTool({
       generate_images:       input.generate_images,
       image_quality:         input.image_quality,
       variant_count:         input.variant_count,
+      reference_image_urls:  references,
     });
 
     const variants = out.variants.map((v) => ({
@@ -538,7 +569,7 @@ const updateSlide = z
   })
   .strict();
 
-const UPDATE_FIELDS = ['title', 'body', 'hashtags', 'slides', 'status'] as const;
+const UPDATE_FIELDS = ['title', 'body', 'hashtags', 'slides', 'status', 'image_url', 'video_url'] as const;
 const UPDATE_STATUSES = ['draft', 'approved', 'archived'] as const;
 
 const updateContentTool = defineTool({
@@ -546,9 +577,11 @@ const updateContentTool = defineTool({
   title: { es: 'Editar contenido', en: 'Update content' },
   kind: 'write',
   description:
-    "Edits a content item's title, body, hashtags or slides, or moves it between draft, approved and archived. " +
-    'It cannot mark an item as scheduled or published (use publish_content). Slides replace the whole list; ' +
-    'read the item with get_content first and send every slide back.',
+    "Edits a content item's title, body, hashtags, slides, main image (image_url; null removes it) or video " +
+    '(video_url, reels and stories only), or moves it between draft, approved and archived. Image and video URLs ' +
+    'outside Kefy are copied into Kefy storage first. It cannot mark an item as scheduled or published (use ' +
+    'publish_content). Slides replace the whole list; read the item with get_content first and send every slide ' +
+    'back. To generate a new image instead, use generate_content_image. Costs no credits.',
   input: z
     .object({
       item_id: z.uuid(),
@@ -557,6 +590,8 @@ const updateContentTool = defineTool({
       hashtags: hashtags.optional(),
       slides: z.array(updateSlide).max(10).optional(),
       status: z.enum(UPDATE_STATUSES).optional(),
+      image_url: httpsUrl.nullable().optional().describe('New main image (https). null removes it.'),
+      video_url: httpsUrl.nullable().optional().describe('Finished video (https mp4/mov/webm) for a reel or story. null removes it.'),
     })
     .strict()
     .refine((v) => UPDATE_FIELDS.some((k) => v[k] !== undefined), {
@@ -586,13 +621,28 @@ const updateContentTool = defineTool({
       text: input.body ?? null,
       hashtags: input.hashtags?.length ? input.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)) : null,
       slides: slides || null,
+      // null = se quita; sin la clave = no cambia.
+      ...(input.image_url !== undefined ? { new_image_url: input.image_url } : {}),
+      ...(input.video_url !== undefined ? { new_video_url: input.video_url } : {}),
     };
   },
   handler: async (ctx, input) => {
+    if (input.video_url) {
+      const current = await loadOwnedItem<{ content_type: string }>(ctx, input.item_id, 'content_type');
+      if (current.content_type !== 'reel' && current.content_type !== 'story') {
+        throw new ServiceError('invalid_input', 422, msg(ctx.language,
+          'Solo los reels y las stories llevan video',
+          'Only reels and stories can have a video'));
+      }
+    }
+
     const patch: Record<string, unknown> = {};
     for (const key of UPDATE_FIELDS) {
       if (input[key] !== undefined) patch[key] = input[key];
     }
+    // Media externa → Storage de Kefy: a Zernio solo le llegan archivos nuestros.
+    if (input.image_url) patch.image_url = await rehostExternalMedia(ctx, input.image_url, 'image');
+    if (input.video_url) patch.video_url = await rehostExternalMedia(ctx, input.video_url, 'video');
     const { item } = await updateContent(ctx, input.item_id, patch, {
       allowedStatuses: UPDATE_STATUSES,
       fields: UPDATE_FIELDS,
@@ -618,13 +668,16 @@ const generateContentImageTool = defineTool({
   title: { es: 'Generar imagen', en: 'Generate image' },
   kind: 'write',
   description:
-    'Generates or regenerates the main image of an existing content item with the brand colors, replacing the current one. ' +
+    'Generates or regenerates the main image of an existing content item with the brand colors and logo, replacing ' +
+    'the current one. Use size 1024x1536 or 1024x1792 for stories and other vertical pieces. ' +
     `Cost: ${CREDIT_COSTS.image} credits.`,
   input: z
     .object({
       item_id: z.uuid(),
       prompt: z.string().trim().min(1).max(1000).describe('What the image should show. No text in the image: copy is overlaid later.'),
       quality: imageQuality.default('medium'),
+      size: imageSize.default('1024x1024'),
+      reference_image_urls: referenceImageUrls(3).optional(),
     })
     .strict(),
   confirm: 'never',
@@ -634,13 +687,152 @@ const generateContentImageTool = defineTool({
       itemId: input.item_id,
       prompt: input.prompt,
       quality: input.quality,
-      size: '1024x1024',
+      size: input.size,
+      referenceImageUrls: await resolveReferenceImages(ctx, input.reference_image_urls, 3),
     });
 
     return {
       data: { item_id: input.item_id, image_url: image.url, revised_prompt: image.revisedPrompt },
       links: [itemLink(ctx.language, input.item_id)],
       dataChanged: ['content'],
+    };
+  },
+});
+
+// ─── create_story ─────────────────────────────────────────────────────────────
+
+const createStoryTool = defineTool({
+  name: 'create_story',
+  title: { es: 'Crear story con IA', en: 'Create AI story' },
+  kind: 'write',
+  description:
+    'Generates a story: a short caption in the brand voice plus one vertical 9:16 image (unless with_image is false), ' +
+    'and saves it as a draft (content_type story). It is published as an image story; to turn it into a short video, ' +
+    'call prepare_story_video and then get_video_plan / produce_video. ' +
+    `Cost: ${CREDIT_COSTS.text} credit for the text, plus ${CREDIT_COSTS.image} for the image. ` +
+    'If the image cannot be made (no credits left or it fails) the story is saved without it and data.image_error says why.',
+  input: z
+    .object({
+      topic: z.string().trim().min(1).max(500).describe('What the story is about.'),
+      channel: channel.default('generic'),
+      with_image: z.boolean().default(true),
+      reference_image_urls: referenceImageUrls(3).optional(),
+    })
+    .strict(),
+  confirm: 'never',
+  estimateCredits: (input) => CREDIT_COSTS.text + (input.with_image !== false ? CREDIT_COSTS.image : 0),
+  describe: async (_ctx, input) => ({ topic: input.topic, channel: input.channel, with_image: input.with_image }),
+  handler: async (ctx, input) => {
+    const references = input.with_image
+      ? await resolveReferenceImages(ctx, input.reference_image_urls, 3)
+      : undefined;
+    const out = await generateStory(ctx, {
+      topic: input.topic,
+      channel: input.channel,
+      withImage: input.with_image,
+      referenceImageUrls: references,
+      save: true,
+    });
+    const itemId = out.itemId as string;
+    return {
+      data: {
+        item_id: itemId,
+        status: 'draft',
+        body: out.body,
+        hashtags: out.hashtags,
+        image_url: out.image_url,
+        ...(out.imageError ? { image_error: out.imageError } : {}),
+      },
+      links: [itemLink(ctx.language, itemId)],
+      dataChanged: ['content'],
+    };
+  },
+});
+
+// ─── prepare_story_video ──────────────────────────────────────────────────────
+
+const prepareStoryVideoTool = defineTool({
+  name: 'prepare_story_video',
+  title: { es: 'Preparar video de la story', en: 'Prepare story video' },
+  kind: 'write',
+  description:
+    'Writes the short video script (1-3 shots, under 12 seconds) of a story item, reusing its image as the first ' +
+    'shot. Nothing is produced yet: afterwards show the cost with get_video_plan and produce it with produce_video. ' +
+    'A story needs this step before get_video_plan / produce_video work. Running it again replaces the script. ' +
+    `Cost: ${CREDIT_COSTS.text} credit.`,
+  input: z.object({ item_id: z.uuid() }).strict(),
+  confirm: 'never',
+  estimateCredits: () => CREDIT_COSTS.text,
+  handler: async (ctx, input) => {
+    const { script } = await writeStoryVideoScript(ctx, { itemId: input.item_id });
+    return {
+      data: {
+        item_id: input.item_id,
+        shots: script.scenes.map((s) => ({
+          order:            s.order,
+          kind:             s.visual.kind,
+          speaker:          s.speaker,
+          line:             s.line,
+          on_screen_text:   s.on_screen_text,
+          duration_seconds: s.duration_seconds,
+        })),
+      },
+      links: [itemLink(ctx.language, input.item_id)],
+      dataChanged: ['content'],
+    };
+  },
+});
+
+// ─── convert_content_format ───────────────────────────────────────────────────
+
+const convertContentFormatTool = defineTool({
+  name: 'convert_content_format',
+  title: { es: 'Convertir a otro formato', en: 'Convert content format' },
+  kind: 'write',
+  description:
+    'Generates an alternate format of an existing content item (post, carousel, reel or story) from its text and ' +
+    'images, in the brand voice, so the same idea can go to networks that need another format. The original is kept; ' +
+    'publish the new version with publish_content and format. If that format is the item\'s own or was already ' +
+    'generated, it is returned without generating anything again. ' +
+    `Cost: post or story ${renditionCredits('post')} credits; carousel or reel up to ${renditionCredits('carousel')} ` +
+    `(${CREDIT_COSTS.text} for the text plus ${CREDIT_COSTS.image} per slide image). A reel version can then be ` +
+    'produced as video with get_video_plan / produce_video and format "reel".',
+  input: z
+    .object({
+      item_id: z.uuid(),
+      format: z.enum(RENDITION_FORMATS),
+    })
+    .strict(),
+  confirm: 'never',
+  estimateCredits: (input) => renditionCredits(input.format),
+  describe: async (ctx, input) => {
+    const item = await loadOwnedItem<{ title: string | null; body: string | null; content_type: string }>(
+      ctx, input.item_id, 'title, body, content_type',
+    );
+    return {
+      title: wrapUntrusted('content', item.title ?? truncate(item.body, 80)),
+      from: item.content_type,
+      format: input.format,
+      credits: renditionCredits(input.format),
+    };
+  },
+  handler: async (ctx, input) => {
+    const { rendition, created } = await generateRendition(ctx, { itemId: input.item_id, format: input.format });
+    const slides = Array.isArray(rendition.slides) ? rendition.slides : null;
+    return {
+      data: {
+        item_id: input.item_id,
+        format: input.format,
+        status: rendition.status ?? null,
+        generated: created,
+        // El texto se escribió a partir del original, que pudo venir de fuera.
+        body: wrapUntrusted('content', (rendition.body as string | null) ?? null),
+        hashtags: rendition.hashtags ?? [],
+        image_url: rendition.image_url ?? null,
+        ...(slides ? { slides: wrapSlides(slides) } : {}),
+      },
+      links: [itemLink(ctx.language, input.item_id)],
+      dataChanged: created ? ['content'] : undefined,
     };
   },
 });
@@ -654,6 +846,9 @@ export const contentTools = [
   createStarterPostsTool,
   createCarouselTool,
   createReelTool,
+  createStoryTool,
+  prepareStoryVideoTool,
+  convertContentFormatTool,
   createManualContentTool,
   updateContentTool,
   generateContentImageTool,

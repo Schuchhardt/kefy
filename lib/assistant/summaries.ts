@@ -59,6 +59,22 @@ export const ASSISTANT_TOOL_NAMES = [
   'save_autopilot_rule',
   'delete_autopilot_rule',
   'run_autopilot_now',
+  'list_brand_assets',
+  'add_brand_asset',
+  'delete_brand_asset',
+  'create_brand',
+  'archive_brand',
+  'set_brand_avatar',
+  'create_story',
+  'prepare_story_video',
+  'convert_content_format',
+  'disconnect_social_account',
+  'list_engagement_rules',
+  'save_engagement_rule',
+  'delete_engagement_rule',
+  'list_leads',
+  'save_lead',
+  'delete_lead',
 ] as const;
 
 export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];

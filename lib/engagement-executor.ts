@@ -5,6 +5,10 @@
 import { createSupabaseServer } from '@/lib/supabase';
 import { generateContentText } from '@/lib/ai';
 import { replyToComment, sendMessage } from '@/lib/zernio';
+import { getBrandKitForBrand } from '@/lib/services/brand-kit';
+import { checkAiSpend } from '@/lib/ai-guard';
+import { reportError } from '@/lib/observability';
+import type { JWTPayload } from '@/types/auth';
 
 type DB = ReturnType<typeof createSupabaseServer>;
 
@@ -12,6 +16,8 @@ export type EngagementEvent =
   | {
       type: 'new_comment';
       socialAccountId: string;
+      /** Marca de la cuenta que recibió el evento (null en cuentas antiguas sin marca). */
+      brandId: string | null;
       zernioAccountId: string;
       commentId: string;
       postId: string;
@@ -22,6 +28,7 @@ export type EngagementEvent =
   | {
       type: 'new_dm';
       socialAccountId: string;
+      brandId: string | null;
       zernioAccountId: string;
       threadId: string;
       body: string;
@@ -74,17 +81,68 @@ function matchesConditions(rule: EngagementRule, event: EngagementEvent): boolea
   return true;
 }
 
+const ROUTE = 'lib/engagement-executor';
+
+/** La respuesta con IA no se envía: la guardia de gasto no la autorizó. */
+class SpendBlocked extends Error {}
+
+/**
+ * Identidad con la que el webhook cobra a la organización. No hay usuario
+ * detrás (lo dispara un comentario o DM), así que el plan se lee de la
+ * organización: es el que fija el tope de créditos.
+ */
+async function systemAuth(db: DB, orgId: string): Promise<JWTPayload> {
+  const { data: org } = await db.from('kefy_organizations').select('plan').eq('id', orgId).maybeSingle();
+  const plan = (org?.plan as JWTPayload['plan'] | undefined) ?? 'starter';
+  return { userId: 'system:engagement', orgId, role: 'owner', plan };
+}
+
+/**
+ * Cobra la respuesta con IA con la misma guardia que las rutas (suscripción →
+ * rate limit → créditos de texto). Sin esto cualquier comentario o DM
+ * entrante gastaba en Anthropic sin límite, también con el mes gratis vencido
+ * o los créditos agotados. Si la guardia bloquea, la regla no responde.
+ */
+async function chargeAIReply(db: DB, orgId: string, rule: EngagementRule): Promise<() => Promise<void>> {
+  const auth = await systemAuth(db, orgId);
+  const spend = await checkAiSpend(auth, { operation: 'text', route: ROUTE });
+  if (spend.ok) return spend.refund;
+  // Créditos agotados, suscripción vencida o ráfaga: es el freno funcionando.
+  // Solo se reporta cuando no se pudo verificar (503).
+  if (spend.status >= 500) {
+    reportError(new Error(String(spend.body.error)), { route: ROUTE, auth, extra: { ruleId: rule.id } });
+  }
+  throw new SpendBlocked(`spend blocked (${spend.status})`);
+}
+
 async function generateAIReply(
   db: DB,
   orgId: string,
+  brandId: string | null,
   rule: EngagementRule,
   contextBody: string,
 ): Promise<string> {
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select('tone, tagline, industry, notes, name')
-    .eq('org_id', orgId)
-    .maybeSingle();
+  const refund = await chargeAIReply(db, orgId, rule);
+  try {
+    return await writeAIReply(db, brandId, rule, contextBody);
+  } catch (err) {
+    // Un fallo de la IA no se le cobra a la organización.
+    await refund();
+    throw err;
+  }
+}
+
+async function writeAIReply(
+  db: DB,
+  brandId: string | null,
+  rule: EngagementRule,
+  contextBody: string,
+): Promise<string> {
+  // El kit de la marca de la cuenta: antes se leía con .eq('org_id')
+  // .maybeSingle(), que con varias marcas devuelve error y responde sin voz.
+  const { data: brandKit } = brandId
+    ? await getBrandKitForBrand(db, brandId)
+    : { data: null };
 
   const extraCtx = [rule.ai_context, brandKit?.notes].filter(Boolean).join('\n');
 
@@ -104,7 +162,6 @@ async function generateAIReply(
 
 async function executeAction(
   db: DB,
-  orgId: string,
   rule: EngagementRule,
   event: EngagementEvent,
 ): Promise<void> {
@@ -120,7 +177,7 @@ async function executeAction(
 
     case 'reply_comment_ai': {
       if (event.type !== 'new_comment') break;
-      const text = await generateAIReply(db, orgId, rule, event.body);
+      const text = await generateAIReply(db, rule.org_id, event.brandId, rule, event.body);
       await replyToComment(event.zernioAccountId, event.postId, event.commentId, text);
       break;
     }
@@ -134,7 +191,7 @@ async function executeAction(
 
     case 'send_dm_ai_response': {
       if (event.type !== 'new_dm') break;
-      const text = await generateAIReply(db, orgId, rule, event.body);
+      const text = await generateAIReply(db, rule.org_id, event.brandId, rule, event.body);
       await sendMessage(event.zernioAccountId, event.threadId, text);
       break;
     }
@@ -155,7 +212,11 @@ export async function executeEngagementRules(
       'id, org_id, trigger_type, condition_platform, condition_keyword, condition_rating, action_type, action_template, ai_context, delay_minutes',
     )
     .eq('org_id', orgId)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    // Solo las reglas de la marca de la cuenta y las antiguas sin marca (de
+    // toda la org). Sin este filtro, una regla de una marca respondía en las
+    // cuentas de todas las demás.
+    .or(event.brandId ? `brand_id.is.null,brand_id.eq.${event.brandId}` : 'brand_id.is.null');
 
   if (error) {
     console.error('[Engagement] failed to fetch rules:', error.message);
@@ -175,7 +236,7 @@ export async function executeEngagementRules(
     }
 
     try {
-      await executeAction(db, orgId, rule, event);
+      await executeAction(db, rule, event);
 
       const { data: current } = await db
         .from('kefy_engagement_rules')
@@ -191,7 +252,8 @@ export async function executeEngagementRules(
         })
         .eq('id', rule.id);
     } catch (err) {
-      console.error(`[Engagement] rule ${rule.id} execution failed:`, err);
+      if (err instanceof SpendBlocked) continue;
+      reportError(err, { route: ROUTE, extra: { ruleId: rule.id, orgId } });
     }
   }
 }

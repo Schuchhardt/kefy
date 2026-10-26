@@ -55,6 +55,8 @@ const fieldLabels: Record<string, string> = {
   body: 'text',
   hashtags: 'hashtags',
   slides: 'slides',
+  image_url: 'image',
+  video_url: 'video',
   status: 'status',
   name: 'name',
   tagline: 'tagline',
@@ -156,6 +158,22 @@ const en = {
     list_comments: 'Checking comments…',
     reply_to_conversation: 'Sending reply…',
     reply_to_comment: 'Replying to comment…',
+    list_brand_assets: 'Checking brand assets…',
+    add_brand_asset: 'Saving the asset…',
+    delete_brand_asset: 'Deleting the asset…',
+    create_brand: 'Creating the brand…',
+    archive_brand: 'Archiving the brand…',
+    set_brand_avatar: 'Updating the brand image…',
+    create_story: 'Creating story…',
+    prepare_story_video: 'Preparing the story video…',
+    convert_content_format: 'Converting format…',
+    disconnect_social_account: 'Disconnecting the account…',
+    list_engagement_rules: 'Checking auto-replies…',
+    save_engagement_rule: 'Saving the auto-reply…',
+    delete_engagement_rule: 'Deleting the auto-reply…',
+    list_leads: 'Checking leads…',
+    save_lead: 'Saving the lead…',
+    delete_lead: 'Deleting the lead…',
   } satisfies Record<AssistantToolName, string>,
 
   toolSummaries: {
@@ -220,6 +238,7 @@ const en = {
     update_content: (_i, p) => {
       const title = str(p.title, 'content');
       if (p.new_status === 'archived') return `Archive ${quote(title)}`;
+      if (p.new_image_url === null && fields(p.fields) === 'image') return `Remove the image from ${quote(title)}`;
       const f = fields(p.fields);
       const warn = p.current_status === 'scheduled' ? ' (it is scheduled)' : '';
       return `Edit the ${f || 'content'} of ${quote(title)}${warn}`;
@@ -285,6 +304,49 @@ const en = {
       const from = str(p.account);
       return `Publicly reply to the comment${to ? ` by ${to}` : ''}${from ? ` on ${from}` : ''}`;
     },
+    list_brand_assets: () => 'Check the brand assets',
+    add_brand_asset: (i): string => (i.set_as_logo
+      ? 'Add the image to the assets and use it as the brand logo'
+      : 'Add an image to the brand assets'),
+    delete_brand_asset: (_i, p) => {
+      const what = str(p.label) ? quote(p.label) : str(p.type);
+      return what ? `Delete the brand asset ${what}` : 'Delete a brand asset';
+    },
+    create_brand: (i, p) => `Create the brand ${quote(str(p.name, str(i.name)))}`,
+    archive_brand: (_i, p) => `Archive the brand ${quote(str(p.name))}: it disappears and nothing can act on it anymore`,
+    set_brand_avatar: (i): string => (i.image_url ? 'Change the brand image' : 'Remove the brand image'),
+    create_story: (i, p) => {
+      const topic = str(p.topic, str(i.topic));
+      const img = (p.with_image ?? i.with_image) !== false ? ' with an image' : '';
+      return topic ? `Create a story${img} about ${quote(topic)}` : `Create a story${img}`;
+    },
+    prepare_story_video: () => "Write the story's video script (1 credit)",
+    convert_content_format: (i, p) => {
+      const credits = Number(p.credits);
+      const cost = Number.isFinite(credits) && credits > 0 ? ` (up to ${credits} credits)` : '';
+      const from = str(p.from) ? ` from ${str(p.from)}` : '';
+      return `Convert ${quote(str(p.title, 'the content'))}${from} to ${str(p.format, str(i.format))}${cost}`;
+    },
+    disconnect_social_account: (_i, p) => {
+      const n = Number(p.scheduled_posts);
+      const base = `Disconnect ${str(p.account, 'the account')}`;
+      return n > 0 ? `${base} (${n} scheduled posts will be deleted)` : base;
+    },
+    list_engagement_rules: () => 'Check the auto-reply rules',
+    save_engagement_rule: (i, p) => {
+      const name = quote(str(p.name, str(i.name)));
+      if (!i.id) {
+        const target = String(p.trigger ?? i.trigger_type ?? '').includes('dm') ? 'DMs' : 'comments';
+        return `Create the auto-reply ${name}: it will answer ${target} on its own`;
+      }
+      if (p.new_status === 'paused') return `Pause the auto-reply ${name}`;
+      if (p.new_status === 'active') return `Resume the auto-reply ${name}`;
+      return `Edit the auto-reply ${name}`;
+    },
+    delete_engagement_rule: (_i, p) => `Delete the auto-reply ${quote(str(p.name))}`,
+    list_leads: () => 'Check the leads',
+    save_lead: (i): string => (i.id ? 'Update a lead' : `Save the lead ${quote(str(i.username))}`),
+    delete_lead: (_i, p) => `Delete the lead ${quote(str(p.username))}${str(p.channel) ? ` (${str(p.channel)})` : ''}`,
   } satisfies Record<AssistantToolName, ToolSummaryFn>,
 
   previewLabels: {

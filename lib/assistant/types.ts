@@ -13,7 +13,9 @@ export type Scope = ToolKind;
 export type Source = 'chat' | 'mcp' | 'api';
 
 /** Qué datos cambió una acción, para que las páginas abiertas se recarguen. */
-export type Entity = 'content' | 'scheduled' | 'brand-kit' | 'strategy' | 'inbox' | 'analytics' | 'autopilot';
+export type Entity =
+  | 'content' | 'scheduled' | 'brand-kit' | 'brands' | 'social-accounts' | 'strategy' | 'inbox' | 'analytics'
+  | 'autopilot' | 'engagement' | 'leads';
 
 export interface ToolLink {
   label: string;

@@ -59,7 +59,7 @@ export const UPDATABLE_FIELDS = [
 ] as const;
 
 /** De dónde vino un contenido: la UI, el chat, la API o MCP. */
-function createdVia(ctx: ServiceContext): 'ui' | 'chat' | 'api' | 'mcp' {
+export function createdVia(ctx: ServiceContext): 'ui' | 'chat' | 'api' | 'mcp' {
   return ctx.source === 'route' ? 'ui' : ctx.source;
 }
 
@@ -291,6 +291,40 @@ export async function getContent(
   return out;
 }
 
+// ─── Media que llega por una herramienta ──────────────────────────────────────
+
+/**
+ * Una URL de media que no está en el Storage de Kefy se descarga y se re-aloja
+ * (ingestExternalMedia): a Zernio y a los proveedores de IA solo les llegan
+ * archivos nuestros. `null`/vacío se devuelve como `null`.
+ */
+export async function rehostExternalMedia(
+  ctx: ServiceContext,
+  url: string | null | undefined,
+  kind: 'image' | 'video',
+): Promise<string | null> {
+  if (!url) return null;
+  return isKefyStorageUrl(url) ? url : ingestExternalMedia(ctx, url, kind);
+}
+
+/**
+ * Imágenes de referencia que llegan por una herramienta. Las que ya están en un
+ * bucket de referencia de Kefy se usan tal cual; cualquier otra URL https se
+ * re-aloja antes (el generador solo acepta referencias de nuestro Storage).
+ */
+export async function resolveReferenceImages(
+  ctx: ServiceContext,
+  urls: readonly string[] | undefined,
+  max = 3,
+): Promise<string[] | undefined> {
+  if (!urls?.length) return undefined;
+  const out: string[] = [];
+  for (const url of urls.slice(0, max)) {
+    out.push(isAllowedMediaUrl(url, { referenceOnly: true }) ? url : await ingestExternalMedia(ctx, url, 'image'));
+  }
+  return out;
+}
+
 // ─── createManualContent ──────────────────────────────────────────────────────
 
 /**
@@ -329,8 +363,7 @@ export async function createManualContent(
 
   // Media externa → Storage de Kefy (solo API/MCP; la UI ya sube a Storage).
   if (ctx.source === 'api' || ctx.source === 'mcp') {
-    const rehost = async (url: string | null | undefined, kind: 'image' | 'video') =>
-      url && !isKefyStorageUrl(url) ? ingestExternalMedia(ctx, url, kind) : (url ?? null);
+    const rehost = (url: string | null | undefined, kind: 'image' | 'video') => rehostExternalMedia(ctx, url, kind);
 
     explicitImage = await rehost(explicitImage, 'image');
     videoUrl = await rehost(videoUrl, 'video');

@@ -336,6 +336,7 @@ async function handleMessageReceived(db: DB, data: Data) {
   await executeEngagementRules(db, account.org_id, {
     type:            'new_dm',
     socialAccountId: account.id,
+    brandId:         account.brand_id ?? null,
     zernioAccountId,
     threadId,
     body,
@@ -477,6 +478,7 @@ async function handleCommentReceived(db: DB, data: Data) {
   await executeEngagementRules(db, account.org_id, {
     type:            'new_comment',
     socialAccountId: account.id,
+    brandId:         account.brand_id ?? null,
     zernioAccountId,
     commentId,
     postId:          platformPostId,

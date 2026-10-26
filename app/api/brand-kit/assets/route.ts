@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { validateAssetUpload, STORAGE_BUCKET } from '@/lib/brand-kit';
+import { validateAssetUpload } from '@/lib/brand-kit';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { listBrandAssets, uploadBrandAsset } from '@/lib/services/brand-assets';
 import type { AssetType } from '@/types/brand-kit';
 
 // ─── GET /api/brand-kit/assets ────────────────────────────────────────────────
-// List all assets for the org's brand kit.
+// Assets del Brand Kit de la marca activa (lib/services/brand-assets.ts).
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -14,30 +16,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = createSupabaseServer();
-
-  const { data: kit } = await db
-    .from('kefy_brand_kits')
-    .select('id')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  if (!kit) {
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) {
     return NextResponse.json({ assets: [] });
   }
 
-  const { data: assets, error } = await db
-    .from('kefy_brand_assets')
-    .select('id, type, label, public_url, file_size, mime_type, created_at')
-    .eq('brand_kit_id', kit.id)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('brand-kit assets GET error:', error.message);
-    return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const res = NextResponse.json(await listBrandAssets(ctx));
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/brand-kit/assets', auth });
   }
-
-  return NextResponse.json({ assets: assets ?? [] });
 }
 
 // ─── POST /api/brand-kit/assets ───────────────────────────────────────────────
@@ -74,90 +65,26 @@ export async function POST(req: NextRequest) {
   }
 
   const rawType = formData.get('type');
-  const assetType: AssetType =
-    typeof rawType === 'string' && ['logo', 'image', 'icon', 'other'].includes(rawType)
-      ? (rawType as AssetType)
-      : 'other';
-
   const rawLabel = formData.get('label');
-  const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim().slice(0, 100) : null;
 
-  const { brand: postBrand, setCookieHeader: postCookieHeader } = await getBrandFromRequest(req, auth);
-  if (!postBrand) {
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) {
     return NextResponse.json({ error: 'No brand found' }, { status: 404 });
   }
 
-  const db = createSupabaseServer();
-
-  // Ensure the brand kit exists (auto-create if not)
-  let kitId: string;
-  const { data: existingKit } = await db
-    .from('kefy_brand_kits')
-    .select('id')
-    .eq('brand_id', postBrand.id)
-    .maybeSingle();
-
-  if (existingKit) {
-    kitId = existingKit.id;
-  } else {
-    const { data: newKit, error: kitError } = await db
-      .from('kefy_brand_kits')
-      .insert({ org_id: auth.orgId, brand_id: postBrand.id, name: postBrand.name })
-      .select('id')
-      .single();
-
-    if (kitError || !newKit) {
-      console.error('brand-kit auto-create error:', kitError?.message);
-      return NextResponse.json({ error: 'Failed to initialize brand kit' }, { status: 500 });
-    }
-    kitId = newKit.id;
-  }
-
-  // Build storage path: brandId/kitId/timestamp-filename
-  const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
-  const storagePath = `${postBrand.id}/${kitId}/${Date.now()}-${safeFilename}`;
-
-  const fileBuffer = Buffer.from(await file.arrayBuffer());
-
-  const { error: uploadError } = await db.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, fileBuffer, {
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const { asset } = await uploadBrandAsset(ctx, {
+      buffer: Buffer.from(await file.arrayBuffer()),
       contentType: file.type,
-      upsert: false,
+      filename: file.name,
+      type: typeof rawType === 'string' ? (rawType as AssetType) : undefined,
+      label: typeof rawLabel === 'string' ? rawLabel : null,
     });
-
-  if (uploadError) {
-    console.error('Storage upload error:', uploadError.message);
-    return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
+    const res = NextResponse.json({ asset }, { status: 201 });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'POST /api/brand-kit/assets', auth });
   }
-
-  const { data: { publicUrl } } = db.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(storagePath);
-
-  const { data: asset, error: dbError } = await db
-    .from('kefy_brand_assets')
-    .insert({
-      brand_kit_id: kitId,
-      org_id:       auth.orgId,
-      type:         assetType,
-      label,
-      storage_path: storagePath,
-      public_url:   publicUrl,
-      file_size:    file.size,
-      mime_type:    file.type,
-    })
-    .select('id, type, label, public_url, file_size, mime_type, created_at')
-    .single();
-
-  if (dbError || !asset) {
-    // Try to clean up the uploaded file
-    await db.storage.from(STORAGE_BUCKET).remove([storagePath]);
-    console.error('brand-kit asset insert error:', dbError?.message);
-    return NextResponse.json({ error: 'Failed to save asset' }, { status: 500 });
-  }
-
-  const res = NextResponse.json({ asset }, { status: 201 });
-  if (postCookieHeader) res.headers.set('Set-Cookie', postCookieHeader);
-  return res;
 }
