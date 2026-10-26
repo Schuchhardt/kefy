@@ -221,7 +221,7 @@ const en: KefyCopy = {
       { ic: '✍️', label: '1 credit = 1 generated text' },
       { ic: '🖼️', label: '3 credits = 1 generated image' },
       { ic: '🎬', label: '10 credits = final edit of 1 video reel or story' },
-      { ic: '✨', label: '8 credits = 1 AI-animated clip or 1 lip-sync · 1 credit = 1 voice. You see the total before producing' },
+      { ic: '✨', label: '8 credits = 1 AI-animated clip · 1 credit = 1 narrator voice. You see the total before producing' },
     ],
     creditNote: 'Credits renew every month. If they run out, your account stays active: only generation pauses until the next cycle. Chatting with the AI assistant does not use credits: it has its own monthly message cap, and only what it generates (posts, images, carousels) costs credits.',
     cmpFeature: 'What’s included',

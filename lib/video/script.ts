@@ -227,6 +227,23 @@ export function normalizeVideoScript(raw: unknown, language: 'es' | 'en'): Video
   };
 }
 
+/**
+ * Videos solo con narrador: nadie habla a cámara. Cada línea la dice el
+ * narrador y un plano «talking» queda como animado. Los personajes siguen
+ * existiendo como aspecto (la misma persona en todos los planos), sin voz.
+ * Se aplica también a guiones guardados antes de este cambio.
+ */
+export function narratorOnly(script: VideoScript): VideoScript {
+  return {
+    ...script,
+    scenes: script.scenes.map((s) => ({
+      ...s,
+      speaker: s.line ? 'narrator' : null,
+      visual:  s.visual.kind === 'talking' ? { ...s.visual, kind: 'animated' } : s.visual,
+    })),
+  };
+}
+
 /** Lee un guion guardado en `metadata.video_script`, o null si no hay (pieza legacy). */
 export function readVideoScript(metadata: unknown): VideoScript | null {
   const m = metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>) : null;

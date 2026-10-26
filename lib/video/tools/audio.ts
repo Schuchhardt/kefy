@@ -88,6 +88,66 @@ export function alignWords(
   });
 }
 
+const LETTER_NAMES_ES: Record<string, string> = {
+  a: 'a', b: 'be', c: 'ce', d: 'de', e: 'e', f: 'efe', g: 'ge', h: 'hache', i: 'i', j: 'jota',
+  k: 'ka', l: 'ele', m: 'eme', n: 'ene', ñ: 'eñe', o: 'o', p: 'pe', q: 'cu', r: 'erre', s: 'ese',
+  t: 'te', u: 'u', v: 've', w: 'doble ve', x: 'equis', y: 'ye', z: 'zeta',
+};
+/** Terminaciones que se leen como palabra; las demás (`.cl`, `.mx`) se deletrean. */
+const WORD_TLDS = new Set(['com', 'net', 'org', 'app', 'info', 'shop', 'store', 'online', 'site', 'blog']);
+const DOMAIN = /\b(?:www\.)?((?:[a-z0-9-]+\.)+)([a-z]{2,6})\b/gi;
+
+/**
+ * Lo que dice la voz de una línea del guion. La línea es también el
+ * subtítulo, así que se escribe como se lee en pantalla («depando.cl»); aquí
+ * se pasa a como se pronuncia («depando punto ce ele») solo para el TTS. Los
+ * subtítulos siguen saliendo del texto escrito (`alignWords` reparte las
+ * palabras escritas sobre las habladas aunque no sean las mismas).
+ */
+export function spokenText(line: string, language: 'es' | 'en'): string {
+  const dot = language === 'es' ? ' punto ' : ' dot ';
+  const spell = (tld: string) => [...tld.toLowerCase()]
+    .map((ch) => (language === 'es' ? LETTER_NAMES_ES[ch] ?? ch : ch.toUpperCase()))
+    .join(' ');
+  return line.replace(DOMAIN, (_m, labels: string, tld: string) => {
+    const name = labels.slice(0, -1).split('.').join(dot);
+    return `${name}${dot}${WORD_TLDS.has(tld.toLowerCase()) ? tld.toLowerCase() : spell(tld)}`;
+  });
+}
+
+/**
+ * Tramos de cada palabra a partir de la alineación por carácter de ElevenLabs
+ * (`/with-timestamps`): cada racha de caracteres sin espacio es una palabra.
+ * Es lo mismo que devuelve whisper, sin tener que transcribir el audio.
+ */
+export function alignmentWordSpans(alignment: {
+  characters?:                    unknown;
+  character_start_times_seconds?: unknown;
+  character_end_times_seconds?:   unknown;
+} | null | undefined): Array<{ start: number; end: number }> {
+  const chars  = Array.isArray(alignment?.characters) ? alignment.characters : [];
+  const starts = Array.isArray(alignment?.character_start_times_seconds) ? alignment.character_start_times_seconds : [];
+  const ends   = Array.isArray(alignment?.character_end_times_seconds) ? alignment.character_end_times_seconds : [];
+  const spans: Array<{ start: number; end: number }> = [];
+  let current: { start: number; end: number } | null = null;
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    const start = starts[i];
+    const end = ends[i];
+    if (typeof ch !== 'string' || typeof start !== 'number' || typeof end !== 'number') continue;
+    if (/\s/.test(ch)) {
+      current = null;
+      continue;
+    }
+    if (current) current.end = end;
+    else {
+      current = { start, end };
+      spans.push(current);
+    }
+  }
+  return spans;
+}
+
 function round(n: number): number {
   return Math.round(n * 1000) / 1000;
 }

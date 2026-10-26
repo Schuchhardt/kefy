@@ -1,8 +1,9 @@
 # Pipeline de video: guion → herramientas → montaje
 
 Un reel (o el video de una story) ya no es una secuencia de slides con texto.
-Es un **guion corto plano a plano**. Cada plano dice qué se ve, cuánto dura,
-qué se dice y quién lo dice. Ese guion se compila en una **lista de llamadas a
+Es un **guion corto plano a plano**. Cada plano dice qué se ve, cuánto dura y
+qué dice el narrador. **Nadie habla a cámara:** toda línea es del narrador, en
+off (`narratorOnly`, ver «Solo narrador»). Ese guion se compila en una **lista de llamadas a
 herramientas** (generar imagen, voz, animar, lipsync, montar) que corren en la
 nube. El usuario ve esa lista con su costo antes de gastar nada.
 
@@ -28,7 +29,7 @@ request.
 | `lib/video/script.ts` | Tipo `VideoScript` y `normalizeVideoScript` (vuelve válido el JSON de Claude). También `mergeSlideEdits` (las ediciones de escenas llegan al guion) y `scriptFromSlides` (reels anteriores, stories) |
 | `prompts/video-script.prompt.md` + `generateVideoScript` (`lib/ai.ts`) | Claude escribe el guion |
 | `lib/video/plan.ts` | `compileVideoPlan`: guion → pasos con dependencias, `$ref` y costo. Es puro |
-| `lib/video/tools/*` | Las herramientas: `generate_image`, `text_to_speech`, `animate_image`, `lip_sync`, `compose_video` |
+| `lib/video/tools/*` | Las herramientas: `generate_image`, `text_to_speech` (ElevenLabs u OpenAI), `animate_image`, `lip_sync`, `compose_video` |
 | `lib/video/higgsfield.ts`, `lib/video/fal.ts` | Clientes de las colas de video. `animate_image` usa Higgsfield si está configurado, si no fal |
 | `lib/video/engine.ts` | `advanceVideoJob`: una «vuelta» al trabajo. Lanza lo que está listo, consulta lo que está en la nube y cierra |
 | `lib/video/timeline.ts` | Guion + salidas → props de la composición `KefyFilm` (pura) |
@@ -79,9 +80,30 @@ Si el usuario edita una escena, el texto nuevo entra al guion al producir
   se tratan como quemadas y se regeneran: si no, el montaje les pondría encima
   el texto otra vez.
 
+## Solo narrador
+
+`narratorOnly` (`lib/video/script.ts`) se aplica en `scriptForTarget` a todo
+guion que se cotiza o se produce, también a los guardados antes:
+
+- cada línea la dice el narrador (`speaker: 'narrator'`);
+- un plano `talking` queda como `animated`;
+- los personajes siguen como aspecto (el retrato de referencia hace que sea la
+  misma persona en todos los planos), sin voz.
+
+La línea es también el subtítulo, así que se escribe como se lee en pantalla:
+«depando.cl», «@depando». Solo la voz recibe la forma hablada (`spokenText` en
+`lib/video/tools/audio.ts`: «depando punto ce ele»), y los subtítulos se
+alinean con el texto escrito.
+
+El prompt (`prompts/video-script.prompt.md`) ya no pide planos `talking` ni
+voces de personajes. Así todos los clips son mudos y se puede animar con un
+modelo barato (Kling 2.5 Turbo). El camino de los planos que hablan (Seedance
+con audio, o lipsync en fal) sigue en el código, pero ningún guion llega a él.
+
 ## El plan
 
-Con **Higgsfield** (Seedance 2.0 genera el audio del clip), un plano donde
+Con **Higgsfield** y un modelo que genera el audio del clip (Seedance 2.0, si
+se configura en `HIGGSFIELD_ANIMATE_MODEL`), un plano donde
 habla un personaje es una sola animación que dice la línea:
 
 ```
@@ -167,10 +189,16 @@ Cada herramienta cobra su operación de créditos (`OPERATION_CREDIT_COSTS` en
 | Herramienta | Proveedor | Créditos |
 |---|---|---|
 | `generate_image` | OpenAI (gpt-image) | 3 (`image`) |
-| `text_to_speech` | OpenAI (`gpt-4o-mini-tts` + `whisper-1`) | 1 (`voice`) |
-| `animate_image` | Higgsfield (Seedance 2.0 i2v, `HIGGSFIELD_ANIMATE_MODEL`) o fal.ai (Kling 2.1 i2v, `FAL_ANIMATE_MODEL`) | 8 (`animation`) |
+| `text_to_speech` | ElevenLabs (Flash v2.5, `/with-timestamps`) o, de respaldo, OpenAI (`gpt-4o-mini-tts` + `whisper-1`) | 1 (`voice`) |
+| `animate_image` | Higgsfield (Kling 2.5 Turbo i2v, `HIGGSFIELD_ANIMATE_MODEL`) o fal.ai (Kling 2.1 i2v, `FAL_ANIMATE_MODEL`) | 8 (`animation`) |
 | `lip_sync` | fal.ai (sync-lipsync v2, `FAL_LIPSYNC_MODEL`). Con Higgsfield no se usa | 8 (`lipsync`) |
 | `compose_video` | Remotion Lambda | 10 (`video`) |
+
+Costo para Kefy (octubre 2026, precios de lista) de un reel de 5 planos con
+nivel `key`: ~US$1. Son 3 clips de 5 s en Kling 2.5 Turbo (~$0,036/s, $0,54),
+5 imágenes (~$0,28), el guion (~$0,08), la narración en ElevenLabs Flash
+(~$0,05 / 1.000 caracteres, ~$0,02) y Lambda (~$0,03). Con Seedance 2.0 los
+clips costaban ~$1,80.
 
 Un reel de 5 planos con nivel `key` cuesta 54 créditos: 5 imágenes (15), 5
 voces (5), 3 animaciones (24) y el montaje (10). La landing lo dice en «¿Cómo funcionan los
@@ -296,8 +324,10 @@ escenas.
 
 | Variable | Para qué |
 |---|---|
-| `HIGGSFIELD_API_KEY` | `KEY_ID:KEY_SECRET` de console.higgsfield.ai (o `HF_API_KEY_ID` + `HF_API_KEY_SECRET`). Animación con audio; tiene prioridad sobre fal |
-| `HIGGSFIELD_ANIMATE_MODEL` | Opcional: por defecto `bytedance/seedance-2.0/image-to-video` |
+| `HIGGSFIELD_API_KEY` | `KEY_ID:KEY_SECRET` de console.higgsfield.ai (o `HF_API_KEY_ID` + `HF_API_KEY_SECRET`). Animación; tiene prioridad sobre fal |
+| `HIGGSFIELD_ANIMATE_MODEL` | Opcional: por defecto `kling-video/v2.5-turbo/standard/image-to-video` (mudo: `prompt`, `image_url`, `duration` 5 o 10, `negative_prompt`). Un modelo `bytedance/seedance…` recibe `resolution` y `generate_audio` y puede decir la línea |
+| `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID` | Voz del narrador. Las dos o ninguna. Sin ellas, o si ElevenLabs falla, OpenAI |
+| `ELEVENLABS_MODEL` | Opcional: por defecto `eleven_flash_v2_5` (con `language_code`). `eleven_multilingual_v2` no lo acepta y no se le manda |
 | `FAL_KEY` | Respaldo: animación y lipsync en fal. Sin Higgsfield ni fal no hay animación; el resto funciona |
 | `FAL_ANIMATE_MODEL`, `FAL_LIPSYNC_MODEL`, `OPENAI_TTS_MODEL` | Opcionales: cambian el modelo sin tocar código |
 | `VIDEO_WEBHOOK_SECRET` | Opcional: firma de los webhooks |
@@ -333,11 +363,12 @@ descargan de ahí las voces.
 
 | Archivo | Qué cubre |
 |---|---|
-| `tests/unit/lib/video/script.test.ts` | Normalización del guion, ediciones por `scene_id`, fotos quemadas o externas y guion desde slides |
+| `tests/unit/lib/video/script.test.ts` | Normalización del guion, solo narrador, ediciones por `scene_id`, fotos quemadas o externas y guion desde slides |
 | `tests/unit/lib/video/brand.test.ts` | Tema de marca, contraste, respaldos, brief del copy, acento de voz y música por ánimo |
 | `tests/unit/lib/video/fal.test.ts` | Contrato de la cola de fal: webhook, estados, 408/429/5xx como pendientes |
 | `tests/unit/lib/video/higgsfield.test.ts` | Contrato de Higgsfield: credenciales, `hf_webhook`, idempotencia, estados |
-| `tests/unit/lib/video/motion.test.ts` | `animate_image` con Higgsfield: audio solo si habla, transcripción del clip, handles viejos de fal |
+| `tests/unit/lib/video/motion.test.ts` | `animate_image` con Higgsfield: Kling mudo por defecto, con Seedance audio solo si habla, transcripción del clip, handles viejos de fal |
+| `tests/unit/lib/video/voice.test.ts` | Narrador con ElevenLabs (voz del env, idioma, tiempos de la alineación) y respaldo en OpenAI |
 | `tests/unit/lib/services/content-slides.test.ts` | Editar escenas conserva `scene_id` |
 | `tests/unit/lib/video/plan.test.ts` | Grafo, costo, niveles de animación, degradación y `$ref` |
 | `tests/unit/lib/video/timeline.test.ts` | Respaldos, duración por voz y voz dentro del clip |
