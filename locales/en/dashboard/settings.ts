@@ -58,7 +58,7 @@ const en: SettingsCopy = {
   },
 
   leadScoring: {
-    subtitle: 'Every interaction adds points to a lead. When its score reaches a stage minimum, it moves to that stage.',
+    subtitle: 'For the active brand. Every comment or DM from a lead adds points; when its score reaches a stage minimum, it moves to that stage. An auto-reply that creates leads can use its own points.',
     pointsTitle: 'Points per interaction type',
     thresholdsTitle: 'Minimum score for each stage',
     points: (n: number) => (n === 1 ? '1 point' : `${n} points`),

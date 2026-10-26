@@ -1,41 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
-import { createSupabaseServer } from '@/lib/supabase';
+import { getBrandFromRequest } from '@/lib/brands';
+import { serviceContext } from '@/lib/services/context';
+import { serviceErrorResponse } from '@/lib/services/errors';
+import { getLeadScoringConfig, updateLeadScoringConfig } from '@/lib/services/lead-scoring';
 
-// GET /api/automations/leads/scoring
-// Returns the org's lead scoring config (creates default if none exists)
+// ─── /api/automations/leads/scoring ──────────────────────────────────────────
+// Puntos por interacción y umbrales de etapa de la marca activa. La lógica
+// vive en lib/services/lead-scoring.ts.
+
+// GET: la configuración (la de por defecto si la marca no tiene una).
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const supabase = createSupabaseServer();
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
-  const { data, error } = await supabase
-    .from('kefy_lead_scoring_config')
-    .select('*')
-    .eq('org_id', auth.orgId)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const res = NextResponse.json({ config: await getLeadScoringConfig(ctx) });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'GET /api/automations/leads/scoring', auth });
   }
-
-  // Return defaults inline if no config exists yet
-  const config = data ?? {
-    defaults: {
-      comment: 5, dm: 15, mention: 8,
-      follow: 3, share: 12, click: 2, manual: 0,
-    },
-    thresholds: {
-      tibio: 20, caliente: 50, contactado: 70, convertido: 100,
-    },
-  };
-
-  return NextResponse.json({ config });
 }
 
-// PATCH /api/automations/leads/scoring
-// Body: { defaults?: {...}, thresholds?: {...} }
+// PATCH — Body: { defaults?: {...}, thresholds?: {...} }
 export async function PATCH(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -44,26 +36,22 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  let body: { defaults?: Record<string, number>; thresholds?: Record<string, number> };
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const supabase = createSupabaseServer();
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
 
-  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (body.defaults)   updates.defaults   = body.defaults;
-  if (body.thresholds) updates.thresholds = body.thresholds;
-
-  const { data, error } = await supabase
-    .from('kefy_lead_scoring_config')
-    .upsert({ org_id: auth.orgId, ...updates }, { onConflict: 'org_id' })
-    .select()
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json({ config: data });
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
+  try {
+    const res = NextResponse.json({ config: await updateLeadScoringConfig(ctx, body) });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
+  } catch (err) {
+    return serviceErrorResponse(err, { route: 'PATCH /api/automations/leads/scoring', auth });
+  }
 }

@@ -44,13 +44,14 @@ const COMMON = { es: esCommon, en: enCommon } as const;
 type SectionId = 'profile' | 'org' | 'billing' | 'social' | 'team' | 'api-keys' | 'lead-scoring';
 
 // ─── Scoring de leads ────────────────────────────────────────────────────────
-// Las claves son las de kefy_lead_scoring_config. Postgres devuelve el JSONB
-// con las claves reordenadas: se muestran en un orden fijo y las que no se
-// conozcan, al final con su clave legible.
+// Las claves son las de kefy_lead_scoring_config, de la marca activa. Postgres
+// devuelve el JSONB con las claves reordenadas: se muestran en un orden fijo.
+// De las interacciones solo se muestran las que de verdad puntúan: comentarios
+// y DMs, los únicos eventos que llegan por webhook (lib/engagement-executor.ts).
 
-const INTERACTION_ORDER = ['comment', 'dm', 'mention', 'review', 'share', 'follow', 'click', 'manual'];
+const INTERACTION_ORDER = ['comment', 'dm'];
 const STAGE_ORDER = ['tibio', 'caliente', 'contactado', 'convertido'];
-const DEFAULT_SCORES: Record<string, number> = { comment: 5, review: 10, dm: 15, mention: 8, follow: 3, share: 12, click: 2, manual: 0 };
+const DEFAULT_SCORES: Record<string, number> = { comment: 5, dm: 15, mention: 8, follow: 3, share: 12, click: 2, manual: 0 };
 const DEFAULT_THRESHOLDS: Record<string, number> = { tibio: 20, caliente: 50, contactado: 70, convertido: 100 };
 
 function orderedKeys(values: Record<string, number>, order: string[]): string[] {
@@ -563,7 +564,7 @@ function SettingsPageInner() {
                     className={`auto-grid ${styles.fieldsetBody}`}
                     style={{ '--min': '200px', '--gap': '14px 20px' } as CSSProperties}
                   >
-                    {orderedKeys(scoringDefaults, INTERACTION_ORDER).map((key) => {
+                    {INTERACTION_ORDER.filter((key) => key in scoringDefaults).map((key) => {
                       const value = scoringDefaults[key];
                       return (
                         <Field key={key} label={ts.interactions[key] ?? humanize(key)}>

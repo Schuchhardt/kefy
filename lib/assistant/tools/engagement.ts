@@ -1,13 +1,14 @@
 // ─── Herramientas del asistente: engagement y leads ──────────────────────────
 //
 // list_engagement_rules, save_engagement_rule, delete_engagement_rule,
-// list_leads, save_lead y delete_lead. Llaman a lib/services/engagement.ts y
-// lib/services/leads.ts, los mismos que /api/automations/{engagement,leads}/**.
+// list_leads, save_lead, delete_lead, get_lead_scoring y update_lead_scoring.
+// Llaman a lib/services/{engagement,leads,lead-scoring}.ts, los mismos que
+// /api/automations/{engagement,leads}/**.
 //
 // Una regla activa responde sola, en público, a comentarios y DMs: crearla o
 // editarla es 'publish' (como el autopilot) y en el chat siempre pide
-// confirmación. Las herramientas solo aceptan lo que el executor de verdad
-// ejecuta (ver engagementRuleIssue); la UI todavía ofrece más opciones.
+// confirmación. El servicio solo guarda lo que el executor de verdad ejecuta
+// (engagementRuleIssue de lib/engagement-rules.ts).
 //
 // Los leads traen usuarios, nombres y notas que pueden venir de terceros: se
 // envuelven como <untrusted_content> y su listado contamina el turno.
@@ -23,6 +24,10 @@ import {
   getEngagementRule, listEngagementRules, updateEngagementRule, type EngagementRuleRow,
 } from '@/lib/services/engagement';
 import { LEAD_STAGES, deleteLead, getLead, listLeads, updateLead, upsertLead, type LeadRow } from '@/lib/services/leads';
+import {
+  INTERACTION_TYPES, THRESHOLD_STAGES, getLeadScoringConfig, updateLeadScoringConfig,
+} from '@/lib/services/lead-scoring';
+import { MAX_DELAY_MINUTES } from '@/lib/engagement-rules';
 
 function engagementLink(lang: 'es' | 'en'): ToolLink {
   return {
@@ -49,6 +54,10 @@ function ruleView(r: EngagementRuleRow, lang: 'es' | 'en') {
     action_type: r.action_type,
     action_template: wrapUntrusted('content', r.action_template || null),
     ai_context: wrapUntrusted('content', r.ai_context),
+    delay_minutes: r.delay_minutes,
+    lead_action_type: r.lead_action_type,
+    lead_action_score_delta: r.lead_action_score_delta,
+    lead_action_stage: r.lead_action_stage,
     times_triggered: r.times_triggered ?? 0,
     last_triggered_at: r.last_triggered_at,
     works: issue === null,
@@ -75,8 +84,9 @@ const listEngagementRulesTool = defineTool({
   kind: 'read',
   description:
     "Lists the brand's engagement rules: each one automatically answers new comments or DMs (with a fixed text or an " +
-    'AI reply in the brand voice). Includes older organization-wide rules (scope "organization"), which answer on every ' +
-    'brand. works=false plus issue flags rules created in the dashboard with options that never run. Costs no credits.',
+    'AI reply in the brand voice), optionally after a delay, and can score the sender as a lead. Includes older ' +
+    'organization-wide rules (scope "organization"), which answer on every brand. works=false plus issue flags older ' +
+    'rules with options that never run. Costs no credits.',
   input: z.object({}).strict(),
   confirm: 'never',
   handler: async (ctx) => {
@@ -95,11 +105,19 @@ const saveEngagementRuleInput = z.object({
   condition_platform: z.string().trim().min(1).max(30).nullable().optional()
     .describe('Only events from this network (e.g. instagram). null = every network.'),
   condition_keyword: z.string().trim().min(1).max(100).nullable().optional()
-    .describe('Case-insensitive text the comment or DM must contain. Required for *_contains_keyword.'),
+    .describe('Case-insensitive text the comment or DM must contain; several separated by commas match any. Required for *_contains_keyword, optional filter otherwise.'),
   action_type: z.enum(ENGAGEMENT_ACTIONS).optional()
     .describe('reply_comment / send_dm send action_template as is; reply_comment_ai / send_dm_ai_response write an AI reply in the brand voice.'),
   action_template: z.string().trim().max(2000).optional().describe('Fixed reply text. Required for reply_comment and send_dm.'),
   ai_context: z.string().trim().max(2000).nullable().optional().describe('Extra instructions for AI replies.'),
+  delay_minutes: z.number().int().min(0).max(MAX_DELAY_MINUTES).optional()
+    .describe('Minutes to wait before answering (0 = right away). Delayed replies go out up to 5 minutes later.'),
+  lead_action_type: z.enum(['create_lead', 'update_lead']).nullable().optional()
+    .describe('create_lead adds the sender to the leads pipeline (or scores them if already there); update_lead only scores existing leads; null = none.'),
+  lead_action_score_delta: z.number().int().min(-1000).max(1000).optional()
+    .describe('Points the interaction adds to the lead. 0 = the brand default for comments/DMs (see get_lead_scoring).'),
+  lead_action_stage: z.enum(LEAD_STAGES).nullable().optional()
+    .describe('Minimum stage the lead is moved to. Leads never move down automatically.'),
   is_active: z.boolean().optional().describe('false pauses the rule.'),
 }).strict();
 
@@ -112,7 +130,8 @@ const saveEngagementRuleTool = defineTool({
     'Creates (no id) or updates (with id) an engagement rule of the brand, which automatically and publicly answers ' +
     'new comments or DMs on its connected accounts. To create, name, trigger_type and action_type are required. ' +
     'Comment triggers pair with reply_comment / reply_comment_ai, DM triggers with send_dm / send_dm_ai_response. ' +
-    'Use is_active=false to pause it. Always requires user confirmation. Saving costs no credits.',
+    'Use is_active=false to pause it. Always requires user confirmation. Saving costs no credits; each AI reply ' +
+    'costs text credits when it is sent.',
   input: saveEngagementRuleInput,
   confirm: 'always',
   describe: async (ctx, input) => {
@@ -124,13 +143,18 @@ const saveEngagementRuleTool = defineTool({
       platform: input.condition_platform ?? current?.condition_platform ?? null,
       action: input.action_type ?? current?.action_type ?? null,
       template: input.action_template ?? null,
+      delay_minutes: input.delay_minutes ?? current?.delay_minutes ?? null,
+      lead_action: input.lead_action_type ?? current?.lead_action_type ?? null,
       new_status: input.is_active === undefined ? null : input.is_active ? 'active' : 'paused',
     };
   },
   snapshot: async (ctx, input) => {
     if (!input.id) return null;
     const r = await getEngagementRule(ctx, input.id);
-    return [r.name, r.trigger_type, r.action_type, r.action_template, r.condition_keyword, r.is_active];
+    return [
+      r.name, r.trigger_type, r.action_type, r.action_template, r.condition_keyword, r.is_active, r.delay_minutes,
+      r.lead_action_type, r.lead_action_score_delta, r.lead_action_stage,
+    ];
   },
   handler: async (ctx, input) => {
     const { id, ...fields } = input;
@@ -138,18 +162,9 @@ const saveEngagementRuleTool = defineTool({
     let rule: EngagementRuleRow;
 
     if (id) {
-      const current = await getEngagementRule(ctx, id);
-      assertNotOrgRule(ctx, current);
-      // Lo que cambia la mecánica de la regla tiene que quedar en una
-      // combinación que el executor ejecute; renombrar o pausar no.
-      const touchesBehavior = ['trigger_type', 'action_type', 'condition_keyword', 'action_template']
-        .some((k) => k in defined);
-      if (touchesBehavior) {
-        const issue = engagementRuleIssue({ ...current, ...defined, delay_minutes: 0 }, ctx.language);
-        if (issue) throw new ServiceError('invalid_input', 422, issue);
-      }
-      // Una regla editada por aquí se ejecuta sin espera.
-      rule = await updateEngagementRule(ctx, id, current.delay_minutes > 0 ? { ...defined, delay_minutes: 0 } : defined);
+      assertNotOrgRule(ctx, await getEngagementRule(ctx, id));
+      // El servicio rechaza dejar la regla en una combinación que no se ejecuta.
+      rule = await updateEngagementRule(ctx, id, defined);
     } else {
       if (!defined.name || !defined.trigger_type || !defined.action_type) {
         throw new ServiceError(
@@ -159,14 +174,6 @@ const saveEngagementRuleTool = defineTool({
             'name, trigger_type and action_type are required to create a rule'),
         );
       }
-      const issue = engagementRuleIssue({
-        trigger_type: defined.trigger_type,
-        action_type: defined.action_type,
-        action_template: defined.action_template ?? '',
-        condition_keyword: defined.condition_keyword ?? null,
-        delay_minutes: 0,
-      }, ctx.language);
-      if (issue) throw new ServiceError('invalid_input', 422, issue);
       rule = await createEngagementRule(ctx, defined);
     }
 
@@ -303,6 +310,49 @@ const deleteLeadTool = defineTool({
   },
 });
 
+// ─── Scoring de leads ────────────────────────────────────────────────────────
+
+const getLeadScoringTool = defineTool({
+  name: 'get_lead_scoring',
+  title: { es: 'Ver scoring de leads', en: 'Show lead scoring' },
+  kind: 'read',
+  description:
+    "Shows the brand's lead scoring: points each interaction adds (defaults; only comment and dm are scored " +
+    'automatically today) and the minimum score of each stage (thresholds). Costs no credits.',
+  input: z.object({}).strict(),
+  confirm: 'never',
+  handler: async (ctx) => ({ data: { config: await getLeadScoringConfig(ctx) }, links: [leadsLink(ctx.language)] }),
+});
+
+const points = z.number().int().min(-1000).max(1000);
+const threshold = z.number().int().min(0).max(100000);
+
+const updateLeadScoringTool = defineTool({
+  name: 'update_lead_scoring',
+  title: { es: 'Cambiar scoring de leads', en: 'Update lead scoring' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    "Changes the brand's lead scoring. Only the keys you send change. defaults: points per interaction type; " +
+    'thresholds: minimum score for tibio, caliente, contactado and convertido (must not decrease in that order). ' +
+    'Costs no credits.',
+  input: z.object({
+    defaults: z.object(Object.fromEntries(INTERACTION_TYPES.map((k) => [k, points.optional()])) as {
+      [K in (typeof INTERACTION_TYPES)[number]]: z.ZodOptional<typeof points>
+    }).strict().optional(),
+    thresholds: z.object(Object.fromEntries(THRESHOLD_STAGES.map((k) => [k, threshold.optional()])) as {
+      [K in (typeof THRESHOLD_STAGES)[number]]: z.ZodOptional<typeof threshold>
+    }).strict().optional(),
+  }).strict(),
+  confirm: 'never',
+  describe: async (_ctx, input) => ({ defaults: input.defaults ?? null, thresholds: input.thresholds ?? null }),
+  handler: async (ctx, input) => ({
+    data: { config: await updateLeadScoringConfig(ctx, input) },
+    links: [leadsLink(ctx.language)],
+    dataChanged: ['leads'],
+  }),
+});
+
 export const engagementTools = [
   listEngagementRulesTool,
   saveEngagementRuleTool,
@@ -310,4 +360,6 @@ export const engagementTools = [
   listLeadsTool,
   saveLeadTool,
   deleteLeadTool,
+  getLeadScoringTool,
+  updateLeadScoringTool,
 ];

@@ -42,6 +42,8 @@ const en: EngagementCopy = {
   platformLabel: 'Platform',
   platformAll: 'All platforms',
   keywordLabel: 'Filter by keyword (optional)',
+  keywordRequiredLabel: 'Keywords',
+  keywordHint: 'Separate several with commas: it replies if the text contains any of them.',
   keywordPlaceholder: 'E.g.: price, shipping, thanks…',
   actionLabel: 'Action',
   actions: {
@@ -61,6 +63,12 @@ const en: EngagementCopy = {
   delayMinutes:         'minutes',
   delayNone:            'No wait',
   delayBadge:           (min: number) => `+${min} min`,
+  delayHint:            'The reply goes out 0 to 5 minutes after the wait.',
+  // Older rules that never run
+  notRunning:           'This rule does not run',
+  notRunningHint:       'It uses a trigger or action that does not exist, or it is missing its keyword or text. Delete it and create a new one.',
+  keywordRequired:      'Write at least one keyword.',
+  templateRequired:     'Write the reply text.',
   // Rule card
   then:                 'then',
   timesTriggered:       (n: number) => (n === 1 ? 'Ran once' : `Ran ${n} times`),
@@ -72,6 +80,9 @@ const en: EngagementCopy = {
   leadActionUpdate:     'Update lead',
   leadScoreDeltaLabel:  'Score points',
   leadStageLabel:       'Assign stage',
+  leadScoreDeltaHint:   '0 uses the points in Settings → Lead scoring.',
+  leadBadge:            (action: 'create_lead' | 'update_lead', points: number) =>
+    `${action === 'create_lead' ? 'Creates lead' : 'Updates lead'}${points ? ` (${points > 0 ? '+' : ''}${points})` : ''}`,
 };
 
 export default en;

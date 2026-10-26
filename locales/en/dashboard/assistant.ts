@@ -174,6 +174,8 @@ const en = {
     list_leads: 'Checking leads…',
     save_lead: 'Saving the lead…',
     delete_lead: 'Deleting the lead…',
+    get_lead_scoring: 'Checking lead scoring…',
+    update_lead_scoring: 'Updating lead scoring…',
   } satisfies Record<AssistantToolName, string>,
 
   toolSummaries: {
@@ -347,6 +349,8 @@ const en = {
     list_leads: () => 'Check the leads',
     save_lead: (i): string => (i.id ? 'Update a lead' : `Save the lead ${quote(str(i.username))}`),
     delete_lead: (_i, p) => `Delete the lead ${quote(str(p.username))}${str(p.channel) ? ` (${str(p.channel)})` : ''}`,
+    get_lead_scoring: () => 'Check lead scoring',
+    update_lead_scoring: () => 'Update lead scoring',
   } satisfies Record<AssistantToolName, ToolSummaryFn>,
 
   previewLabels: {

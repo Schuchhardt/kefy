@@ -13,6 +13,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TONE_COLORS, type Tone } from '@/lib/status';
 import { toLocale } from '@/lib/i18n';
 import type { TriggerType, ActionType, EngagementPlatform, EngagementRule } from '@/types/automations';
+import { WORKING_TRIGGERS, actionsForTrigger, engagementRuleIssue, isKeywordTrigger } from '@/lib/engagement-rules';
 import esT from '@/locales/es/dashboard/engagement';
 import enT from '@/locales/en/dashboard/engagement';
 import esCommon from '@/locales/es/dashboard/common';
@@ -31,26 +32,12 @@ const PLATFORMS: { value: EngagementPlatform; label: string }[] = [
 ];
 const PLATFORM_LABELS: Record<string, string> = Object.fromEntries(PLATFORMS.map((p) => [p.value, p.label]));
 
-const TRIGGER_TYPES: TriggerType[] = [
-  'new_comment',
-  'new_follower',
-  'mention',
-  'brand_mention',
-  'post_shared',
-  'new_dm',
-  'comment_contains_keyword',
-  'dm_contains_keyword',
-  'lead_score_threshold',
-];
+// Solo los disparadores que llegan por webhook (comentarios y DMs), y para
+// cada uno las acciones que le corresponden: lib/engagement-rules.ts.
+const TRIGGER_TYPES: readonly TriggerType[] = WORKING_TRIGGERS;
 
-const ACTION_TYPES: ActionType[] = [
-  'reply_comment',
-  'reply_comment_ai',
-  'send_dm',
-  'send_dm_ai_response',
-];
+type LeadAction = 'none' | 'create_lead' | 'update_lead';
 
-const KEYWORD_TRIGGERS: TriggerType[] = ['comment_contains_keyword', 'dm_contains_keyword'];
 const AI_ACTIONS: ActionType[]        = ['reply_comment_ai', 'send_dm_ai_response'];
 const NEEDS_TEMPLATE: ActionType[]    = ['reply_comment', 'send_dm'];
 const DELAY_MINUTES = [5, 15, 30, 60];
@@ -97,6 +84,8 @@ export default function EngagementPage() {
   const [template, setTemplate]       = useState('');
   const [aiContext, setAiContext]     = useState('');
   const [delayMinutes, setDelayMinutes] = useState<number>(0);
+  const [leadAction, setLeadAction]   = useState<LeadAction>('none');
+  const [leadPoints, setLeadPoints]   = useState<number>(0);
 
   const fetchRules = useCallback(() => {
     setLoading(true); setLoadError(null);
@@ -129,19 +118,32 @@ export default function EngagementPage() {
     setName(''); setTriggerType('new_comment'); setPlatform('all');
     setKeyword(''); setActionType('reply_comment');
     setTemplate(''); setAiContext(''); setDelayMinutes(0);
+    setLeadAction('none'); setLeadPoints(0);
     setFormError(null);
   }
 
   function openForm()  { resetForm(); setShowForm(true); }
   function closeForm() { setShowForm(false); resetForm(); }
 
-  const needsKeyword  = KEYWORD_TRIGGERS.includes(triggerType);
+  const needsKeyword  = isKeywordTrigger(triggerType);
+  const actionOptions = actionsForTrigger(triggerType);
+
+  // Un comentario se responde en el comentario y un DM por DM: al cambiar de
+  // disparador, la acción pasa a la primera que corresponde.
+  function changeTrigger(next: TriggerType) {
+    setTriggerType(next);
+    const allowed = actionsForTrigger(next);
+    if (!allowed.includes(actionType)) setActionType(allowed[0]);
+  }
   const isAiAction    = AI_ACTIONS.includes(actionType);
   const needsTemplate = NEEDS_TEMPLATE.includes(actionType);
 
   async function handleCreate(e?: FormEvent) {
     e?.preventDefault();
     if (!name.trim()) { setFormError(t.nameRequired); return; }
+    // El formulario solo ofrece combinaciones válidas; falta revisar lo escrito.
+    if (needsKeyword && !keyword.split(',').some((k) => k.trim())) { setFormError(t.keywordRequired); return; }
+    if (needsTemplate && !template.trim()) { setFormError(t.templateRequired); return; }
     setSaving(true); setFormError(null);
     try {
       const res = await fetch('/api/automations/engagement/rules', {
@@ -151,12 +153,14 @@ export default function EngagementPage() {
           name:               name.trim(),
           trigger_type:       triggerType,
           condition_platform: platform !== 'all' ? platform : null,
-          condition_keyword:  needsKeyword ? (keyword.trim() || null) : null,
+          condition_keyword:  keyword.trim() || null,
           action_type:        actionType,
           action_template:    template.trim(),
           ai_context:         isAiAction ? (aiContext.trim() || null) : null,
           delay_minutes:      delayMinutes,
           is_active:          true,
+          lead_action_type:        leadAction === 'none' ? null : leadAction,
+          lead_action_score_delta: leadAction === 'none' ? 0 : leadPoints,
         }),
       });
       if (!res.ok) {
@@ -247,7 +251,7 @@ export default function EngagementPage() {
             <div className="grid-2">
               {/* Trigger */}
               <Field label={t.triggerLabel}>
-                <Select value={triggerType} onChange={(e) => setTriggerType(e.target.value as TriggerType)}>
+                <Select value={triggerType} onChange={(e) => changeTrigger(e.target.value as TriggerType)}>
                   {TRIGGER_TYPES.map((tr) => (
                     <option key={tr} value={tr}>{t.triggers[tr] ?? tr}</option>
                   ))}
@@ -265,25 +269,23 @@ export default function EngagementPage() {
               </Field>
             </div>
 
-            {/* Keyword — only for keyword triggers */}
-            {needsKeyword && (
-              <Field label={t.keywordLabel}>
-                <Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={t.keywordPlaceholder} />
-              </Field>
-            )}
+            {/* Keywords — obligatorias en los disparadores *_keyword, filtro opcional en el resto */}
+            <Field label={needsKeyword ? t.keywordRequiredLabel : t.keywordLabel} required={needsKeyword} hint={t.keywordHint}>
+              <Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={t.keywordPlaceholder} />
+            </Field>
 
             {/* Action */}
             <div className="grid-2">
               <Field label={t.actionLabel}>
                 <Select value={actionType} onChange={(e) => setActionType(e.target.value as ActionType)}>
-                  {ACTION_TYPES.map((a) => (
+                  {actionOptions.map((a) => (
                     <option key={a} value={a}>{t.actions[a] ?? a}</option>
                   ))}
                 </Select>
               </Field>
 
               {/* Delay */}
-              <Field label={t.delayLabel}>
+              <Field label={t.delayLabel} hint={delayMinutes > 0 ? t.delayHint : undefined}>
                 <Select value={delayMinutes} onChange={(e) => setDelayMinutes(Number(e.target.value))}>
                   <option value={0}>{t.delayNone}</option>
                   {DELAY_MINUTES.map((m) => <option key={m} value={m}>{m} {t.delayMinutes}</option>)}
@@ -291,6 +293,29 @@ export default function EngagementPage() {
                   <option value={1440}>24 h</option>
                 </Select>
               </Field>
+            </div>
+
+            {/* Lead — suma la interacción al pipeline de leads de la marca */}
+            <div className="grid-2">
+              <Field label={t.leadActionLabel}>
+                <Select value={leadAction} onChange={(e) => setLeadAction(e.target.value as LeadAction)}>
+                  <option value="none">{t.leadActionNone}</option>
+                  <option value="create_lead">{t.leadActionCreate}</option>
+                  <option value="update_lead">{t.leadActionUpdate}</option>
+                </Select>
+              </Field>
+              {leadAction !== 'none' && (
+                <Field label={t.leadScoreDeltaLabel} hint={t.leadScoreDeltaHint}>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={-1000}
+                    max={1000}
+                    value={leadPoints}
+                    onChange={(e) => setLeadPoints(Math.trunc(Number(e.target.value) || 0))}
+                  />
+                </Field>
+              )}
             </div>
 
             {/* Template — for manual template actions */}
@@ -385,6 +410,7 @@ export default function EngagementPage() {
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           {rules.map((rule) => {
             const isAi = AI_ACTIONS.includes(rule.action_type as ActionType);
+            const runs = engagementRuleIssue(rule) === null;
             const nameId = `${uid}-rule-${rule.id}`;
             return (
               <li key={rule.id}>
@@ -430,7 +456,18 @@ export default function EngagementPage() {
                         {rule.delay_minutes > 0 && (
                           <span style={chipStyle}>{t.delayBadge(rule.delay_minutes)}</span>
                         )}
+                        {rule.lead_action_type && (
+                          <span style={chipStyle}>{t.leadBadge(rule.lead_action_type, rule.lead_action_score_delta ?? 0)}</span>
+                        )}
                       </div>
+
+                      {!runs && (
+                        <div style={{ margin: '8px 0' }}>
+                          <Notice tone="warning" icon={<Icon name="alert" size={16} />} live={false}>
+                            <strong>{t.notRunning}.</strong> {t.notRunningHint}
+                          </Notice>
+                        </div>
+                      )}
 
                       {rule.action_template && (
                         <p style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic', margin: 0,

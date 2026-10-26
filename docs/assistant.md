@@ -180,7 +180,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Conectar una cuenta nueva | `get_connect_account_link` → link directo (una persona con sesión termina el OAuth de la red) | read |
 | Autopilot | `list_autopilot_rules`, `save_autopilot_rule`, `delete_autopilot_rule`, `run_autopilot_now` | read / publish / write |
 | Respuestas automáticas a comentarios y DMs | `list_engagement_rules` (read), `save_engagement_rule` (publish), `delete_engagement_rule` (write) | read / publish / write |
-| Leads | `list_leads` (read), `save_lead`, `delete_lead` (write) | read / write |
+| Leads | `list_leads`, `get_lead_scoring` (read), `save_lead`, `delete_lead`, `update_lead_scoring` (write) | read / write |
 | Bandeja: DMs y comentarios | `list_conversations`, `get_conversation_messages`, `list_comments`, `reply_to_conversation`, `reply_to_comment` | read / publish |
 | Marca: identidad | `get_brand_profile`, `update_brand_profile` (un `logo_url` externo se copia al Storage de Kefy), `import_brand_from_website` | read / write |
 | Marca: assets (logos, imágenes, íconos) | `list_brand_assets` (read), `add_brand_asset` (desde una URL; `set_as_logo`), `delete_brand_asset` (write) | read / write |
@@ -195,13 +195,25 @@ sesión, pasa por el login (`?next=`) y sigue después.
 
 **Respuestas automáticas.** Las reglas nuevas son de la marca (`brand_id`); las
 antiguas sin marca valen para toda la organización y una key atada a una marca
-no puede editarlas ni borrarlas (`bound_key_org_write`). El executor
-(`lib/engagement-executor.ts`) solo ejecuta los disparadores `new_comment`,
-`comment_contains_keyword`, `new_dm`, `dm_contains_keyword` y las acciones
-`reply_comment`, `reply_comment_ai`, `send_dm`, `send_dm_ai_response`, y se
-salta las reglas con espera (`delay_minutes > 0`): la herramienta solo acepta
-eso, y `list_engagement_rules` marca con `works: false` las reglas que nunca se
-ejecutarían.
+no puede editarlas ni borrarlas (`bound_key_org_write`). Zernio solo avisa de
+comentarios y DMs, así que el executor (`lib/engagement-executor.ts`) solo
+ejecuta los disparadores `new_comment`, `comment_contains_keyword`, `new_dm` y
+`dm_contains_keyword`, cada uno con su acción (comentario → `reply_comment` /
+`reply_comment_ai`, DM → `send_dm` / `send_dm_ai_response`).
+`lib/engagement-rules.ts` decide qué combinación funciona y lo usan la UI, el
+servicio (rechaza guardar las demás) y el executor; `list_engagement_rules`
+marca con `works: false` las reglas antiguas que nunca se ejecutarían.
+`condition_keyword` admite varias palabras separadas por comas. Con
+`delay_minutes > 0` la respuesta se encola en `kefy_engagement_jobs` y la manda
+el cron `/api/automations/engagement/run` (cada 5 minutos). Un webhook repetido
+no vuelve a responder: solo un comentario o mensaje nuevo dispara las reglas.
+
+**Leads.** Cada comentario o DM puntúa al remitente en la marca
+(`recordLeadInteraction` de `lib/services/lead-scoring.ts`): una regla con
+`lead_action_type: create_lead` lo agrega al pipeline, `update_lead` solo
+puntúa a quien ya es lead, y sin regla también se puntúa a quien ya es lead.
+Los puntos son los de la regla o, si son 0, los de `get_lead_scoring`; la etapa
+sube según los umbrales y nunca baja sola.
 
 **Medios externos.** Toda URL de imagen o video que no sea del Storage de Kefy
 (referencias, logo, assets, avatar, `update_content`) se descarga con las
@@ -496,8 +508,11 @@ Los links del asistente abren la página en la opción concreta:
 | `lib/services/brands.ts`, `app/api/brands/**` | Listar, crear y archivar marcas; avatar |
 | `lib/services/story.ts`, `app/api/content/story` | Story con IA y su guion de video |
 | `lib/services/renditions.ts`, `app/api/content/[itemId]/renditions` | Conversión de un contenido a otro formato |
-| `lib/services/engagement.ts`, `app/api/automations/engagement/rules/**` | Reglas de respuesta automática (`lib/engagement-executor.ts` las ejecuta) |
+| `lib/services/engagement.ts`, `app/api/automations/engagement/{rules,packs}/**` | Reglas de respuesta automática y packs por objetivo (`lib/engagement-executor.ts` las ejecuta) |
+| `lib/engagement-rules.ts` | Qué disparador y acción se ejecutan; palabras clave (compartido con la UI) |
+| `app/api/automations/engagement/run` | Cron de las respuestas con espera (`kefy_engagement_jobs`) |
 | `lib/services/leads.ts`, `app/api/automations/leads/**` | Leads de la marca |
+| `lib/services/lead-scoring.ts`, `app/api/automations/leads/scoring` | Puntos por interacción, umbrales de etapa y registro de interacciones |
 | `lib/services/autopilot.ts`, `app/api/autopilot/**` | Reglas y ejecución del autopilot |
 | `lib/safe-redirect.ts` | `?next=` del login y del registro: solo rutas propias del idioma (dashboard, onboarding, invitación, consentimiento OAuth) |
 | `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, el onboarding y `import_brand_from_website` |

@@ -177,6 +177,8 @@ const es = {
     list_leads: 'Revisando leads…',
     save_lead: 'Guardando el lead…',
     delete_lead: 'Borrando el lead…',
+    get_lead_scoring: 'Revisando el scoring de leads…',
+    update_lead_scoring: 'Cambiando el scoring de leads…',
   } satisfies Record<AssistantToolName, string>,
 
   toolSummaries: {
@@ -350,6 +352,8 @@ const es = {
     list_leads: () => 'Revisar los leads',
     save_lead: (i): string => (i.id ? 'Actualizar un lead' : `Guardar el lead ${quote(str(i.username))}`),
     delete_lead: (_i, p) => `Borrar el lead ${quote(str(p.username))}${str(p.channel) ? ` (${str(p.channel)})` : ''}`,
+    get_lead_scoring: () => 'Revisar el scoring de leads',
+    update_lead_scoring: () => 'Cambiar el scoring de leads',
   } satisfies Record<AssistantToolName, ToolSummaryFn>,
 
   /** Etiquetas de los campos de la vista previa en la tarjeta de confirmación. */

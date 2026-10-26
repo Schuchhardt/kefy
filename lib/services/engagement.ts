@@ -12,41 +12,31 @@
 // marca y se pueden editar, pero una API key atada a una marca no las puede
 // tocar (lo comprueba la herramienta, que conoce la key).
 //
-// Lo que de verdad se ejecuta: el executor solo entiende los disparadores
-// WORKING_TRIGGERS y las acciones de ENGAGEMENT_ACTIONS, y se salta toda regla
-// con delay_minutes > 0 (la espera no está implementada). La UI todavía ofrece
-// más disparadores y esperas; la ruta los sigue aceptando, las herramientas no.
+// Solo se guardan reglas que el executor ejecuta (engagementRuleIssue de
+// lib/engagement-rules.ts): comentarios y DMs, cada uno con su acción. Una
+// regla con delay_minutes > 0 se encola y la responde el cron
+// /api/automations/engagement/run.
+//
+// Packs (kefy_automation_packs): plantillas de reglas por objetivo. Solo se
+// ofrecen e instalan las reglas que se ejecutan, en la marca del contexto.
 
 import { z } from 'zod';
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, msg } from '@/lib/services/errors';
+import {
+  ENGAGEMENT_ACTIONS, ENGAGEMENT_TRIGGERS, MAX_DELAY_MINUTES, engagementRuleIssue, ruleKeywords,
+} from '@/lib/engagement-rules';
 
 type Db = ReturnType<typeof createSupabaseServer>;
 
 const ROUTE = 'lib/services/engagement';
 
-/** Disparadores que admite la base (CHECK de kefy_engagement_rules). */
-export const ENGAGEMENT_TRIGGERS = [
-  'new_comment', 'new_follower', 'mention', 'comment_contains_keyword', 'new_dm',
-  'dm_contains_keyword', 'brand_mention', 'post_shared', 'lead_score_threshold',
-] as const;
-
-/** Disparadores que el executor sabe ejecutar. */
-export const WORKING_TRIGGERS = [
-  'new_comment', 'comment_contains_keyword', 'new_dm', 'dm_contains_keyword',
-] as const;
-
-export const ENGAGEMENT_ACTIONS = ['reply_comment', 'reply_comment_ai', 'send_dm', 'send_dm_ai_response'] as const;
-
-export type EngagementTrigger = (typeof ENGAGEMENT_TRIGGERS)[number];
-export type EngagementAction = (typeof ENGAGEMENT_ACTIONS)[number];
-
-const KEYWORD_TRIGGERS = new Set<string>(['comment_contains_keyword', 'dm_contains_keyword']);
-const COMMENT_TRIGGERS = new Set<string>(['new_comment', 'comment_contains_keyword']);
-const TEMPLATE_ACTIONS = new Set<string>(['reply_comment', 'send_dm']);
-const COMMENT_ACTIONS = new Set<string>(['reply_comment', 'reply_comment_ai']);
+export {
+  ENGAGEMENT_ACTIONS, ENGAGEMENT_TRIGGERS, WORKING_TRIGGERS, engagementRuleIssue,
+  type EngagementAction, type EngagementTrigger,
+} from '@/lib/engagement-rules';
 
 export const engagementRuleFields = {
   name: z.string().trim().min(1).max(100),
@@ -57,7 +47,7 @@ export const engagementRuleFields = {
   action_config: z.record(z.string(), z.unknown()),
   action_template: z.string().max(2000),
   ai_context: z.string().max(2000).nullable(),
-  delay_minutes: z.number().int().min(0).max(1440),
+  delay_minutes: z.number().int().min(0).max(MAX_DELAY_MINUTES),
   is_active: z.boolean(),
   condition_platform: z.string().trim().max(30).nullable(),
   condition_keyword: z.string().trim().max(100).nullable(),
@@ -146,36 +136,14 @@ function brandFilter(brandId: string): string {
   return `brand_id.is.null,brand_id.eq.${brandId}`;
 }
 
-/**
- * Por qué una regla no va a ejecutarse nunca, o null si se ejecuta. Lo usan la
- * herramienta (para rechazar reglas que no funcionan) y el listado (para
- * avisar de las que creó la UI con opciones que el executor no entiende).
- */
-export function engagementRuleIssue(
-  rule: Pick<EngagementRuleRow, 'trigger_type' | 'action_type' | 'action_template' | 'condition_keyword' | 'delay_minutes'>,
-  lang: 'es' | 'en' = 'en',
-): string | null {
-  if (!(WORKING_TRIGGERS as readonly string[]).includes(rule.trigger_type)) {
-    return msg(lang, `El disparador ${rule.trigger_type} todavía no se ejecuta`, `Trigger ${rule.trigger_type} is not executed yet`);
-  }
-  if ((rule.delay_minutes ?? 0) > 0) {
-    return msg(lang, 'Las reglas con espera todavía no se ejecutan', 'Rules with a delay are not executed yet');
-  }
-  if (COMMENT_TRIGGERS.has(rule.trigger_type) !== COMMENT_ACTIONS.has(rule.action_type)) {
-    return msg(
-      lang,
-      'Un comentario se responde con reply_comment / reply_comment_ai y un DM con send_dm / send_dm_ai_response',
-      'Comments are answered with reply_comment / reply_comment_ai and DMs with send_dm / send_dm_ai_response',
-    );
-  }
-  if (KEYWORD_TRIGGERS.has(rule.trigger_type) && !rule.condition_keyword?.trim()) {
-    return msg(lang, 'Este disparador necesita condition_keyword', 'This trigger needs condition_keyword');
-  }
-  if (TEMPLATE_ACTIONS.has(rule.action_type) && !rule.action_template?.trim()) {
-    return msg(lang, 'Esta acción necesita action_template', 'This action needs action_template');
-  }
-  return null;
+/** Rechaza una regla que el executor nunca ejecutaría. */
+function assertRuns(ctx: ServiceContext, rule: Parameters<typeof engagementRuleIssue>[0]): void {
+  const issue = engagementRuleIssue(rule, ctx.language);
+  if (issue) throw new ServiceError('invalid_input', 422, issue, { error: issue });
 }
+
+/** Campos que cambian cuándo o cómo responde una regla (renombrar o pausar no). */
+const BEHAVIOR_FIELDS = ['trigger_type', 'trigger_config', 'action_type', 'action_template', 'condition_keyword'] as const;
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
 
@@ -214,6 +182,7 @@ export async function getEngagementRule(ctx: ServiceContext, id: string, db: Db 
 
 export async function createEngagementRule(ctx: ServiceContext, input: unknown): Promise<EngagementRuleRow> {
   const parsed = parse(ctx, createSchema, input);
+  assertRuns(ctx, parsed);
   const db = createSupabaseServer();
   const { data, error } = await db
     .from('kefy_engagement_rules')
@@ -227,12 +196,15 @@ export async function createEngagementRule(ctx: ServiceContext, input: unknown):
 export async function updateEngagementRule(ctx: ServiceContext, id: string, input: unknown): Promise<EngagementRuleRow> {
   const parsed = parse(ctx, patchSchema, input);
   const db = createSupabaseServer();
-  await getEngagementRule(ctx, id, db);
+  const current = await getEngagementRule(ctx, id, db);
 
   const updates = Object.fromEntries(Object.entries(parsed).filter(([, v]) => v !== undefined));
   if (Object.keys(updates).length === 0) {
     throw new ServiceError('invalid_input', 422, msg(ctx.language, 'No hay campos válidos', 'No valid fields to update'));
   }
+  // Una regla antigua que no se ejecuta se puede renombrar, pausar o borrar;
+  // cambiar su mecánica la tiene que dejar en una combinación que funcione.
+  if (BEHAVIOR_FIELDS.some((k) => k in updates)) assertRuns(ctx, { ...current, ...updates } as EngagementRuleRow);
 
   const { data, error } = await db
     .from('kefy_engagement_rules')
@@ -254,4 +226,149 @@ export async function deleteEngagementRule(ctx: ServiceContext, id: string): Pro
     .eq('id', id)
     .eq('org_id', ctx.auth.orgId);
   if (error) throw dbError(ctx, 'Failed to delete rule', error);
+}
+
+// ─── Packs ────────────────────────────────────────────────────────────────────
+
+export interface EngagementPackRuleRow {
+  id: string;
+  pack_id: string;
+  name_es: string;
+  name_en: string;
+  desc_es: string | null;
+  desc_en: string | null;
+  trigger_type: string;
+  trigger_config: Record<string, unknown> | null;
+  action_type: string;
+  action_config: Record<string, unknown> | null;
+  ai_context: string | null;
+  delay_minutes: number | null;
+  lead_action_type: 'create_lead' | 'update_lead' | null;
+  lead_action_score_delta: number | null;
+  lead_action_stage: string | null;
+  sort_order: number;
+}
+
+export interface EngagementPackRow {
+  id: string;
+  objective_id: string;
+  name_es: string;
+  name_en: string;
+  desc_es: string | null;
+  desc_en: string | null;
+  icon: string | null;
+  sort_order: number;
+  kefy_automation_pack_rules: EngagementPackRuleRow[];
+}
+
+/** Una regla de pack vista como regla de engagement, para validarla. */
+function packRuleShape(pr: EngagementPackRuleRow) {
+  return {
+    trigger_type: pr.trigger_type,
+    trigger_config: pr.trigger_config ?? {},
+    action_type: pr.action_type,
+    action_template: '',
+    condition_keyword: null,
+  };
+}
+
+/** Solo las reglas del pack que el executor ejecuta (los seeds traen reseñas, seguidores…). */
+function runnablePackRules(rules: EngagementPackRuleRow[]): EngagementPackRuleRow[] {
+  return rules
+    .filter((pr) => engagementRuleIssue(packRuleShape(pr)) === null)
+    .sort((a, b) => a.sort_order - b.sort_order);
+}
+
+/**
+ * Packs de un objetivo con sus reglas ejecutables. Un pack sin ninguna no se
+ * ofrece: instalarlo no haría nada.
+ */
+export async function listEngagementPacks(ctx: ServiceContext, objectiveId?: string | null): Promise<EngagementPackRow[]> {
+  const db = createSupabaseServer();
+  let q = db
+    .from('kefy_automation_packs')
+    .select('id, objective_id, name_es, name_en, desc_es, desc_en, icon, sort_order')
+    .order('sort_order');
+  if (objectiveId) q = q.eq('objective_id', objectiveId);
+  const { data: packs, error } = await q;
+  if (error) throw dbError(ctx, 'Failed to fetch packs', error);
+  if (!packs?.length) return [];
+
+  const { data: rules, error: rulesError } = await db
+    .from('kefy_automation_pack_rules')
+    .select('*')
+    .in('pack_id', packs.map((p) => p.id));
+  if (rulesError) throw dbError(ctx, 'Failed to fetch pack rules', rulesError);
+
+  return (packs as Omit<EngagementPackRow, 'kefy_automation_pack_rules'>[])
+    .map((p) => ({
+      ...p,
+      kefy_automation_pack_rules: runnablePackRules(
+        ((rules ?? []) as EngagementPackRuleRow[]).filter((r) => r.pack_id === p.id),
+      ),
+    }))
+    .filter((p) => p.kefy_automation_pack_rules.length > 0);
+}
+
+/**
+ * Instala las reglas ejecutables de un pack en la marca del contexto. Antes se
+ * insertaban sin marca (respondían en todas) y con las palabras clave en
+ * trigger_config, que el executor no leía. Instalarlo dos veces en la misma
+ * marca no duplica las reglas.
+ */
+export async function installEngagementPack(
+  ctx: ServiceContext,
+  packId: string,
+): Promise<{ rules: EngagementRuleRow[]; inserted: number }> {
+  const db = createSupabaseServer();
+  const { data: packRules, error } = await db
+    .from('kefy_automation_pack_rules')
+    .select('*')
+    .eq('pack_id', packId);
+  if (error) throw dbError(ctx, 'Failed to fetch pack rules', error);
+
+  const runnable = runnablePackRules((packRules ?? []) as EngagementPackRuleRow[]);
+  if (runnable.length === 0) {
+    throw new ServiceError('not_found', 404, msg(ctx.language, 'Pack no encontrado o vacío', 'Pack not found or empty'));
+  }
+
+  const createdFrom = `pack:${packId}`;
+  const { data: existing, error: existingError } = await db
+    .from('kefy_engagement_rules')
+    .select('*')
+    .eq('org_id', ctx.auth.orgId)
+    .eq('brand_id', ctx.brandId)
+    .eq('created_from', createdFrom);
+  if (existingError) throw dbError(ctx, 'Failed to fetch rules', existingError);
+  if (existing?.length) return { rules: existing as EngagementRuleRow[], inserted: 0 };
+
+  const toInsert = runnable.map((pr) => {
+    // Las palabras clave pasan a condition_keyword, que es lo que la UI
+    // muestra y edita; si quedaran en trigger_config, borrar una en la UI no
+    // la quitaría.
+    const { keywords: _keywords, ...triggerConfig } = pr.trigger_config ?? {};
+    return {
+      org_id: ctx.auth.orgId,
+      brand_id: ctx.brandId,
+      name: ctx.language === 'en' ? pr.name_en : pr.name_es,
+      trigger_type: pr.trigger_type,
+      trigger_config: triggerConfig,
+      conditions: [],
+      condition_keyword: ruleKeywords(packRuleShape(pr)).join(', ') || null,
+      action_type: pr.action_type,
+      action_config: pr.action_config ?? {},
+      action_template: '',
+      ai_context: pr.ai_context ?? null,
+      delay_minutes: Math.min(Math.max(pr.delay_minutes ?? 0, 0), MAX_DELAY_MINUTES),
+      is_active: true,
+      created_from: createdFrom,
+      lead_action_type: pr.lead_action_type ?? null,
+      lead_action_score_delta: pr.lead_action_score_delta ?? 0,
+      lead_action_stage: pr.lead_action_stage ?? null,
+    };
+  });
+
+  const { data, error: insertError } = await db.from('kefy_engagement_rules').insert(toInsert).select('*');
+  if (insertError) throw dbError(ctx, 'Failed to install pack', insertError);
+  return { rules: (data ?? []) as EngagementRuleRow[], inserted: data?.length ?? 0 };
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { executeEngagementRules } from '@/lib/engagement-executor';
 import { safePostUrl } from '@/lib/zernio';
+import { reportError } from '@/lib/observability';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
 // Receives real-time events from Zernio and processes them.
@@ -315,7 +316,7 @@ async function handleMessageReceived(db: DB, data: Data) {
   const account = await resolveAccount(db, zernioAccountId);
   if (!account) return;
 
-  await db.from('kefy_messages').upsert(
+  const { data: inserted, error: insertError } = await db.from('kefy_messages').upsert(
     {
       org_id:              account.org_id,
       brand_id:            account.brand_id ?? null,
@@ -331,7 +332,15 @@ async function handleMessageReceived(db: DB, data: Data) {
       direction:           'inbound',
     },
     { onConflict: 'social_account_id,platform_message_id', ignoreDuplicates: true },
-  );
+  ).select('id');
+
+  // Solo un mensaje nuevo dispara las reglas: Zernio reintenta los webhooks y
+  // un reintento respondía (y cobraba la IA) dos veces.
+  if (insertError) {
+    reportError(new Error(insertError.message), { route: 'POST /api/webhooks/zernio', service: 'supabase' });
+    return;
+  }
+  if (!inserted?.length) return;
 
   await executeEngagementRules(db, account.org_id, {
     type:            'new_dm',
@@ -339,9 +348,12 @@ async function handleMessageReceived(db: DB, data: Data) {
     brandId:         account.brand_id ?? null,
     zernioAccountId,
     threadId,
+    messageId,
     body,
     platform,
     senderId,
+    senderName:      strOrNull(data.sender_name),
+    senderAvatar:    strOrNull(data.sender_avatar),
   });
 }
 
@@ -457,7 +469,7 @@ async function handleCommentReceived(db: DB, data: Data) {
     scheduledPostId = sp?.id ?? null;
   }
 
-  await db.from('kefy_comments').upsert(
+  const { data: inserted, error: insertError } = await db.from('kefy_comments').upsert(
     {
       org_id:              account.org_id,
       brand_id:            account.brand_id ?? null,
@@ -473,7 +485,14 @@ async function handleCommentReceived(db: DB, data: Data) {
       body,
     },
     { onConflict: 'social_account_id,platform_comment_id', ignoreDuplicates: true },
-  );
+  ).select('id');
+
+  // Igual que con los DMs: un reintento del webhook no vuelve a responder.
+  if (insertError) {
+    reportError(new Error(insertError.message), { route: 'POST /api/webhooks/zernio', service: 'supabase' });
+    return;
+  }
+  if (!inserted?.length) return;
 
   await executeEngagementRules(db, account.org_id, {
     type:            'new_comment',
@@ -485,6 +504,8 @@ async function handleCommentReceived(db: DB, data: Data) {
     body,
     platform,
     authorId,
+    authorName:      strOrNull(data.author_name),
+    authorAvatar:    strOrNull(data.author_avatar),
   });
 }
 

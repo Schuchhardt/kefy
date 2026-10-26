@@ -278,9 +278,8 @@ describe('Ajustes — scoring de leads', () => {
     await renderPage();
     const points = screen.getByRole('group', { name: 'Puntos por tipo de interacción' });
     const sliders = within(points).getAllByRole('slider');
-    expect(sliders.map((s) => s.getAttribute('aria-valuetext'))).toEqual(
-      ['5 puntos', '15 puntos', '8 puntos', '10 puntos', '12 puntos', '3 puntos', '2 puntos', '0 puntos'],
-    );
+    // Solo comentarios y DMs: son las únicas interacciones que llegan y puntúan.
+    expect(sliders.map((s) => s.getAttribute('aria-valuetext'))).toEqual(['5 puntos', '15 puntos']);
     expect(within(points).getByLabelText('Comentario')).toHaveValue('5');
     expect(within(points).getByLabelText('Mensaje directo')).toHaveValue('15');
     expect(points.textContent).not.toMatch(/\bdm\b|\bcomment\b/);
