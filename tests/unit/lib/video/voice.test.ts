@@ -71,6 +71,21 @@ describe('text_to_speech con ElevenLabs', () => {
     expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ text: 'Hola ya', model_id: 'eleven_multilingual_v2' });
   });
 
+  it('un 409 already_running (voces a la vez) se reintenta en vez de caer a OpenAI', async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('{"detail":{"status":"already_running"}}', { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(elevenBody), { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const pending = textToSpeechTool.run(ctx, { text: 'Hola ya', language: 'es' });
+    await vi.runAllTimersAsync();
+    const res = await pending;
+    vi.useRealTimers();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(speechCreate).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ status: 'done', output: { audio_url: 'https://storage/voice-voice_s1.mp3' } });
+  });
+
   it('si ElevenLabs falla, la voz sale de OpenAI', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":{"status":"quota_exceeded"}}', { status: 401 })));
     speechCreate.mockResolvedValue({ arrayBuffer: async () => new ArrayBuffer(0) });

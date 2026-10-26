@@ -19,6 +19,8 @@ const TTS_MODEL = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io/v1';
 /** Flash v2.5: la mitad de precio que Multilingual v2 y respeta `language_code`. */
 const ELEVENLABS_DEFAULT_MODEL = 'eleven_flash_v2_5';
+const ELEVENLABS_CONFLICT_RETRIES  = 4;
+const ELEVENLABS_CONFLICT_DELAY_MS = 1500;
 
 // `fetch` se resuelve en cada llamada (no al cargar el módulo): así los tests
 // pueden sustituirlo.
@@ -77,7 +79,7 @@ async function elevenLabsSpeech(
   language: 'es' | 'en',
 ): Promise<Speech> {
   const url = `${ELEVENLABS_BASE}/text-to-speech/${encodeURIComponent(cfg.voiceId)}/with-timestamps?output_format=mp3_44100_128`;
-  const res = await elevenFetch(url, {
+  const request = () => elevenFetch(url, {
     method:  'POST',
     headers: { 'xi-api-key': cfg.apiKey, 'Content-Type': 'application/json' },
     // multilingual_v2 no acepta `language_code`: solo se manda a los demás.
@@ -87,6 +89,15 @@ async function elevenLabsSpeech(
       ...(cfg.model.includes('multilingual_v2') ? {} : { language_code: language }),
     }),
   });
+  // Las voces de un video se piden a la vez. Con una voz de la biblioteca,
+  // ElevenLabs responde 409 `already_running` a las que llegan mientras la
+  // agrega a la cuenta. Se reintenta: caer a OpenAI mezclaría dos voces en
+  // el mismo video.
+  let res = await request();
+  for (let attempt = 1; res.status === 409 && attempt <= ELEVENLABS_CONFLICT_RETRIES; attempt++) {
+    await new Promise((r) => setTimeout(r, ELEVENLABS_CONFLICT_DELAY_MS * attempt));
+    res = await request();
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
     throw new Error(`elevenlabs ${res.status}: ${detail.slice(0, 300)}`);
