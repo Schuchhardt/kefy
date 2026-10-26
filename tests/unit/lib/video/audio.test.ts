@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { alignWords, alignmentWordSpans, wavDurationSeconds } from '@/lib/video/tools/audio';
+import { alignWords, alignmentWordSpans, spokenText, wavDurationSeconds } from '@/lib/video/tools/audio';
 
 function wav(seconds: number, opts: { streamed?: boolean } = {}): Buffer {
   const sampleRate = 24000;
@@ -79,5 +79,19 @@ describe('alignmentWordSpans', () => {
   it('sin alineación, ninguna palabra', () => {
     expect(alignmentWordSpans(null)).toEqual([]);
     expect(alignmentWordSpans({ characters: 'nope' })).toEqual([]);
+  });
+});
+
+describe('spokenText', () => {
+  it('la voz deletrea la terminación del dominio; el texto escrito no cambia', () => {
+    expect(spokenText('Descubre más en depando.cl.', 'es')).toBe('Descubre más en depando punto ce ele.');
+    expect(spokenText('Visita www.depando.cl hoy', 'es')).toBe('Visita depando punto ce ele hoy');
+    expect(spokenText('Entra a kefy.app', 'es')).toBe('Entra a kefy punto app');
+    expect(spokenText('Visit shop.depando.com', 'en')).toBe('Visit shop dot depando dot com');
+    expect(spokenText('Go to depando.cl', 'en')).toBe('Go to depando dot C L');
+  });
+
+  it('no toca números, precios ni siglas', () => {
+    expect(spokenText('Perdió $2.400.000 en un año. S.A. incluida', 'es')).toBe('Perdió $2.400.000 en un año. S.A. incluida');
   });
 });

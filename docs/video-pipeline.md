@@ -90,6 +90,11 @@ guion que se cotiza o se produce, también a los guardados antes:
 - los personajes siguen como aspecto (el retrato de referencia hace que sea la
   misma persona en todos los planos), sin voz.
 
+La línea es también el subtítulo, así que se escribe como se lee en pantalla:
+«depando.cl», «@depando». Solo la voz recibe la forma hablada (`spokenText` en
+`lib/video/tools/audio.ts`: «depando punto ce ele»), y los subtítulos se
+alinean con el texto escrito.
+
 El prompt (`prompts/video-script.prompt.md`) ya no pide planos `talking` ni
 voces de personajes. Así todos los clips son mudos y se puede animar con un
 modelo barato (Kling 2.5 Turbo). El camino de los planos que hablan (Seedance

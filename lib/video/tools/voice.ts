@@ -11,7 +11,7 @@ import { getOpenAI } from '@/lib/ai';
 import { uploadVideoAsset } from '@/lib/storage';
 import { reportError } from '@/lib/observability';
 import { withProviderAlerts } from '@/lib/provider-alerts';
-import { alignWords, alignmentWordSpans, wavDurationSeconds } from './audio';
+import { alignWords, alignmentWordSpans, spokenText, wavDurationSeconds } from './audio';
 import { TOOL_CREDIT_OPERATION, type VideoTool } from './types';
 
 const TTS_MODEL = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
@@ -161,18 +161,20 @@ export const textToSpeechTool: VideoTool = {
     const instructions = typeof input.instructions === 'string' && input.instructions ? input.instructions : undefined;
     const language = input.language === 'en' ? 'en' : 'es';
 
+    // La voz dice «depando punto ce ele»; el subtítulo (`text`) sigue diciendo «depando.cl».
+    const spoken = spokenText(text, language);
     let speech: Speech | null = null;
     const eleven = elevenLabsConfig();
     if (eleven) {
       try {
-        speech = await elevenLabsSpeech(eleven, text, language);
+        speech = await elevenLabsSpeech(eleven, spoken, language);
       } catch (err) {
         // Sin OpenAI no hay respaldo: el paso falla y el motor lo reintenta.
         if (!process.env.OPENAI_API_KEY) throw err;
         reportError(err, { route: 'lib/video/tools/voice', service: 'elevenlabs', extra: { step: ctx.stepKey } });
       }
     }
-    speech ??= await openAiSpeech(text, voice, instructions, language, ctx.stepKey);
+    speech ??= await openAiSpeech(spoken, voice, instructions, language, ctx.stepKey);
 
     const audioUrl = await uploadVideoAsset(speech.buf, ctx.orgId, `voice-${ctx.stepKey}.${speech.filename.split('.').pop()}`, speech.mime);
     return {

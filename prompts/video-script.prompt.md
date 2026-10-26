@@ -59,6 +59,8 @@ Rules:
 - visual.kind: "still" or "animated" only.
 - characters: [] unless the same person appears in several shots (so they look the same). Never more than 2.
 - camera: push_in, pull_out, pan_left, pan_right or static. transition: crossfade, cut, zoom or slide.
+- line is also the burned-in subtitle: write web addresses, @handles, numbers and prices the way they are written
+  ("depando.cl", "@depando", "$2.400.000"), never spelled out phonetically ("depando punto cl"). The voice reads them correctly.
 - on_screen_text is for numbers, key words or the CTA — do not repeat the whole line, subtitles already show it. Max 3 shots with on_screen_text.
 - Sound like the brand: use its audience, what makes it different and where to send people. If there is no brand profile, follow the fallback guidance above.
 - visual_style must fit the brand and the topic (a bakery is warm and tactile, a fintech is clean and bright). Pictures must look like real photos of real places and people, never like stock-photo clichés.

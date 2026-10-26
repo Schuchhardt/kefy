@@ -63,6 +63,14 @@ describe('text_to_speech con ElevenLabs', () => {
     });
   });
 
+  it('la voz dice la dirección hablada y el subtítulo conserva la escrita', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(elevenBody), { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const res = await textToSpeechTool.run(ctx, { text: 'En depando.cl', language: 'es' });
+    expect(JSON.parse(fetch.mock.calls[0]![1].body).text).toBe('En depando punto ce ele');
+    expect(res).toMatchObject({ status: 'done', output: { words: [{ text: 'En' }, { text: 'depando.cl' }] } });
+  });
+
   it('multilingual_v2 no recibe language_code', async () => {
     process.env.ELEVENLABS_MODEL = 'eleven_multilingual_v2';
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(elevenBody), { status: 200 }));
