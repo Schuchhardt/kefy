@@ -19,7 +19,7 @@ import { test, expect } from './fixtures/auth';
 
 const PUBLIC = [
   '/es', '/en', '/es/precios', '/en/pricing',
-  '/es/login', '/en/login', '/es/register', '/es/forgot-password',
+  '/es/access', '/en/access', '/es/login', '/en/login', '/es/register', '/es/forgot-password',
 ];
 
 const DASHBOARD = [

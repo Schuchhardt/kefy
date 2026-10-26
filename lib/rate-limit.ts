@@ -153,6 +153,8 @@ export function rateLimitResponse(result: RateLimitResult, message: string): Nex
 export const RATE_LIMITS = {
   /** Login por IP: frena la fuerza bruta contra contraseñas. */
   login:          { limit: 10, windowSeconds: 300 },
+  /** Comprobar si un email tiene cuenta (pantalla de acceso): frena la enumeración. */
+  checkEmail:     { limit: 20, windowSeconds: 300 },
   /** Registro por IP: frena la creación masiva de cuentas en la beta abierta. */
   register:       { limit: 5,  windowSeconds: 3600 },
   /** Recuperación de contraseña: frena el envío masivo de correos. */
@@ -178,6 +180,10 @@ export const RATE_LIMITS = {
 /** Regla de login para una IP. */
 export function loginRule(ip: string): RateLimitRule {
   return { bucket: `login:ip:${ip}`, ...RATE_LIMITS.login };
+}
+
+export function checkEmailRule(ip: string): RateLimitRule {
+  return { bucket: `check-email:ip:${ip}`, ...RATE_LIMITS.checkEmail };
 }
 
 export function registerRule(ip: string): RateLimitRule {

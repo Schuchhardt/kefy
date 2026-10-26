@@ -10,6 +10,7 @@
 
 const es = {
   meta: {
+    access: 'Entrar',
     login: 'Iniciar sesión',
     register: 'Crear cuenta',
     forgot: 'Recuperar contraseña',
@@ -45,6 +46,17 @@ const es = {
     match: 'Las dos contraseñas coinciden',
     met: 'cumplido',
     unmet: 'pendiente',
+  },
+  // Pantalla de acceso (components/auth/AccessForm.tsx): primero el email; si
+  // tiene cuenta pide la contraseña y si no, nombre y contraseña.
+  access: {
+    subtitle: 'Inicia sesión o regístrate',
+    intro: 'Escribe tu email. Si ya tienes cuenta te pediremos la contraseña; si no, la creamos en un momento.',
+    continue: 'Continuar',
+    checking: 'Comprobando…',
+    welcomeBack: 'Hola de nuevo. Escribe tu contraseña para entrar.',
+    newAccount: 'No hay ninguna cuenta con este email. Crea la tuya: 30 días gratis, sin tarjeta.',
+    changeEmail: 'Cambiar email',
   },
   login: {
     subtitle: 'Inicia sesión en tu cuenta',

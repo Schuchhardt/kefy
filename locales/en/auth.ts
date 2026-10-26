@@ -2,6 +2,7 @@ import type { AuthCopy } from '@/locales/es/auth';
 
 const en: AuthCopy = {
   meta: {
+    access: 'Get started',
     login: 'Sign in',
     register: 'Create account',
     forgot: 'Reset password',
@@ -37,6 +38,15 @@ const en: AuthCopy = {
     match: 'Both passwords match',
     met: 'done',
     unmet: 'pending',
+  },
+  access: {
+    subtitle: 'Sign in or sign up',
+    intro: "Enter your email. If you already have an account we'll ask for your password; if not, we'll create one in a moment.",
+    continue: 'Continue',
+    checking: 'Checking…',
+    welcomeBack: 'Welcome back. Enter your password to sign in.',
+    newAccount: 'There is no account with this email. Create yours: 30 days free, no card.',
+    changeEmail: 'Change email',
   },
   login: {
     subtitle: 'Sign in to your account',

@@ -3,7 +3,8 @@
 // ─── Acceso al registro desde la landing ─────────────────────────────────────
 //
 // Durante la beta cerrada todos los CTA abrían un modal de lista de espera.
-// Con la beta abierta llevan a `/{lang}/register`.
+// Con la beta abierta llevan a la pantalla de acceso `/{lang}/access`, que pide
+// el email y según exista o no sigue con login o con registro.
 //
 // Sigue siendo un contexto y no un `<Link>` en cada sitio porque los botones ya
 // existían como `<button onClick>` repartidos por diez secciones, y porque el
@@ -22,7 +23,7 @@ const SignupCtx = createContext<SignupCtxValue>({ go: () => {}, goWithEmail: () 
 
 export function SignupProvider({ lang, children }: { lang: string; children: ReactNode }) {
   const router = useRouter();
-  const base = `/${lang}/register`;
+  const base = `/${lang}/access`;
 
   const go = useCallback(() => {
     router.push(base);
