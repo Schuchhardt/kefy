@@ -73,6 +73,8 @@ export interface KefyCopy {
     menuOpen: string; menuClose: string;
     languageLabel: string;
     languages: { es: string; en: string };
+    /** Botón del nav que lleva a la pantalla de acceso (login o registro). */
+    signIn: string;
   };
   cta: LandingCta;
   hero: {

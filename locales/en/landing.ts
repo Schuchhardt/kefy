@@ -15,6 +15,7 @@ const en: KefyCopy = {
     menuClose: 'Close menu',
     languageLabel: 'Language',
     languages: { es: 'Español', en: 'English' },
+    signIn: 'Sign in',
   },
   cta: {
     label: 'Try it free',

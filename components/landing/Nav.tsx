@@ -5,7 +5,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useScrolled } from '@/hooks/useScrolled';
-import { useSignup } from '@/components/ui/SignupContext';
 import { switchLocalePath } from '@/lib/localized-paths';
 import type { KefyCopy, NavLink } from '@/types/locales';
 
@@ -29,7 +28,6 @@ export default function Nav({ lang, copy, cta }: NavProps) {
   const pathname = usePathname() ?? `/${lang}`;
   const [langOpen, setLangOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const goToRegister = useSignup();
   const langRef = useRef<HTMLDivElement>(null);
   const langButtonRef = useRef<HTMLButtonElement>(null);
   const burgerRef = useRef<HTMLButtonElement>(null);
@@ -116,11 +114,11 @@ export default function Nav({ lang, copy, cta }: NavProps) {
             </ul>
           </div>
 
-          {/* CTA siempre visible: en móvil en versión compacta (antes solo
-              aparecía dentro del menú hamburguesa). */}
-          <button type="button" className="btn btn-primary nav-cta" onClick={goToRegister}>
-            {cta.label}
-          </button>
+          {/* Siempre visible, también en móvil: lleva a la pantalla de acceso,
+              que con el email decide si es login o registro. */}
+          <Link href={`/${lang}/access`} className="btn btn-primary nav-cta">
+            {copy.signIn}
+          </Link>
 
           <button
             ref={burgerRef}
@@ -142,14 +140,14 @@ export default function Nav({ lang, copy, cta }: NavProps) {
             {link.label}
           </a>
         ))}
-        <button
-          type="button"
+        <Link
+          href={`/${lang}/access`}
           className="btn btn-primary btn-lg"
           style={{ width: '100%', justifyContent: 'center', marginTop: '12px' }}
-          onClick={() => { goToRegister(); closeMenu(); }}
+          onClick={closeMenu}
         >
-          {cta.label}
-        </button>
+          {copy.signIn}
+        </Link>
         <p className="nav-mobile-note">{cta.note}</p>
       </div>
     </nav>
