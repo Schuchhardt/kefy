@@ -1,5 +1,5 @@
 import { AuthProvider } from '@/lib/auth-context';
-import { BrandProvider } from '@/lib/brand-context';
+import { BrandProvider, BrandScopedContent } from '@/lib/brand-context';
 import DashboardSidebar from '@/components/dashboard/Sidebar';
 import BottomNav from '@/components/dashboard/BottomNav';
 import UserAvatar from '@/components/dashboard/UserAvatar';
@@ -27,7 +27,7 @@ export default async function DashboardLayout({
         <div className="dashboard-shell">
           <DashboardSidebar lang={lang} />
           <main id="main-content" tabIndex={-1} className="dashboard-main">
-            {children}
+            <BrandScopedContent>{children}</BrandScopedContent>
           </main>
         </div>
         {/* Franja de fondo tras los controles fijos de arriba (solo móvil). */}
