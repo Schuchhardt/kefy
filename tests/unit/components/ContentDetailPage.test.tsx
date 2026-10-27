@@ -26,6 +26,12 @@ vi.mock('@/components/dashboard/content/ScheduleModal', () => ({
 vi.mock('@/components/dashboard/content/EditContentModal', () => ({ default: () => null }));
 
 import ContentDetailPage from '@/app/[lang]/dashboard/content/[itemId]/page';
+import { BrandProvider, BrandScopedContent } from '@/lib/brand-context';
+
+const BRANDS = [
+  { id: 'b1', org_id: 'o1', name: 'Marca Uno', slug: 'uno', avatar_url: null, archived: false, created_at: '', updated_at: '' },
+  { id: 'b2', org_id: 'o1', name: 'Marca Dos', slug: 'dos', avatar_url: null, archived: false, created_at: '', updated_at: '' },
+];
 
 function item(overrides: Partial<ContentItem> = {}): ContentItem {
   return {
@@ -42,11 +48,20 @@ function jsonResponse(data: unknown, ok = true, status = 200) {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/** Marca activa del "servidor" (la cookie): /api/brand-kit responde con la suya. */
+let serverBrand = 'b1';
+
 function renderPage(current: ContentItem, { deleteOk = true } = {}) {
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/brands') return jsonResponse({ brands: BRANDS, count: 2, limit: 3, canCreate: true });
+    if (url === '/api/brands/active') return jsonResponse({ brand: BRANDS.find((b) => b.id === serverBrand) });
+    if (url === '/api/brands/switch') {
+      serverBrand = (JSON.parse(String(init?.body)) as { brandId: string }).brandId;
+      return jsonResponse({ brand: BRANDS.find((b) => b.id === serverBrand) });
+    }
     if (url === '/api/content/item-1' && init?.method === 'DELETE') return jsonResponse({}, deleteOk, deleteOk ? 200 : 500);
     if (url.startsWith('/api/content/item-1')) return jsonResponse({ item: current });
-    if (url.startsWith('/api/brand-kit')) return jsonResponse({ kit: null });
+    if (url.startsWith('/api/brand-kit')) return jsonResponse({ kit: { name: `kit-${serverBrand}` } });
     if (url.startsWith('/api/analytics/posts')) {
       return jsonResponse({ data: [{
         scheduled_post_id: 's1', platform: 'instagram', published_at: '2026-09-21T10:00:00.000Z',
@@ -56,13 +71,30 @@ function renderPage(current: ContentItem, { deleteOk = true } = {}) {
     return jsonResponse({});
   });
   vi.stubGlobal('fetch', fetchMock);
-  return render(<ContentDetailPage />);
+  return render(<BrandProvider><BrandScopedContent><ContentDetailPage /></BrandScopedContent></BrandProvider>);
 }
 
-beforeEach(() => { push.mockReset(); });
+beforeEach(() => { push.mockReset(); serverBrand = 'b1'; });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('ContentDetailPage', () => {
+  it('enlace a un contenido de otra marca: cambia a esa marca antes de cargar el Brand Kit', async () => {
+    renderPage(item({ brand_id: 'b2' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Cinco errores en redes' })).toBeTruthy();
+    expect(serverBrand).toBe('b2');
+    // El Brand Kit solo se pide con la marca del contenido ya activa.
+    const calls = () => fetchMock.mock.calls.map(([u]) => String(u));
+    await waitFor(() => expect(calls().some((u) => u.startsWith('/api/brand-kit'))).toBe(true));
+    expect(calls().findIndex((u) => u.startsWith('/api/brand-kit'))).toBeGreaterThan(calls().indexOf('/api/brands/switch'));
+  });
+
+  it('contenido de la marca activa: no cambia de marca', async () => {
+    renderPage(item({ brand_id: 'b1' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Cinco errores en redes' })).toBeTruthy();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).startsWith('/api/brand-kit'))).toBe(true));
+    expect(fetchMock.mock.calls.map(([u]) => String(u))).not.toContain('/api/brands/switch');
+  });
+
   it('cabecera: título como h1, estado con StatusBadge y origen traducido', async () => {
     renderPage(item());
     expect(await screen.findByRole('heading', { level: 1, name: 'Cinco errores en redes' })).toBeTruthy();
@@ -115,7 +147,7 @@ describe('ContentDetailPage', () => {
   it('no encontrado: estado vacío con acción para volver', async () => {
     fetchMock = vi.fn(async () => jsonResponse({}, false, 404));
     vi.stubGlobal('fetch', fetchMock);
-    render(<ContentDetailPage />);
+    render(<BrandProvider><ContentDetailPage /></BrandProvider>);
     expect(await screen.findByText('No se encontró este contenido')).toBeTruthy();
     expect(screen.getByRole('link', { name: /volver a contenido/i })).toHaveAttribute('href', '/es/dashboard/content/create');
   });

@@ -59,6 +59,8 @@ export interface ContentMetadata {
 
 export interface ContentItem {
   id:               string;
+  /** Marca dueña. NULL en filas antiguas, anteriores a las marcas. */
+  brand_id?:        string | null;
   channel:          Channel;
   content_type:     ContentType;
   status:           ContentStatus;

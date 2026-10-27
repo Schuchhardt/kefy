@@ -27,6 +27,7 @@ import StatusBadge from '@/components/ui/StatusBadge';
 import Icon, { type IconName } from '@/components/ui/icons';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { toLocale } from '@/lib/i18n';
+import { useBrand } from '@/lib/brand-context';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
 import ViewPublishedLink from '@/components/dashboard/content/ViewPublishedLink';
@@ -74,6 +75,7 @@ export default function ContentDetailPage() {
   const common = COMMON[locale];
   const dateLocale = locale === 'en' ? 'en-US' : 'es-ES';
   const { confirm, dialog } = useConfirm();
+  const { activeBrand, loading: brandsLoading, switchBrand } = useBrand();
 
   const [item, setItem] = useState<ContentItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,6 +89,7 @@ export default function ContentDetailPage() {
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [brandSwitchFailed, setBrandSwitchFailed] = useState(false);
 
   /** `silent`: recarga sin volver al esqueleto (tras publicar, con el modal
    *  mostrando el resultado encima). */
@@ -105,12 +108,29 @@ export default function ContentDetailPage() {
 
   useEffect(() => { fetchItem(); }, [fetchItem]);
 
+  // El enlace a un contenido puede abrirse con otra marca activa (la cookie se
+  // queda con la última que se miró). Todo lo que la página carga después —
+  // Brand Kit, cuentas para publicar, generación de imágenes — sale de la
+  // marca activa, así que antes se mezclaban las dos. Se adopta la marca del
+  // contenido; al cambiar, BrandScopedContent remonta la página entera.
+  const itemBrandId = item?.brand_id ?? null;
+  const brandMismatch = !!itemBrandId && !brandSwitchFailed
+    && (brandsLoading || activeBrand?.id !== itemBrandId);
+
   useEffect(() => {
+    if (!itemBrandId || brandsLoading || brandSwitchFailed || activeBrand?.id === itemBrandId) return;
+    switchBrand(itemBrandId).catch(() => setBrandSwitchFailed(true));
+  }, [itemBrandId, brandsLoading, brandSwitchFailed, activeBrand?.id, switchBrand]);
+
+  useEffect(() => {
+    if (!item || brandMismatch) return;
     fetch('/api/brand-kit', { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { kit?: BrandKitInfo }) => { if (d.kit) setBrandKit(d.kit); })
       .catch(() => {/* non-critical */});
-  }, []);
+  // Solo hace falta una vez por contenido, cuando la marca activa ya es la suya.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id, brandMismatch]);
 
   const fetchPerformance = useCallback((id: string) => {
     fetch(`/api/analytics/posts?content_id=${encodeURIComponent(id)}&limit=50`, { credentials: 'include' })
@@ -169,7 +189,7 @@ export default function ContentDetailPage() {
     }
   }
 
-  if (loading) {
+  if (loading || brandMismatch) {
     return (
       <div className="page" style={{ maxWidth: 1000, margin: '0 auto' }}>
         <SkeletonBlock width={140} height={13} style={{ marginBottom: 20 }} />

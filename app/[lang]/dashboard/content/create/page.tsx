@@ -570,7 +570,7 @@ function ContentPageInner() {
   // BrandSwitcher). fetchItems debe depender de su id: si no, cambiar de marca
   // no dispara un refetch y la lista se queda con el contenido de la marca
   // anterior hasta que algo más (otro efecto) la refresque de casualidad.
-  const { activeBrand } = useBrand();
+  const { activeBrand, loading: brandsLoading, switchBrand } = useBrand();
 
   const [items, setItems]           = useState<ContentItem[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -731,8 +731,11 @@ function ContentPageInner() {
   useDataChanged(['content'], () => { void fetchItems(); });
 
   // Enlace profundo ?item=<id> (lo generan los enlaces del asistente): abre el
-  // contenido en el modal de edición.
+  // contenido en el modal de edición. Si es de otra marca, primero se cambia a
+  // esa marca (el modal genera imágenes y textos con la marca activa); el
+  // cambio remonta la página y, con ?item= aún en la URL, se vuelve a abrir.
   const deepItemId = searchParams?.get('item') ?? null;
+  const [deepItem, setDeepItem] = useState<ContentItem | null>(null);
   useEffect(() => {
     if (!deepItemId) return;
     let cancelled = false;
@@ -740,11 +743,21 @@ function ContentPageInner() {
       .then(async (res) => {
         if (!res.ok) return;
         const data = await res.json() as { item?: ContentItem };
-        if (!cancelled && data.item) setEditItem(data.item);
+        if (!cancelled && data.item) setDeepItem(data.item);
       })
       .catch(() => {/* non-critical */});
     return () => { cancelled = true; };
   }, [deepItemId]);
+
+  useEffect(() => {
+    if (!deepItem || brandsLoading) return;
+    setDeepItem(null);
+    if (deepItem.brand_id && deepItem.brand_id !== activeBrand?.id) {
+      switchBrand(deepItem.brand_id).catch(() => setEditItem(deepItem));
+    } else {
+      setEditItem(deepItem);
+    }
+  }, [deepItem, brandsLoading, activeBrand?.id, switchBrand]);
 
   const closeEditItem = useCallback(() => {
     setEditItem(null);
