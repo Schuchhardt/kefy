@@ -36,8 +36,10 @@ reels).
 
 - **Mi marca** (`app/[lang]/dashboard/brand/…`): Identidad y Mercado editan el
   kit con barra de guardado (solo se envía lo que cambió); Estrategia es
-  aparte. Mientras falten datos clave, el layout muestra «Tu marca está al
-  N %» con enlace al wizard.
+  aparte y también es de cada marca (ver `docs/assistant.md`, *Estrategias
+  propias*). Mientras falten datos clave, el layout muestra «Tu marca está al
+  N %» con enlace al wizard. Al cambiar de marca, el layout vuelve a montar la
+  página (`key` con el id de la marca) para leer los datos de la nueva.
 - **Completa tu marca** (`/{lang}/dashboard/brand/setup`,
   `components/dashboard/BrandKitWizard.tsx`): 5 pantallas (tu negocio, tu voz,
   tu imagen, tu público, tu diferencia), retoma en la primera incompleta,

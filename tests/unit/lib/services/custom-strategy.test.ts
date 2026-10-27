@@ -13,23 +13,24 @@ import {
   CUSTOM_STRATEGY_LIMITS, createCustomStrategy, deleteCustomStrategy, getCustomStrategy, listCustomStrategies,
   updateCustomStrategy,
 } from '@/lib/services/custom-strategy';
-import { getOrgStrategy, getStrategyIdeas, loadStrategyContext, setOrgStrategy } from '@/lib/services/strategy';
+import { getBrandStrategy, getStrategyIdeas, loadStrategyContext, setBrandStrategy } from '@/lib/services/strategy';
 import { executeTool } from '@/lib/assistant/registry';
 import { ensureToolsRegistered } from '@/lib/assistant/tools';
 import { chatToolContext } from '@/lib/assistant/context';
 import type { ToolContext } from '@/lib/assistant/types';
 
 // Estrategias propias de la organización: aislamiento entre orgs, cómo
-// conviven con la del catálogo en kefy_org_strategies, que las ideas de
-// contenido las usen, y las herramientas del asistente que las crean.
+// conviven con la del catálogo en kefy_org_strategies (una selección por
+// marca), que las ideas de contenido las usen, y las herramientas del
+// asistente que las crean.
 
 const OBJECTIVE = IDS.uuid(300);
 const INDUSTRY = IDS.uuid(301);
 const CATALOG = IDS.uuid(302);
 const OTHER_CUSTOM = IDS.uuid(310);
 
-const ctx = (over: Partial<Parameters<typeof serviceContext>[3]> = {}, auth = AUTH) =>
-  serviceContext(auth, IDS.BRAND, 'es', { brandScope: 'org', source: 'route', ...over });
+const ctx = (over: Partial<Parameters<typeof serviceContext>[3]> = {}, auth = AUTH, brandId: string = IDS.BRAND) =>
+  serviceContext(auth, brandId, 'es', { brandScope: 'org', source: 'route', ...over });
 
 
 const VALID = {
@@ -121,38 +122,114 @@ describe('servicio de estrategias propias', () => {
   });
 });
 
-describe('selección de la org con estrategia propia', () => {
+describe('selección de la marca con estrategia propia', () => {
   it('activa una propia y la de otra org da 404 sin tocar la selección', async () => {
     const s = await createCustomStrategy(ctx(), VALID);
-    await expect(setOrgStrategy(ctx(), { custom_strategy_id: OTHER_CUSTOM })).rejects.toMatchObject({ status: 404 });
+    await expect(setBrandStrategy(ctx(), { custom_strategy_id: OTHER_CUSTOM })).rejects.toMatchObject({ status: 404 });
     expect(db.rows('kefy_org_strategies')).toHaveLength(0);
 
-    const { selection } = await setOrgStrategy(ctx(), { custom_strategy_id: s.id });
+    const { selection } = await setBrandStrategy(ctx(), { custom_strategy_id: s.id });
     expect(selection.custom_strategy_id).toBe(s.id);
 
-    const { names } = await getOrgStrategy(ctx());
+    const { names } = await getBrandStrategy(ctx());
     expect(names).toMatchObject({ framework: 'Café de barrio', custom: true });
   });
 
   it('cambiar solo la industria (página Mercado) conserva la propia; elegir del catálogo la desactiva', async () => {
     const s = await createCustomStrategy(ctx(), VALID);
-    await setOrgStrategy(ctx(), { custom_strategy_id: s.id });
+    await setBrandStrategy(ctx(), { custom_strategy_id: s.id });
 
-    const { selection: afterIndustry } = await setOrgStrategy(ctx(), { industry_id: INDUSTRY });
+    const { selection: afterIndustry } = await setBrandStrategy(ctx(), { industry_id: INDUSTRY });
     expect(afterIndustry.custom_strategy_id).toBe(s.id);
 
-    const { selection: afterCatalog } = await setOrgStrategy(ctx(), {
+    const { selection: afterCatalog } = await setBrandStrategy(ctx(), {
       objective_id: OBJECTIVE, industry_id: INDUSTRY, strategy_id: CATALOG,
     });
     expect(afterCatalog).toMatchObject({ custom_strategy_id: null, strategy_id: CATALOG });
   });
 });
 
+describe('cada marca tiene su propia estrategia activa', () => {
+  it('activar en una marca no cambia la de otra marca de la misma org', async () => {
+    const s = await createCustomStrategy(ctx(), VALID);
+    await setBrandStrategy(ctx(), { custom_strategy_id: s.id });
+    await setBrandStrategy(ctx({}, AUTH, IDS.BRAND_2), {
+      objective_id: OBJECTIVE, industry_id: INDUSTRY, strategy_id: CATALOG,
+    });
+
+    expect(db.rows('kefy_org_strategies')).toHaveLength(2);
+    const { selection: first } = await getBrandStrategy(ctx(), { withNames: false });
+    const { selection: second } = await getBrandStrategy(ctx({}, AUTH, IDS.BRAND_2), { withNames: false });
+    expect(first).toMatchObject({ brand_id: IDS.BRAND, custom_strategy_id: s.id });
+    expect(second).toMatchObject({ brand_id: IDS.BRAND_2, custom_strategy_id: null, strategy_id: CATALOG });
+
+    // Las ideas de cada marca salen de su propia estrategia.
+    const ideas1 = await getStrategyIdeas(ctx());
+    const ideas2 = await getStrategyIdeas(ctx({}, AUTH, IDS.BRAND_2));
+    expect(ideas1).toMatchObject({ strategy: { framework_name: 'Café de barrio' } });
+    expect(ideas2).toMatchObject({ strategy: { framework_name: 'Embudo local' } });
+  });
+
+  it('una marca sin selección propia no hereda la de otra', async () => {
+    await setBrandStrategy(ctx(), { objective_id: OBJECTIVE, industry_id: INDUSTRY, strategy_id: CATALOG });
+    const { selection } = await getBrandStrategy(ctx({}, AUTH, IDS.BRAND_2));
+    expect(selection).toBeNull();
+  });
+
+  it('sin marca en el contexto no se lee ni se guarda nada', async () => {
+    await expect(getBrandStrategy(ctx({}, AUTH, ''))).rejects.toMatchObject({ status: 400 });
+    await expect(setBrandStrategy(ctx({}, AUTH, ''), { industry_id: INDUSTRY })).rejects.toMatchObject({ status: 400 });
+    expect(db.rows('kefy_org_strategies')).toHaveLength(0);
+  });
+
+  it('set_active_strategy con una key atada a una marca cambia solo esa marca', async () => {
+    const r = await executeTool(
+      'set_active_strategy',
+      { objective_id: OBJECTIVE, industry_id: INDUSTRY },
+      apiCtx({ brandId: IDS.BRAND_2, boundBrandId: IDS.BRAND_2 }),
+    );
+    expect(r.ok).toBe(true);
+    expect(db.rows('kefy_org_strategies')).toHaveLength(1);
+    expect(db.rows('kefy_org_strategies')[0]).toMatchObject({ brand_id: IDS.BRAND_2, strategy_id: CATALOG });
+  });
+});
+
+describe('MCP: marcas en get_workspace_context y en la confirmación', () => {
+  it('get_workspace_context sin brand_id en una org con varias marcas lista las marcas en vez de fallar', async () => {
+    const r = await executeTool('get_workspace_context', {}, apiCtx());
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) return;
+    const data = r.data as { brand: unknown; brands: Array<{ id: string }>; strategy: unknown };
+    expect(data.brand).toBeNull();
+    expect(data.strategy).toBeNull();
+    expect(data.brands.map((b) => b.id).sort()).toEqual([IDS.BRAND, IDS.BRAND_2].sort());
+  });
+
+  it('get_workspace_context con brand_id trae la estrategia de esa marca', async () => {
+    await setBrandStrategy(ctx({}, AUTH, IDS.BRAND_2), { objective_id: OBJECTIVE, industry_id: INDUSTRY, strategy_id: CATALOG });
+    const r = await executeTool('get_workspace_context', { brand_id: IDS.BRAND_2 }, apiCtx());
+    expect(r).toMatchObject({ ok: true, data: { brand: { id: IDS.BRAND_2 }, strategy: { framework: 'Local funnel' } } });
+  });
+
+  it('otras herramientas siguen pidiendo brand_id cuando hay varias marcas', async () => {
+    const r = await executeTool('get_content_ideas', {}, apiCtx());
+    expect(r).toMatchObject({ ok: false, error: { code: 'brand_required' } });
+  });
+
+  it('la tarjeta de set_active_strategy dice a qué marca se aplica, no a toda la org', async () => {
+    const pending = await executeTool('set_active_strategy', { objective_id: OBJECTIVE, industry_id: INDUSTRY }, chat());
+    expect(pending.ok).toBe('pending');
+    if (pending.ok !== 'pending') return;
+    expect(pending.summary).toContain('Acme Café');
+    expect(pending.summary).not.toContain('organización');
+  });
+});
+
 describe('las ideas de contenido usan la estrategia propia activa', () => {
   it('get_content_ideas sale del calendario de la propia, no del catálogo', async () => {
     const s = await createCustomStrategy(ctx(), VALID);
-    await setOrgStrategy(ctx(), { objective_id: OBJECTIVE, industry_id: INDUSTRY, strategy_id: CATALOG });
-    await setOrgStrategy(ctx(), { custom_strategy_id: s.id });
+    await setBrandStrategy(ctx(), { objective_id: OBJECTIVE, industry_id: INDUSTRY, strategy_id: CATALOG });
+    await setBrandStrategy(ctx(), { custom_strategy_id: s.id });
 
     const ideas = await getStrategyIdeas(ctx());
     expect(ideas).toMatchObject({ source: 'strategy', strategy: { framework_name: 'Café de barrio', kpi_primary: 'Visitas al local' } });
@@ -196,7 +273,7 @@ describe('herramientas del asistente', () => {
     expect(created).toMatchObject({ created_via: 'chat', name: 'Café de barrio' });
     expect(done.links?.[0].href).toBe(`/es/dashboard/brand/strategy?custom=${created.id}`);
     expect(done.dataChanged).toEqual(['strategy']);
-    expect(db.find('kefy_org_strategies', (r) => r.org_id === IDS.ORG)?.custom_strategy_id).toBe(created.id);
+    expect(db.find('kefy_org_strategies', (r) => r.brand_id === IDS.BRAND)?.custom_strategy_id).toBe(created.id);
   });
 
   it('save_custom_strategy sin nombre ni calendario (crear) falla con 422', async () => {

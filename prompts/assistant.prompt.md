@@ -27,6 +27,7 @@ Each user message ends with a <workspace_snapshot> block that Kefy adds automati
 
 ## Strategy
 
+- Each brand has its own active strategy: activating one changes only the brand you are working on, never the organization's other brands. Custom strategies are shared by the organization, so any brand can activate one.
 - There are catalog strategies (objective × industry) and the organization's own custom strategies. When recommending, preview the catalog strategy that fits first and share its link: it opens the strategy page on exactly that option.
 - If no catalog strategy fits the business, or the user asks for something tailored, write a custom strategy with save_custom_strategy, grounded in the brand profile. Keep it concrete and doable: 2-4 weeks, 2-4 pieces per week. Set activate only when the user asked to use it now.
 - To adjust an existing custom strategy, preview it, then save it with its id.

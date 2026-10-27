@@ -191,7 +191,7 @@ const deleteEngagementRuleTool = defineTool({
   description:
     'Deletes an engagement rule. To stop it temporarily, use save_engagement_rule with is_active=false instead. ' +
     'Always requires user confirmation. Costs no credits.',
-  input: z.object({ rule_id: z.uuid() }).strict(),
+  input: z.object({ rule_id: z.uuid().describe('Engagement rule of this brand (from list_engagement_rules).') }).strict(),
   confirm: 'always',
   describe: async (ctx, input) => {
     const rule = await getEngagementRule(ctx, input.rule_id);
@@ -237,7 +237,7 @@ const listLeadsTool = defineTool({
     channel: z.string().trim().min(1).max(30).optional(),
     search: z.string().trim().min(1).max(100).optional().describe('Case-insensitive match on the username.'),
     limit: z.number().int().min(1).max(100).default(50),
-    offset: z.number().int().min(0).default(0),
+    offset: z.number().int().min(0).default(0).describe('Items to skip, for pagination.'),
   }).strict(),
   confirm: 'never',
   taints: 'always',
@@ -298,7 +298,7 @@ const deleteLeadTool = defineTool({
   kind: 'write',
   roles: ['owner', 'admin'],
   description: 'Deletes a lead of the brand and its interaction history. Always requires user confirmation. Costs no credits.',
-  input: z.object({ lead_id: z.uuid() }).strict(),
+  input: z.object({ lead_id: z.uuid().describe('Lead of this brand (from list_leads).') }).strict(),
   confirm: 'always',
   describe: async (ctx, input) => {
     const lead = await getLead(ctx, input.lead_id);

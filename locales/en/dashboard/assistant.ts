@@ -196,15 +196,17 @@ const en = {
     get_strategy_catalog: () => 'Check the strategy catalog',
     preview_strategy: () => 'Preview a strategy',
     set_active_strategy: (_i, p) => {
-      if (str(p.name)) return `Activate your custom strategy ${quote(str(p.name))} for the whole organization`;
+      const target = str(p.brand) ? `for the brand ${quote(str(p.brand))}` : 'for this brand';
+      if (str(p.name)) return `Activate your custom strategy ${quote(str(p.name))} ${target}`;
       const pair = [str(p.objective), str(p.industry)].filter(Boolean).join(' · ');
-      return pair ? `Activate the ${pair} strategy for the whole organization` : 'Activate a strategy for the whole organization';
+      return pair ? `Activate the ${pair} strategy ${target}` : `Activate a strategy ${target}`;
     },
     save_custom_strategy: (i, p) => {
       const name = str(p.name, str(i.name));
       const verb = i.id ? 'Update the custom strategy' : 'Create the custom strategy';
       const base = name ? `${verb} ${quote(name)}` : verb;
-      return p.activate ? `${base} and activate it` : base;
+      if (!p.activate) return base;
+      return str(p.brand) ? `${base} and activate it for the brand ${quote(str(p.brand))}` : `${base} and activate it`;
     },
     get_content_ideas: () => 'Find content ideas',
     list_content: () => 'Search content',

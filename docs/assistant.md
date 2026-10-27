@@ -462,7 +462,26 @@ en `/brand/strategy` (pestaña *Personalizadas*) o el asistente con
 (`custom_strategy_id`). Si hay una propia activa
 (`kefy_org_strategies.custom_strategy_id`), manda sobre la del catálogo: las
 ideas de contenido y el contexto de generación salen de su calendario.
-Son de toda la org (herramientas `orgWide`, solo owner/admin).
+
+**La estrategia activa es de cada marca.** `kefy_org_strategies` tiene una fila
+por `brand_id` (migración `20261027000001_brand_strategies.sql`), así que una
+org con varias marcas lleva una estrategia distinta en cada una.
+`set_active_strategy`, `get_content_ideas`, `get_strategy_catalog` (`active`) y
+`get_workspace_context` actúan sobre la marca del contexto (`brand_id`); una key
+atada a una marca puede cambiar la suya. Las estrategias propias, en cambio,
+son una biblioteca de la org que cualquiera de sus marcas puede activar:
+`save_custom_strategy` es `orgWide` (solo owner/admin, rechazada con una key
+atada a una marca) y con `activate` la deja activa en la marca del contexto.
+En la UI, `/api/strategies/org` (conserva el nombre) lee y guarda la de la
+marca activa (cookie). La tarjeta de confirmación de `set_active_strategy` (y
+de `save_custom_strategy` con `activate`) nombra la marca.
+
+`get_workspace_context` es `brandOptional` (`lib/assistant/registry.ts`): sin
+`brand_id` en una org con varias marcas no responde `brand_required`, devuelve
+la organización y la lista de marcas con `brand` y lo de cada marca en `null`.
+Es el punto de partida que indican las instrucciones del servidor MCP
+(`MCP_INSTRUCTIONS` en `lib/assistant/mcp.ts`): qué es de cada marca y qué es de
+toda la organización.
 
 ```bash
 # Crear una estrategia propia y activarla
@@ -522,3 +541,4 @@ Los links del asistente abren la página en la opción concreta:
 | `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, el onboarding y `import_brand_from_website` |
 | `lib/services/onboarding.ts`, `app/api/onboarding/starter` | «Pega tu web → 3 posts» (`createStarterPosts`): lee la web si la hay, completa lo vacío del Brand Kit y escribe 3 borradores. La usan la página `/{lang}/onboarding` y `create_starter_posts` |
 | `db/migrations/20260925000001_create_custom_strategies.sql` | `kefy_custom_strategies` y `kefy_org_strategies.custom_strategy_id` |
+| `db/migrations/20261027000001_brand_strategies.sql` | `kefy_org_strategies.brand_id`: una estrategia activa por marca |

@@ -56,6 +56,13 @@ export interface ToolDef<S extends z.ZodObject<any>> {
    * varias marcas, y su JSON Schema no lo anuncia.
    */
   brandless?: boolean;
+  /**
+   * true → sin brand_id y con varias marcas no responde brand_required: corre
+   * sin marca (ctx.brandId vacío) y el handler devuelve solo lo de la
+   * organización. Es para get_workspace_context, que es la que lista las
+   * marcas entre las que elegir.
+   */
+  brandOptional?: boolean;
   confirm: 'never' | 'always' | ((ctx: ToolContext, input: z.infer<S>, preview?: Record<string, unknown>) => boolean);
   /** Recibe también la vista previa de `describe`, por si el costo depende de datos guardados. */
   estimateCredits?: (input: z.infer<S>, preview: Record<string, unknown>) => number;
@@ -143,7 +150,11 @@ export function toolJsonSchema(
     properties.brand_id = {
       type: 'string',
       format: 'uuid',
-      description: 'Brand to act on. Required when the org has several brands; see get_workspace_context.',
+      description: def.brandOptional
+        ? 'Brand to describe. Optional: without it, in an organization with several brands, only the ' +
+          'organization data and the list of brands are returned.'
+        : 'Id of the brand this call acts on (from the brands list of get_workspace_context). Optional when the ' +
+          'organization has a single brand; required when it has several (the error brand_required lists them).',
     };
     s.properties = properties;
   }
@@ -281,12 +292,18 @@ export async function executeTool(
         }
       }
       if (requestedBrandId || (!ctx.brandId && !def.brandless)) {
-        const brand = await resolveBrandForContext({
-          orgId: ctx.orgId,
-          boundBrandId: ctx.boundBrandId,
-          requestedBrandId,
-        });
-        ctx.brandId = brand.id;
+        try {
+          const brand = await resolveBrandForContext({
+            orgId: ctx.orgId,
+            boundBrandId: ctx.boundBrandId,
+            requestedBrandId,
+          });
+          ctx.brandId = brand.id;
+        } catch (err) {
+          const optional = def.brandOptional && !requestedBrandId
+            && err instanceof ServiceError && err.code === 'brand_required';
+          if (!optional) throw err;
+        }
       }
     } catch (err) {
       if (err instanceof ServiceError) return fromServiceError(err);

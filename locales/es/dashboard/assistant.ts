@@ -199,15 +199,17 @@ const es = {
     get_strategy_catalog: () => 'Revisar el catálogo de estrategias',
     preview_strategy: () => 'Ver una estrategia',
     set_active_strategy: (_i, p) => {
-      if (str(p.name)) return `Activar tu estrategia propia ${quote(str(p.name))} para toda la organización`;
+      const target = str(p.brand) ? `en la marca ${quote(str(p.brand))}` : 'en esta marca';
+      if (str(p.name)) return `Activar tu estrategia propia ${quote(str(p.name))} ${target}`;
       const pair = [str(p.objective), str(p.industry)].filter(Boolean).join(' · ');
-      return pair ? `Activar la estrategia ${pair} para toda la organización` : 'Activar una estrategia para toda la organización';
+      return pair ? `Activar la estrategia ${pair} ${target}` : `Activar una estrategia ${target}`;
     },
     save_custom_strategy: (i, p) => {
       const name = str(p.name, str(i.name));
       const verb = i.id ? 'Actualizar la estrategia propia' : 'Crear la estrategia propia';
       const base = name ? `${verb} ${quote(name)}` : verb;
-      return p.activate ? `${base} y activarla` : base;
+      if (!p.activate) return base;
+      return str(p.brand) ? `${base} y activarla en la marca ${quote(str(p.brand))}` : `${base} y activarla`;
     },
     get_content_ideas: () => 'Buscar ideas de contenido',
     list_content: () => 'Buscar contenidos',
