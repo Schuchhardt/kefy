@@ -16,18 +16,20 @@ import { defineTool } from '@/lib/assistant/registry';
 import { buildDashboardHref, DASHBOARD_PAGES, type DashboardPage } from '@/lib/assistant/links';
 import type { ToolContext } from '@/lib/assistant/types';
 import { listBrands } from '@/lib/services/brands';
-import { getOrgStrategy } from '@/lib/services/strategy';
+import { getBrandStrategy } from '@/lib/services/strategy';
 import { getInboxSummary } from '@/lib/services/inbox';
 
 // ─── Snapshot ─────────────────────────────────────────────────────────────────
 
 export interface WorkspaceSnapshot {
   org: { name: string | null; plan: string };
-  brand: { id: string; name: string | null };
+  /** null si la llamada no eligió marca y la organización tiene varias. */
+  brand: { id: string; name: string | null } | null;
   brands: { id: string; name: string }[];
   role: string;
   subscription: { canCreate: boolean; status: string; trialDaysLeft: number | null } | null;
   credits: { used: number; limit: number; remaining: number } | null;
+  /** La estrategia activa de `brand` (cada marca tiene la suya). */
   strategy: { objective: string | null; industry: string | null; framework: string | null } | null;
   connected_accounts: number | null;
   inbox: { unread_dms: number; unreplied_comments: number } | null;
@@ -52,6 +54,10 @@ async function part<T>(ctx: ToolContext, name: string, fn: () => Promise<T>): Pr
  */
 export async function buildWorkspaceSnapshot(ctx: ToolContext): Promise<WorkspaceSnapshot> {
   const db = createSupabaseServer();
+  // Sin marca (get_workspace_context sin brand_id en una org con varias) solo
+  // va lo de la organización: lo de cada marca queda en null.
+  const hasBrand = !!ctx.brandId;
+  const none = async () => null;
 
   const [org, brandList, entitlement, strategy, connectedAccounts, inbox] = await Promise.all([
     part(ctx, 'org', async () => {
@@ -64,8 +70,8 @@ export async function buildWorkspaceSnapshot(ctx: ToolContext): Promise<Workspac
     }),
     part(ctx, 'brands', () => listBrands(ctx, { onlyBrandId: ctx.boundBrandId ?? undefined })),
     part(ctx, 'subscription', () => getEntitlement(ctx.orgId)),
-    part(ctx, 'strategy', () => getOrgStrategy(ctx)),
-    part(ctx, 'accounts', async () => {
+    hasBrand ? part(ctx, 'strategy', () => getBrandStrategy(ctx)) : none(),
+    hasBrand ? part(ctx, 'accounts', async () => {
       const { count, error } = await db
         .from('kefy_social_accounts')
         .select('id', { count: 'exact', head: true })
@@ -74,8 +80,8 @@ export async function buildWorkspaceSnapshot(ctx: ToolContext): Promise<Workspac
         .eq('status', 'active');
       if (error) throw new Error(error.message);
       return count ?? 0;
-    }),
-    part(ctx, 'inbox', () => getInboxSummary(ctx)),
+    }) : none(),
+    hasBrand ? part(ctx, 'inbox', () => getInboxSummary(ctx)) : none(),
   ]);
 
   // El plan de la organización manda: el del JWT puede ser de antes de un cambio.
@@ -87,7 +93,7 @@ export async function buildWorkspaceSnapshot(ctx: ToolContext): Promise<Workspac
 
   return {
     org: { name: org?.name ?? null, plan },
-    brand: { id: ctx.brandId, name: activeBrand?.name ?? null },
+    brand: hasBrand ? { id: ctx.brandId, name: activeBrand?.name ?? null } : null,
     brands,
     role: ctx.role,
     subscription: entitlement
@@ -107,10 +113,13 @@ const getWorkspaceContextTool = defineTool({
   title: { es: 'Ver contexto del espacio de trabajo', en: 'Get workspace context' },
   kind: 'read',
   description:
-    'Returns the organization, active brand, available brands, caller role, plan, subscription state, remaining AI credits, ' +
-    'active strategy, number of connected social accounts, and unread DM / unreplied comment counts. ' +
-    'Call it first when you need to plan an action or pick a brand. Costs no credits.',
+    'Start here. Returns the organization (name, plan, subscription state, AI credits left — credits are shared by ' +
+    'all its brands), the caller role, the list of brands (id and name: pass one as brand_id to every other tool) ' +
+    'and, for the brand of this call, its active content strategy, connected social accounts and unread DM / ' +
+    'unreplied comment counts. Works without brand_id even when the organization has several brands: then `brand` ' +
+    'and the per-brand fields are null. Costs no credits.',
   input: z.object({}).strict(),
+  brandOptional: true,
   confirm: 'never',
   handler: async (ctx) => ({ data: await buildWorkspaceSnapshot(ctx) }),
 });

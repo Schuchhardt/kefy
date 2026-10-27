@@ -6,6 +6,8 @@ const en: StrategyCopy = {
   heading: 'Kefy works as your strategist',
   headingDesc:
     'Select your objective and industry. Kefy picks the right framework, builds your 4-week calendar and guides you through every interaction.',
+  brandScope: (brand: string) =>
+    `This is the strategy for ${brand}. Each brand in your organization has its own: changing it here does not affect the others.`,
   step1: '01 — Main objective',
   step2: '02 — Your industry',
   brandHint: 'Suggested from your Brand Kit',

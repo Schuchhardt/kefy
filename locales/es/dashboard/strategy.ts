@@ -4,6 +4,8 @@ const es = {
   heading: 'Kefy opera como tu estratega',
   headingDesc:
     'Selecciona tu objetivo y tu industria. Kefy elige el framework correcto, construye tu calendario de 4 semanas y te guía en cada interacción.',
+  brandScope: (brand: string) =>
+    `Esta es la estrategia de ${brand}. Cada marca de tu organización tiene la suya: cambiarla aquí no afecta a las demás.`,
   step1: '01 — Objetivo principal',
   step2: '02 — Tu industria',
   brandHint: 'Sugerido desde tu Brand Kit',

@@ -1,32 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { serviceContext } from '@/lib/services/context';
 import { serviceErrorResponse } from '@/lib/services/errors';
-import { getOrgStrategy, setOrgStrategy, type OrgStrategyPatch } from '@/lib/services/strategy';
+import { getBrandStrategy, setBrandStrategy, type BrandStrategyPatch } from '@/lib/services/strategy';
 
-// La estrategia es de la organización: estas rutas no resuelven la marca
-// activa, así que el contexto va sin brandId (brandScope 'org' no lo usa).
+// La estrategia activa es de cada marca: estas rutas leen y guardan la de la
+// marca activa (cookie). La ruta conserva el nombre /org de cuando era una
+// sola por organización.
 
 // GET /api/strategies/org
-// Returns the current org's saved strategy selection
+// Returns the active brand's saved strategy selection
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) {
+    return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+  }
+
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
 
   try {
-    const { selection } = await getOrgStrategy(ctx, { withNames: false });
-    return NextResponse.json({ selection });
+    const { selection } = await getBrandStrategy(ctx, { withNames: false });
+    const res = NextResponse.json({ selection });
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
   } catch (err) {
     return serviceErrorResponse(err, { route: 'GET /api/strategies/org', auth });
   }
 }
 
 // PATCH /api/strategies/org
-// Upserts the org's strategy selection
+// Upserts the active brand's strategy selection
 // Body: { objective_id, industry_id, strategy_id, custom_strategy_id?, custom_notes? }
 // custom_strategy_id activa una estrategia propia (null vuelve al catálogo).
 export async function PATCH(req: NextRequest) {
@@ -39,7 +48,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  let body: OrgStrategyPatch;
+  let body: BrandStrategyPatch;
 
   try {
     body = await req.json();
@@ -48,15 +57,22 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Un cuerpo JSON que no es un objeto (null, número…) no trae ningún campo.
-  const input: OrgStrategyPatch = body && typeof body === 'object' ? body : {};
+  const input: BrandStrategyPatch = body && typeof body === 'object' ? body : {};
   const { objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes } = input;
 
-  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) {
+    return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+  }
+
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'org', source: 'route' });
 
   try {
-    return NextResponse.json(
-      await setOrgStrategy(ctx, { objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes }),
+    const res = NextResponse.json(
+      await setBrandStrategy(ctx, { objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes }),
     );
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
   } catch (err) {
     return serviceErrorResponse(err, { route: 'PATCH /api/strategies/org', auth });
   }

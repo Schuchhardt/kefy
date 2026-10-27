@@ -6,8 +6,12 @@
 // nuevas y, una vez desaparecido, no había forma de volver a él.
 //
 // La página del wizard va sin pestañas: es un flujo con su propia navegación.
+//
+// Kit, mercado y estrategia son de cada marca: al cambiar de marca las páginas
+// se montan de nuevo (key) para leer los de la nueva y no guardar en ella lo
+// que se estaba editando de la anterior.
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, usePathname } from 'next/navigation';
 import SectionTabs from '@/components/dashboard/SectionTabs';
@@ -65,7 +69,7 @@ export default function BrandLayout({ children }: { children: ReactNode }) {
           </Link>
         </div>
       )}
-      {children}
+      <Fragment key={activeBrand?.id ?? 'none'}>{children}</Fragment>
     </SectionTabs>
   );
 }

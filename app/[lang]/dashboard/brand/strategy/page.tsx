@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useDataChanged } from '@/lib/data-events';
 import { useAuth } from '@/lib/auth-context';
+import { useBrand } from '@/lib/brand-context';
 import { toLocale } from '@/lib/i18n';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import Button, { ButtonLink, Spinner } from '@/components/ui/Button';
@@ -83,6 +84,7 @@ function StrategyPageInner() {
   const router   = useRouter();
   const searchParams = useSearchParams();
   const { role } = useAuth();
+  const { brands, activeBrand } = useBrand();
   const locale   = toLocale(lang);
   const t        = T[locale];
   // Solo owner/admin escriben la estrategia. Sin rol conocido todavía se deja
@@ -419,6 +421,12 @@ function StrategyPageInner() {
           <span className={styles.eyebrow}>{t.sectionLabel}</span>
           <h1>{t.heading}</h1>
           <p style={{ maxWidth: 560, lineHeight: 1.6, marginTop: 8 }}>{t.headingDesc}</p>
+          {/* Cada marca tiene su estrategia: con varias, se dice de cuál es esta. */}
+          {activeBrand && brands.length > 1 && (
+            <p style={{ maxWidth: 560, lineHeight: 1.6, marginTop: 8, color: 'var(--muted)' }}>
+              {t.brandScope(activeBrand.name)}
+            </p>
+          )}
         </div>
       </header>
 

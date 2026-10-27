@@ -131,7 +131,7 @@ const deleteAutopilotRuleTool = defineTool({
     'Deletes an autopilot rule of the brand. Posts it already scheduled are not cancelled (use ' +
     'list_scheduled_posts / cancel_scheduled_post). To stop it temporarily, pause it instead. Always requires user ' +
     'confirmation. Costs no credits.',
-  input: z.object({ rule_id: z.string().uuid() }).strict(),
+  input: z.object({ rule_id: z.string().uuid().describe('Autopilot rule of this brand (from list_autopilot_rules).') }).strict(),
   confirm: 'always',
   describe: async (ctx, input) => {
     const rule = await getAutopilotRule(ctx, input.rule_id);
@@ -158,7 +158,8 @@ const runAutopilotNowTool = defineTool({
     'advances the schedule. Costs the credits of that format (~4 for a post, up to ~60 for a reel). Always requires ' +
     'user confirmation.',
   input: z.object({
-    rule_ids: z.array(z.string().uuid()).min(1).max(MAX_MANUAL_RUN),
+    rule_ids: z.array(z.string().uuid()).min(1).max(MAX_MANUAL_RUN)
+      .describe('Autopilot rules of this brand to run (from list_autopilot_rules).'),
   }).strict(),
   confirm: 'always',
   estimateCredits: (input, preview) =>

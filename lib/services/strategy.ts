@@ -5,12 +5,13 @@
 // rutas de la UI y las herramientas del asistente (get_strategy_catalog,
 // preview_strategy, set_active_strategy, get_content_ideas).
 //
-// La estrategia es de la organización (kefy_org_strategies tiene una fila por
-// org), no de la marca: cambiarla afecta a todas las marcas.
+// La estrategia activa es de cada marca (kefy_org_strategies tiene una fila
+// por brand_id): una org con varias marcas lleva una distinta en cada una.
 //
 // La activa puede ser del catálogo (strategy_id) o propia de la org
-// (custom_strategy_id, ver lib/services/custom-strategy.ts). Si hay una
-// propia, manda ella.
+// (custom_strategy_id, ver lib/services/custom-strategy.ts). Las propias son
+// una biblioteca de la org que cualquiera de sus marcas puede activar. Si hay
+// una propia activa, manda ella.
 
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
@@ -194,11 +195,12 @@ export async function previewStrategy(objectiveId: string, industryId: string): 
   return { strategy: strategy as StrategyPreviewRow, templates: (templates ?? []) as StrategyTemplate[] };
 }
 
-// ─── Selección de la organización ────────────────────────────────────────────
+// ─── Selección de la marca ───────────────────────────────────────────────────
 
-export interface OrgStrategySelection {
+export interface BrandStrategySelection {
   id: string;
   org_id: string;
+  brand_id: string;
   objective_id: string | null;
   industry_id: string | null;
   strategy_id: string | null;
@@ -216,7 +218,16 @@ export interface StrategyNames {
   custom: boolean;
 }
 
-const SELECTION_COLUMNS = 'id, org_id, objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes, updated_at';
+const SELECTION_COLUMNS =
+  'id, org_id, brand_id, objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes, updated_at';
+
+/** La selección es de la marca del contexto: sin marca no hay qué leer ni guardar. */
+function requireBrand(ctx: ServiceContext): string {
+  if (!ctx.brandId) {
+    throw new ServiceError('invalid_input', 400, msg(ctx.language, 'Falta la marca', 'Brand is required'));
+  }
+  return ctx.brandId;
+}
 
 /**
  * Nombres legibles (en el idioma pedido) de un objetivo, industria y estrategia.
@@ -264,34 +275,34 @@ export async function strategyNames(
 }
 
 /**
- * Selección de estrategia de la organización. Con `withNames` (por defecto)
- * añade los nombres del objetivo, la industria y el framework; la ruta GET no
- * los necesita.
+ * Selección de estrategia de la marca del contexto. Con `withNames` (por
+ * defecto) añade los nombres del objetivo, la industria y el framework; la
+ * ruta GET no los necesita.
  */
-export async function getOrgStrategy(
+export async function getBrandStrategy(
   ctx: ServiceContext,
   opts: { withNames?: boolean } = {},
-): Promise<{ selection: OrgStrategySelection | null; names: StrategyNames | null }> {
+): Promise<{ selection: BrandStrategySelection | null; names: StrategyNames | null }> {
+  const brandId = requireBrand(ctx);
   const supabase = createSupabaseServer();
 
+  // Sin fila es lo normal en una marca nueva.
   const { data, error } = await supabase
     .from('kefy_org_strategies')
     .select(SELECTION_COLUMNS)
     .eq('org_id', ctx.auth.orgId)
-    .single();
+    .eq('brand_id', brandId)
+    .maybeSingle();
 
-  // PGRST116 = "no rows found": lo normal en una organización nueva.
-  if (error && error.code !== 'PGRST116') {
-    throw dbError('Failed to load strategy selection', ctx, error);
-  }
+  if (error) throw dbError('Failed to load strategy selection', ctx, error);
 
-  const selection = (data as OrgStrategySelection | null) ?? null;
+  const selection = (data as BrandStrategySelection | null) ?? null;
   if (!selection || opts.withNames === false) return { selection, names: null };
 
   return { selection, names: await strategyNames(ctx.language, selection, ctx.auth.orgId) };
 }
 
-export interface OrgStrategyPatch {
+export interface BrandStrategyPatch {
   objective_id?: string | null;
   industry_id?: string | null;
   strategy_id?: string | null;
@@ -338,8 +349,9 @@ async function assertStrategyMatches(
 }
 
 /**
- * Guarda (upsert) la selección de estrategia de la organización. Actualización
- * parcial: lo que no viene en `patch` se conserva.
+ * Guarda (upsert) la selección de estrategia de la marca del contexto; las
+ * demás marcas de la org no cambian. Actualización parcial: lo que no viene en
+ * `patch` se conserva.
  *
  * - `strategy_id` explícito → tiene que corresponder al par (fusionado).
  * - Sin `strategy_id` pero con objetivo e industria → se resuelve con
@@ -348,10 +360,10 @@ async function assertStrategyMatches(
  *   org). Elegir una del catálogo (`strategy_id` u `objective_id`) la
  *   desactiva; cambiar solo la industria (página Mercado) no.
  */
-export async function setOrgStrategy(
+export async function setBrandStrategy(
   ctx: ServiceContext,
-  patch: OrgStrategyPatch,
-): Promise<{ selection: OrgStrategySelection }> {
+  patch: BrandStrategyPatch,
+): Promise<{ selection: BrandStrategySelection }> {
   const { objective_id, industry_id, custom_notes, custom_strategy_id } = patch;
   let { strategy_id } = patch;
 
@@ -361,18 +373,20 @@ export async function setOrgStrategy(
   ) {
     throw new ServiceError('invalid_input', 400, 'At least one field is required');
   }
+  const brandId = requireBrand(ctx);
 
   // La estrategia propia tiene que ser de esta org (404 si no).
   if (custom_strategy_id) await getCustomStrategy(ctx, custom_strategy_id);
 
   const supabase = createSupabaseServer();
 
-  // Selección actual, para fusionar (actualización parcial).
+  // Selección actual de la marca, para fusionar (actualización parcial).
   const { data: existing } = await supabase
     .from('kefy_org_strategies')
     .select('objective_id, industry_id, strategy_id, custom_strategy_id, custom_notes')
     .eq('org_id', ctx.auth.orgId)
-    .single();
+    .eq('brand_id', brandId)
+    .maybeSingle();
 
   // Elegir una del catálogo desactiva la propia, salvo que venga otra propia.
   const choosesCatalog = strategy_id !== undefined || objective_id !== undefined;
@@ -393,6 +407,7 @@ export async function setOrgStrategy(
 
   const merged = {
     org_id:       ctx.auth.orgId,
+    brand_id:     brandId,
     objective_id: objectiveId,
     industry_id:  industryId,
     strategy_id:  strategy_id  !== undefined ? (strategy_id ?? null)   : (existing?.strategy_id  ?? null),
@@ -403,36 +418,38 @@ export async function setOrgStrategy(
 
   const { data, error } = await supabase
     .from('kefy_org_strategies')
-    .upsert(merged, { onConflict: 'org_id' })
+    .upsert(merged, { onConflict: 'brand_id' })
     .select(SELECTION_COLUMNS)
     .single();
 
   if (error) throw dbError('Failed to save strategy selection', ctx, error);
 
-  return { selection: data as OrgStrategySelection };
+  return { selection: data as BrandStrategySelection };
 }
 
 // ─── Estrategias propias: guardar y activar ──────────────────────────────────
 
 /**
- * Crea (sin `id`) o edita (con `id`) una estrategia propia y, con `activate`,
- * la deja como la activa de la organización. Lo comparten la ruta
- * /api/strategies/custom y la herramienta save_custom_strategy.
+ * Crea (sin `id`) o edita (con `id`) una estrategia propia de la org y, con
+ * `activate`, la deja como la activa de la marca del contexto. Lo comparten la
+ * ruta /api/strategies/custom y la herramienta save_custom_strategy.
  */
 export async function saveCustomStrategy(
   ctx: ServiceContext,
   input: { id?: string | null; activate?: boolean } & Record<string, unknown>,
-): Promise<{ strategy: CustomStrategy; selection: OrgStrategySelection | null }> {
+): Promise<{ strategy: CustomStrategy; selection: BrandStrategySelection | null }> {
   const { id, activate, ...fields } = input;
+  // Antes de escribir: activar sin marca no guarda la estrategia a medias.
+  if (activate) requireBrand(ctx);
   const strategy = id
     ? await updateCustomStrategy(ctx, id, fields)
     : await createCustomStrategy(ctx, fields);
 
   if (!activate) return { strategy, selection: null };
 
-  const { selection } = await setOrgStrategy(ctx, {
+  const { selection } = await setBrandStrategy(ctx, {
     custom_strategy_id: strategy.id,
-    // El objetivo de la propia pasa a ser el de la org, si lo tiene.
+    // El objetivo de la propia pasa a ser el de la marca, si lo tiene.
     ...(strategy.objective_id ? { objective_id: strategy.objective_id } : {}),
   });
   return { strategy, selection };
@@ -656,7 +673,7 @@ export async function loadStrategyRecommendations(opts: LoadStrategyOpts): Promi
   // Semanas que tiene la estrategia.
   const totalWeeks = Math.max(1, ...tpls.map((t) => t.week_num));
 
-  // Semana en curso: semanas desde que la organización aceptó la estrategia, en ciclo.
+  // Semana en curso: semanas desde que la marca aceptó la estrategia, en ciclo.
   let currentWeek = 1;
   if (createdAt) {
     const weeksElapsed = Math.floor(
@@ -747,9 +764,9 @@ export type StrategyIdeas =
   | { ideas: []; hint: 'no_strategy' };
 
 /**
- * Ideas de esta semana desde el calendario de la estrategia activa (o la de la
- * industria del Brand Kit). Solo plantillas: no llama a la IA ni gasta nada.
- * `offset` rota por el calendario.
+ * Ideas de esta semana desde el calendario de la estrategia activa de la marca
+ * (o la de la industria de su Brand Kit). Solo plantillas: no llama a la IA ni
+ * gasta nada. `offset` rota por el calendario.
  */
 export async function getStrategyIdeas(
   ctx: ServiceContext,
@@ -771,6 +788,7 @@ export async function getStrategyIdeas(
       .from('kefy_org_strategies')
       .select('strategy_id, custom_strategy_id, industry_id, created_at')
       .eq('org_id', ctx.auth.orgId)
+      .eq('brand_id', requireBrand(ctx))
       .maybeSingle(),
     recentQ.order('created_at', { ascending: false }).limit(30),
   ]);

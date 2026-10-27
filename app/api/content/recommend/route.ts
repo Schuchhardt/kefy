@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
+import { getBrandKitForBrand } from '@/lib/services/brand-kit';
 import { checkRateLimit, aiRule, rateLimitResponse } from '@/lib/rate-limit';
 import { reportError } from '@/lib/observability';
 import { generateContentRecommendations } from '@/lib/ai';
 
-// Las plantillas y el contexto de la estrategia activa (del catálogo o propia
-// de la org) salen de lib/services/strategy.ts, igual que get_content_ideas.
+// Las plantillas y el contexto de la estrategia activa de la marca (del
+// catálogo o propia de la org) salen de lib/services/strategy.ts, igual que
+// get_content_ideas. Todo se lee para la marca activa (cookie): cada marca
+// tiene su Brand Kit y su estrategia.
 import {
   defaultSlideCount,
   findIndustryStrategyId,
@@ -20,7 +24,7 @@ import {
 // Auth required — returns 3 channel-agnostic content recommendations driven by:
 //   1. If `hint` is provided → Claude-generated ideas guided by the comment
 //      (brand kit + active strategy context are passed in for grounding).
-//   2. Otherwise, `offset === 0` → first batch from the org's active strategy
+//   2. Otherwise, `offset === 0` → first batch from the brand's active strategy
 //      template (or industry-matched strategy as fallback).
 //   3. Otherwise (`offset > 0`) → Claude-generated ideas, grounded with the
 //      active strategy context so users keep getting fresh content instead of
@@ -54,32 +58,36 @@ export async function GET(req: NextRequest) {
 
   const hint     = (searchParams.get('hint') ?? '').trim().slice(0, 500);
 
+  const { brand } = await getBrandFromRequest(req, auth);
+  if (!brand) {
+    return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+  }
+
   const db = createSupabaseServer();
 
-  // 1. Load brand kit (industry + audience context)
-  const { data: brandKit } = await db
-    .from('kefy_brand_kits')
-    .select(
-      `id, name, tagline, industry, niche, target_audience, mission,
-       differentiators, tone, communication_style`,
-    )
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  // 2. Load org's selected strategy (if any)
-  const { data: orgStrategy } = await db
-    .from('kefy_org_strategies')
-    .select('strategy_id, custom_strategy_id, industry_id, created_at')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  // 3. Load recent content to dedupe (last 30 items)
-  const { data: recentItems } = await db
-    .from('kefy_content_items')
-    .select('body, title')
-    .eq('org_id', auth.orgId)
-    .order('created_at', { ascending: false })
-    .limit(30);
+  const [
+    // 1. Brand kit (industry + audience context)
+    { data: brandKit },
+    // 2. The brand's selected strategy (if any)
+    { data: orgStrategy },
+    // 3. Recent content of the brand to dedupe (last 30 items)
+    { data: recentItems },
+  ] = await Promise.all([
+    getBrandKitForBrand(db, brand.id),
+    db
+      .from('kefy_org_strategies')
+      .select('strategy_id, custom_strategy_id, industry_id, created_at')
+      .eq('org_id', auth.orgId)
+      .eq('brand_id', brand.id)
+      .maybeSingle(),
+    db
+      .from('kefy_content_items')
+      .select('body, title')
+      .eq('org_id', auth.orgId)
+      .eq('brand_id', brand.id)
+      .order('created_at', { ascending: false })
+      .limit(30),
+  ]);
 
   const recentBlob = (recentItems ?? [])
     .map((i) => `${i.title ?? ''}\n${i.body ?? ''}`.toLowerCase())
@@ -122,7 +130,7 @@ export async function GET(req: NextRequest) {
   // Subsequent rotations (offset > 0) always go through Claude so users keep
   // getting fresh ideas instead of cycling through the same calendar.
   if (offset === 0) {
-    // Case A: org has an active strategy (catalog or its own)
+    // Case A: the brand has an active strategy (catalog or the org's own)
     if (orgStrategy?.strategy_id || orgStrategy?.custom_strategy_id) {
       const strategyResult = await loadStrategyRecommendations({
         db,

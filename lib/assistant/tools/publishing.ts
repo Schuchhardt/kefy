@@ -320,7 +320,7 @@ const publishContentTool = defineTool({
 const listScheduledInput = z.object({
   status: z.enum(SCHEDULED_POST_STATUSES).optional(),
   limit: z.number().int().min(1).max(50).default(20),
-  offset: z.number().int().min(0).default(0),
+  offset: z.number().int().min(0).default(0).describe('Items to skip, for pagination.'),
 }).strict();
 
 interface ScheduledPostRow {
@@ -404,7 +404,7 @@ const cancelScheduledPostTool = defineTool({
   description:
     'Cancels a scheduled post, both in Zernio and in Kefy. Already published posts cannot be cancelled. ' +
     'Get the id from list_scheduled_posts. Costs no credits.',
-  input: z.object({ scheduled_post_id: z.uuid() }).strict(),
+  input: z.object({ scheduled_post_id: z.uuid().describe('Scheduled post of this brand (from list_scheduled_posts).') }).strict(),
   confirm: 'always',
   describe: async (ctx, input) => {
     const post = await loadOwnedScheduledPost<{
@@ -454,7 +454,7 @@ const disconnectSocialAccountTool = defineTool({
     "in Kefy, the account's pending and scheduled posts, its publishing history, DMs and comments, and removes the " +
     'account from the autopilot rules that targeted it. Posts already published stay on the network. To use it again ' +
     'the account has to be reconnected with get_connect_account_link. Always requires user confirmation. Costs no credits.',
-  input: z.object({ account_id: z.uuid().describe('Account id from list_social_accounts.') }).strict(),
+  input: z.object({ account_id: z.uuid().describe('Social account of this brand (from list_social_accounts).') }).strict(),
   confirm: 'always',
   describe: async (ctx, input) => {
     const account = await loadOwnedAccount<{ platform: string; username: string | null }>(

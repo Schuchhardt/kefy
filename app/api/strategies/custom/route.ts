@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { serviceContext } from '@/lib/services/context';
 import { serviceErrorResponse } from '@/lib/services/errors';
 import { listCustomStrategies } from '@/lib/services/custom-strategy';
 import { saveCustomStrategy } from '@/lib/services/strategy';
 
-// Estrategias propias de la organización. Como la selección de estrategia
-// (/api/strategies/org), son de la org y solo owner/admin las crean.
+// Estrategias propias de la organización: una biblioteca que comparten todas
+// sus marcas, y solo owner/admin las crean. `activate` la deja como la activa
+// de la marca activa (cookie), como /api/strategies/org.
 
 function language(req: NextRequest): 'es' | 'en' {
   return req.nextUrl.searchParams.get('lang') === 'en' ? 'en' : 'es';
@@ -45,7 +47,8 @@ export async function POST(req: NextRequest) {
   const input = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   const { activate, id: _ignored, ...fields } = input;
 
-  const ctx = serviceContext(auth, '', language(req), { brandScope: 'org', source: 'route' });
+  const { brand } = await getBrandFromRequest(req, auth);
+  const ctx = serviceContext(auth, brand?.id ?? '', language(req), { brandScope: 'org', source: 'route' });
   try {
     const result = await saveCustomStrategy(ctx, { ...fields, activate: activate === true });
     return NextResponse.json(result, { status: 201 });

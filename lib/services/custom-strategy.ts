@@ -4,7 +4,8 @@
 // estrategias propias: las escribe el usuario en /brand/strategy o el
 // asistente (save_custom_strategy). Tienen la misma forma que una del catálogo
 // —framework, KPIs, mecánica de CTA y un calendario semanal— y se activan
-// igual: kefy_org_strategies.custom_strategy_id manda sobre strategy_id.
+// igual, en cada marca: kefy_org_strategies.custom_strategy_id manda sobre
+// strategy_id. Son de la org; cualquiera de sus marcas puede activarlas.
 //
 // Siempre se filtra por org_id: una estrategia propia no existe fuera de su
 // organización (404, no 403, para no confirmar que el id existe).
@@ -261,7 +262,7 @@ export async function updateCustomStrategy(
   return normalize(data as Record<string, unknown>);
 }
 
-/** Borra la estrategia. Si estaba activa, la FK deja la org con la del catálogo. */
+/** Borra la estrategia. Las marcas que la tenían activa quedan (por la FK) con la del catálogo. */
 export async function deleteCustomStrategy(ctx: ServiceContext, id: string): Promise<void> {
   if (!z.string().uuid().safeParse(id).success) throw notFound(ctx);
   const db = createSupabaseServer();

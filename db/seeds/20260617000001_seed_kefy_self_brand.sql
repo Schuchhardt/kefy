@@ -10,7 +10,7 @@
 --   5. Los seeds de content_strategies (PACK 1 y PACK 2) ya se ejecutaron.
 --
 -- Lo que crea este seed:
---   - Asigna estrategia "brand_awareness × b2b_saas" en kefy_org_strategies (UPSERT).
+--   - Asigna estrategia "brand_awareness × b2b_saas" a la marca en kefy_org_strategies (UPSERT).
 --   - Crea hasta 4 reglas en kefy_autopilot_rules (LinkedIn, Facebook, Instagram, TikTok),
 --     una por cada cuenta social ya conectada via Zernio. Si una cuenta no existe,
 --     la regla correspondiente se omite con RAISE NOTICE (no rompe el seed).
@@ -174,11 +174,12 @@ BEGIN
   END IF;
 
   -- ═══════════════════════════════════════════════════════════════════════
-  -- STEP 5 — Asignar estrategia a la org de Kefy
+  -- STEP 5 — Asignar estrategia a la marca de Kefy
   -- ═══════════════════════════════════════════════════════════════════════
-  INSERT INTO kefy_org_strategies (org_id, objective_id, industry_id, strategy_id, custom_notes)
+  INSERT INTO kefy_org_strategies (org_id, brand_id, objective_id, industry_id, strategy_id, custom_notes)
   VALUES (
     kefy_org_id,
+    kefy_brand_id,
     obj_awareness_id,
     ind_b2b_id,
     strat_id,
@@ -186,7 +187,7 @@ BEGIN
     'Plan rotacional: sem 1-4 awareness · sem 5-8 lead generation · sem 9-12 conversion. '
     'Cambiar strategy_id manualmente al avanzar de fase.'
   )
-  ON CONFLICT (org_id) DO UPDATE
+  ON CONFLICT (brand_id) DO UPDATE
     SET objective_id = EXCLUDED.objective_id,
         industry_id  = EXCLUDED.industry_id,
         strategy_id  = EXCLUDED.strategy_id,

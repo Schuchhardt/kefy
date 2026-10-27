@@ -5,8 +5,10 @@
 // y lib/services/custom-strategy.ts, los mismos servicios que
 // /api/strategies/*.
 //
-// La estrategia es de toda la organización: las escrituras son orgWide y el
-// registro las rechaza con una API key atada a una marca.
+// La estrategia activa es de cada marca: set_active_strategy y
+// get_content_ideas actúan sobre la marca del contexto (brand_id), y una API
+// key atada a una marca puede cambiar la suya. Las estrategias propias son una
+// biblioteca de la org: save_custom_strategy es orgWide.
 //
 // Hay dos tipos de estrategia: las del catálogo (objetivo × industria) y las
 // propias de la org, que escribe el usuario o el asistente. El texto de una
@@ -19,8 +21,10 @@ import { buildDashboardHref } from '@/lib/assistant/links';
 import { wrapUntrusted } from '@/lib/assistant/untrusted';
 import type { ToolLink } from '@/lib/assistant/types';
 import { ServiceError, msg } from '@/lib/services/errors';
+import { getActiveBrandById } from '@/lib/brands';
+import type { ToolContext } from '@/lib/assistant/types';
 import {
-  getOrgStrategy, getStrategyCatalog, getStrategyIdeas, previewStrategy, saveCustomStrategy, setOrgStrategy,
+  getBrandStrategy, getStrategyCatalog, getStrategyIdeas, previewStrategy, saveCustomStrategy, setBrandStrategy,
   strategyNames,
 } from '@/lib/services/strategy';
 import {
@@ -35,6 +39,11 @@ function strategyLink(lang: Lang, params: { objective?: string; industry?: strin
     label: msg(lang, 'Abrir estrategia', 'Open strategy'),
     href: buildDashboardHref(lang, 'brand_strategy', params),
   };
+}
+
+/** Nombre de la marca de la llamada, para que la tarjeta diga a cuál se aplica. */
+async function brandName(ctx: ToolContext): Promise<string | null> {
+  return (await getActiveBrandById(ctx.brandId, ctx.orgId))?.name ?? null;
 }
 
 /** Valor en el idioma pedido, con el otro idioma de respaldo. */
@@ -98,9 +107,12 @@ const getStrategyCatalogTool = defineTool({
   title: { es: 'Ver catálogo de estrategias', en: 'Get strategy catalog' },
   kind: 'read',
   description:
-    'Lists the content objectives and industries that combine into a catalog strategy, plus the organization\'s own ' +
-    'custom strategies (custom_strategies, with which one is active). Use the ids with preview_strategy, ' +
-    'set_active_strategy and save_custom_strategy. Costs no credits.',
+    'Lists everything a brand can choose as its content strategy, and which one it has now. Catalog strategies come ' +
+    'from combining one of `objectives` with one of `industries`. `custom_strategies` is the organization\'s own ' +
+    'library, shared by all its brands (each one\'s `active` flag is true if it is the one this brand uses). The ' +
+    'top-level `active` is the current strategy of the brand in brand_id: each brand has its own. Next: ' +
+    'preview_strategy to see one in detail, set_active_strategy ' +
+    'to switch this brand to it. Costs no credits.',
   input: z.object({}).strict(),
   confirm: 'never',
   taints: hasExternalCustom,
@@ -109,7 +121,7 @@ const getStrategyCatalogTool = defineTool({
     const [{ objectives, industries }, customs, { selection }] = await Promise.all([
       getStrategyCatalog(),
       listCustomStrategies(ctx),
-      getOrgStrategy(ctx, { withNames: false }),
+      getBrandStrategy(ctx, { withNames: false }),
     ]);
     const activeCustomId = selection?.custom_strategy_id ?? null;
     return {
@@ -142,13 +154,15 @@ const previewStrategyTool = defineTool({
   title: { es: 'Ver estrategia', en: 'Preview strategy' },
   kind: 'read',
   description:
-    'Shows a strategy in detail before activating it: framework, KPIs, CTA mechanic and calendar. Pass either ' +
-    'objective_id + industry_id (catalog; if the pair has no strategy of its own, returns the industry fallback with ' +
-    'is_fallback) or custom_strategy_id (one of the organization\'s own). Costs no credits.',
+    'Shows one strategy in detail (framework, KPIs, CTA mechanic and week-by-week calendar) without changing ' +
+    'anything. Pass either objective_id + industry_id for a catalog strategy (if that pair has none, the closest one ' +
+    'of the industry is returned with is_fallback=true), or custom_strategy_id for one of the organization\'s own. ' +
+    'Show it to the user before set_active_strategy. Costs no credits.',
   input: z.object({
-    objective_id: z.string().uuid().optional(),
-    industry_id: z.string().uuid().optional(),
-    custom_strategy_id: z.string().uuid().optional(),
+    objective_id: z.string().uuid().optional().describe('Objective id from get_strategy_catalog (catalog strategy).'),
+    industry_id: z.string().uuid().optional().describe('Industry id from get_strategy_catalog (catalog strategy).'),
+    custom_strategy_id: z.string().uuid().optional()
+      .describe('Id from custom_strategies of get_strategy_catalog. Use instead of objective_id + industry_id.'),
   }).strict(),
   confirm: 'never',
   taints: hasExternalCustom,
@@ -214,31 +228,35 @@ const setActiveStrategyTool = defineTool({
   title: { es: 'Activar estrategia', en: 'Activate strategy' },
   kind: 'write',
   roles: ['owner', 'admin'],
-  orgWide: true,
   description:
-    'Activates the organization\'s content strategy. It drives the weekly content ideas and applies to every brand ' +
-    'of the org. Pass objective_id + industry_id for a catalog strategy (strategy_id is resolved automatically when ' +
-    'omitted), or custom_strategy_id for one of the organization\'s own. Always requires user confirmation. ' +
-    'Costs no credits.',
+    'Switches the content strategy of ONE brand (brand_id). Each brand of the organization has its own active ' +
+    'strategy, which drives that brand\'s weekly content ideas and AI content; the other brands keep theirs. To ' +
+    'give several brands a strategy, call it once per brand_id. Pass objective_id + industry_id for a catalog ' +
+    'strategy, or custom_strategy_id for one of the organization\'s own (that replaces the catalog one while ' +
+    'active). Always requires user confirmation. Costs no credits.',
   input: z.object({
-    objective_id: z.string().uuid().optional(),
-    industry_id: z.string().uuid().optional(),
-    strategy_id: z.string().uuid().optional(),
-    custom_strategy_id: z.string().uuid().optional(),
-    custom_notes: z.string().max(1000).optional(),
+    objective_id: z.string().uuid().optional().describe('Objective id from get_strategy_catalog (catalog strategy).'),
+    industry_id: z.string().uuid().optional().describe('Industry id from get_strategy_catalog (catalog strategy).'),
+    strategy_id: z.string().uuid().optional()
+      .describe('Catalog strategy id from preview_strategy. Usually omitted: it is resolved from objective + industry.'),
+    custom_strategy_id: z.string().uuid().optional()
+      .describe('Id from custom_strategies of get_strategy_catalog. Use instead of objective_id + industry_id.'),
+    custom_notes: z.string().max(1000).optional().describe('Free notes about how this brand applies the strategy.'),
   }).strict(),
   confirm: 'always',
   describe: async (ctx, input) => {
     if (input.custom_strategy_id) {
-      const custom = await getCustomStrategy(ctx, input.custom_strategy_id);
+      const [custom, brand] = await Promise.all([getCustomStrategy(ctx, input.custom_strategy_id), brandName(ctx)]);
       return {
+        brand,
         name: custom.name,
         kpi_primary: custom.kpi_primary,
         posts: custom.calendar.length,
       };
     }
-    const names = await strategyNames(ctx.language, input);
+    const [names, brand] = await Promise.all([strategyNames(ctx.language, input), brandName(ctx)]);
     return {
+      brand,
       objective: names.objective,
       industry: names.industry,
       framework: names.framework,
@@ -260,8 +278,8 @@ const setActiveStrategyTool = defineTool({
     }
 
     const { selection } = input.custom_strategy_id
-      ? await setOrgStrategy(ctx, { custom_strategy_id: input.custom_strategy_id, custom_notes: input.custom_notes })
-      : await setOrgStrategy(ctx, {
+      ? await setBrandStrategy(ctx, { custom_strategy_id: input.custom_strategy_id, custom_notes: input.custom_notes })
+      : await setBrandStrategy(ctx, {
           objective_id: input.objective_id,
           industry_id: input.industry_id,
           strategy_id: input.strategy_id,
@@ -292,18 +310,21 @@ const saveCustomStrategyTool = defineTool({
   roles: ['owner', 'admin'],
   orgWide: true,
   description:
-    'Creates (no id) or updates (with id) one of the organization\'s own content strategies, written by you for this ' +
-    'business when no catalog strategy fits or the user asks for a tailored one. Write it in the user language, ' +
-    'grounded in the brand profile: a clear name, the approach, KPIs, the recurring CTA mechanic and a calendar of ' +
-    '2-4 weeks with 2-4 pieces per week (format, channel, topic, angle, goal). You may adapt a catalog strategy ' +
-    '(based_on_strategy_id). With activate=true it also becomes the active strategy. On update, calendar replaces ' +
-    'the whole calendar. Always requires user confirmation. Costs no credits.',
+    'Organization-wide. Creates (no id) or updates (with id) a custom content strategy in the organization\'s ' +
+    'library, which every brand of the organization can use. Saving does not activate it anywhere unless ' +
+    'activate=true, which also makes it the active strategy of the brand in brand_id only (other brands: ' +
+    'set_active_strategy). Editing one changes it for every brand that has it active. Write it when no catalog ' +
+    'strategy fits or the user asks for a tailored one, in the user language and grounded in the brand profile: a ' +
+    'clear name, the approach, KPIs, the recurring CTA mechanic and a calendar of 2-4 weeks with 2-4 pieces per week ' +
+    '(format, channel, topic, angle, goal). You may adapt a catalog strategy (based_on_strategy_id). On update, ' +
+    'calendar replaces the whole calendar. Always requires user confirmation. Costs no credits.',
   input: z.object({
     id: z.string().uuid().optional().describe('Existing custom strategy to update. Omit to create a new one.'),
     ...Object.fromEntries(
       Object.entries(customStrategyFields).map(([k, v]) => [k, k === 'name' || k === 'calendar' ? v.optional() : v]),
     ) as { [K in keyof typeof customStrategyFields]: z.ZodOptional<(typeof customStrategyFields)[K]> },
-    activate: z.boolean().optional().describe('Also make it the active strategy of the organization.'),
+    activate: z.boolean().optional()
+      .describe('Also make it the active strategy of the brand in brand_id (only that brand).'),
   }).strict(),
   confirm: 'always',
   describe: async (ctx, input) => {
@@ -318,6 +339,7 @@ const saveCustomStrategyTool = defineTool({
       posts: calendar ? calendar.length : null,
       sample_topics: calendar ? calendar.slice(0, 4).map((c) => c.topic) : null,
       activate: input.activate === true,
+      brand: input.activate === true ? await brandName(ctx) : null,
     };
   },
   snapshot: async (ctx, input) => (input.id ? (await getCustomStrategy(ctx, input.id)).updated_at : null),
@@ -349,11 +371,12 @@ const getContentIdeasTool = defineTool({
   title: { es: 'Ver ideas de contenido', en: 'Get content ideas' },
   kind: 'read',
   description:
-    "Returns this week's content ideas from the active strategy calendar (catalog or custom: topic, format, goal). " +
-    'Use offset to rotate through more ideas. If there is no strategy it returns hint "no_strategy"; you can still ' +
-    'brainstorm ideas yourself. Costs no credits.',
+    "Returns this week's content ideas (topic, format, goal) from the calendar of the active strategy of the brand " +
+    'in brand_id. With no strategy, it uses the catalog strategy that matches the industry of the brand profile ' +
+    '(source "industry_fallback"); with neither, it returns hint "no_strategy" and you can brainstorm ideas ' +
+    'yourself. Costs no credits.',
   input: z.object({
-    offset: z.number().int().min(0).max(50).optional(),
+    offset: z.number().int().min(0).max(50).optional().describe('Skip this many ideas to rotate through the calendar.'),
   }).strict(),
   confirm: 'never',
   handler: async (ctx, input) => {

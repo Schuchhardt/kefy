@@ -17,6 +17,9 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/es/dashboard/brand/strategy',
 }));
 vi.mock('@/lib/auth-context', () => ({ useAuth: () => ({ role: 'owner' }) }));
+// Dos marcas: la estrategia es de la activa y la página lo dice.
+const BRANDS = vi.hoisted(() => [{ id: 'b1', name: 'Acme Café' }, { id: 'b2', name: 'Acme Bar' }]);
+vi.mock('@/lib/brand-context', () => ({ useBrand: () => ({ brands: BRANDS, activeBrand: BRANDS[0] }) }));
 
 import StrategyPage from '@/app/[lang]/dashboard/brand/strategy/page';
 
@@ -81,6 +84,13 @@ describe('Estrategia — pestañas', () => {
     fireEvent.keyDown(custom, { key: 'Home' });
     expect(catalog).toHaveAttribute('aria-selected', 'true');
     expect(catalog).toHaveFocus();
+  });
+});
+
+describe('Estrategia — marca', () => {
+  it('con varias marcas dice que la estrategia es solo de la activa', async () => {
+    render(<StrategyPage />);
+    expect(await screen.findByText(/Esta es la estrategia de Acme Café/)).toBeInTheDocument();
   });
 });
 

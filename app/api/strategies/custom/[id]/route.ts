@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { serviceContext } from '@/lib/services/context';
 import { serviceErrorResponse } from '@/lib/services/errors';
 import { deleteCustomStrategy, getCustomStrategy } from '@/lib/services/custom-strategy';
@@ -30,7 +31,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // PATCH /api/strategies/custom/[id]
-// Body: cualquier campo de la estrategia, y `activate?` → { strategy, selection }
+// Body: cualquier campo de la estrategia, y `activate?` (la activa en la marca
+// activa) → { strategy, selection }
 export async function PATCH(req: NextRequest, { params }: Params) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -46,7 +48,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { activate, id: _ignored, ...fields } = input;
 
   const { id } = await params;
-  const ctx = serviceContext(auth, '', language(req), { brandScope: 'org', source: 'route' });
+  const { brand } = await getBrandFromRequest(req, auth);
+  const ctx = serviceContext(auth, brand?.id ?? '', language(req), { brandScope: 'org', source: 'route' });
   try {
     return NextResponse.json(await saveCustomStrategy(ctx, { ...fields, id, activate: activate === true }));
   } catch (err) {
@@ -54,8 +57,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 }
 
-// DELETE /api/strategies/custom/[id] → 204. Si era la activa, la org vuelve a
-// la del catálogo que tuviera.
+// DELETE /api/strategies/custom/[id] → 204. Las marcas que la tenían activa
+// vuelven a la del catálogo que tuvieran.
 export async function DELETE(req: NextRequest, { params }: Params) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
