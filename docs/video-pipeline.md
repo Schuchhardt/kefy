@@ -93,7 +93,10 @@ guion que se cotiza o se produce, también a los guardados antes:
 La línea es también el subtítulo, así que se escribe como se lee en pantalla:
 «depando.cl», «@depando». Solo la voz recibe la forma hablada (`spokenText` en
 `lib/video/tools/audio.ts`: «depando punto ce ele»), y los subtítulos se
-alinean con el texto escrito.
+alinean con el texto escrito. El idioma de la voz sale del texto de la línea
+(`lineLanguage`), no de `script.language`: por la API o el MCP el guion llega
+marcado `en` por defecto aunque el modelo escriba en español, y la voz decía
+«aitickets dot C L».
 
 El prompt (`prompts/video-script.prompt.md`) ya no pide planos `talking` ni
 voces de personajes. Así todos los clips son mudos y se puede animar con un
