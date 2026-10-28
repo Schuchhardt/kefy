@@ -11,7 +11,7 @@ import { getOpenAI } from '@/lib/ai';
 import { uploadVideoAsset } from '@/lib/storage';
 import { reportError } from '@/lib/observability';
 import { withProviderAlerts } from '@/lib/provider-alerts';
-import { alignWords, alignmentWordSpans, spokenText, wavDurationSeconds } from './audio';
+import { alignWords, alignmentWordSpans, lineLanguage, spokenText, wavDurationSeconds } from './audio';
 import { TOOL_CREDIT_OPERATION, type VideoTool } from './types';
 
 const TTS_MODEL = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
@@ -159,7 +159,9 @@ export const textToSpeechTool: VideoTool = {
     if (!text) return { status: 'failed', error: 'text_to_speech: falta text' };
     const voice = typeof input.voice === 'string' ? input.voice : 'nova';
     const instructions = typeof input.instructions === 'string' && input.instructions ? input.instructions : undefined;
-    const language = input.language === 'en' ? 'en' : 'es';
+    // Manda el idioma en que está escrita la línea, no el del guion: un guion
+    // marcado `en` con líneas en español decía «aitickets dot C L».
+    const language = lineLanguage(text, input.language === 'en' ? 'en' : 'es');
 
     // La voz dice «depando punto ce ele»; el subtítulo (`text`) sigue diciendo «depando.cl».
     const spoken = spokenText(text, language);

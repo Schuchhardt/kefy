@@ -97,6 +97,34 @@ const LETTER_NAMES_ES: Record<string, string> = {
 const WORD_TLDS = new Set(['com', 'net', 'org', 'app', 'info', 'shop', 'store', 'online', 'site', 'blog']);
 const DOMAIN = /\b(?:www\.)?((?:[a-z0-9-]+\.)+)([a-z]{2,6})\b/gi;
 
+const ES_WORDS = new Set([
+  'el', 'la', 'los', 'las', 'de', 'del', 'que', 'y', 'en', 'un', 'una', 'por', 'para', 'con', 'es',
+  'tu', 'tus', 'más', 'mas', 'entra', 'visita', 'descubre', 'compra', 'aquí', 'ahora', 'hoy', 'ya', 'te', 'se', 'lo',
+]);
+const EN_WORDS = new Set([
+  'the', 'a', 'an', 'of', 'and', 'to', 'in', 'for', 'with', 'is', 'your', 'you', 'more', 'visit',
+  'go', 'get', 'now', 'today', 'at', 'on', 'it', 'this', 'our', 'buy', 'here',
+]);
+
+/**
+ * Idioma en que está escrita la línea. El `language` del guion no siempre
+ * coincide: por la API o el MCP llega `en` por defecto y el modelo igual
+ * escribe en español si el tema y la marca lo están. La voz tiene que leer en
+ * el idioma del texto («aitickets punto ce ele», no «aitickets dot C L»).
+ */
+export function lineLanguage(line: string, fallback: 'es' | 'en'): 'es' | 'en' {
+  if (/[ñáéíóú¿¡]/i.test(line)) return 'es';
+  let es = 0;
+  let en = 0;
+  for (const word of line.toLowerCase().match(/[a-zñáéíóúü]+/g) ?? []) {
+    if (ES_WORDS.has(word)) es++;
+    if (EN_WORDS.has(word)) en++;
+  }
+  if (es > en) return 'es';
+  if (en > es) return 'en';
+  return fallback;
+}
+
 /**
  * Lo que dice la voz de una línea del guion. La línea es también el
  * subtítulo, así que se escribe como se lee en pantalla («depando.cl»); aquí

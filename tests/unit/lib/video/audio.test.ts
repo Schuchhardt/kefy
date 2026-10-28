@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { alignWords, alignmentWordSpans, spokenText, wavDurationSeconds } from '@/lib/video/tools/audio';
+import { alignWords, alignmentWordSpans, lineLanguage, spokenText, wavDurationSeconds } from '@/lib/video/tools/audio';
 
 function wav(seconds: number, opts: { streamed?: boolean } = {}): Buffer {
   const sampleRate = 24000;
@@ -89,6 +89,15 @@ describe('spokenText', () => {
     expect(spokenText('Entra a kefy.app', 'es')).toBe('Entra a kefy punto app');
     expect(spokenText('Visit shop.depando.com', 'en')).toBe('Visit shop dot depando dot com');
     expect(spokenText('Go to depando.cl', 'en')).toBe('Go to depando dot C L');
+  });
+
+  it('el idioma de la voz sale del texto de la línea, no del guion', () => {
+    expect(lineLanguage('Compra tus entradas en aitickets.cl', 'en')).toBe('es');
+    expect(lineLanguage('Entradas ya a la venta: aitickets.cl', 'en')).toBe('es');
+    expect(lineLanguage('Get your tickets at aitickets.cl', 'es')).toBe('en');
+    expect(lineLanguage('aitickets.cl', 'en')).toBe('en');
+    expect(spokenText('Compra tus entradas en aitickets.cl', lineLanguage('Compra tus entradas en aitickets.cl', 'en')))
+      .toBe('Compra tus entradas en aitickets punto ce ele');
   });
 
   it('no toca números, precios ni siglas', () => {
