@@ -4,7 +4,7 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { guardAiRequest } from '@/lib/ai-guard';
 import { reportError } from '@/lib/observability';
 import { renderMediaOnLambda } from '@remotion/lambda/client';
-import { reconcileRenderTarget, type RenderTarget } from '@/lib/reel-render';
+import { LAMBDA_RENDER_CONCURRENCY, reconcileRenderTarget, type RenderTarget } from '@/lib/reel-render';
 import { pickMusicTrack } from '@/remotion/audio-tracks';
 import { readVideoScript } from '@/lib/video/script';
 import type { VideoJobSnapshot } from '@/lib/video/engine';
@@ -330,8 +330,8 @@ export async function POST(req: NextRequest) {
       codec:       'h264',
       imageFormat: 'jpeg',
       jpegQuality: 85,
-      // Render more frames per invocation → fewer parallel Lambdas → avoids concurrency limit
-      framesPerLambda: 120,
+      // Fixed Lambda count, whatever the length: the AWS account caps concurrency
+      concurrency: LAMBDA_RENDER_CONCURRENCY,
       downloadBehavior: { type: 'play-in-browser' },
     });
 

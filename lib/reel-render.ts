@@ -17,6 +17,14 @@ import { getRenderProgress } from '@remotion/lambda/client';
 export const RENDER_TRIGGER_GRACE_MS = 3 * 60 * 1000;   // 3 min
 /** A render still not finished after this is considered dead (Lambda timeout is 240 s). */
 export const RENDER_STALE_MS         = 20 * 60 * 1000;  // 20 min
+/**
+ * Renderer Lambdas per render (plus one orchestrator). The AWS account allows
+ * 10 concurrent executions, and `framesPerLambda: 120` scaled with the video:
+ * a 38 s film opened 11–12 Lambdas and always failed with "AWS Concurrency
+ * limit reached". A fixed count keeps any length under the limit; longer
+ * videos just render more frames per Lambda (~300 for 60 s, well within 240 s).
+ */
+export const LAMBDA_RENDER_CONCURRENCY = 6;
 
 export type RenderTable = 'kefy_content_items' | 'kefy_content_renditions';
 

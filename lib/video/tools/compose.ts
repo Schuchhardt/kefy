@@ -4,6 +4,7 @@
 // mismo despliegue que el render de siempre (docs/reel-render.md).
 
 import { getRenderProgress, renderMediaOnLambda } from '@remotion/lambda/client';
+import { LAMBDA_RENDER_CONCURRENCY } from '@/lib/reel-render';
 import { TOOL_CREDIT_OPERATION, type VideoTool } from './types';
 
 type AwsRegion = Parameters<typeof renderMediaOnLambda>[0]['region'];
@@ -38,7 +39,9 @@ export const composeVideoTool: VideoTool = {
       codec:           'h264',
       imageFormat:     'jpeg',
       jpegQuality:     85,
-      framesPerLambda: 120,
+      // Número fijo de Lambdas: con framesPerLambda un film de 38 s pasaba
+      // el límite de concurrencia de la cuenta AWS (ver LAMBDA_RENDER_CONCURRENCY).
+      concurrency:     LAMBDA_RENDER_CONCURRENCY,
       downloadBehavior: { type: 'play-in-browser' },
     });
     return { status: 'pending', handle: { render_id: renderId, bucket: bucketName } };
