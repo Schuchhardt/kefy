@@ -108,7 +108,17 @@ Env vars: `REMOTION_AWS_REGION`, `REMOTION_AWS_ACCESS_KEY_ID`,
 `REMOTION_AWS_SECRET_ACCESS_KEY`, `REMOTION_LAMBDA_FUNCTION_NAME`,
 `REMOTION_SERVE_URL`, y `CRON_SECRET` para el reconciliador.
 Deploy inicial: `npx tsx scripts/deploy-remotion-lambda.ts`
-(Lambda: 3008 MB, 240 s; render: `framesPerLambda: 120`).
+(Lambda: 3008 MB, 240 s; render: `concurrency: LAMBDA_RENDER_CONCURRENCY`).
+
+**Límite de concurrencia.** La cuenta AWS (us-east-2) permite **10** Lambdas
+simultáneas, el mínimo de una cuenta nueva. Un render abre una Lambda
+orquestadora más las renderizadoras. Antes se usaba `framesPerLambda: 120`, así
+que el número de Lambdas crecía con el video: un film de ~38 s abría 11–12 y
+fallaba siempre con `AWS Concurrency limit reached` (reintentar no ayudaba).
+Ahora cada render usa un número fijo (`LAMBDA_RENDER_CONCURRENCY` en
+`lib/reel-render.ts`, 6 + 1) y los videos largos reparten más cuadros por
+Lambda. Dos renders a la vez todavía pueden pasar de 10: para eso hay que
+pedir más cuota en AWS (Service Quotas → Lambda → *Concurrent executions*).
 
 Tests: `tests/unit/lib/reel-render.test.ts`, `tests/unit/api/reel-render.test.ts`,
 `tests/unit/api/reel-reconcile.test.ts`, `tests/unit/remotion/reel-duration.test.ts`.
