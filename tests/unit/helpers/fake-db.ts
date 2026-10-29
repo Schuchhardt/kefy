@@ -148,6 +148,8 @@ export interface FakeDb {
     uploads: Array<{ bucket: string; path: string; contentType?: string; size: number }>;
     removed: Array<{ bucket: string; path: string }>;
     failUpload: boolean;
+    /** Contenido de lo subido (y de lo sembrado a mano), por `bucket/path`: lo lee download(). */
+    files: Map<string, Buffer>;
   };
   reset(): void;
   /** Operaciones que modificaron `table` (insert/update/delete/upsert). */
@@ -164,6 +166,7 @@ export type FakeClient = {
   storage: {
     from: (bucket: string) => {
       upload: (path: string, body: { byteLength?: number; length?: number }, opts?: { contentType?: string }) => Promise<{ data: unknown; error: DbError | null }>;
+      download: (path: string) => Promise<{ data: Blob | null; error: DbError | null }>;
       getPublicUrl: (path: string) => { data: { publicUrl: string } };
       remove: (paths: string[]) => Promise<{ data: unknown; error: DbError | null }>;
     };
@@ -219,7 +222,7 @@ export function createFakeDb(): FakeDb {
   const failures: Array<{ table: string; op: Op | '*'; error: DbError }> = [];
   const identities: Record<string, number> = {};
   const rpcHandlers: FakeDb['rpcHandlers'] = {};
-  const storage: FakeDb['storage'] = { uploads: [], removed: [], failUpload: false };
+  const storage: FakeDb['storage'] = { uploads: [], removed: [], failUpload: false, files: new Map() };
   // created_at estrictamente creciente: el orden por created_at es determinista.
   let clock = Date.parse('2026-09-01T00:00:00Z');
   const tick = () => new Date((clock += 1000)).toISOString();
@@ -289,7 +292,13 @@ export function createFakeDb(): FakeDb {
         async upload(path, body, opts) {
           if (storage.failUpload) return { data: null, error: { message: 'simulated upload failure' } };
           storage.uploads.push({ bucket, path, contentType: opts?.contentType, size: body.byteLength ?? body.length ?? 0 });
+          if (Buffer.isBuffer(body)) storage.files.set(`${bucket}/${path}`, body);
           return { data: { path }, error: null };
+        },
+        async download(path) {
+          const file = storage.files.get(`${bucket}/${path}`);
+          if (!file) return { data: null, error: { message: 'Object not found' } };
+          return { data: new Blob([new Uint8Array(file)]), error: null };
         },
         getPublicUrl: (path) => ({
           data: { publicUrl: `https://test.supabase.co/storage/v1/object/public/${bucket}/${path}` },
@@ -323,6 +332,7 @@ export function createFakeDb(): FakeDb {
       storage.uploads.length = 0;
       storage.removed.length = 0;
       storage.failUpload = false;
+      storage.files.clear();
     },
     writes: (name) => log.filter((l) => l.op !== 'select' && (!name || l.table === name)),
   };

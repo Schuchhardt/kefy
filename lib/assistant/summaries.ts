@@ -61,6 +61,8 @@ export const ASSISTANT_TOOL_NAMES = [
   'run_autopilot_now',
   'list_brand_assets',
   'add_brand_asset',
+  'update_brand_asset',
+  'create_brand_icon',
   'delete_brand_asset',
   'create_brand',
   'archive_brand',

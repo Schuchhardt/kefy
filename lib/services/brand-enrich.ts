@@ -13,6 +13,11 @@
 //
 // Lo que devuelve la web son datos de terceros: quien los muestre al modelo
 // del asistente los envuelve como <untrusted_content>.
+//
+// El branding de Firecrawl trae más de una imagen de marca (logo, images.logo,
+// favicon, a veces otras). collectWebLogos las junta todas y storeWebLogos las
+// guarda en la biblioteca de logos de la marca (se clasifican solas), así el
+// logo principal queda alojado en Kefy y no apuntando a la web.
 
 import FirecrawlApp from '@mendable/firecrawl-js';
 import { z } from 'zod';
@@ -22,6 +27,7 @@ import type { BrandKit } from '@/types/brand-kit';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, chargeOrThrow, msg } from '@/lib/services/errors';
 import { getOrCreateBrandKit, updateBrandKit } from '@/lib/services/brand-kit';
+import { importBrandLogos } from '@/lib/services/brand-assets';
 
 export const ENRICH_ROUTE = 'POST /api/brand-kit/enrich-url';
 
@@ -130,8 +136,55 @@ export function mapFirecrawlResult(
   return extracted;
 }
 
+/** Una imagen de marca que trae la web. `kind` solo da el nombre: la forma se mide al importarla. */
+export interface WebLogo {
+  url: string;
+  kind: 'logo' | 'icon';
+}
+
+/** Claves de branding.images que no son logos. */
+const NOT_LOGOS = new Set(['ogImage', 'ogimage', 'og_image', 'twitterImage', 'screenshot']);
+
+/**
+ * Todas las URLs de logos e íconos del branding de Firecrawl (y el favicon de
+ * los metadatos), sin repetir y primero el logo principal. Solo https (lo
+ * único que se descarga) y sin .ico, que sharp no sabe leer. Pura.
+ */
+export function collectWebLogos(
+  branding: Record<string, unknown> | undefined,
+  metadata?: Record<string, unknown>,
+): WebLogo[] {
+  const out: WebLogo[] = [];
+  const add = (value: unknown, kind: WebLogo['kind']) => {
+    if (typeof value !== 'string') return;
+    const url = value.trim();
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { return; }
+    if (parsed.protocol !== 'https:' || /\.ico$/i.test(parsed.pathname)) return;
+    if (out.some((l) => l.url === url)) return;
+    out.push({ url, kind });
+  };
+
+  const images = (branding?.images ?? {}) as Record<string, unknown>;
+  add(branding?.logo, 'logo');
+  add(images.logo, 'logo');
+  for (const [key, value] of Object.entries(images)) {
+    if (key === 'logo' || key === 'favicon' || NOT_LOGOS.has(key)) continue;
+    if (/logo/i.test(key)) add(value, 'logo');
+    else if (/icon/i.test(key)) add(value, 'icon');
+  }
+  add(images.favicon, 'icon');
+  add(metadata?.favicon, 'icon');
+  return out;
+}
+
+interface ScrapedBrand {
+  extracted: Partial<BrandKit>;
+  logos: WebLogo[];
+}
+
 /** Lee la web con Firecrawl. Sin cobro: lo hace enrichBrandFromUrl. */
-async function scrapeBrand(url: string, lang: 'es' | 'en', apiKey: string): Promise<Partial<BrandKit>> {
+async function scrapeBrand(url: string, lang: 'es' | 'en', apiKey: string): Promise<ScrapedBrand> {
   const location = lang === 'en'
     ? { country: 'US', languages: ['en'] }
     : { country: 'CL', languages: ['es'] };
@@ -152,12 +205,15 @@ async function scrapeBrand(url: string, lang: 'es' | 'en', apiKey: string): Prom
 
   const raw = (jsonResult as { json?: unknown }).json as z.infer<typeof brandSchema> | undefined;
   const branding = (brandingResult as { branding?: unknown }).branding as Record<string, unknown> | undefined;
-  return mapFirecrawlResult(raw, branding);
+  const metadata = (brandingResult as { metadata?: unknown }).metadata as Record<string, unknown> | undefined;
+  return { extracted: mapFirecrawlResult(raw, branding), logos: collectWebLogos(branding, metadata) };
 }
 
 export interface EnrichBrandResult {
   url: string;
   extracted: Partial<BrandKit>;
+  /** Logos e íconos de la web, sin guardar todavía (storeWebLogos). */
+  logos: WebLogo[];
 }
 
 /**
@@ -185,8 +241,8 @@ export async function enrichBrandFromUrl(
 
   const refund = await chargeOrThrow(ctx, 'text', ENRICH_ROUTE);
   try {
-    const extracted = await scrapeBrand(url, ctx.language, apiKey);
-    return { url, extracted };
+    const { extracted, logos } = await scrapeBrand(url, ctx.language, apiKey);
+    return { url, extracted, logos };
   } catch (err) {
     await refund();
     reportError(err, { route: ENRICH_ROUTE, auth: ctx.auth, service: 'firecrawl', extra: { source: ctx.source } });
@@ -194,6 +250,43 @@ export async function enrichBrandFromUrl(
       'provider_error', 502,
       msg(ctx.language, 'No pudimos leer esa web.', 'Failed to enrich URL'),
     ).markReported();
+  }
+}
+
+// ─── Logos de la web a la biblioteca ─────────────────────────────────────────
+
+/** Nombre de un logo importado: «Logo (acme.cl)», «Ícono (acme.cl)». */
+export function webLogoLabel(logo: WebLogo, websiteUrl: string, lang: 'es' | 'en'): string {
+  let host = '';
+  try { host = new URL(websiteUrl).hostname.replace(/^www\./, ''); } catch { /* sin host */ }
+  const base = logo.kind === 'logo' ? 'Logo' : msg(lang, 'Ícono', 'Icon');
+  return host ? `${base} (${host})` : base;
+}
+
+/**
+ * Guarda los logos de la web en la biblioteca de la marca y devuelve
+ * `extracted` con logo_url apuntando a la copia de Kefy (si se pudo traer).
+ * Sin descargas no hay créditos; un logo que falla se salta (ya lo reporta
+ * media-ingest) y nunca tumba la lectura de la web.
+ */
+export async function storeWebLogos(
+  ctx: ServiceContext,
+  result: EnrichBrandResult,
+): Promise<{ extracted: Partial<BrandKit>; imported: number }> {
+  if (result.logos.length === 0) return { extracted: result.extracted, imported: 0 };
+  try {
+    const { imported } = await importBrandLogos(ctx, {
+      logos: result.logos.map((l) => ({ url: l.url, label: webLogoLabel(l, result.url, ctx.language) })),
+    });
+    const extracted = { ...result.extracted };
+    const main = imported.find((i) => i.url === result.extracted.logo_url) ?? imported.find((i) => i.asset.type === 'logo');
+    if (main) extracted.logo_url = main.asset.public_url;
+    return { extracted, imported: imported.filter((i) => !i.existing).length };
+  } catch (err) {
+    if (!(err instanceof ServiceError && err.reported)) {
+      reportError(err, { route: ENRICH_ROUTE, auth: ctx.auth, extra: { fase: 'logos' } });
+    }
+    return { extracted: result.extracted, imported: 0 };
   }
 }
 
@@ -231,24 +324,28 @@ export interface ImportBrandResult {
   filled: string[];
   /** Campos que la web traía pero ya tenían valor (no se tocaron). */
   kept: string[];
+  /** Logos e íconos nuevos en la biblioteca de la marca. */
+  logos_imported: number;
   kit: BrandKit;
 }
 
 /**
- * Lee la web y guarda en el Brand Kit los campos que estaban vacíos. Lo usa
- * la herramienta import_brand_from_website. El control de rol (owner/admin)
- * va en la herramienta, como en updateBrandKit.
+ * Lee la web, guarda sus logos en la biblioteca y en el Brand Kit los campos
+ * que estaban vacíos. Lo usa la herramienta import_brand_from_website. El
+ * control de rol (owner/admin) va en la herramienta, como en updateBrandKit.
  */
 export async function importBrandFromWebsite(
   ctx: ServiceContext,
   input: { url: unknown },
 ): Promise<ImportBrandResult> {
-  const { url, extracted } = await enrichBrandFromUrl(ctx, input);
+  const enriched = await enrichBrandFromUrl(ctx, input);
+  const { url } = enriched;
+  const { extracted, imported } = await storeWebLogos(ctx, enriched);
   const { kit } = await getOrCreateBrandKit(ctx);
   const patch = fillEmptyFields(kit, { ...extracted, website_url: url });
   const filled = Object.keys(patch);
   const kept = Object.keys(extracted).filter((k) => !(k in patch));
-  if (filled.length === 0) return { url, filled, kept, kit };
+  if (filled.length === 0) return { url, filled, kept, logos_imported: imported, kit };
   const { kit: updated } = await updateBrandKit(ctx, patch);
-  return { url, filled, kept, kit: updated };
+  return { url, filled, kept, logos_imported: imported, kit: updated };
 }

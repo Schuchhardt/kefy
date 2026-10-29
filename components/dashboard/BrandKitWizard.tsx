@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { BrandKit, BrandTone, CompanySize } from '@/types/brand-kit';
 import type { BrandKitWizardProps } from '@/types/components/brand-kit-wizard';
+import type { WebLogo } from '@/lib/services/brand-enrich';
 import { BRAND_SETUP_GROUPS, brandCompleteness, firstIncompleteGroup, isFilled } from '@/lib/brand-setup';
 import { useBrand } from '@/lib/brand-context';
 import { Field, Input, Select, Textarea } from '@/components/ui/Field';
@@ -115,7 +116,10 @@ export default function BrandKitWizard({ locale, orgName, onComplete, onExit }: 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [suggestions, setSuggestions] = useState<Record<string, SuggestionState>>({});
   const [enrich, setEnrich] = useState<
-    { status: 'idle' | 'loading' | 'empty' | 'applied' } | { status: 'found'; data: Kit } | { status: 'error'; error: ApiError }
+    | { status: 'idle' | 'loading' | 'empty' }
+    | { status: 'found'; data: Kit; logos: WebLogo[]; applying?: boolean }
+    | { status: 'applied'; logosImported: number }
+    | { status: 'error'; error: ApiError }
   >({ status: 'idle' });
   const [logo, setLogo] = useState<{ status: 'idle' | 'uploading' } | { status: 'error'; message: string }>({ status: 'idle' });
 
@@ -309,19 +313,42 @@ export default function BrandKitWizard({ locale, orgName, onComplete, onExit }: 
         setEnrich({ status: 'error', error: await apiError(res, t.website.error) });
         return;
       }
-      const { extracted } = await res.json() as { extracted?: Kit };
+      const { extracted, logos } = await res.json() as { extracted?: Kit; logos?: WebLogo[] };
       const data = Object.fromEntries(Object.entries(extracted ?? {}).filter(([, v]) => isFilled(v))) as Kit;
-      setEnrich(Object.keys(data).length ? { status: 'found', data } : { status: 'empty' });
+      const found = Array.isArray(logos) ? logos : [];
+      setEnrich(Object.keys(data).length || found.length ? { status: 'found', data, logos: found } : { status: 'empty' });
     } catch {
       setEnrich({ status: 'error', error: { message: t.website.error } });
     }
   }
 
-  function applyEnriched() {
-    if (enrich.status !== 'found') return;
-    setForm((prev) => ({ ...prev, ...enrich.data }));
+  // Los logos de la web van a la biblioteca de la marca y el principal queda
+  // apuntando a la copia de Kefy. Si la importación falla, se aplica lo demás.
+  async function applyEnriched() {
+    if (enrich.status !== 'found' || enrich.applying) return;
+    let data = enrich.data;
+    let logosImported = 0;
+    if (enrich.logos.length > 0) {
+      setEnrich({ ...enrich, applying: true });
+      try {
+        const res = await fetch('/api/brand-kit/assets/import', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ website_url: normalizeUrl(String(form.website_url ?? '')), logo_url: data.logo_url, logos: enrich.logos }),
+        });
+        if (res.ok) {
+          const out = await res.json() as { logo_url: string | null; imported: number };
+          logosImported = out.imported;
+          if (out.logo_url && (data.logo_url || !isFilled(form.logo_url))) data = { ...data, logo_url: out.logo_url };
+        }
+      } catch {
+        // Sin red: se aplica lo demás.
+      }
+    }
+    setForm((prev) => ({ ...prev, ...data }));
     setSaved(false);
-    setEnrich({ status: 'applied' });
+    setEnrich({ status: 'applied', logosImported });
   }
 
   async function uploadLogo(file: File) {
@@ -479,7 +506,12 @@ export default function BrandKitWizard({ locale, orgName, onComplete, onExit }: 
             </Notice>
           )}
           {enrich.status === 'empty' && <Notice tone="warning">{t.website.empty}</Notice>}
-          {enrich.status === 'applied' && <Notice tone="success">{t.website.applied}</Notice>}
+          {enrich.status === 'applied' && (
+            <Notice tone="success">
+              {t.website.applied}
+              {enrich.logosImported > 0 && <> {tb.logos.webImported(enrich.logosImported)}</>}
+            </Notice>
+          )}
           {enrich.status === 'found' && (
             <div className={styles.found}>
               <p className={styles.foundTitle}>{t.website.found}</p>
@@ -499,10 +531,26 @@ export default function BrandKitWizard({ locale, orgName, onComplete, onExit }: 
                     </dd>
                   </div>
                 ))}
+                {enrich.logos.length > 0 && (
+                  <div className={styles.foundRow}>
+                    <dt>{tb.logos.title}</dt>
+                    <dd>
+                      <span className={styles.foundLogos}>
+                        {enrich.logos.map((logo) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img key={logo.url} src={logo.url} alt="" className={styles.foundLogo} />
+                        ))}
+                      </span>
+                      {tb.logos.webFound(enrich.logos.length)}
+                    </dd>
+                  </div>
+                )}
               </dl>
               <div className={styles.actionsRow}>
-                <Button size="sm" variant="primary" onClick={applyEnriched}>{t.website.apply}</Button>
-                <Button size="sm" variant="ghost" onClick={() => setEnrich({ status: 'idle' })}>{t.website.discard}</Button>
+                <Button size="sm" variant="primary" loading={enrich.applying} onClick={() => { void applyEnriched(); }}>
+                  {t.website.apply}
+                </Button>
+                <Button size="sm" variant="ghost" disabled={enrich.applying} onClick={() => setEnrich({ status: 'idle' })}>{t.website.discard}</Button>
               </div>
             </div>
           )}

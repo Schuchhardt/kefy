@@ -1,0 +1,149 @@
+/* ── Biblioteca de logos e íconos (BrandLogoLibrary, IconCropModal) ── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.errorList { margin: 0; padding-left: 18px; }
+
+.grid {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* Lienzos fijos a propósito, como .logoPreview en brand-form: son el fondo
+   neutro del logo del usuario, no colores del tema. Un logo para fondo oscuro
+   se enseña sobre oscuro; el resto, sobre blanco. */
+.canvasLight { background: #fff; }
+.canvasDark { background: #111114; }
+
+.thumb {
+  display: grid;
+  place-items: center;
+  height: 112px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.cardBody {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px 4px;
+}
+.cardName {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 8px 10px;
+  margin-top: auto;
+}
+
+.editForm { display: grid; gap: 14px; }
+
+/* ── Recorte ── */
+.cropLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 639px) {
+  .cropLayout { grid-template-columns: 1fr; }
+}
+
+.cropStage {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.cropImageWrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+.cropImage {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  min-width: 120px;
+  user-select: none;
+}
+.cropBox {
+  position: absolute;
+  border: 2px solid var(--accent);
+  /* Oscurece lo que queda fuera del recorte. */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  cursor: move;
+  touch-action: none;
+}
+.cropBox:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cropSide { display: grid; gap: 14px; }
+
+.range {
+  width: 100%;
+  min-height: 44px;
+  accent-color: var(--accent);
+}
+
+.previewRow {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+.previewSquare,
+.previewCircle {
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.previewSquare { border-radius: 12px; }
+.previewCircle { border-radius: 50%; }
+.previewFill {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+}

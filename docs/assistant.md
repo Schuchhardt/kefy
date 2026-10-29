@@ -183,7 +183,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Leads | `list_leads`, `get_lead_scoring` (read), `save_lead`, `delete_lead`, `update_lead_scoring` (write) | read / write |
 | Bandeja: DMs y comentarios | `list_conversations`, `get_conversation_messages`, `list_comments`, `reply_to_conversation`, `reply_to_comment` | read / publish |
 | Marca: identidad | `get_brand_profile`, `update_brand_profile` (un `logo_url` externo se copia al Storage de Kefy), `import_brand_from_website` | read / write |
-| Marca: assets (logos, imágenes, íconos) | `list_brand_assets` (read), `add_brand_asset` (desde una URL; `set_as_logo`), `delete_brand_asset` (write) | read / write |
+| Marca: assets (logos, imágenes, íconos) | `list_brand_assets` (read), `add_brand_asset` (desde una URL; `set_as_logo`; `type: 'auto'` clasifica logo/ícono), `update_brand_asset` (corrige tipo, forma o fondo), `create_brand_icon` (recorta un ícono de un logo), `delete_brand_asset` (write) | read / write |
 | Marcas | `create_brand` (`brandless`, orgWide), `archive_brand` (solo dueño, orgWide; archiva la marca de la llamada), `set_brand_avatar` | write |
 
 **Conectar una cuenta.** Conectar una red exige que una persona autorice en el
@@ -538,7 +538,7 @@ Los links del asistente abren la página en la opción concreta:
 | `lib/services/lead-scoring.ts`, `app/api/automations/leads/scoring` | Puntos por interacción, umbrales de etapa y registro de interacciones |
 | `lib/services/autopilot.ts`, `app/api/autopilot/**` | Reglas y ejecución del autopilot |
 | `lib/safe-redirect.ts` | `?next=` del login y del registro: solo rutas propias del idioma (dashboard, onboarding, invitación, consentimiento OAuth) |
-| `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, el onboarding y `import_brand_from_website` |
+| `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `storeWebLogos` (todos sus logos e íconos a la biblioteca, sin duplicar), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, `POST /api/brand-kit/assets/import`, el onboarding y `import_brand_from_website` |
 | `lib/services/onboarding.ts`, `app/api/onboarding/starter` | «Pega tu web → 3 posts» (`createStarterPosts`): lee la web si la hay, completa lo vacío del Brand Kit y escribe 3 borradores. La usan la página `/{lang}/onboarding` y `create_starter_posts` |
 | `db/migrations/20260925000001_create_custom_strategies.sql` | `kefy_custom_strategies` y `kefy_org_strategies.custom_strategy_id` |
 | `db/migrations/20261027000001_brand_strategies.sql` | `kefy_org_strategies.brand_id`: una estrategia activa por marca |

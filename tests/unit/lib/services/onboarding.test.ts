@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import sharp from 'sharp';
 import { createFakeDb } from '../../helpers/fake-db';
 import {
   creditsSpent, quotaState, refundCount, resetQuotaState, resetSubscriptionState, subscriptionState,
@@ -20,11 +21,18 @@ vi.mock('@mendable/firecrawl-js', () => ({
   default: class { scrape = scrape; },
 }));
 
+// Los logos de la web se descargan con media-ingest (probado aparte).
+const media = vi.hoisted(() => ({ download: vi.fn() }));
+vi.mock('@/lib/services/media-ingest', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/services/media-ingest')>()),
+  downloadExternalMedia: media.download,
+}));
+
 import { generateContentText } from '@/lib/ai';
 import { serviceContext } from '@/lib/services/context';
 import { ServiceError } from '@/lib/services/errors';
 import { STARTER_ANGLES, createStarterPosts } from '@/lib/services/onboarding';
-import { fillEmptyFields, mapFirecrawlResult, validateWebsiteUrl } from '@/lib/services/brand-enrich';
+import { collectWebLogos, fillEmptyFields, mapFirecrawlResult, validateWebsiteUrl } from '@/lib/services/brand-enrich';
 import { executeTool } from '@/lib/assistant/registry';
 import { ensureToolsRegistered } from '@/lib/assistant/tools';
 import { chatToolContext } from '@/lib/assistant/context';
@@ -35,10 +43,15 @@ import { chatToolContext } from '@/lib/assistant/context';
 const ctx = () => serviceContext(AUTH, IDS.BRAND, 'es', { brandScope: 'org', source: 'route' });
 const KIT_ID = IDS.uuid(600);
 
-function webDevuelve(json: Record<string, unknown>, branding: Record<string, unknown> = {}) {
+function webDevuelve(json: Record<string, unknown>, branding: Record<string, unknown> = {}, metadata: Record<string, unknown> = {}) {
   scrape.mockImplementation(async (_url: string, opts: { formats: unknown[] }) => (
-    JSON.stringify(opts.formats).includes('branding') ? { branding } : { json }
+    JSON.stringify(opts.formats).includes('branding') ? { branding, metadata } : { json }
   ));
+}
+
+async function png(w: number, h: number): Promise<{ buffer: Buffer; contentType: string; ext: string }> {
+  const buffer = await sharp({ create: { width: w, height: h, channels: 4, background: '#202020' } }).png().toBuffer();
+  return { buffer, contentType: 'image/png', ext: 'png' };
 }
 
 async function codigoDe(p: Promise<unknown>): Promise<string> {
@@ -178,6 +191,36 @@ describe('brand-enrich', () => {
     )).toEqual({ name: 'Acme', tone: ['friendly'], primary_color: '#000000' });
   });
 
+  it('collectWebLogos junta todos los logos e íconos de la web, sin repetir y el principal primero', () => {
+    expect(collectWebLogos(
+      {
+        logo: 'https://acme.cl/logo.svg',
+        images: {
+          logo: 'https://acme.cl/logo.svg',
+          favicon: 'https://acme.cl/favicon.png',
+          logoDark: 'https://acme.cl/logo-blanco.png',
+          appleTouchIcon: 'https://acme.cl/apple-touch-icon.png',
+          ogImage: 'https://acme.cl/portada.jpg',
+        },
+      },
+      { favicon: 'https://acme.cl/favicon-32.png' },
+    )).toEqual([
+      { url: 'https://acme.cl/logo.svg', kind: 'logo' },
+      { url: 'https://acme.cl/logo-blanco.png', kind: 'logo' },
+      { url: 'https://acme.cl/apple-touch-icon.png', kind: 'icon' },
+      { url: 'https://acme.cl/favicon.png', kind: 'icon' },
+      { url: 'https://acme.cl/favicon-32.png', kind: 'icon' },
+    ]);
+  });
+
+  it('collectWebLogos descarta lo que no se puede descargar ni leer', () => {
+    expect(collectWebLogos(
+      { logo: 'data:image/png;base64,x', images: { logo: 'http://acme.cl/logo.png', favicon: 'https://acme.cl/favicon.ico' } },
+      { favicon: '/favicon.png' },
+    )).toEqual([]);
+    expect(collectWebLogos(undefined)).toEqual([]);
+  });
+
   it('fillEmptyFields no pisa lo que ya tiene valor', () => {
     expect(fillEmptyFields(
       { name: 'Mía', tone: [], social_urls: {} },
@@ -203,6 +246,40 @@ describe('herramientas import_brand_from_website y create_starter_posts', () => 
     expect(r.data).toMatchObject({ filled: expect.arrayContaining(['industry', 'website_url']), kept: ['name'] });
     expect(r.tainted).toBe(true);
     expect(creditsSpent()).toBe(1);
+  });
+
+  it('import_brand_from_website guarda los logos de la web en la biblioteca y el principal apunta a la copia', async () => {
+    const files: Record<string, Awaited<ReturnType<typeof png>>> = {
+      'https://acmecafe.cl/logo.png': await png(600, 150),
+      'https://acmecafe.cl/favicon.png': await png(64, 64),
+    };
+    media.download.mockImplementation(async (_ctx: unknown, url: string) => files[url]);
+    webDevuelve({}, { logo: 'https://acmecafe.cl/logo.png', images: { favicon: 'https://acmecafe.cl/favicon.png' } });
+
+    const r = await executeTool('import_brand_from_website', { url: 'acmecafe.cl', brand_id: IDS.BRAND }, apiCtx());
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) return;
+    expect(r.data).toMatchObject({ logos_imported: 2, filled: expect.arrayContaining(['logo_url']) });
+    expect(r.dataChanged).toEqual(['brand-kit']);
+
+    const assets = db.rows('kefy_brand_assets');
+    expect(assets.map((a) => [a.type, a.label]).sort()).toEqual([['icon', 'Icon (acmecafe.cl)'], ['logo', 'Logo (acmecafe.cl)']]);
+    const logo = assets.find((a) => a.type === 'logo')!;
+    expect(db.find('kefy_brand_kits', (k) => k.id === KIT_ID)?.logo_url).toBe(logo.public_url);
+
+    // Leer otra vez la misma web no duplica.
+    const again = await executeTool('import_brand_from_website', { url: 'acmecafe.cl', brand_id: IDS.BRAND }, apiCtx());
+    expect(again.ok === true && again.data).toMatchObject({ logos_imported: 0 });
+    expect(db.rows('kefy_brand_assets')).toHaveLength(2);
+  });
+
+  it('si un logo de la web no se puede traer, el resto de la lectura se guarda igual', async () => {
+    media.download.mockRejectedValue(new ServiceError('invalid_input', 422, 'Unsupported image type'));
+    webDevuelve({ industry: 'Cafetería' }, { logo: 'https://acmecafe.cl/logo.webp' });
+    const r = await executeTool('import_brand_from_website', { url: 'acmecafe.cl', brand_id: IDS.BRAND }, apiCtx());
+    expect(r.ok === true && r.data).toMatchObject({ logos_imported: 0, filled: expect.arrayContaining(['industry', 'logo_url']) });
+    // Sin copia, queda la URL de la web, como antes.
+    expect(db.find('kefy_brand_kits', (k) => k.id === KIT_ID)?.logo_url).toBe('https://acmecafe.cl/logo.webp');
   });
 
   it('un miembro no puede cambiar el perfil de marca desde la web', async () => {

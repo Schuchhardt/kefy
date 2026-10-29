@@ -119,6 +119,26 @@ describe('biblioteca de assets', () => {
     expect(r.ok).toBe('pending');
     expect(db.find('kefy_brand_assets', (a) => a.id === ASSET_2)).toBeDefined();
   });
+
+  it('update_brand_asset reclasifica solo assets de la marca indicada', async () => {
+    expect(err(await executeTool('update_brand_asset', { brand_id: IDS.BRAND, asset_id: ASSET_2, type: 'logo' }, apiCtx())).code).toBe('not_found');
+    const data = ok(await executeTool('update_brand_asset', { brand_id: IDS.BRAND_2, asset_id: ASSET_2, type: 'logo', background: 'dark' }, apiCtx()));
+    expect(data.asset).toMatchObject({ type: 'logo', background: 'dark' });
+  });
+
+  it('create_brand_icon recorta un ícono del logo de la marca y no cruza marcas', async () => {
+    const png = await sharp({ create: { width: 800, height: 200, channels: 4, background: '#123456' } }).png().toBuffer();
+    db.storage.files.set('kefy-brand-assets/b/k/2.png', png);
+    expect(err(await executeTool('create_brand_icon', { brand_id: IDS.BRAND, asset_id: ASSET_2 }, apiCtx())).code).toBe('not_found');
+    const data = ok(await executeTool('create_brand_icon', {
+      brand_id: IDS.BRAND_2, asset_id: ASSET_2, crop: { x: 0, y: 0, width: 0.25, height: 1 },
+    }, apiCtx()));
+    expect(data.asset).toMatchObject({ type: 'icon', variant: 'square', width: 200, height: 200, source_asset_id: ASSET_2 });
+  });
+
+  it('create_brand_icon exige owner o admin', async () => {
+    expect(err(await executeTool('create_brand_icon', { brand_id: IDS.BRAND_2, asset_id: ASSET_2 }, apiCtx({ role: 'member' }))).code).toBe('forbidden');
+  });
 });
 
 describe('create_brand', () => {

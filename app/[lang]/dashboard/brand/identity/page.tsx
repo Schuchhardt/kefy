@@ -25,7 +25,9 @@ import { useDataChanged } from '@/lib/data-events';
 import { CHANNEL_LABELS } from '@/lib/channels';
 import { toLocale } from '@/lib/i18n';
 import type { BrandKit, BrandTone } from '@/types/brand-kit';
+import type { WebLogo } from '@/lib/services/brand-enrich';
 import BrandImageField from '@/components/dashboard/BrandImageField';
+import BrandLogoLibrary from '@/components/dashboard/BrandLogoLibrary';
 import GoogleFontSelect from '@/components/ui/GoogleFontSelect';
 import { SkeletonBlock, FormSectionSkeleton } from '@/components/ui/Skeleton';
 import SectionCard from '@/components/ui/SectionCard';
@@ -65,10 +67,6 @@ const COLOR_FIELDS = [
   { key: 'secondary_color', label: 'secondaryColor', fallback: '#ffffff' },
   { key: 'accent_color', label: 'accentColor', fallback: '#c6ff4b' },
 ] as const;
-
-// Lo mismo que acepta /api/brand-kit/assets (lib/brand-kit.ts).
-const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'image/gif'];
-const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 
 /** Campos que edita esta página. */
 const IDENTITY_FIELDS = [
@@ -188,10 +186,10 @@ function validate(form: Kit, t: BrandCopy): Errors {
 // ─── Página ───────────────────────────────────────────────────────────────────
 
 type EnrichState =
-  | { status: 'idle' | 'loading' | 'error' | 'applied' }
-  | { status: 'result'; data: Kit };
+  | { status: 'idle' | 'loading' | 'error' }
+  | { status: 'result'; data: Kit; logos: WebLogo[]; applying?: boolean }
+  | { status: 'applied'; logosImported: number };
 
-type LogoState = { status: 'idle' | 'uploading' | 'uploaded' } | { status: 'error'; message: string };
 
 export default function BrandIdentityPage() {
   const params = useParams<{ lang: string }>();
@@ -221,8 +219,7 @@ export default function BrandIdentityPage() {
   const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
 
   const [enrich, setEnrich] = useState<EnrichState>({ status: 'idle' });
-  const [logo, setLogo] = useState<LogoState>({ status: 'idle' });
-  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [libraryKey, setLibraryKey] = useState(0);
   const [sugg, setSugg] = useState<{ items?: string[]; loading: boolean; error: string | null }>({ loading: false, error: null });
 
   // ── Carga ────────────────────────────────────────────────────────────────
@@ -348,21 +345,44 @@ export default function BrandIdentityPage() {
         body: JSON.stringify({ url, lang: locale }),
       });
       if (!res.ok) throw new Error('enrich');
-      const { extracted } = await res.json() as { extracted: Kit };
+      const { extracted, logos } = await res.json() as { extracted: Kit; logos?: WebLogo[] };
       const useful = Object.entries(extracted ?? {}).filter(([key, value]) =>
         (FIELDS as readonly string[]).includes(key) && hasValue(value));
-      if (useful.length === 0) throw new Error('empty');
-      setEnrich({ status: 'result', data: Object.fromEntries(useful) as Kit });
+      const found = Array.isArray(logos) ? logos : [];
+      if (useful.length === 0 && found.length === 0) throw new Error('empty');
+      setEnrich({ status: 'result', data: Object.fromEntries(useful) as Kit, logos: found });
     } catch {
       setEnrich({ status: 'error' });
     }
   }
 
-  function applyEnriched() {
-    if (enrich.status !== 'result') return;
-    const data = enrich.data;
+  // Los logos de la web van a la biblioteca (sin créditos) y el principal
+  // queda apuntando a la copia de Kefy. Si la importación falla, se aplica
+  // el resto igual.
+  async function applyEnriched() {
+    if (enrich.status !== 'result' || enrich.applying) return;
+    let data = enrich.data;
+    let logosImported = 0;
+    if (enrich.logos.length > 0) {
+      setEnrich({ ...enrich, applying: true });
+      try {
+        const res = await fetch('/api/brand-kit/assets/import', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ website_url: form.website_url, logo_url: data.logo_url, logos: enrich.logos }),
+        });
+        if (res.ok) {
+          const out = await res.json() as { logo_url: string | null; imported: number };
+          logosImported = out.imported;
+          if (out.logo_url && (data.logo_url || !form.logo_url)) data = { ...data, logo_url: out.logo_url };
+          setLibraryKey((k) => k + 1);
+        }
+      } catch {
+        // Sin red: se aplica lo demás.
+      }
+    }
     setKit((prev) => ({ ...prev, form: { ...prev.form, ...data } }));
-    setEnrich({ status: 'applied' });
+    setEnrich({ status: 'applied', logosImported });
   }
 
   function display(key: string, value: unknown): string {
@@ -379,33 +399,6 @@ export default function BrandIdentityPage() {
     }
     if (key === 'language') return LANGUAGES.find((l) => l.value === value)?.label ?? String(value);
     return String(value);
-  }
-
-  // ── Logo ─────────────────────────────────────────────────────────────────
-  async function handleLogoUpload(file: File) {
-    const reset = () => { if (logoInputRef.current) logoInputRef.current.value = ''; };
-    if (!LOGO_TYPES.includes(file.type)) { setLogo({ status: 'error', message: ti.logoBadType }); reset(); return; }
-    if (file.size > MAX_LOGO_BYTES) { setLogo({ status: 'error', message: ti.logoTooBig }); reset(); return; }
-
-    setLogo({ status: 'uploading' });
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'logo');
-      fd.append('label', 'Logo');
-      const res = await fetch('/api/brand-kit/assets', { method: 'POST', credentials: 'include', body: fd });
-      if (!res.ok) {
-        setLogo({ status: 'error', message: res.status === 403 ? t.errors.forbidden : ti.logoFailed });
-        return;
-      }
-      const { asset } = await res.json() as { asset: { public_url: string } };
-      updateField('logo_url', asset.public_url);
-      setLogo({ status: 'uploaded' });
-    } catch {
-      setLogo({ status: 'error', message: ti.logoFailed });
-    } finally {
-      reset();
-    }
   }
 
   // ── Sugerencias (1 crédito cada vez: solo con el botón) ──────────────────
@@ -467,9 +460,9 @@ export default function BrandIdentityPage() {
   const enrichAnnouncement =
     enrich.status === 'loading' ? t.enriching
       : enrich.status === 'result' ? t.enrichSuccess
-        : enrich.status === 'applied' ? ti.enrichApplied
+        : enrich.status === 'applied'
+          ? [ti.enrichApplied, enrich.logosImported > 0 ? t.logos.webImported(enrich.logosImported) : ''].filter(Boolean).join(' ')
           : '';
-  const logoStatus = logo.status === 'uploading' ? ti.logoUploading : logo.status === 'uploaded' ? ti.logoUploaded : '';
 
   return (
     <div className="page" style={{ maxWidth: 840 }}>
@@ -571,7 +564,10 @@ export default function BrandIdentityPage() {
                 <Notice tone="danger" icon={<Icon name="alert" size={16} />}>{t.enrichError}</Notice>
               )}
               {enrich.status === 'applied' && (
-                <Notice tone="success" live={false} icon={<Icon name="check-circle" size={16} />}>{ti.enrichApplied}</Notice>
+                <Notice tone="success" live={false} icon={<Icon name="check-circle" size={16} />}>
+                  {ti.enrichApplied}
+                  {enrich.logosImported > 0 && <> {t.logos.webImported(enrich.logosImported)}</>}
+                </Notice>
               )}
               {enrich.status === 'result' && (
                 <section className={styles.enrichBox} aria-labelledby={`${fid('enrich')}-title`}>
@@ -588,12 +584,29 @@ export default function BrandIdentityPage() {
                         </dd>
                       </div>
                     ))}
+                    {enrich.logos.length > 0 && (
+                      <div style={{ display: 'contents' }}>
+                        <dt>{t.logos.title}</dt>
+                        <dd>
+                          <span className={styles.enrichLogos}>
+                            {enrich.logos.map((logo) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img key={logo.url} src={logo.url} alt="" className={styles.enrichLogo} />
+                            ))}
+                          </span>
+                          {t.logos.webFound(enrich.logos.length)}
+                        </dd>
+                      </div>
+                    )}
                   </dl>
                   <div className={styles.actions}>
-                    <Button variant="primary" icon={<Icon name="check" size={16} />} onClick={applyEnriched}>
+                    <Button
+                      variant="primary" icon={<Icon name="check" size={16} />}
+                      loading={enrich.applying} onClick={() => { void applyEnriched(); }}
+                    >
                       {ti.enrichApply}
                     </Button>
-                    <Button variant="ghost" onClick={() => setEnrich({ status: 'idle' })}>{ti.enrichDiscard}</Button>
+                    <Button variant="ghost" disabled={enrich.applying} onClick={() => setEnrich({ status: 'idle' })}>{ti.enrichDiscard}</Button>
                   </div>
                 </section>
               )}
@@ -777,32 +790,12 @@ export default function BrandIdentityPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={form.logo_url} alt={ti.logoAlt} className={styles.logoPreview} />
                   )}
-                  <input
-                    ref={logoInputRef}
-                    type="file"
-                    hidden
-                    accept={LOGO_TYPES.join(',')}
-                    aria-label={ti.logoFile}
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLogoUpload(f); }}
-                  />
-                  <Button
-                    variant="secondary"
-                    icon={<Icon name="upload" size={16} />}
-                    loading={logo.status === 'uploading'}
-                    aria-describedby={fid('logo-hint')}
-                    onClick={() => logoInputRef.current?.click()}
-                  >
-                    {ti.logoUpload}
-                  </Button>
                   {form.logo_url && (
                     <Button variant="danger-ghost" icon={<Icon name="trash" size={16} />} onClick={() => updateField('logo_url', null)}>
                       {ti.logoRemove}
                     </Button>
                   )}
                 </div>
-                <p className="ui-hint" id={fid('logo-hint')}>{ti.logoHint}</p>
-                <p role="status" className={logoStatus ? 'ui-hint' : 'sr-only'}>{logoStatus}</p>
-                {logo.status === 'error' && <p role="alert" className="ui-error">{logo.message}</p>}
               </div>
 
               <Field id={fid('logo_url')} label={ti.logoUrl} error={errorFor('logo_url')}>
@@ -815,6 +808,16 @@ export default function BrandIdentityPage() {
                   placeholder="https://…"
                 />
               </Field>
+
+              {/* Varias versiones del logo e íconos, clasificadas al subirlas.
+                  «Usar como principal» cambia logo_url en el formulario. */}
+              <BrandLogoLibrary
+                locale={locale}
+                canEdit={canEdit}
+                primaryUrl={form.logo_url ?? null}
+                onPrimaryChange={(url) => updateField('logo_url', url)}
+                refreshKey={libraryKey}
+              />
             </div>
           </SectionCard>
 

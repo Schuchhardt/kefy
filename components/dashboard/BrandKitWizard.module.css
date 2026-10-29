@@ -87,6 +87,12 @@
 .foundRow dt { color: var(--muted); }
 .foundRow dd { margin: 0; color: var(--text); overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; }
 .swatch { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border); flex-shrink: 0; }
+.foundRow dd:has(.foundLogos) { flex-wrap: wrap; }
+.foundLogos { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.foundLogo {
+  width: 40px; height: 40px; object-fit: contain; padding: 4px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2);
+}
 .actionsRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* ── Imagen ──────────────────────────────────────────────── */
