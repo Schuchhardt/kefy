@@ -163,6 +163,8 @@ const es = {
     reply_to_comment: 'Respondiendo comentario…',
     list_brand_assets: 'Revisando los assets de la marca…',
     add_brand_asset: 'Guardando el asset…',
+    update_brand_asset: 'Reclasificando el asset…',
+    create_brand_icon: 'Recortando el ícono…',
     delete_brand_asset: 'Borrando el asset…',
     create_brand: 'Creando la marca…',
     archive_brand: 'Archivando la marca…',
@@ -315,6 +317,8 @@ const es = {
     add_brand_asset: (i): string => (i.set_as_logo
       ? 'Añadir la imagen a los assets y usarla como logo de la marca'
       : 'Añadir una imagen a los assets de la marca'),
+    update_brand_asset: () => 'Cambiar la clasificación de un asset de la marca',
+    create_brand_icon: () => 'Crear un ícono recortando un logo de la marca',
     delete_brand_asset: (_i, p) => {
       const what = str(p.label) ? quote(p.label) : str(p.type);
       return what ? `Borrar el asset ${what} de la marca` : 'Borrar un asset de la marca';

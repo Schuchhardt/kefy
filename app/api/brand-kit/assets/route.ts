@@ -34,7 +34,9 @@ export async function GET(req: NextRequest) {
 // ─── POST /api/brand-kit/assets ───────────────────────────────────────────────
 // Upload a new asset. Expects multipart/form-data with:
 //   file  — the image file (required)
-//   type  — 'logo' | 'image' | 'icon' | 'other' (optional, default 'other')
+//   type  — 'logo' | 'image' | 'icon' | 'other' | 'auto' (optional, default 'other').
+//           'auto' mide la imagen y la guarda como logo o ícono, con su forma y
+//           el fondo para el que sirve (lib/services/brand-assets.ts).
 //   label — human-readable label (optional)
 
 export async function POST(req: NextRequest) {
@@ -78,7 +80,7 @@ export async function POST(req: NextRequest) {
       buffer: Buffer.from(await file.arrayBuffer()),
       contentType: file.type,
       filename: file.name,
-      type: typeof rawType === 'string' ? (rawType as AssetType) : undefined,
+      type: typeof rawType === 'string' ? (rawType as AssetType | 'auto') : undefined,
       label: typeof rawLabel === 'string' ? rawLabel : null,
     });
     const res = NextResponse.json({ asset }, { status: 201 });

@@ -12,6 +12,12 @@ export type BrandTone =
 
 export type AssetType = 'logo' | 'image' | 'icon' | 'other';
 
+/** Forma del contenido de un logo o ícono, sin márgenes (lib/brand-logos.ts). */
+export type LogoVariant = 'horizontal' | 'vertical' | 'square';
+
+/** Fondo para el que está pensado: claro, oscuro o cualquiera. */
+export type LogoBackground = 'light' | 'dark' | 'any';
+
 export type CompanySize = '1-10' | '11-50' | '51-200' | '201-500' | '500+';
 
 export interface SocialUrls {
@@ -68,6 +74,12 @@ export interface BrandAsset {
   public_url:   string;
   file_size:    number | null;
   mime_type:    string | null;
+  variant:         LogoVariant | null;
+  background:      LogoBackground | null;
+  width:           number | null;
+  height:          number | null;
+  /** Logo del que se recortó este ícono. */
+  source_asset_id: string | null;
   created_at:   string;
 }
 

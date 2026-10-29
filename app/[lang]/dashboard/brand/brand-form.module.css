@@ -111,6 +111,22 @@
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+/* Logos que trae la web: miniaturas antes de importarlos. */
+.enrichLogos {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.enrichList dd:has(.enrichLogos) { flex-wrap: wrap; }
+.enrichLogo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
 .actions {
   display: flex;
   flex-wrap: wrap;

@@ -3,8 +3,9 @@
 // Perfil (Brand Kit): get_brand_profile, update_brand_profile e
 // import_brand_from_website, con lib/services/brand-kit.ts (el mismo servicio
 // que GET/PATCH /api/brand-kit).
-// Biblioteca de assets: list_brand_assets, add_brand_asset y
-// delete_brand_asset (lib/services/brand-assets.ts, /api/brand-kit/assets).
+// Biblioteca de assets: list_brand_assets, add_brand_asset, update_brand_asset,
+// create_brand_icon y delete_brand_asset (lib/services/brand-assets.ts,
+// /api/brand-kit/assets).
 // Marcas: create_brand, archive_brand y set_brand_avatar
 // (lib/services/brands.ts, /api/brands/**).
 //
@@ -22,8 +23,10 @@ import { getOrCreateBrandKit, updateBrandKit } from '@/lib/services/brand-kit';
 import { importBrandFromWebsite } from '@/lib/services/brand-enrich';
 import { downloadExternalMedia, ingestExternalMedia } from '@/lib/services/media-ingest';
 import {
-  ASSET_TYPES, addBrandAssetFromUrl, deleteBrandAsset, getBrandAsset, listBrandAssets,
+  ASSET_TYPES, addBrandAssetFromUrl, createIconFromAsset, deleteBrandAsset, getBrandAsset, listBrandAssets,
+  updateBrandAsset, type BrandAssetView,
 } from '@/lib/services/brand-assets';
+import { LOGO_BACKGROUNDS, LOGO_VARIANTS } from '@/lib/brand-logos';
 import { archiveBrand, clearBrandAvatar, createBrand, setBrandAvatar } from '@/lib/services/brands';
 import { getActiveBrandById } from '@/lib/brands';
 import { isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
@@ -182,6 +185,8 @@ const importBrandFromWebsiteTool = defineTool({
     "Reads the brand's website and fills in the EMPTY fields of the brand profile (name, tagline, mission, industry, " +
     'audience, tone, colors, logo, fonts, social links). It never overwrites a field that already has a value: ' +
     'data.filled lists what was saved and data.kept what the website had but was left as is. ' +
+    'Every logo and icon found on the website (logo, favicon…) is also saved to the brand asset library, ' +
+    'classified automatically; data.logos_imported counts the new ones. ' +
     'Always requires user confirmation. ' +
     `Cost: ${CREDIT_COSTS.text} credit, refunded if the website can't be read.`,
   input: z.object({
@@ -196,22 +201,27 @@ const importBrandFromWebsiteTool = defineTool({
   handler: async (ctx, input) => {
     const out = await importBrandFromWebsite(ctx, { url: input.url });
     return {
-      data: { url: out.url, filled: out.filled, kept: out.kept, kit: projectKit(out.kit) },
+      data: { url: out.url, filled: out.filled, kept: out.kept, logos_imported: out.logos_imported, kit: projectKit(out.kit) },
       links: brandLinks(ctx.language),
-      dataChanged: out.filled.length > 0 ? ['brand-kit'] : undefined,
+      dataChanged: out.filled.length > 0 || out.logos_imported > 0 ? ['brand-kit'] : undefined,
     };
   },
 });
 
 // ─── Biblioteca de assets ────────────────────────────────────────────────────
 
-function assetView(a: { id: string; type: string; label: string | null; public_url: string; mime_type: string | null; created_at: string }) {
+function assetView(a: BrandAssetView) {
   return {
     id: a.id,
     type: a.type,
     label: wrapUntrusted('brand_data', a.label),
     url: a.public_url,
     mime_type: a.mime_type,
+    variant: a.variant,
+    background: a.background,
+    width: a.width,
+    height: a.height,
+    source_asset_id: a.source_asset_id,
     created_at: a.created_at,
   };
 }
@@ -221,8 +231,10 @@ const listBrandAssetsTool = defineTool({
   title: { es: 'Ver assets de la marca', en: 'List brand assets' },
   kind: 'read',
   description:
-    "Lists the brand's asset library (logos, images, icons) with their Kefy-hosted urls. A url from here can be " +
-    'used as logo_url in update_brand_profile or as a reference image when creating content. Costs no credits.',
+    "Lists the brand's asset library (logos, images, icons) with their Kefy-hosted urls. A brand can have several " +
+    'logos and icons: variant is the shape of the content (horizontal, vertical, square) and background the ' +
+    'background it is meant for (light, dark, any). A url from here can be used as logo_url in ' +
+    'update_brand_profile or as a reference image when creating content. Costs no credits.',
   input: z.object({}).strict(),
   confirm: 'never',
   handler: async (ctx) => {
@@ -238,10 +250,12 @@ const addBrandAssetTool = defineTool({
   roles: ['owner', 'admin'],
   description:
     "Downloads an image (https, PNG, JPEG, WebP or GIF, up to 10 MB) and stores it in the brand's asset library. " +
+    "type 'auto' measures a logo or icon and files it as one or the other, with its shape and background. " +
     'set_as_logo also makes it the brand logo used on generated images and videos. Costs no credits.',
   input: z.object({
     image_url: httpsUrl.describe('Public https URL of the image.'),
-    type: z.enum(ASSET_TYPES as [string, ...string[]]).default('image').describe('Kind of asset in the library.'),
+    type: z.enum(['logo', 'image', 'icon', 'other', 'auto']).default('image')
+      .describe("Kind of asset in the library; 'auto' for a logo or icon whose kind Kefy should detect."),
     label: z.string().trim().max(100).optional().describe('Short name shown in the library.'),
     set_as_logo: z.boolean().default(false),
   }).strict(),
@@ -252,7 +266,7 @@ const addBrandAssetTool = defineTool({
   handler: async (ctx, input) => {
     const { asset } = await addBrandAssetFromUrl(ctx, {
       url: input.image_url,
-      type: input.type as (typeof ASSET_TYPES)[number],
+      type: input.type as (typeof ASSET_TYPES)[number] | 'auto',
       label: input.label ?? null,
     });
     let logoSet = false;
@@ -265,6 +279,59 @@ const addBrandAssetTool = defineTool({
       links: brandLinks(ctx.language),
       dataChanged: ['brand-kit'],
     };
+  },
+});
+
+const updateBrandAssetTool = defineTool({
+  name: 'update_brand_asset',
+  title: { es: 'Reclasificar asset de marca', en: 'Reclassify brand asset' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    "Corrects how a library asset is filed: type (logo, icon, image, other), variant (horizontal, vertical, " +
+    'square), background it is meant for (light, dark, any) or label. Costs no credits.',
+  input: z.object({
+    asset_id: z.uuid().describe('Asset of this brand (from list_brand_assets).'),
+    type: z.enum(ASSET_TYPES as [string, ...string[]]).optional(),
+    variant: z.enum(LOGO_VARIANTS as [string, ...string[]]).optional(),
+    background: z.enum(LOGO_BACKGROUNDS as [string, ...string[]]).optional(),
+    label: z.string().trim().max(100).optional(),
+  }).strict(),
+  confirm: 'never',
+  handler: async (ctx, input) => {
+    const { asset } = await updateBrandAsset(ctx, input.asset_id, {
+      type: input.type as BrandAssetView['type'] | undefined,
+      variant: input.variant as BrandAssetView['variant'] | undefined,
+      background: input.background as BrandAssetView['background'] | undefined,
+      label: input.label,
+    });
+    return { data: { asset: assetView(asset) }, links: brandLinks(ctx.language), dataChanged: ['brand-kit'] };
+  },
+});
+
+const createBrandIconTool = defineTool({
+  name: 'create_brand_icon',
+  title: { es: 'Crear ícono desde un logo', en: 'Create icon from a logo' },
+  kind: 'write',
+  roles: ['owner', 'admin'],
+  description:
+    "Crops a square icon out of a logo in the brand's library and stores it as a new icon asset. crop is the " +
+    'region as fractions of the image (0 to 1); without it Kefy proposes one (the symbol at the left of a ' +
+    'horizontal logo, at the top of a vertical one, the centre of a square one). Costs no credits.',
+  input: z.object({
+    asset_id: z.uuid().describe('Logo of this brand (from list_brand_assets).'),
+    crop: z.object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+      width: z.number().gt(0).max(1),
+      height: z.number().gt(0).max(1),
+    }).strict().optional().describe('Region to keep, in fractions of the image.'),
+    label: z.string().trim().max(100).optional(),
+  }).strict(),
+  confirm: 'never',
+  handler: async (ctx, input) => {
+    const { asset } = await createIconFromAsset(ctx, input.asset_id, { crop: input.crop ?? null, label: input.label ?? null });
+    return { data: { asset: assetView(asset) }, links: brandLinks(ctx.language), dataChanged: ['brand-kit'] };
   },
 });
 
@@ -368,6 +435,8 @@ export const brandTools = [
   importBrandFromWebsiteTool,
   listBrandAssetsTool,
   addBrandAssetTool,
+  updateBrandAssetTool,
+  createBrandIconTool,
   deleteBrandAssetTool,
   createBrandTool,
   archiveBrandTool,

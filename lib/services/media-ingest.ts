@@ -35,6 +35,7 @@ const TIMEOUT_MS = 15_000;
 const MAX_BYTES: Record<MediaKind, number> = {
   image: 10 * 1024 * 1024,
   video: 50 * 1024 * 1024,
+  logo:  5 * 1024 * 1024,
 };
 
 const ALLOWED_TYPES: Record<MediaKind, Record<string, string>> = {
@@ -49,9 +50,19 @@ const ALLOWED_TYPES: Record<MediaKind, Record<string, string>> = {
     'video/quicktime': 'mov',
     'video/webm':      'webm',
   },
+  // Logos de la biblioteca de la marca: los mismos tipos que acepta la subida
+  // (lib/brand-kit.ts), SVG incluido porque es como suelen venir en una web.
+  // Nunca se publican tal cual: no pasan por ingestExternalMedia.
+  logo: {
+    'image/jpeg':    'jpg',
+    'image/png':     'png',
+    'image/webp':    'webp',
+    'image/gif':     'gif',
+    'image/svg+xml': 'svg',
+  },
 };
 
-export type MediaKind = 'image' | 'video';
+export type MediaKind = 'image' | 'video' | 'logo';
 
 function invalid(message: string): ServiceError {
   return new ServiceError('invalid_input', 422, message);
@@ -162,8 +173,8 @@ export async function downloadExternalMedia(
     if (!ext) {
       throw invalid(msg(
         lang,
-        `Tipo de ${kind === 'image' ? 'imagen' : 'video'} no permitido: ${contentType || 'desconocido'}`,
-        `Unsupported ${kind} type: ${contentType || 'unknown'}`,
+        `Tipo de ${kind === 'video' ? 'video' : 'imagen'} no permitido: ${contentType || 'desconocido'}`,
+        `Unsupported ${kind === 'video' ? 'video' : 'image'} type: ${contentType || 'unknown'}`,
       ));
     }
 
@@ -210,7 +221,7 @@ export async function downloadExternalMedia(
 export async function ingestExternalMedia(
   ctx: ServiceContext,
   url: string,
-  kind: MediaKind,
+  kind: Exclude<MediaKind, 'logo'>,
 ): Promise<string> {
   const lang = ctx.language;
   const { buffer, contentType, ext } = await downloadExternalMedia(ctx, url, kind);

@@ -10,10 +10,12 @@ export const maxDuration = 60;
 
 // POST /api/brand-kit/enrich-url
 // Body: { url: string, lang?: string }
-// Returns: { extracted: Partial<BrandKit> }
+// Returns: { extracted: Partial<BrandKit>, logos: WebLogo[] }
 //
 // La lógica vive en lib/services/brand-enrich.ts (la comparten el onboarding y
 // el asistente). Cuesta 1 crédito: antes no pasaba por ninguna guardia.
+// No guarda nada: los logos se importan cuando la persona aplica lo leído
+// (POST /api/brand-kit/assets/import).
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) {
@@ -43,8 +45,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { extracted } = await enrichBrandFromUrl(serviceContext(auth, brand.id, language), { url });
-    const res = NextResponse.json({ extracted });
+    const { extracted, logos } = await enrichBrandFromUrl(serviceContext(auth, brand.id, language), { url });
+    const res = NextResponse.json({ extracted, logos });
     if (setCookieHeader) res.headers.append('Set-Cookie', setCookieHeader);
     return res;
   } catch (err) {

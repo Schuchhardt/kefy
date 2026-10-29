@@ -18,7 +18,7 @@
 // ninguna petición se acerca al límite de duración de la función.
 
 import { getOrCreateBrandKit, updateBrandKit } from '@/lib/services/brand-kit';
-import { enrichBrandFromUrl, fillEmptyFields, validateWebsiteUrl } from '@/lib/services/brand-enrich';
+import { enrichBrandFromUrl, fillEmptyFields, storeWebLogos, validateWebsiteUrl } from '@/lib/services/brand-enrich';
 import { generateTextPost } from '@/lib/services/content';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, msg } from '@/lib/services/errors';
@@ -130,7 +130,8 @@ export async function createStarterPosts(ctx: ServiceContext, input: StarterInpu
   let websiteError: string | undefined;
   if (url) {
     try {
-      extracted = (await enrichBrandFromUrl(ctx, { url })).extracted;
+      // Sus logos van a la biblioteca y el principal queda alojado en Kefy.
+      extracted = (await storeWebLogos(ctx, await enrichBrandFromUrl(ctx, { url }))).extracted;
     } catch (err) {
       // URL inválida, sin suscripción o sin créditos: nada más va a funcionar.
       if (!(err instanceof ServiceError) || BLOCKING_CODES.has(err.code)) throw err;
