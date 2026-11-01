@@ -713,3 +713,10 @@ Envía un mensaje en una conversación de inbox. Es el endpoint correcto para re
 | `402 PAYMENT_REQUIRED` | X/Twitter supera el límite gratuito | Añadir método de pago en el dashboard de Zernio |
 | Imagen cortada al publicar | Recorte forzado al tamaño canónico de la red | Corregido: ver *Formato de imagen por red* |
 | Imagen en X detrás de aviso de contenido sensible | Ajuste de la cuenta de X, no de la API | Ver *X/Twitter: media marcado como sensible* |
+
+## Firma del webhook
+
+`POST /api/webhooks/zernio` exige la cabecera `x-zernio-signature: sha256=<hex>`
+(HMAC-SHA256 del cuerpo crudo con `ZERNIO_WEBHOOK_SECRET`). Sin firma válida, o
+sin el secreto configurado, responde 401. Cubierto en
+`tests/unit/api/webhooks-zernio.test.ts`.

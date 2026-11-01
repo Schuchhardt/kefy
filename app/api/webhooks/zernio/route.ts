@@ -3,6 +3,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { executeEngagementRules } from '@/lib/engagement-executor';
 import { safePostUrl } from '@/lib/zernio';
 import { reportError } from '@/lib/observability';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
 // Receives real-time events from Zernio and processes them.
@@ -531,8 +532,24 @@ async function handleAdStatusChanged(db: DB, data: Data) {
 
 // ─── Main handler ──────────────────────────────────────────────────────────────
 
+// Firma HMAC-SHA256 del cuerpo crudo con ZERNIO_WEBHOOK_SECRET. Sin secreto
+// configurado se rechaza todo (falla cerrado): el webhook escribe estados de
+// posts, tokens de cuentas y mensajes, no puede aceptar peticiones anónimas.
+function verifyZernioSignature(rawBody: Buffer, header: string | null): boolean {
+  const secret = process.env.ZERNIO_WEBHOOK_SECRET;
+  if (!secret || !header) return false;
+  const received = header.trim().replace(/^sha256=/i, '').toLowerCase();
+  const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+  if (received.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(received), Buffer.from(expected));
+}
+
 export async function POST(req: NextRequest) {
   const rawBody = Buffer.from(await req.arrayBuffer());
+
+  if (!verifyZernioSignature(rawBody, req.headers.get('x-zernio-signature'))) {
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+  }
 
   let rawPayload: Record<string, unknown>;
   try {
