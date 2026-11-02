@@ -130,6 +130,11 @@ const en: ContentCopy = {
   recommendSourceStrategy: (framework: string, kpi: string, week: number, total: number) =>
     `Based on your “${framework}” strategy — Week ${week} of ${total} · KPI: ${kpi}`,
   recommendSourceAI: 'AI-generated from your Brand Kit.',
+  recommendSourceHistory: (framework: string | null, kpi: string | null) =>
+    'Based on what you already published, weighting your latest and best-performing pieces'
+    + (framework ? ` · Strategy “${framework}”` : '')
+    + (kpi ? ` · KPI: ${kpi}` : ''),
+  historyBadge: 'Your content',
   weekBadge: (week: number, post: number) => `Week ${week} · Post ${post}`,
   aiBadge: 'AI',
 

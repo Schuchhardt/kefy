@@ -139,6 +139,11 @@ const es = {
   recommendSourceStrategy: (framework: string, kpi: string, week: number, total: number) =>
     `Basado en tu estrategia «${framework}» — Semana ${week} de ${total} · KPI: ${kpi}`,
   recommendSourceAI: 'Generado por IA a partir de tu Brand Kit.',
+  recommendSourceHistory: (framework: string | null, kpi: string | null) =>
+    'Basado en lo que ya publicaste, con más peso en lo último y en lo que mejor funcionó'
+    + (framework ? ` · Estrategia «${framework}»` : '')
+    + (kpi ? ` · KPI: ${kpi}` : ''),
+  historyBadge: 'Tu contenido',
   weekBadge: (week: number, post: number) => `Semana ${week} · Post ${post}`,
   aiBadge: 'IA',
 

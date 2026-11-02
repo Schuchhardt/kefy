@@ -460,7 +460,7 @@ export async function saveCustomStrategy(
 // get_content_ideas.
 
 export type RecommendedContentType = 'post' | 'carousel' | 'reel' | 'story';
-export type RecommendSource = 'strategy' | 'industry_fallback' | 'ai_only';
+export type RecommendSource = 'strategy' | 'industry_fallback' | 'ai_only' | 'history';
 
 export interface Recommendation {
   template_id?:    string;

@@ -111,13 +111,17 @@ export default function RecommendModal({
                 display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+              {/* El badge baja a su propia línea si no cabe: antes se montaba
+                  sobre la descripción del formato en tarjetas angostas. */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                 <FormatExample format={r.content_type} lang={lang} />
                 <span
                   className="ui-badge"
                   style={{ ['--badge-color' as string]: 'var(--accent-text)', ['--badge-bg' as string]: 'var(--accent-soft)', flexShrink: 0 }}
                 >
-                  {r.week_num && r.post_num ? t.weekBadge(r.week_num, r.post_num) : t.aiBadge}
+                  {r.week_num && r.post_num
+                    ? t.weekBadge(r.week_num, r.post_num)
+                    : r.rationale.source === 'history' ? t.historyBadge : t.aiBadge}
                 </span>
               </div>
               <p style={{

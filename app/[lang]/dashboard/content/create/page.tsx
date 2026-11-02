@@ -1232,6 +1232,9 @@ function ContentPageInner() {
     if ((recsSource === 'strategy' || recsSource === 'industry_fallback') && recsMeta) {
       return t.recommendSourceStrategy(recsMeta.framework_name, recsMeta.kpi_primary, recsMeta.current_week, recsMeta.total_weeks);
     }
+    if (recsSource === 'history') {
+      return t.recommendSourceHistory(recsMeta?.framework_name || null, recsMeta?.kpi_primary || null);
+    }
     if (recsSource === 'ai_only') return t.recommendSourceAI;
     return '';
   })();

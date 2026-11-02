@@ -184,6 +184,28 @@ export interface RecommendBrandContext {
     sample_topics?:  string[];
   };
   recent_topics?:   string[];
+  /** Lo que la marca ya hizo, de lo más nuevo a lo más viejo. */
+  history?:         ContentHistoryEntry[];
+  /** Cuántas veces se pidió «Otras ideas»: empuja a ángulos menos obvios. */
+  rotation?:        number;
+}
+
+/** Una pieza que la marca ya creó, con sus métricas si se publicó y se midió. */
+export interface ContentHistoryEntry {
+  topic:         string;
+  content_type:  RecommendedContentType;
+  published:     boolean;
+  /** Días desde que se publicó (o se creó, si no se publicó). */
+  age_days:      number;
+  metrics: {
+    impressions:     number;
+    reach:           number;
+    engagements:     number;
+    /** Porcentaje (interacciones / alcance), o null sin alcance. */
+    engagement_rate: number | null;
+  } | null;
+  /** Entre las de mejor rendimiento de la marca. */
+  top_performer: boolean;
 }
 
 export interface GenerateRecommendationsResult {

@@ -476,6 +476,18 @@ En la UI, `/api/strategies/org` (conserva el nombre) lee y guarda la de la
 marca activa (cookie). La tarjeta de confirmación de `set_active_strategy` (y
 de `save_custom_strategy` con `activate`) nombra la marca.
 
+**Las ideas se construyen sobre lo que la marca ya publicó.** La
+«Recomendación inteligente» de Crear contenido (`/api/content/recommend` →
+`recommendContent` en `lib/services/recommendations.ts`) solo muestra las
+plantillas del calendario a una marca **sin** contenido. Con contenido, la IA
+recibe sus últimas piezas (de la más nueva a la más vieja, con métricas y las
+de mejor rendimiento marcadas por `markTopPerformers`) y propone continuaciones
+de esos temas, con más peso en la última y en las que mejor funcionaron; la
+estrategia activa entra como lente (framework, KPI, ángulos de la semana), no
+como temas genéricos con `[placeholders]`. `get_content_ideas` devuelve el
+mismo historial en `recent_content` para que el asistente razone igual sin
+gastar créditos.
+
 `get_workspace_context` es `brandOptional` (`lib/assistant/registry.ts`): sin
 `brand_id` en una org con varias marcas no responde `brand_required`, devuelve
 la organización y la lista de marcas con `brand` y lo de cada marca en `null`.
