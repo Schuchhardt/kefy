@@ -67,6 +67,29 @@ const es = {
     },
   },
 
+  /** Una publicación ya programada: su fecha, cambiarla y editarla. */
+  scheduled: {
+    scheduledFor: (when: string) => `Programada para el ${when}`,
+    publishedOn: (when: string) => `Publicada el ${when}`,
+    failedOn: (when: string) => `Falló el ${when}`,
+    goingOut: 'Se está publicando ahora',
+    reschedule: 'Cambiar fecha',
+    editContent: 'Editar contenido',
+    editHint: 'Si editas el contenido, el cambio se aplica también a lo programado.',
+    rescheduleTitle: 'Cambiar fecha de publicación',
+    rescheduleCurrent: (when: string) => `Ahora sale el ${when}.`,
+    rescheduleSave: 'Guardar fecha',
+    rescheduleCancel: 'Volver',
+    rescheduleSaved: (when: string) => `Listo: saldrá el ${when}.`,
+    reschedulePast: 'Elige una fecha y hora futuras.',
+    rescheduleError: 'No se pudo cambiar la fecha. Inténtalo de nuevo.',
+    syncOk: (n: number) => (n === 1
+      ? 'El cambio se aplicó a la publicación programada.'
+      : `El cambio se aplicó a las ${n} publicaciones programadas.`),
+    syncFailed: (networks: string) => `El cambio no llegó a ${networks}: esa publicación saldría con la versión anterior. Cancélala y vuelve a programarla.`,
+    syncError: 'No se pudo aplicar el cambio a lo programado: podría salir la versión anterior. Revisa el calendario o vuelve a programarlo.',
+  },
+
   dateTime: {
     dayLabel: 'Día de publicación',
     timeLabel: 'Hora',

@@ -147,6 +147,17 @@ export interface ScheduledPost {
   kefy_social_accounts:   { id: string; platform: string; username: string; avatar_url: string | null; status: string } | null;
 }
 
+/**
+ * Resultado de reenviar un contenido editado a sus publicaciones programadas
+ * (Zernio guarda una copia al programar).
+ */
+export interface ScheduledSyncResult {
+  /** Publicaciones programadas que recibieron el contenido nuevo. */
+  updated: number;
+  /** Las que siguen con el contenido anterior en la red. */
+  failed: Array<{ scheduled_post_id: string; platform: string | null; error: string }>;
+}
+
 // ─── Dashboard summary ───────────────────────────────────────────────────────
 
 export interface TopPost {

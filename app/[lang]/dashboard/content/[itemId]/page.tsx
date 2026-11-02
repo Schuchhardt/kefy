@@ -30,6 +30,8 @@ import { toLocale } from '@/lib/i18n';
 import { useBrand } from '@/lib/brand-context';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
+import RescheduleModal, { formatScheduledDate } from '@/components/dashboard/content/RescheduleModal';
+import { scheduledSyncNotice } from '@/components/dashboard/content/scheduled-sync';
 import ViewPublishedLink from '@/components/dashboard/content/ViewPublishedLink';
 import type { ContentItem, ContentType, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
 import esT from '@/locales/es/dashboard/content-detail';
@@ -67,11 +69,25 @@ interface PerformanceEntry {
   } | null;
 }
 
+/** Una publicación de este contenido (GET /api/content/[itemId]). */
+interface ItemScheduledPost {
+  id: string;
+  status: string;
+  scheduled_at: string | null;
+  kefy_social_accounts: { platform: string; username: string | null } | null;
+}
+
+/** Programada y con la hora todavía por delante: se puede mover o cancelar. */
+function isUpcoming(p: ItemScheduledPost): boolean {
+  return p.status === 'scheduled' && !!p.scheduled_at && new Date(p.scheduled_at).getTime() > Date.now();
+}
+
 export default function ContentDetailPage() {
   const { lang, itemId } = useParams<{ lang: string; itemId: string }>();
   const router = useRouter();
   const locale = toLocale(lang);
   const t = T[locale];
+  const ts = PUBLISH[locale].scheduled;
   const common = COMMON[locale];
   const dateLocale = locale === 'en' ? 'en-US' : 'es-ES';
   const { confirm, dialog } = useConfirm();
@@ -90,6 +106,9 @@ export default function ContentDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [brandSwitchFailed, setBrandSwitchFailed] = useState(false);
+  const [scheduledPosts, setScheduledPosts] = useState<ItemScheduledPost[]>([]);
+  const [reschedulePost, setReschedulePost] = useState<ItemScheduledPost | null>(null);
+  const [scheduleNotice, setScheduleNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null);
 
   /** `silent`: recarga sin volver al esqueleto (tras publicar, con el modal
    *  mostrando el resultado encima). */
@@ -99,8 +118,9 @@ export default function ContentDetailPage() {
     fetch(`/api/content/${encodeURIComponent(itemId)}`, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) { if (!silent) setNotFound(true); return; }
-        const data = await res.json() as { item?: ContentItem };
+        const data = await res.json() as { item?: ContentItem; scheduled_posts?: ItemScheduledPost[] };
         if (data.item) setItem(data.item); else if (!silent) setNotFound(true);
+        setScheduledPosts(data.scheduled_posts ?? []);
       })
       .catch(() => { if (!silent) setNotFound(true); })
       .finally(() => { if (!silent) setLoading(false); });
@@ -162,6 +182,26 @@ export default function ContentDetailPage() {
   // se debe pisar aunque el usuario haya cambiado de pestaña.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [performance]);
+
+  async function handleCancelScheduled(post: ItemScheduledPost) {
+    const ok = await confirm({
+      title: t.cancelScheduledTitle,
+      message: t.cancelScheduledMessage,
+      confirmLabel: t.cancelScheduled,
+      cancelLabel: t.cancelScheduledKeep,
+      danger: true,
+    });
+    if (!ok) return;
+    setActionError(null);
+    setScheduleNotice(null);
+    try {
+      const res = await fetch(`/api/social/schedule/${post.id}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error(`cancel ${res.status}`);
+    } catch {
+      setActionError(t.cancelScheduledError);
+    }
+    fetchItem({ silent: true });
+  }
 
   function handleUpdate(patch: Partial<ContentItem>) {
     setItem((prev) => prev ? { ...prev, ...patch } : prev);
@@ -237,6 +277,9 @@ export default function ContentDetailPage() {
     || t.untitled;
   const channelLabel = item.channel === 'generic' ? t.channelGeneric : (NET_LABEL[item.channel] ?? item.channel);
   const numberFormat = new Intl.NumberFormat(dateLocale);
+  const upcoming = scheduledPosts
+    .filter(isUpcoming)
+    .sort((a, b) => a.scheduled_at!.localeCompare(b.scheduled_at!));
 
   return (
     <div className="page" style={{ maxWidth: 1000, margin: '0 auto' }}>
@@ -271,6 +314,7 @@ export default function ContentDetailPage() {
       </header>
 
       {actionError && <div style={{ marginBottom: 16 }}><Notice tone="danger">{actionError}</Notice></div>}
+      {scheduleNotice && <div style={{ marginBottom: 16 }}><Notice tone={scheduleNotice.tone}>{scheduleNotice.text}</Notice></div>}
 
       <div className={styles.layout}>
         {/* ── Preview ──────────────────────────────────────────────────── */}
@@ -331,8 +375,41 @@ export default function ContentDetailPage() {
         {/* ── Detalle / acciones ───────────────────────────────────────── */}
         <div className={styles.side}>
           {!isPublished ? (
+            <>
+            {upcoming.length > 0 && (
+              <section className="ui-card" aria-labelledby="content-schedule-title">
+                <div className="ui-card-head">
+                  <h2 id="content-schedule-title" className="ui-card-title">{t.scheduleTitle}</h2>
+                </div>
+                <ul className={styles.scheduleList}>
+                  {upcoming.map((p) => {
+                    const platform = p.kefy_social_accounts?.platform ?? null;
+                    return (
+                      <li key={p.id} className={styles.scheduleItem}>
+                        <div className={styles.metricsNet}>
+                          <ChannelIcon name={platform ?? item.channel} size={14} />
+                          <span className={styles.metricsNetName}>
+                            {platform ? (NET_LABEL[platform] ?? platform) : channelLabel}
+                            {p.kefy_social_accounts?.username ? ` · @${p.kefy_social_accounts.username}` : ''}
+                          </span>
+                        </div>
+                        <p className={styles.scheduleWhen}>{ts.scheduledFor(formatScheduledDate(p.scheduled_at!, locale))}</p>
+                        <div className={styles.scheduleActions}>
+                          <Button variant="secondary" size="sm" icon={<Icon name="calendar" size={14} />} onClick={() => { setScheduleNotice(null); setReschedulePost(p); }}>
+                            {ts.reschedule}
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => void handleCancelScheduled(p)}>
+                            {t.cancelScheduled}
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
             <section className="ui-card">
-              <p className={styles.draftNotice}>{t.draftNotice}</p>
+              <p className={styles.draftNotice}>{upcoming.length > 0 ? ts.editHint : t.draftNotice}</p>
               <div className={styles.actions}>
                 <Button variant="primary" size="lg" block icon={<Icon name="send" size={16} />} onClick={() => setScheduleOpen(true)}>
                   {t.publish}
@@ -351,6 +428,7 @@ export default function ContentDetailPage() {
                 </Button>
               </div>
             </section>
+            </>
           ) : (
             <>
               <section className="ui-card" aria-labelledby="content-stats-title">
@@ -432,6 +510,17 @@ export default function ContentDetailPage() {
         brandKit={brandKit}
         lang={locale}
         onUpdate={handleUpdate}
+        onScheduledSync={(result) => setScheduleNotice(scheduledSyncNotice(result, locale))}
+      />
+      <RescheduleModal
+        open={!!reschedulePost}
+        onClose={() => setReschedulePost(null)}
+        post={reschedulePost}
+        lang={locale}
+        onSuccess={(at) => {
+          setScheduleNotice({ tone: 'success', text: ts.rescheduleSaved(formatScheduledDate(at, locale)) });
+          fetchItem({ silent: true });
+        }}
       />
       {dialog}
     </div>

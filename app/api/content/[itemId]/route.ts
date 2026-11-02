@@ -22,9 +22,10 @@ export async function GET(
   const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
 
   try {
-    // Include drafts
-    const { item, drafts } = await getContent(ctx, itemId);
-    return NextResponse.json({ item, drafts });
+    // Borradores y sus publicaciones (la página de detalle muestra para cuándo
+    // está programado y deja cambiar la fecha).
+    const { item, drafts, scheduled_posts } = await getContent(ctx, itemId, { withScheduled: true });
+    return NextResponse.json({ item, drafts, scheduled_posts: scheduled_posts ?? [] });
   } catch (e) {
     return serviceErrorResponse(e, { route: 'GET /api/content/[itemId]', auth });
   }
@@ -51,10 +52,12 @@ export async function PATCH(
   }
 
   // Las validaciones (422) y sus mensajes están en updateContent. Desde la UI
-  // se puede pasar a cualquier estado.
+  // se puede pasar a cualquier estado. ?sync=defer: el autoguardado del editor
+  // no reenvía cada tecla a lo programado; sincroniza al cerrar.
   const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
+  const deferSync = new URL(req.url).searchParams.get('sync') === 'defer';
   try {
-    const out = await updateContent(ctx, itemId, body as Record<string, unknown>);
+    const out = await updateContent(ctx, itemId, body as Record<string, unknown>, { syncScheduled: !deferSync });
     return NextResponse.json(out);
   } catch (e) {
     return serviceErrorResponse(e, { route: 'PATCH /api/content/[itemId]', auth });

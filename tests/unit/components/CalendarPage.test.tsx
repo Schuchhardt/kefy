@@ -171,7 +171,7 @@ describe('CalendarPage — agenda (móvil)', () => {
 });
 
 describe('CalendarPage — acciones', () => {
-  it('cancelar pide confirmación con el diálogo de la app y hace PATCH', async () => {
+  it('cancelar pide confirmación con el diálogo de la app y hace DELETE', async () => {
     const nativeConfirm = vi.fn(() => true);
     vi.stubGlobal('confirm', nativeConfirm);
     renderCalendar();
@@ -185,10 +185,44 @@ describe('CalendarPage — acciones', () => {
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url]) => url === '/api/social/schedule/p1');
       expect(call).toBeTruthy();
-      expect((call![1] as RequestInit).method).toBe('PATCH');
-      expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({ status: 'cancelled' });
+      // La ruta solo tiene DELETE para cancelar (antes se mandaba un PATCH que no existía).
+      expect((call![1] as RequestInit).method).toBe('DELETE');
     });
     expect(nativeConfirm).not.toHaveBeenCalled();
+  });
+
+  it('cada publicación dice para cuándo está programada o cuándo salió', async () => {
+    renderCalendar();
+    const agenda = await screen.findByRole('list', { name: 'Agenda de septiembre' });
+    expect(within(agenda).getByText(/^Programada para el miércoles, 16 de septiembre, 09:30$/)).toBeTruthy();
+    expect(within(agenda).getByText(/^Publicada el jueves, 10 de septiembre, 08:00$/)).toBeTruthy();
+  });
+
+  it('«Cambiar fecha» abre el selector y guarda con PATCH la fecha nueva', async () => {
+    renderCalendar();
+    const agenda = await screen.findByRole('list', { name: 'Agenda de septiembre' });
+    // Solo lo programado ofrece cambiar fecha y editar el contenido.
+    expect(within(agenda).getAllByRole('button', { name: 'Cambiar fecha' })).toHaveLength(2);
+    expect(within(agenda).getAllByRole('link', { name: 'Editar contenido' })[0]).toHaveAttribute('href', '/es/dashboard/content/item-1');
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/social/schedule/p1' && init?.method === 'PATCH') {
+        return jsonResponse({ id: 'p1', scheduled_at: JSON.parse(init.body as string).scheduled_at });
+      }
+      if (url.startsWith('/api/social/schedule?')) return jsonResponse({ posts: POSTS });
+      return jsonResponse({ accounts: ACCOUNTS });
+    });
+    fireEvent.click(within(agenda).getAllByRole('button', { name: 'Cambiar fecha' })[0]);
+    const dialog = await screen.findByRole('dialog', { name: 'Cambiar fecha de publicación' });
+    expect(within(dialog).getByText('Ahora sale el miércoles, 16 de septiembre, 09:30.')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar fecha' }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) => url === '/api/social/schedule/p1' && (init as RequestInit)?.method === 'PATCH');
+      expect(call).toBeTruthy();
+      expect(JSON.parse((call![1] as RequestInit).body as string).scheduled_at).toBe(at(16, 9, 30));
+    });
+    expect(await screen.findByText('Listo: saldrá el miércoles, 16 de septiembre, 09:30.')).toBeTruthy();
   });
 
   it('«Mantener» no cancela nada', async () => {

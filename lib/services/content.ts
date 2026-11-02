@@ -17,6 +17,7 @@ import { generateCarouselSlides, generateContentImage, generateContentText } fro
 import { consumeCredits, refundCredits } from '@/lib/usage';
 import { uploadBase64Image } from '@/lib/storage';
 import { reportError } from '@/lib/observability';
+import { syncScheduledPosts } from '@/lib/services/publish';
 import { isAllowedMediaUrl, isKefyStorageUrl } from '@/lib/assistant/url-allowlist';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, chargeOrThrow, msg } from '@/lib/services/errors';
@@ -24,7 +25,7 @@ import { loadOwnedItem } from '@/lib/services/ownership';
 import { brandPromptContext, getBrandKitForBrand } from '@/lib/services/brand-kit';
 import { ingestExternalMedia } from '@/lib/services/media-ingest';
 import type { AIModel, BrandImageContext, ContentChannel, GenerateTextResult } from '@/types/ai';
-import type { CarouselSlide, ContentStatus, ContentType, SlideInput } from '@/types/content';
+import type { CarouselSlide, ContentStatus, ContentType, ScheduledSyncResult, SlideInput } from '@/types/content';
 import type { BrandKit } from '@/types/brand-kit';
 import { fillMissingPostUrls, type PostUrlRow } from '@/lib/services/post-urls';
 
@@ -62,6 +63,9 @@ export const UPDATABLE_FIELDS = [
 export function createdVia(ctx: ServiceContext): 'ui' | 'chat' | 'api' | 'mcp' {
   return ctx.source === 'route' ? 'ui' : ctx.source;
 }
+
+/** Campos que van en lo que se manda a Zernio al publicar o programar. */
+const PUBLISHED_FIELDS = ['body', 'hashtags', 'image_url', 'video_url', 'slides'] as const;
 
 /** Campos de texto de un contenido: los que el asistente le lee al modelo. */
 const TEXT_FIELDS = ['title', 'body', 'hashtags', 'slides'] as const;
@@ -417,6 +421,12 @@ export interface UpdateContentOptions {
   allowedStatuses?: readonly string[];
   /** Campos editables. Por defecto, los de PATCH /api/content/[itemId]. */
   fields?: readonly string[];
+  /**
+   * false: no reenviar el cambio a las publicaciones programadas. Lo usa el
+   * autoguardado del editor, que sincroniza una sola vez al cerrar
+   * (POST /api/content/[itemId]/sync-scheduled) en vez de en cada tecla.
+   */
+  syncScheduled?: boolean;
 }
 
 /**
@@ -430,7 +440,7 @@ export async function updateContent(
   itemId: string,
   input: Record<string, unknown>,
   opts: UpdateContentOptions = {},
-): Promise<{ item: Record<string, unknown> }> {
+): Promise<{ item: Record<string, unknown>; scheduled_sync?: ScheduledSyncResult }> {
   const allowedStatuses = new Set(opts.allowedStatuses ?? CONTENT_STATUSES);
 
   if (input.status !== undefined && !(VALID_STATUSES.has(input.status as string) && allowedStatuses.has(input.status as string))) {
@@ -502,6 +512,15 @@ export async function updateContent(
     throw new ServiceError('unavailable', 500, 'Failed to update item').markReported();
   }
   if (!item) throw new ServiceError('not_found', 404, 'Not found');
+
+  // Zernio guarda una copia de lo programado: si cambió lo que se publica, se
+  // le reenvía. El fallo no deshace la edición, pero se devuelve para avisar
+  // de que esa red sigue con la versión anterior.
+  const changedPublished = PUBLISHED_FIELDS.some((k) => k in update);
+  if (changedPublished && opts.syncScheduled !== false && (item as { status?: string }).status === 'scheduled') {
+    const scheduled_sync = await syncScheduledPosts(ctx, itemId);
+    return { item: item as Record<string, unknown>, scheduled_sync };
+  }
 
   return { item: item as Record<string, unknown> };
 }

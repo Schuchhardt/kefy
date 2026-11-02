@@ -643,7 +643,7 @@ const updateContentTool = defineTool({
     // Media externa → Storage de Kefy: a Zernio solo le llegan archivos nuestros.
     if (input.image_url) patch.image_url = await rehostExternalMedia(ctx, input.image_url, 'image');
     if (input.video_url) patch.video_url = await rehostExternalMedia(ctx, input.video_url, 'video');
-    const { item } = await updateContent(ctx, input.item_id, patch, {
+    const { item, scheduled_sync } = await updateContent(ctx, input.item_id, patch, {
       allowedStatuses: UPDATE_STATUSES,
       fields: UPDATE_FIELDS,
     });
@@ -654,9 +654,12 @@ const updateContentTool = defineTool({
         status: item.status,
         title: wrapUntrusted('content', (item.title as string | null) ?? null),
         updated_fields: Object.keys(patch),
+        // Programado: cuántas publicaciones recibieron el cambio y cuáles
+        // siguen con la versión anterior en la red.
+        ...(scheduled_sync ? { scheduled_sync } : {}),
       },
       links: [itemLink(ctx.language, input.item_id)],
-      dataChanged: ['content'],
+      dataChanged: scheduled_sync ? ['content', 'scheduled'] : ['content'],
     };
   },
 });

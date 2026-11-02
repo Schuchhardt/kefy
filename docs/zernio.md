@@ -385,6 +385,41 @@ en `kefy_scheduled_posts.platform_post_url` y llega por tres caminos
 Tests: `tests/unit/lib/zernio.test.ts`, `tests/unit/lib/services/post-urls.test.ts`,
 `tests/unit/lib/services/publish.test.ts` y `tests/unit/api/webhooks-zernio.test.ts`.
 
+### Editar un post programado
+
+```
+PUT /v1/posts/{postId}
+```
+
+Verificado contra `docs.zernio.com/posts/update-post`: se pueden editar posts
+`draft`, `scheduled`, `failed`, `partial` y `cancelled`; uno publicado solo
+cambia su config de reciclado. Acepta los mismos campos que crear (`content`,
+`mediaItems`, `platforms`, `scheduledFor`, …) y valida igual por red (400 si
+falla). En `lib/zernio.ts`, `updatePost` arma el cuerpo con el mismo
+`buildPostBody` que `publishPost`.
+
+**Zernio guarda una copia del texto y el media al programar.** Editar el
+contenido en Kefy no cambia lo que va a salir si no se le reenvía:
+
+| Qué cambia | Cómo llega a Zernio |
+|------------|---------------------|
+| Fecha | `PATCH /api/social/schedule/[postId]` y la herramienta `reschedule_scheduled_post` → `rescheduleScheduledPost` → `PUT` con `scheduledFor` |
+| Texto, hashtags, imagen, video o slides | `updateContent` llama a `syncScheduledPosts` si el contenido está `scheduled`: rehace el payload de cada publicación programada (mismo `preparePublish` / `buildAccountPayload` que al publicar) y hace `PUT` con `content` + `mediaItems` |
+| Edición desde el editor de la UI | El autoguardado manda `PATCH /api/content/[id]?sync=defer` (no sincroniza en cada tecla) y al cerrar el editor llama una vez a `POST /api/content/[id]/sync-scheduled` |
+
+Un fallo de sincronización no deshace la edición: se devuelve en
+`scheduled_sync.failed[]` y la UI avisa de que esa red saldría con la versión
+anterior. Solo se edita lo que sigue `scheduled` y con la hora por delante.
+
+### Fecha programada en los webhooks
+
+`post.scheduled` y `post.recycled` traen la fecha como `post.scheduledFor`.
+`normalizePayload` la copia a `scheduled_at`; antes no lo hacía y el webhook
+dejaba `kefy_scheduled_posts.scheduled_at` en NULL, con lo que la publicación
+desaparecía del calendario. Sin fecha en el evento se conserva la de Kefy, y un
+`post.scheduled` que llega después de `post.published` no vuelve a marcar como
+programado un post que ya salió.
+
 ### Listar posts
 
 ```
@@ -686,6 +721,7 @@ Envía un mensaje en una conversación de inbox. Es el endpoint correcto para re
 | Callback OAuth | `app/api/social/oauth/callback/route.ts` | Recibe `?connected=...&accountId=...` y guarda en DB |
 | Listar / desconectar cuentas | `app/api/social/accounts/route.ts` | `GET` lista de DB; `POST` conecta via código OAuth (headless) |
 | Publicar | `app/api/social/publish/route.ts` | Llama `POST /v1/posts` |
+| Cambiar fecha / editar lo programado | `app/api/social/schedule/[postId]/route.ts` (PATCH), `app/api/content/[itemId]/sync-scheduled/route.ts` | `PUT /v1/posts/{id}` (ver *Editar un post programado*) |
 | Estado y URL de los posts | `app/api/webhooks/zernio/route.ts` | Webhooks `post.*`; guarda `platform_post_url` (ver *URL pública del post*) |
 | Sync inbox | `app/api/messaging/sync/route.ts` | Llama `GET /v1/inbox/conversations?sortOrder=desc&limit=100` y hace upsert en `kefy_messages` |
 | Ver historial mensajes | `app/api/messaging/[threadId]/route.ts` (GET) | Al abrir un hilo, llama `GET /v1/inbox/conversations/{id}/messages` y hace upsert en `kefy_messages` |

@@ -11,10 +11,12 @@ vi.mock('@/lib/observability', () => ({ reportError: vi.fn() }));
 const zernio = vi.hoisted(() => ({
   publishPost: vi.fn(),
   cancelPost: vi.fn(),
+  updatePost: vi.fn(),
 }));
 vi.mock('@/lib/zernio', () => ({
   publishPost: zernio.publishPost,
   cancelPost: zernio.cancelPost,
+  updatePost: zernio.updatePost,
   STORY_CAPABLE_PLATFORMS: new Set(['instagram', 'facebook']),
 }));
 vi.mock('@/lib/publish-images', () => ({
@@ -22,7 +24,8 @@ vi.mock('@/lib/publish-images', () => ({
   prepareCarouselSlides: vi.fn(async (slides: Array<{ image_url: string }>) => slides.map((s) => s.image_url)),
 }));
 
-import { publishContent, cancelScheduledPost } from '@/lib/services/publish';
+import { publishContent, cancelScheduledPost, rescheduleScheduledPost, syncScheduledPosts } from '@/lib/services/publish';
+import { updateContent } from '@/lib/services/content';
 import { prepareSingleImage } from '@/lib/publish-images';
 import { serviceContext } from '@/lib/services/context';
 import { ServiceError } from '@/lib/services/errors';
@@ -269,6 +272,136 @@ describe('cancelScheduledPost', () => {
     const err = await cancelScheduledPost(strict, POST).catch((e) => e);
     expect(err.status).toBe(404);
     expect(posts()[0].status).toBe('scheduled');
+  });
+});
+
+// ─── Editar lo programado ────────────────────────────────────────────────────
+
+const inDays = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString();
+
+describe('rescheduleScheduledPost', () => {
+  const POST = IDS.uuid(510);
+
+  function seedPost(row: Record<string, unknown> = {}) {
+    db.seed('kefy_scheduled_posts', [{
+      id: POST, org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, status: 'scheduled',
+      zernio_post_id: 'zp-1', scheduled_at: inDays(2), kefy_content_items: { brand_id: IDS.BRAND }, ...row,
+    }]);
+  }
+
+  it('cambia la fecha en Zernio y en Kefy', async () => {
+    seedPost();
+    const at = inDays(5);
+    const r = await rescheduleScheduledPost(strict, POST, { scheduledAt: at });
+
+    expect(zernio.updatePost).toHaveBeenCalledWith('zp-1', { scheduled_at: at });
+    expect(r.scheduled_at).toBe(at);
+    expect(posts()[0].scheduled_at).toBe(at);
+  });
+
+  it('una fecha pasada → 422 sin tocar Zernio', async () => {
+    seedPost();
+    const err = await rescheduleScheduledPost(strict, POST, { scheduledAt: inDays(-1) }).catch((e) => e);
+    expect(err.status).toBe(422);
+    expect(zernio.updatePost).not.toHaveBeenCalled();
+  });
+
+  it('una publicación ya publicada o cuya hora ya pasó no se mueve (409)', async () => {
+    seedPost({ status: 'published' });
+    expect((await rescheduleScheduledPost(strict, POST, { scheduledAt: inDays(3) }).catch((e) => e)).status).toBe(409);
+
+    db.reset(); seedWorkspace(db); seedPost({ scheduled_at: inDays(-0.01) });
+    expect((await rescheduleScheduledPost(strict, POST, { scheduledAt: inDays(3) }).catch((e) => e)).status).toBe(409);
+    expect(zernio.updatePost).not.toHaveBeenCalled();
+  });
+
+  it('si Zernio falla, la fecha de Kefy no cambia (502)', async () => {
+    const before = inDays(2);
+    seedPost({ scheduled_at: before });
+    zernio.updatePost.mockRejectedValueOnce(new Error('Zernio down'));
+    const err = await rescheduleScheduledPost(strict, POST, { scheduledAt: inDays(4) }).catch((e) => e);
+    expect(err.status).toBe(502);
+    expect(posts()[0].scheduled_at).toBe(before);
+  });
+
+  it('una publicación de otra marca es 404', async () => {
+    seedPost({ brand_id: IDS.BRAND_2, kefy_content_items: { brand_id: IDS.BRAND_2 } });
+    const err = await rescheduleScheduledPost(strict, POST, { scheduledAt: inDays(3) }).catch((e) => e);
+    expect(err.status).toBe(404);
+  });
+});
+
+describe('syncScheduledPosts — editar un contenido programado', () => {
+  const account = (id: string, platform: string, zid: string) => ({ id, platform, zernio_account_id: zid });
+
+  beforeEach(() => {
+    zernio.updatePost.mockReset();
+    item().status = 'scheduled';
+    db.seed('kefy_scheduled_posts', [
+      { id: IDS.uuid(520), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, status: 'scheduled',
+        zernio_post_id: 'zp-ig', scheduled_at: inDays(2), format: 'post', kefy_social_accounts: account(ACC, 'instagram', 'z1') },
+      { id: IDS.uuid(521), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, status: 'scheduled',
+        zernio_post_id: 'zp-fb', scheduled_at: inDays(3), format: 'post', kefy_social_accounts: account(ACC_2, 'facebook', 'z2') },
+      // Ya publicada: no se toca.
+      { id: IDS.uuid(522), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, status: 'published',
+        zernio_post_id: 'zp-old', scheduled_at: inDays(-2), format: 'post', kefy_social_accounts: account(ACC, 'instagram', 'z1') },
+    ]);
+  });
+
+  it('reenvía el texto y el media nuevos a cada publicación programada', async () => {
+    item().body = 'Texto corregido';
+    const r = await syncScheduledPosts(strict, ITEM);
+
+    expect(r).toEqual({ updated: 2, failed: [] });
+    expect(zernio.updatePost).toHaveBeenCalledTimes(2);
+    const [id, { payload }] = zernio.updatePost.mock.calls.find(([zid]) => zid === 'zp-ig')!;
+    expect(id).toBe('zp-ig');
+    expect(payload).toMatchObject({ account_id: 'z1', platform: 'instagram', content_type: 'post', image_url: 'https://cdn.test/img.jpg' });
+    expect(payload.text).toContain('Texto corregido');
+    expect(payload.scheduled_at).toBeUndefined();
+  });
+
+  it('un fallo en una red se informa y no frena las demás', async () => {
+    zernio.updatePost.mockImplementation(async (zid: string) => { if (zid === 'zp-fb') throw new Error('validation failed'); });
+    const r = await syncScheduledPosts(strict, ITEM);
+
+    expect(r.updated).toBe(1);
+    expect(r.failed).toEqual([{ scheduled_post_id: IDS.uuid(521), platform: 'facebook', error: 'validation failed' }]);
+  });
+
+  it('updateContent sincroniza al editar el texto de un contenido programado', async () => {
+    const out = await updateContent(strict, ITEM, { body: 'Nuevo' });
+    expect(out.scheduled_sync).toEqual({ updated: 2, failed: [] });
+  });
+
+  it('updateContent con syncScheduled: false (autoguardado del editor) no llama a Zernio', async () => {
+    const out = await updateContent(strict, ITEM, { body: 'Nuevo' }, { syncScheduled: false });
+    expect(out.scheduled_sync).toBeUndefined();
+    expect(zernio.updatePost).not.toHaveBeenCalled();
+  });
+
+  it('cambiar solo el título (no se publica) no sincroniza', async () => {
+    await updateContent(strict, ITEM, { title: 'Otro título' });
+    expect(zernio.updatePost).not.toHaveBeenCalled();
+  });
+});
+
+describe('herramienta reschedule_scheduled_post', () => {
+  beforeEach(() => { ensureToolsRegistered(); });
+
+  it('por la API mueve la publicación y queda auditada como publish', async () => {
+    db.seed('kefy_scheduled_posts', [{
+      id: IDS.uuid(530), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, social_account_id: ACC, status: 'scheduled',
+      zernio_post_id: 'zp-1', scheduled_at: inDays(2), kefy_content_items: { brand_id: IDS.BRAND },
+    }]);
+    const at = inDays(6);
+    const r = await executeTool('reschedule_scheduled_post', {
+      scheduled_post_id: IDS.uuid(530), scheduled_at: at,
+    }, apiCtx({ brandId: IDS.BRAND }));
+
+    expect(r.ok).toBe(true);
+    expect(zernio.updatePost).toHaveBeenCalledWith('zp-1', { scheduled_at: at });
+    expect(db.rows('kefy_assistant_actions')[0]).toMatchObject({ tool_name: 'reschedule_scheduled_post', kind: 'publish', status: 'succeeded' });
   });
 });
 

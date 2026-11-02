@@ -44,7 +44,7 @@ function getApiKey(): string {
 const ZERNIO_DEBUG = process.env.ZERNIO_DEBUG === '1' || process.env.ZERNIO_DEBUG === 'true';
 
 async function zernioFetch<T>(
-  method: 'GET' | 'POST' | 'DELETE' | 'PATCH',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
   path: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
@@ -169,16 +169,11 @@ export const STORY_CAPABLE_PLATFORMS = new Set(['instagram', 'facebook', 'snapch
 const REEL_EXPLICIT_PLATFORMS = new Set(['facebook']);
 
 /**
- * Publish or schedule a post via Zernio.
- * Translates from our internal payload shape to Zernio's actual API format:
- *   text → content
- *   account_id + platform → platforms:[{ platform, accountId }]
- *   image_url / media_urls / video_url → mediaItems:[{ type, url }]
- *   scheduled_at → scheduledFor  (omitted = publishNow: true)
+ * Cuerpo de un post de Zernio (targets, texto y media) a partir del payload de
+ * Kefy. Lo comparten publishPost (POST /posts) y updatePost (PUT /posts/{id})
+ * para que editar un post programado le mande lo mismo que crearlo.
  */
-export async function publishPost(
-  payload: ZernioPublishPayload,
-): Promise<ZernioPublishResult> {
+function buildPostBody(payload: ZernioPublishPayload): Record<string, unknown> {
   // ── Build mediaItems ───────────────────────────────────────────────────────
   const mediaItems: Array<{ type: 'image' | 'video'; url: string }> = [];
   if (payload.image_url) {
@@ -240,6 +235,23 @@ export async function publishPost(
   };
   if (postContent.trim()) zernioBody.content = postContent;
   if (mediaItems.length > 0) zernioBody.mediaItems = mediaItems;
+
+  return zernioBody;
+}
+
+/**
+ * Publish or schedule a post via Zernio.
+ * Translates from our internal payload shape to Zernio's actual API format:
+ *   text → content
+ *   account_id + platform → platforms:[{ platform, accountId }]
+ *   image_url / media_urls / video_url → mediaItems:[{ type, url }]
+ *   scheduled_at → scheduledFor  (omitted = publishNow: true)
+ */
+export async function publishPost(
+  payload: ZernioPublishPayload,
+): Promise<ZernioPublishResult> {
+  const zernioBody = buildPostBody(payload);
+
   if (payload.scheduled_at) {
     zernioBody.scheduledFor = payload.scheduled_at;
   } else {
@@ -332,6 +344,23 @@ export async function getPublishedPostUrl(
     url:              safePostUrl(entry?.platformPostUrl ?? entry?.publishedUrl),
     platform_post_id: entry?.platformPostId ?? null,
   };
+}
+
+/**
+ * Edita un post programado (`PUT /posts/{id}`). Con `payload` reemplaza el
+ * texto y el media (el mismo cuerpo que publishPost); con `scheduled_at`
+ * cambia la fecha. Zernio solo deja editar posts sin publicar.
+ */
+export async function updatePost(
+  zernioPostId: string,
+  changes: { payload?: ZernioPublishPayload; scheduled_at?: string },
+): Promise<void> {
+  const body: Record<string, unknown> = changes.payload ? buildPostBody(changes.payload) : {};
+  if (changes.scheduled_at) body.scheduledFor = changes.scheduled_at;
+  if (Object.keys(body).length === 0) return;
+
+  console.log(`[Zernio] updatePost → id=${zernioPostId} fields=${Object.keys(body).join(',')}`);
+  await zernioFetch<unknown>('PUT', `/posts/${encodeURIComponent(zernioPostId)}`, body);
 }
 
 /**

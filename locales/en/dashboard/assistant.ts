@@ -149,6 +149,7 @@ const en = {
     run_autopilot_now: 'Running autopilot…',
     publish_content: 'Publishing…',
     list_scheduled_posts: 'Checking scheduled posts…',
+    reschedule_scheduled_post: 'Changing the date…',
     cancel_scheduled_post: 'Cancelling post…',
     get_analytics_overview: 'Checking metrics…',
     list_post_performance: 'Analyzing posts…',
@@ -282,6 +283,13 @@ const en = {
       return `Publish ${quote(title)} to ${accounts}${when ? ` ${when}` : ''}`;
     },
     list_scheduled_posts: () => 'Check scheduled posts',
+    reschedule_scheduled_post: (_i, p) => {
+      const title = str(p.title, 'content');
+      const account = str(p.account);
+      const from = str(p.from);
+      const to = str(p.to);
+      return `Move the post ${quote(title)}${account ? ` on ${account}` : ''}${from ? ` from ${from}` : ''} to ${to}`;
+    },
     cancel_scheduled_post: (_i, p) => {
       const title = str(p.title, 'content');
       const account = str(p.account);

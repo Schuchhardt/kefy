@@ -1,7 +1,7 @@
 // ─── Herramientas del asistente: publicación ─────────────────────────────────
 //
-// list_social_accounts, publish_content, list_scheduled_posts y
-// cancel_scheduled_post. Son finas: validan con zod y llaman a los servicios
+// list_social_accounts, publish_content, list_scheduled_posts,
+// reschedule_scheduled_post y cancel_scheduled_post. Son finas: validan con zod y llaman a los servicios
 // de lib/services/{social,publish}.ts, los mismos que usan las rutas de
 // /api/social/*. Antes de tocar la publicación, leer docs/zernio.md.
 //
@@ -24,7 +24,7 @@ import { getActiveBrandById } from '@/lib/brands';
 import { ORGANIC_CHANNELS, getChannelLabel } from '@/lib/channels';
 import type { Channel } from '@/types/channels';
 import {
-  cancelScheduledPost, listScheduledPosts, publishContent, SCHEDULED_POST_STATUSES,
+  cancelScheduledPost, listScheduledPosts, publishContent, rescheduleScheduledPost, SCHEDULED_POST_STATUSES,
 } from '@/lib/services/publish';
 
 const FORMATS = ['post', 'carousel', 'reel', 'story'] as const;
@@ -395,6 +395,65 @@ const listScheduledPostsTool = defineTool({
   },
 });
 
+// ─── reschedule_scheduled_post ───────────────────────────────────────────────
+
+const rescheduleScheduledPostTool = defineTool({
+  name: 'reschedule_scheduled_post',
+  title: { es: 'Cambiar fecha de publicación', en: 'Reschedule post' },
+  kind: 'publish',
+  description:
+    'Changes the date and time of a scheduled post that has not gone out yet, both in Zernio and in Kefy. ' +
+    'To change its text or media, edit the content with update_content: scheduled posts receive the change. ' +
+    'Get the id from list_scheduled_posts. Costs no credits.',
+  input: z.object({
+    scheduled_post_id: z.uuid().describe('Scheduled post of this brand (from list_scheduled_posts).'),
+    scheduled_at: z.iso.datetime({ offset: true }).describe('New date, ISO 8601 with timezone offset. At least 2 minutes and at most one year ahead.'),
+  }).strict(),
+  confirm: 'always',
+  describe: async (ctx, input) => {
+    const at = new Date(input.scheduled_at).getTime();
+    const ahead = at - Date.now();
+    if (ahead < MIN_SCHEDULE_AHEAD_MS || ahead > MAX_SCHEDULE_AHEAD_MS) {
+      throw new ServiceError('invalid_input', 422, msg(ctx.language,
+        'La fecha tiene que ser al menos 2 minutos en el futuro y como mucho en un año.',
+        'The date must be at least 2 minutes ahead and at most one year ahead.'));
+    }
+    const post = await loadOwnedScheduledPost<{
+      id: string; status: string; scheduled_at: string | null; content_item_id: string; social_account_id: string;
+    }>(ctx, input.scheduled_post_id);
+
+    const db = createSupabaseServer();
+    const [{ data: item }, { data: account }] = await Promise.all([
+      db.from('kefy_content_items')
+        .select('title')
+        .eq('id', post.content_item_id)
+        .eq('org_id', ctx.orgId)
+        .maybeSingle(),
+      db.from('kefy_social_accounts')
+        .select('platform, username')
+        .eq('id', post.social_account_id)
+        .eq('org_id', ctx.orgId)
+        .maybeSingle(),
+    ]);
+
+    return {
+      title: (item as { title?: string | null } | null)?.title ?? msg(ctx.language, '(sin título)', '(untitled)'),
+      account: account ? accountLabel(account as { platform: string; username: string | null }) : null,
+      from: post.scheduled_at ? formatWhen(ctx, post.scheduled_at) : null,
+      to: formatWhen(ctx, input.scheduled_at),
+      status: post.status,
+    };
+  },
+  handler: async (ctx, input) => {
+    const out = await rescheduleScheduledPost(ctx, input.scheduled_post_id, { scheduledAt: input.scheduled_at });
+    return {
+      data: { rescheduled: true, scheduled_post_id: out.id, scheduled_at: out.scheduled_at, when: formatWhen(ctx, out.scheduled_at) },
+      links: [itemLink(ctx.language, out.content_item_id), calendarLink(ctx.language)],
+      dataChanged: ['scheduled'],
+    };
+  },
+});
+
 // ─── cancel_scheduled_post ───────────────────────────────────────────────────
 
 const cancelScheduledPostTool = defineTool({
@@ -493,6 +552,7 @@ export const publishingTools = [
   getConnectAccountLinkTool,
   publishContentTool,
   listScheduledPostsTool,
+  rescheduleScheduledPostTool,
   cancelScheduledPostTool,
   disconnectSocialAccountTool,
 ];

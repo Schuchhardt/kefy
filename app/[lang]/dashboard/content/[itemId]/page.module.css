@@ -37,6 +37,13 @@
 .draftNotice { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0 0 16px; }
 .publishOn { margin-top: 12px; }
 
+.scheduleList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.scheduleItem { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.scheduleItem + .scheduleItem { border-top: 1px solid var(--border); padding-top: 14px; }
+.scheduleWhen { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.scheduleWhen::first-letter { text-transform: uppercase; }
+.scheduleActions { display: flex; flex-wrap: wrap; gap: 6px; }
+
 .metricsNet { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; min-width: 0; }
 .metricsNetName { font-size: 12px; font-weight: 600; }
 .metricsDate { margin-left: auto; font-size: 12px; color: var(--muted); }

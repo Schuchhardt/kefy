@@ -26,6 +26,7 @@ import Icon, { type IconName } from '@/components/ui/icons';
 import { useConfirm }      from '@/components/ui/ConfirmDialog';
 import ContentActions      from '@/components/dashboard/content/ContentActions';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
+import { scheduledSyncNotice } from '@/components/dashboard/content/scheduled-sync';
 import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
 import RecommendModal      from '@/components/dashboard/content/RecommendModal';
 import ContentLibraryModal from '@/components/dashboard/content/ContentLibraryModal';
@@ -575,6 +576,8 @@ function ContentPageInner() {
   const [items, setItems]           = useState<ContentItem[]>([]);
   const [loading, setLoading]       = useState(true);
   const [listError, setListError]   = useState<string | null>(null);
+  /** Resultado de reenviar a lo programado un contenido editado. */
+  const [syncNotice, setSyncNotice] = useState<ReturnType<typeof scheduledSyncNotice>>(null);
   const [filterChannel, setFilterChannel] = useState<Channel | ''>('');
   const [filterStatus, setFilterStatus]   = useState<ContentStatus | ''>('');
   const [brandKit, setBrandKit]     = useState<BrandKitInfo | null>(null);
@@ -1800,6 +1803,12 @@ function ContentPageInner() {
           )}
         </div>
 
+        {syncNotice && (
+          <div style={{ marginBottom: 16 }}>
+            <Notice tone={syncNotice.tone}>{syncNotice.text}</Notice>
+          </div>
+        )}
+
         {listError && (
           <div style={{ marginBottom: 16 }}>
             <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
@@ -1826,6 +1835,7 @@ function ContentPageInner() {
         onUpdate={(patch) => {
           if (editItem) handleItemUpdate(editItem.id, patch as Partial<ContentItem>);
         }}
+        onScheduledSync={(result) => setSyncNotice(scheduledSyncNotice(result, lang))}
       />
 
       <ScheduleModal

@@ -20,8 +20,8 @@
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
 import { prepareCarouselSlides, prepareSingleImage } from '@/lib/publish-images';
-import { resolvePublishMedia, type PublishMediaSource } from '@/lib/publish-media';
-import type { CarouselSlide, ContentType } from '@/types/content';
+import { resolvePublishMedia, type PublishMediaSource, type ResolvedPublishMedia } from '@/lib/publish-media';
+import type { CarouselSlide, ContentType, ScheduledSyncResult } from '@/types/content';
 import type { ContentChannel } from '@/types/ai';
 import type { ZernioPublishPayload } from '@/types/social';
 import type { ServiceContext } from '@/lib/services/context';
@@ -78,34 +78,29 @@ interface PublishItemRow {
 const ITEM_SELECT =
   'id, title, body, image_url, hashtags, channel, status, content_type, slides, video_url, mux_playback_id, brand_id';
 
-export async function publishContent(
-  ctx: ServiceContext,
-  input: PublishContentInput,
-): Promise<{ status: number; body: { results: PublishResultEntry[] } }> {
-  const { mode } = input;
-  const tag = mode === 'now' ? '[publish]' : '[schedule]';
-  const route = mode === 'now' ? '/api/social/publish' : '/api/social/schedule';
-  const orgId = ctx.auth.orgId;
+// ─── Preparar lo que se manda a Zernio ───────────────────────────────────────
+//
+// Lo comparten publishContent (crear el post) y syncScheduledPosts (reenviar
+// un contenido editado a sus posts programados): los dos tienen que mandar
+// exactamente el mismo texto y media.
 
-  let scheduledAt: Date | null = null;
-  if (mode === 'schedule') {
-    scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
-    if (!scheduledAt || isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
-      throw new ServiceError('invalid_input', 422, 'scheduled_at must be a valid future datetime');
-    }
-  }
+interface PreparedPublish {
+  media: ResolvedPublishMedia;
+  carouselSlides: CarouselSlide[];
+  imageDeps: { orgId: string; prefix: string; brandFonts: { heading?: string | null; body?: string | null } };
+  sourceImageBuffer: Buffer | null;
+}
 
-  const accountIds = [...new Set(input.accountIds.filter((id) => typeof id === 'string'))];
-  if (accountIds.length === 0) {
-    throw new ServiceError('invalid_input', 422, 'social_account_ids must contain valid IDs');
-  }
-
+/** El texto y el media de un contenido en un formato, listos para cada cuenta. */
+async function preparePublish(
+  item: PublishItemRow,
+  format: ContentType,
+  brandId: string | null,
+  orgId: string,
+  prefix: string,
+  tag: string,
+): Promise<PreparedPublish> {
   const db = createSupabaseServer();
-
-  // Verificar el contenido (org_id siempre; brand_id con brandScope 'strict').
-  const item = await loadOwnedItem<PublishItemRow>(ctx, input.itemId, ITEM_SELECT, 'Content item not found');
-
-  const format = input.format ?? (item.content_type as ContentType);
 
   // El texto y el media a publicar: las columnas del propio contenido para su
   // formato principal, o la rendición correspondiente para otro formato.
@@ -137,36 +132,6 @@ export async function publishContent(
   }
   const media = resolved.media;
 
-  // Las cuentas tienen que ser de la misma marca que el contenido. Un contenido
-  // antiguo sin brand_id, llamado desde una ruta (sin marca en el contexto),
-  // mantiene el comportamiento de antes: cualquier cuenta activa de la org.
-  const brandId = item.brand_id ?? (ctx.brandId || null);
-
-  let accountsQuery = db
-    .from('kefy_social_accounts')
-    .select('id, zernio_account_id, status, platform')
-    .in('id', accountIds)
-    .eq('org_id', orgId)
-    .eq('status', 'active');
-  if (brandId) accountsQuery = accountsQuery.eq('brand_id', brandId);
-
-  const { data: accountRows } = await accountsQuery;
-  const accounts = (accountRows ?? []) as Array<{
-    id: string; zernio_account_id: string | null; status: string; platform: string;
-  }>;
-
-  if (accounts.length === 0) {
-    throw new ServiceError('not_found', 404, 'No active social accounts found for the given IDs');
-  }
-
-  const { publishPost, STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
-
-  console.log(
-    `${tag} START itemId=${item.id} format=${format}` +
-    (scheduledAt ? ` scheduledAt=${scheduledAt.toISOString()}` : '') +
-    ` accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
-  );
-
   const carouselSlides: CarouselSlide[] = format === 'carousel' && Array.isArray(source.slides)
     ? (source.slides as CarouselSlide[])
     : [];
@@ -182,7 +147,7 @@ export async function publishContent(
 
   const imageDeps = {
     orgId,
-    prefix:     mode === 'now' ? 'publish' : 'schedule',
+    prefix,
     brandFonts: { heading: brandFontsRow?.font_heading, body: brandFontsRow?.font_body },
   };
 
@@ -201,48 +166,122 @@ export async function publishContent(
     }
   }
 
+  return { media, carouselSlides, imageDeps, sourceImageBuffer };
+}
+
+/** El payload de Zernio para una cuenta (sin fecha ni request id). */
+async function buildAccountPayload(
+  prep: PreparedPublish,
+  account: { id: string; zernio_account_id: string | null; platform: string },
+  format: ContentType,
+  tag: string,
+): Promise<ZernioPublishPayload> {
+  const { STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
+  const { media, carouselSlides, imageDeps, sourceImageBuffer } = prep;
+  const platform = (account.platform ?? 'generic') as ContentChannel;
+
+  // Ajuste al formato de la red + texto quemado donde la red no lo muestra
+  // (caption de story, y el título/cuerpo de cada slide del carrusel).
+  let imageForAccount = media.image_url;
+  if (media.image_url) {
+    imageForAccount = await prepareSingleImage(
+      media.image_url, sourceImageBuffer, platform, format,
+      imageDeps,
+      format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
+        ? media.text
+        : undefined,
+    );
+  }
+
+  let mediaUrlsForAccount = media.media_urls;
+  if (format === 'carousel' && carouselSlides.length > 0) {
+    mediaUrlsForAccount = await prepareCarouselSlides(carouselSlides, platform, imageDeps);
+  }
+
+  console.log(
+    `${tag} → account ${account.id} platform=${account.platform}` +
+    ` zernio_account_id=${account.zernio_account_id}` +
+    ` hasImage=${!!imageForAccount} mediaUrls=${mediaUrlsForAccount?.length ?? 0} hasVideo=${!!media.video_url}`,
+  );
+
+  return {
+    account_id:   account.zernio_account_id!,
+    platform:     account.platform,
+    text:         media.text,
+    image_url:    imageForAccount,
+    media_urls:   mediaUrlsForAccount,
+    video_url:    media.video_url,
+    content_type: format,
+    hashtags:     media.hashtags,
+  };
+}
+
+export async function publishContent(
+  ctx: ServiceContext,
+  input: PublishContentInput,
+): Promise<{ status: number; body: { results: PublishResultEntry[] } }> {
+  const { mode } = input;
+  const tag = mode === 'now' ? '[publish]' : '[schedule]';
+  const route = mode === 'now' ? '/api/social/publish' : '/api/social/schedule';
+  const orgId = ctx.auth.orgId;
+
+  let scheduledAt: Date | null = null;
+  if (mode === 'schedule') {
+    scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
+    if (!scheduledAt || isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+      throw new ServiceError('invalid_input', 422, 'scheduled_at must be a valid future datetime');
+    }
+  }
+
+  const accountIds = [...new Set(input.accountIds.filter((id) => typeof id === 'string'))];
+  if (accountIds.length === 0) {
+    throw new ServiceError('invalid_input', 422, 'social_account_ids must contain valid IDs');
+  }
+
+  const db = createSupabaseServer();
+
+  // Verificar el contenido (org_id siempre; brand_id con brandScope 'strict').
+  const item = await loadOwnedItem<PublishItemRow>(ctx, input.itemId, ITEM_SELECT, 'Content item not found');
+
+  const format = input.format ?? (item.content_type as ContentType);
+
+  // Las cuentas tienen que ser de la misma marca que el contenido. Un contenido
+  // antiguo sin brand_id, llamado desde una ruta (sin marca en el contexto),
+  // mantiene el comportamiento de antes: cualquier cuenta activa de la org.
+  const brandId = item.brand_id ?? (ctx.brandId || null);
+
+  const prep = await preparePublish(item, format, brandId, orgId, mode === 'now' ? 'publish' : 'schedule', tag);
+  let accountsQuery = db
+    .from('kefy_social_accounts')
+    .select('id, zernio_account_id, status, platform')
+    .in('id', accountIds)
+    .eq('org_id', orgId)
+    .eq('status', 'active');
+  if (brandId) accountsQuery = accountsQuery.eq('brand_id', brandId);
+
+  const { data: accountRows } = await accountsQuery;
+  const accounts = (accountRows ?? []) as Array<{
+    id: string; zernio_account_id: string | null; status: string; platform: string;
+  }>;
+
+  if (accounts.length === 0) {
+    throw new ServiceError('not_found', 404, 'No active social accounts found for the given IDs');
+  }
+
+  const { publishPost } = await import('@/lib/zernio');
+
+  console.log(
+    `${tag} START itemId=${item.id} format=${format}` +
+    (scheduledAt ? ` scheduledAt=${scheduledAt.toISOString()}` : '') +
+    ` accounts=[${accounts.map((a) => `${a.id}(${a.platform})`).join(', ')}]`,
+  );
+
   const results: PublishResultEntry[] = [];
 
   // Cada cuenta por separado: un fallo parcial no aborta el resto.
   for (const account of accounts) {
     try {
-      const platform = (account.platform ?? 'generic') as ContentChannel;
-
-      // Ajuste al formato de la red + texto quemado donde la red no lo muestra
-      // (caption de story, y el título/cuerpo de cada slide del carrusel).
-      let imageForAccount = media.image_url;
-      if (media.image_url) {
-        imageForAccount = await prepareSingleImage(
-          media.image_url, sourceImageBuffer, platform, format,
-          imageDeps,
-          format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
-            ? media.text
-            : undefined,
-        );
-      }
-
-      let mediaUrlsForAccount = media.media_urls;
-      if (format === 'carousel' && carouselSlides.length > 0) {
-        mediaUrlsForAccount = await prepareCarouselSlides(carouselSlides, platform, imageDeps);
-      }
-
-      console.log(
-        `${tag} → account ${account.id} platform=${account.platform}` +
-        ` zernio_account_id=${account.zernio_account_id}` +
-        (scheduledAt ? ` scheduledAt=${scheduledAt.toISOString()}` : '') +
-        ` hasImage=${!!imageForAccount} mediaUrls=${mediaUrlsForAccount?.length ?? 0} hasVideo=${!!media.video_url}`,
-      );
-
-      const payload: ZernioPublishPayload = {
-        account_id:   account.zernio_account_id!,
-        platform:     account.platform,
-        text:         media.text,
-        image_url:    imageForAccount,
-        media_urls:   mediaUrlsForAccount,
-        video_url:    media.video_url,
-        content_type: format,
-        hashtags:     media.hashtags,
-      };
+      const payload = await buildAccountPayload(prep, account, format, tag);
       // Sin scheduled_at → publicación inmediata.
       if (scheduledAt) payload.scheduled_at = scheduledAt.toISOString();
       if (input.requestIdBase) payload.request_id = `${input.requestIdBase}:${account.id}`;
@@ -436,6 +475,145 @@ export async function listScheduledPosts(
 
   const posts = await fillMissingPostUrls((data ?? []) as unknown as Array<Record<string, unknown> & PostUrlRow>);
   return { posts };
+}
+
+// ─── Editar una publicación programada ───────────────────────────────────────
+
+/** Zernio no deja programar a más de un año. */
+const MAX_SCHEDULE_AHEAD_MS = 365 * 24 * 60 * 60_000;
+
+/**
+ * Cambia la fecha de una publicación programada, en Zernio y en Kefy. Solo
+ * mientras no haya salido: una con la hora ya pasada se está publicando.
+ */
+export async function rescheduleScheduledPost(
+  ctx: ServiceContext,
+  postId: string,
+  input: { scheduledAt: string },
+): Promise<{ id: string; content_item_id: string; scheduled_at: string }> {
+  const when = new Date(input.scheduledAt);
+  if (isNaN(when.getTime()) || when.getTime() <= Date.now()) {
+    throw new ServiceError('invalid_input', 422, 'scheduled_at must be a valid future datetime');
+  }
+  if (when.getTime() - Date.now() > MAX_SCHEDULE_AHEAD_MS) {
+    throw new ServiceError('invalid_input', 422, 'scheduled_at must be within one year');
+  }
+
+  const post = await loadOwnedScheduledPost<{
+    id: string; zernio_post_id: string | null; status: string; scheduled_at: string | null; content_item_id: string;
+  }>(ctx, postId);
+
+  assertEditable(ctx, post);
+
+  const scheduledAt = when.toISOString();
+  try {
+    const { updatePost } = await import('@/lib/zernio');
+    await updatePost(post.zernio_post_id!, { scheduled_at: scheduledAt });
+  } catch (err) {
+    reportError(err, {
+      route: 'lib/services/publish', service: 'zernio', auth: ctx.auth, extra: { op: 'reschedule', postId },
+    });
+    throw new ServiceError('unavailable', 502, msg(ctx.language,
+      'No se pudo cambiar la fecha en la red social. La publicación sigue en su fecha anterior.',
+      'Could not change the date on the social network. The post keeps its previous date.',
+    )).markReported();
+  }
+
+  await createSupabaseServer()
+    .from('kefy_scheduled_posts')
+    .update({ scheduled_at: scheduledAt })
+    .eq('id', post.id)
+    .eq('org_id', ctx.auth.orgId);
+
+  return { id: post.id, content_item_id: post.content_item_id, scheduled_at: scheduledAt };
+}
+
+/** Solo se edita lo que sigue programado en Zernio y todavía no salió. */
+function assertEditable(
+  ctx: ServiceContext,
+  post: { status: string; zernio_post_id: string | null; scheduled_at: string | null },
+): void {
+  if (post.status !== 'scheduled' || !post.zernio_post_id) {
+    throw new ServiceError('conflict', 409, msg(ctx.language,
+      'Solo se puede editar una publicación programada que todavía no sale.',
+      'Only a scheduled post that has not gone out yet can be edited.',
+    ));
+  }
+  if (post.scheduled_at && new Date(post.scheduled_at).getTime() <= Date.now()) {
+    throw new ServiceError('conflict', 409, msg(ctx.language,
+      'Esta publicación ya se está publicando y no se puede editar.',
+      'This post is already being published and can no longer be edited.',
+    ));
+  }
+}
+
+/**
+ * Reenvía un contenido editado a sus publicaciones programadas. Zernio guarda
+ * una copia del texto y el media al programar: sin esto, editar el contenido
+ * en Kefy no cambiaba lo que iba a salir.
+ */
+export async function syncScheduledPosts(ctx: ServiceContext, itemId: string): Promise<ScheduledSyncResult> {
+  const tag = '[schedule-sync]';
+  const out: ScheduledSyncResult = { updated: 0, failed: [] };
+
+  const { data: rows } = await createSupabaseServer()
+    .from('kefy_scheduled_posts')
+    .select('id, zernio_post_id, scheduled_at, format, kefy_social_accounts ( id, zernio_account_id, platform )')
+    .eq('content_item_id', itemId)
+    .eq('org_id', ctx.auth.orgId)
+    .eq('status', 'scheduled')
+    .not('zernio_post_id', 'is', null)
+    .gt('scheduled_at', new Date().toISOString());
+
+  type Row = {
+    id: string; zernio_post_id: string; scheduled_at: string; format: string | null;
+    kefy_social_accounts: { id: string; zernio_account_id: string | null; platform: string } | null;
+  };
+  const posts = (rows ?? []) as unknown as Row[];
+  if (posts.length === 0) return out;
+
+  const item = await loadOwnedItem<PublishItemRow>(ctx, itemId, ITEM_SELECT, 'Content item not found');
+  const brandId = item.brand_id ?? (ctx.brandId || null);
+  const { updatePost } = await import('@/lib/zernio');
+
+  const fail = (post: Row, err: unknown) => {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`${tag} ✗ scheduled_post ${post.id}:`, error);
+    reportError(err, {
+      route: 'lib/services/publish', service: 'zernio', auth: ctx.auth, extra: { op: 'syncScheduledPosts', postId: post.id },
+    });
+    out.failed.push({ scheduled_post_id: post.id, platform: post.kefy_social_accounts?.platform ?? null, error });
+  };
+
+  // Una preparación por formato: un contenido programado como post y como
+  // story manda media distinto a cada uno.
+  const byFormat = new Map<ContentType, Row[]>();
+  for (const post of posts) {
+    const format = (post.format ?? item.content_type) as ContentType;
+    byFormat.set(format, [...(byFormat.get(format) ?? []), post]);
+  }
+
+  for (const [format, group] of byFormat) {
+    let prep: PreparedPublish;
+    try {
+      prep = await preparePublish(item, format, brandId, ctx.auth.orgId, 'schedule', tag);
+    } catch (err) {
+      for (const post of group) fail(post, err);
+      continue;
+    }
+    for (const post of group) {
+      try {
+        if (!post.kefy_social_accounts?.zernio_account_id) throw new Error('Social account not connected');
+        const payload = await buildAccountPayload(prep, post.kefy_social_accounts, format, tag);
+        await updatePost(post.zernio_post_id, { payload });
+        out.updated += 1;
+      } catch (err) {
+        fail(post, err);
+      }
+    }
+  }
+
+  return out;
 }
 
 // ─── Cancelar ────────────────────────────────────────────────────────────────
