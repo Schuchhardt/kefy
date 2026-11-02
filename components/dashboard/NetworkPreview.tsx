@@ -15,6 +15,7 @@ import { safeAreaFor } from '@/lib/preview-layout';
 import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
 import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ReelScene, ContentType } from '@/types/content';
+import PreviewAvatarImage, { hasAvatar, type AvatarSource } from '@/components/dashboard/PreviewAvatarImage';
 import styles from './NetworkPreview.module.css';
 
 /** Networks worth showing per format. Square formats (post/carousel) map to the
@@ -43,7 +44,7 @@ interface NetworkPreviewProps {
   activeSlide:    number;
   onActiveSlideChange: (idx: number) => void;
   username:       string;
-  logoUrl?:       string | null;
+  logoUrl?:       AvatarSource;
   /** True while the cover image is still being generated in the background
    *  (no imageUrl yet, but it's not a failure — shows a spinner instead of
    *  the plain text-only fallback). */
@@ -246,7 +247,7 @@ export function TikTokFrame({
   username, logoUrl, caption, children, maxHeight, lang = 'es',
 }: {
   username: string;
-  logoUrl?: string | null;
+  logoUrl?: AvatarSource;
   caption:  string;
   children: React.ReactNode;
   /** Ver `frameMaxHeight` en NetworkPreview. */
@@ -284,9 +285,8 @@ export function TikTokFrame({
             border: '1.5px solid #fff', background: '#1a1a1a',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            {logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            {hasAvatar(logoUrl) ? (
+              <PreviewAvatarImage src={logoUrl} />
             ) : (
               <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{username[0]?.toUpperCase()}</span>
             )}
@@ -340,7 +340,7 @@ function VerticalNetworkFrame({
   channel:  string;
   caption:  string;
   username: string;
-  logoUrl?: string | null;
+  logoUrl?: AvatarSource;
   children: React.ReactNode;
   maxHeight?: string;
 }) {
@@ -374,9 +374,8 @@ function VerticalNetworkFrame({
           width: 26, height: 26, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
           background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          {hasAvatar(logoUrl) ? (
+            <PreviewAvatarImage src={logoUrl} />
           ) : (
             <span style={{ fontSize: 11, fontWeight: 700, color: '#fff' }}>{username[0]?.toUpperCase()}</span>
           )}

@@ -8,6 +8,8 @@ import { Field, Input, Textarea } from '@/components/ui/Field';
 import Notice from '@/components/ui/Notice';
 import Icon from '@/components/ui/icons';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
+import { brandImages } from '@/components/dashboard/BrandAvatar';
+import { useActiveBrand } from '@/lib/brand-context';
 import { ImageGeneratingSpinner } from '@/components/dashboard/ImageGeneratingSpinner';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene, ScheduledSyncResult } from '@/types/content';
 import esPublish from '@/locales/es/dashboard/publish';
@@ -49,6 +51,8 @@ export default function EditContentModal({
 }: EditContentModalProps) {
   const copy = COPY[lang];
   const t = copy.edit;
+  // El avatar de la vista previa es el mismo que el del selector de marca.
+  const activeBrand = useActiveBrand();
 
   const [title,    setTitle]    = useState('');
   const [bodyText, setBodyText] = useState('');
@@ -546,7 +550,7 @@ export default function EditContentModal({
               activeSlide={previewSlide}
               onActiveSlideChange={setPreviewSlide}
               username={brandKit?.name ?? copy.preview.defaultUsername}
-              logoUrl={brandKit?.logo_url ?? undefined}
+              logoUrl={brandImages(activeBrand, brandKit?.logo_url)}
               imagePending={item.image_status === 'generating'}
               accentColor={brandKit?.accent_color ?? undefined}
               brandFont={brandKit?.font_heading}

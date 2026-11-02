@@ -21,6 +21,15 @@ export function brandImage(brand: Brand | null): string | null {
   return brand.avatar_url || brand.kit_logo_url || null;
 }
 
+/**
+ * Todas las imágenes de la marca, en el mismo orden de preferencia, más un
+ * respaldo opcional. Las vistas previas eligen entre ellas la que sea
+ * cuadrada (ver `PreviewAvatarImage`).
+ */
+export function brandImages(brand: Brand | null, fallback?: string | null): string[] {
+  return [brand?.avatar_url, brand?.kit_logo_url, fallback].filter((s): s is string => Boolean(s));
+}
+
 function brandInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase();
 }

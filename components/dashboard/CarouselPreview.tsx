@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Icon from '@/components/ui/icons';
+import PreviewAvatarImage, { hasAvatar, type AvatarSource } from '@/components/dashboard/PreviewAvatarImage';
 import { networkFrame, safeAreaCss } from '@/lib/preview-layout';
 import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
 import type { ContentChannel } from '@/types/ai';
@@ -223,7 +224,7 @@ export function CarouselPreview({
 }: {
   slides:       CarouselSlide[];
   username?:    string;
-  logoUrl?:     string | null;
+  logoUrl?:     AvatarSource;
   description?: string;
   lang?:        'es' | 'en';
 }) {
@@ -253,13 +254,8 @@ export function CarouselPreview({
             background: 'linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)',
           }}
         >
-          {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={logoUrl}
-              alt={name}
-              style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', display: 'block' }}
-            />
+          {hasAvatar(logoUrl) ? (
+            <PreviewAvatarImage src={logoUrl} alt={name} />
           ) : (
             <div
               style={{
