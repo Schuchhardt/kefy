@@ -59,6 +59,8 @@ export interface ContentMetadata {
 
 export interface ContentItem {
   id:               string;
+  /** Solo en GET /api/content con status 'scheduled': la próxima fecha a la que sale. */
+  next_scheduled_at?: string | null;
   /** Marca dueña. NULL en filas antiguas, anteriores a las marcas. */
   brand_id?:        string | null;
   channel:          Channel;

@@ -159,6 +159,8 @@ const listContentTool = defineTool({
       content_type: it.content_type,
       channel: it.channel,
       status: it.status,
+      // Programado: la próxima fecha a la que sale (ISO).
+      ...(it.status === 'scheduled' ? { next_scheduled_at: it.next_scheduled_at ?? null } : {}),
       image_url: it.image_url ?? null,
       image_status: it.image_status ?? null,
       video_url: it.video_url ?? null,

@@ -15,12 +15,16 @@ import enPublish from '@/locales/en/dashboard/publish';
 
 const COPY = { es: esPublish, en: enPublish } as const;
 
-/** «lunes, 4 de noviembre, 19:00»; con el año si no es el actual. */
-export function formatScheduledDate(iso: string, lang: 'es' | 'en'): string {
+/**
+ * «lunes, 4 de noviembre, 19:00» («mar, 4 nov, 19:00» con `short`, para las
+ * tarjetas de la lista); con el año si no es el actual.
+ */
+export function formatScheduledDate(iso: string, lang: 'es' | 'en', opts: { short?: boolean } = {}): string {
   const date = new Date(iso);
   const sameYear = date.getFullYear() === new Date().getFullYear();
+  const width = opts.short ? 'short' as const : 'long' as const;
   return date.toLocaleString(lang === 'en' ? 'en-US' : 'es-ES', {
-    weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+    weekday: width, day: 'numeric', month: width, hour: '2-digit', minute: '2-digit',
     ...(sameYear ? {} : { year: 'numeric' as const }),
   });
 }

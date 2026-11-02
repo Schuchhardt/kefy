@@ -225,7 +225,41 @@ export async function listContent(
     throw new ServiceError('unavailable', 500, 'Failed to fetch content').markReported();
   }
 
-  return { items: (data ?? []) as unknown as Record<string, unknown>[], total: count ?? 0 };
+  const items = (data ?? []) as unknown as Record<string, unknown>[];
+  await addNextScheduledAt(db, ctx, items);
+  return { items, total: count ?? 0 };
+}
+
+/**
+ * `next_scheduled_at` de los contenidos programados de la página: la próxima
+ * fecha a la que sale (si va a varias redes, la más cercana). Una sola
+ * consulta para toda la página. Sin fecha por delante queda en null.
+ */
+async function addNextScheduledAt(
+  db: ReturnType<typeof createSupabaseServer>,
+  ctx: ServiceContext,
+  items: Record<string, unknown>[],
+): Promise<void> {
+  const ids = items.filter((it) => it.status === 'scheduled').map((it) => it.id as string);
+  for (const it of items) if (it.status === 'scheduled') it.next_scheduled_at = null;
+  if (ids.length === 0) return;
+
+  const { data } = await db
+    .from('kefy_scheduled_posts')
+    .select('content_item_id, scheduled_at')
+    .eq('org_id', ctx.auth.orgId)
+    .in('content_item_id', ids)
+    .eq('status', 'scheduled')
+    .gt('scheduled_at', new Date().toISOString())
+    .order('scheduled_at', { ascending: true });
+
+  const next = new Map<string, string>();
+  for (const row of (data ?? []) as Array<{ content_item_id: string; scheduled_at: string }>) {
+    if (!next.has(row.content_item_id)) next.set(row.content_item_id, row.scheduled_at);
+  }
+  for (const it of items) {
+    if (it.status === 'scheduled') it.next_scheduled_at = next.get(it.id as string) ?? null;
+  }
 }
 
 // ─── getContent ───────────────────────────────────────────────────────────────

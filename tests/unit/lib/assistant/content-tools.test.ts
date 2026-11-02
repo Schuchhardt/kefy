@@ -138,3 +138,25 @@ describe('procedencia por edición', () => {
     expect(r).toMatchObject({ ok: true, tainted: true });
   });
 });
+
+// La lista decía solo «Programado»: ahora trae para cuándo.
+describe('list_content: fecha de lo programado', () => {
+  it('cada contenido programado trae su próxima fecha; los demás no', async () => {
+    db.rows('kefy_content_items').find((i) => i.id === ITEM_2)!.status = 'scheduled';
+    const soon = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const later = new Date(Date.now() + 5 * 86_400_000).toISOString();
+    db.seed('kefy_scheduled_posts', [
+      { id: IDS.uuid(410), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM_2, status: 'scheduled', scheduled_at: later },
+      { id: IDS.uuid(411), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM_2, status: 'scheduled', scheduled_at: soon },
+      // Cancelada: no cuenta.
+      { id: IDS.uuid(412), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM_2, status: 'cancelled', scheduled_at: new Date(Date.now() + 86_400_000).toISOString() },
+    ]);
+
+    const r = await executeTool('list_content', {}, apiCtx({ brandId: IDS.BRAND }));
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) return;
+    const items = (r.data as { items: Array<Record<string, unknown>> }).items;
+    expect(items.find((i) => i.id === ITEM_2)!.next_scheduled_at).toBe(soon);
+    expect('next_scheduled_at' in items.find((i) => i.id === ITEM)!).toBe(false);
+  });
+});
