@@ -44,6 +44,14 @@ const COMMON = { es: esCommon, en: enCommon } as const;
 
 const LEGEND: PostStatus[] = ['scheduled', 'published', 'failed', 'pending'];
 
+/**
+ * Cuándo sale (o salió) la publicación. Las de «publicar ahora» no tienen
+ * scheduled_at: van al día en que se publicaron, o en que se intentó.
+ */
+function postWhen(post: ScheduledPost): string {
+  return post.scheduled_at ?? post.published_at ?? post.created_at;
+}
+
 /** Clave local `YYYY-MM-DD` de una fecha. */
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -133,13 +141,12 @@ export default function CalendarPage() {
   const postsByDay = useMemo(() => {
     const map: Record<string, ScheduledPost[]> = {};
     for (const post of posts) {
-      if (!post.scheduled_at) continue;
-      const key = dayKey(new Date(post.scheduled_at));
+      const key = dayKey(new Date(postWhen(post)));
       if (!map[key]) map[key] = [];
       map[key].push(post);
     }
     for (const list of Object.values(map)) {
-      list.sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''));
+      list.sort((a, b) => postWhen(a).localeCompare(postWhen(b)));
     }
     return map;
   }, [posts]);
@@ -233,9 +240,7 @@ export default function CalendarPage() {
     const contentId = post.kefy_content_items?.id;
     const platform = post.kefy_social_accounts?.platform;
     const account = post.kefy_social_accounts?.username ? `@${post.kefy_social_accounts.username}` : t.unknownAccount;
-    const time = post.scheduled_at
-      ? new Date(post.scheduled_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
-      : '--:--';
+    const time = new Date(postWhen(post)).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
     return (
       <li key={post.id} className={styles.post}>
         <span className={styles.postTime}>{time}</span>

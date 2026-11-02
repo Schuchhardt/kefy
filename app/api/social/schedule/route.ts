@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '@/lib/auth';
+import { getBrandFromRequest } from '@/lib/brands';
 import { requireActiveSubscription } from '@/lib/subscription';
 import { checkRateLimit, publishRule, rateLimitResponse } from '@/lib/rate-limit';
 import { serviceContext } from '@/lib/services/context';
@@ -10,7 +11,9 @@ import type { ContentType } from '@/types/content';
 const VALID_FORMATS: ContentType[] = ['post', 'carousel', 'reel', 'story'];
 
 // ─── GET /api/social/schedule ─────────────────────────────────────────────────
-// List scheduled posts for the org.
+// List scheduled posts for the active brand (the calendar). Antes listaba los
+// de toda la organización: el calendario mostraba los posts de otras marcas y,
+// con el límite de 100, dejaba fuera los de la marca activa.
 // Query: ?status= ?limit= ?offset=
 
 export async function GET(req: NextRequest) {
@@ -22,10 +25,15 @@ export async function GET(req: NextRequest) {
   const limit  = Math.min(parseInt(searchParams.get('limit') ?? '20', 10), 100);
   const offset = Math.max(parseInt(searchParams.get('offset') ?? '0', 10), 0);
 
-  const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });
+  const { brand, setCookieHeader } = await getBrandFromRequest(req, auth);
+  if (!brand) return NextResponse.json({ error: 'No brand found' }, { status: 404 });
+
+  const ctx = serviceContext(auth, brand.id, 'es', { brandScope: 'strict', source: 'route' });
 
   try {
-    return NextResponse.json(await listScheduledPosts(ctx, { status, limit, offset }));
+    const res = NextResponse.json(await listScheduledPosts(ctx, { status, limit, offset }));
+    if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);
+    return res;
   } catch (err) {
     return serviceErrorResponse(err, { route: '/api/social/schedule', auth });
   }

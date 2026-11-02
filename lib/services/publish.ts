@@ -388,8 +388,8 @@ export type ScheduledPostStatus = (typeof SCHEDULED_POST_STATUSES)[number];
 /**
  * Publicaciones programadas / publicadas / fallidas (GET /api/social/schedule).
  *
- * La ruta es de toda la organización (brandScope 'org'), como hoy. Con
- * 'strict' solo se devuelven las de la marca del contexto: filas con ese
+ * La ruta (el calendario) y las herramientas usan 'strict': solo se devuelven
+ * las de la marca del contexto: filas con ese
  * brand_id, o filas antiguas sin brand_id cuyo contenido es de la marca. En
  * ese modo el contenido embebido trae también `metadata` (created_via), que la
  * herramienta usa para marcar el turno como contaminado.
