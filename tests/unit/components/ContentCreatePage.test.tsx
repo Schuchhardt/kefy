@@ -178,3 +178,29 @@ describe('Página de creación de contenido — imagen de portada', () => {
     expect(screen.queryByText('Generando imagen…')).not.toBeInTheDocument();
   });
 });
+
+// La tarjeta de un contenido programado decía solo «Programado».
+describe('Página de contenido — lista', () => {
+  beforeEach(() => {
+    searchParams = new URLSearchParams();
+    const scheduled: ContentItem = {
+      ...generatedItem, id: 'item-s', status: 'scheduled', body: 'Post programado',
+      next_scheduled_at: new Date(new Date().getFullYear(), 10, 4, 19, 0).toISOString(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/content?'))   return jsonResponse({ items: [scheduled], total: 1 });
+      if (url.startsWith('/api/brands/active')) return jsonResponse({ brand: null });
+      if (url.startsWith('/api/brands'))     return jsonResponse({ brands: [], count: 0, limit: 1, canCreate: false });
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('un contenido programado dice para cuándo sale', async () => {
+    render(<BrandProvider><ContentPage /></BrandProvider>);
+    // El día de la semana depende del año en curso: no se fija.
+    expect(await screen.findByText(/^Programada para el \S+, 4 nov, 19:00$/)).toBeInTheDocument();
+  });
+});

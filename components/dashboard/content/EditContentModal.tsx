@@ -9,7 +9,7 @@ import Notice from '@/components/ui/Notice';
 import Icon from '@/components/ui/icons';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
 import { ImageGeneratingSpinner } from '@/components/dashboard/ImageGeneratingSpinner';
-import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene } from '@/types/content';
+import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene, ScheduledSyncResult } from '@/types/content';
 import esPublish from '@/locales/es/dashboard/publish';
 import enPublish from '@/locales/en/dashboard/publish';
 import styles from './EditContentModal.module.css';
@@ -26,6 +26,11 @@ interface EditContentModalProps {
   brandKit?: BrandKitInfo | null;
   lang:      'es' | 'en';
   onUpdate:  (patch: Partial<ContentItem>) => void;
+  /**
+   * Contenido programado: al cerrar con cambios se reenvía a sus publicaciones
+   * programadas, y aquí llega el resultado (null si la llamada falló).
+   */
+  onScheduledSync?: (result: ScheduledSyncResult | null) => void;
 }
 
 const COPY = { es: esPublish, en: enPublish } as const;
@@ -40,7 +45,7 @@ function aiMessage(err: unknown, fallback: string): string {
 }
 
 export default function EditContentModal({
-  open, onClose, item, brandKit, lang, onUpdate,
+  open, onClose, item, brandKit, lang, onUpdate, onScheduledSync,
 }: EditContentModalProps) {
   const copy = COPY[lang];
   const t = copy.edit;
@@ -75,6 +80,8 @@ export default function EditContentModal({
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef<{ itemId: string; patch: Partial<ContentItem> } | null>(null);
   const lastSentRef = useRef<string>('');
+  /** Algo se guardó desde que se abrió: al cerrar, se sincroniza lo programado. */
+  const changedRef = useRef(false);
   // Always-fresh ref so the unmount flush below (registered once, empty deps)
   // never calls a stale onUpdate closure.
   const onUpdateRef = useRef(onUpdate);
@@ -101,14 +108,16 @@ export default function EditContentModal({
     setSlideError(null);
     setUploadError(null);
     lastSentRef.current = '';
+    changedRef.current = false;
   }, [item?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendPatch = useCallback((itemId: string, patch: Partial<ContentItem>) => {
+  const sendPatch = useCallback((itemId: string, patch: Partial<ContentItem>): Promise<void> => {
     const payload = JSON.stringify(patch);
-    if (payload === lastSentRef.current) return;
+    if (payload === lastSentRef.current) return Promise.resolve();
     lastSentRef.current = payload;
     setSaveState('saving');
-    fetch(`/api/content/${itemId}`, {
+    // sync=defer: lo programado se sincroniza una vez, al cerrar.
+    return fetch(`/api/content/${itemId}?sync=defer`, {
       method: 'PATCH', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: payload,
@@ -116,6 +125,7 @@ export default function EditContentModal({
       const d = await res.json() as { item?: ContentItem; error?: string };
       if (!res.ok) throw new Error(d.error ?? 'PATCH failed');
       setSaveState('saved');
+      changedRef.current = true;
       onUpdateRef.current(patch);
       setTimeout(() => setSaveState((s) => s === 'saved' ? 'idle' : s), 1500);
     }).catch(() => setSaveState('error'));
@@ -147,6 +157,32 @@ export default function EditContentModal({
   }, [sendPatch]);
 
   if (!item) return null;
+
+  /**
+   * Cerrar guarda lo pendiente ya (antes el autoguardado salía 700 ms después)
+   * y, si el contenido está programado y cambió, lo reenvía una vez a sus
+   * publicaciones programadas: Zernio publica la copia que recibió al programar.
+   */
+  function handleClose() {
+    const current = item!;
+    onClose();
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+
+    void (async () => {
+      if (pending) await sendPatch(pending.itemId, pending.patch);
+      if (!changedRef.current || current.status !== 'scheduled') return;
+      changedRef.current = false;
+      let result: ScheduledSyncResult | null = null;
+      try {
+        const res = await fetch(`/api/content/${current.id}/sync-scheduled`, { method: 'POST', credentials: 'include' });
+        if (res.ok) result = await res.json() as ScheduledSyncResult;
+      } catch { /* result null: se avisa abajo */ }
+      onScheduledSync?.(result);
+    })();
+  }
 
   // ── Field handlers ────────────────────────────────────────────────────────
   function onTitleChange(v: string) {
@@ -242,13 +278,14 @@ export default function EditContentModal({
     setSaveState('saving');
     const patch: Partial<ContentItem> = { slides: normalized, video_url: null, render_status: 'not_rendered' };
     try {
-      const res = await fetch(`/api/content/${item!.id}`, {
+      const res = await fetch(`/api/content/${item!.id}?sync=defer`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
       if (!res.ok) throw new Error('PATCH failed');
       setSaveState('saved');
+      changedRef.current = true;
       onUpdate(patch);
       // Only now is it safe to flip local state — this is what mounts
       // MuxReelPlayer, and by this point the DB already reflects the edit.
@@ -369,6 +406,7 @@ export default function EditContentModal({
       if (!res.ok) throw new Error(d.error);
       if (d.body)     { setBodyText(d.body); lastSentRef.current = ''; }
       if (d.hashtags) { setTagsText(d.hashtags.join(' ')); }
+      changedRef.current = true;
       onUpdate({ body: d.body, hashtags: d.hashtags });
       setRegenTextFeedback('');
     } catch (err) {
@@ -396,6 +434,7 @@ export default function EditContentModal({
       if (!res.ok) throw new Error(d.error);
       if (d.image?.url) {
         setImageUrl(d.image.url);
+        changedRef.current = true;
         onUpdate({ image_url: d.image.url });
       }
       setRegenImageFeedback('');
@@ -452,6 +491,7 @@ export default function EditContentModal({
       const d = await res.json() as { scenes?: ReelScene[]; error?: string };
       if (!res.ok) throw new Error(d.error ?? t.aiError);
       setSlides((d.scenes ?? []) as unknown as (CarouselSlide | ReelScene)[]);
+      changedRef.current = true;
       onUpdate({ slides: (d.scenes ?? []) as unknown as ReelScene[] });
       setStoryHasScript(true);
     } catch (err) {
@@ -484,11 +524,11 @@ export default function EditContentModal({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={t.title}
       subtitle={<span role="status" className={styles.saveStatus}>{saveStatus}</span>}
       maxWidth={960}
-      footer={<Button variant="primary" onClick={onClose}>{t.close}</Button>}
+      footer={<Button variant="primary" onClick={handleClose}>{t.close}</Button>}
     >
       <div className={styles.layout}>
         {/* ── Live preview ─────────────────────────────────────────────── */}

@@ -26,6 +26,8 @@ import Icon, { type IconName } from '@/components/ui/icons';
 import { useConfirm }      from '@/components/ui/ConfirmDialog';
 import ContentActions      from '@/components/dashboard/content/ContentActions';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
+import { scheduledSyncNotice } from '@/components/dashboard/content/scheduled-sync';
+import { formatScheduledDate } from '@/components/dashboard/content/RescheduleModal';
 import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
 import RecommendModal      from '@/components/dashboard/content/RecommendModal';
 import ContentLibraryModal from '@/components/dashboard/content/ContentLibraryModal';
@@ -46,6 +48,8 @@ import esT, { type ContentCopy } from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
 import esCommon, { type DashboardCommonCopy as CommonCopy } from '@/locales/es/dashboard/common';
 import enCommon from '@/locales/en/dashboard/common';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -440,6 +444,15 @@ function ContentCard({
     </span>
   );
   const date = <time className={styles.date} dateTime={item.created_at}>{dateLabel}</time>;
+  // Programado: para cuándo, no solo la etiqueta «Programado».
+  const scheduledFor = item.status === 'scheduled' && item.next_scheduled_at ? (
+    <p className={styles.scheduledFor}>
+      <Icon name="calendar" size={12} />
+      <time dateTime={item.next_scheduled_at}>
+        {(lang === 'en' ? enPublish : esPublish).scheduled.scheduledFor(formatScheduledDate(item.next_scheduled_at, lang, { short: true }))}
+      </time>
+    </p>
+  ) : null;
   const link = (
     <Link href={href} className={styles.cardLink}>
       <span className={styles.cardText}>{text}</span>
@@ -490,6 +503,7 @@ function ContentCard({
           )}
           {date}
         </div>
+        {scheduledFor}
         {link}
       </div>
       <div className={styles.gridActions}>{actions}</div>
@@ -539,6 +553,7 @@ function ContentCard({
           )}
           {date}
         </div>
+        {scheduledFor}
         {link}
       </div>
 
@@ -575,6 +590,8 @@ function ContentPageInner() {
   const [items, setItems]           = useState<ContentItem[]>([]);
   const [loading, setLoading]       = useState(true);
   const [listError, setListError]   = useState<string | null>(null);
+  /** Resultado de reenviar a lo programado un contenido editado. */
+  const [syncNotice, setSyncNotice] = useState<ReturnType<typeof scheduledSyncNotice>>(null);
   const [filterChannel, setFilterChannel] = useState<Channel | ''>('');
   const [filterStatus, setFilterStatus]   = useState<ContentStatus | ''>('');
   const [brandKit, setBrandKit]     = useState<BrandKitInfo | null>(null);
@@ -1800,6 +1817,12 @@ function ContentPageInner() {
           )}
         </div>
 
+        {syncNotice && (
+          <div style={{ marginBottom: 16 }}>
+            <Notice tone={syncNotice.tone}>{syncNotice.text}</Notice>
+          </div>
+        )}
+
         {listError && (
           <div style={{ marginBottom: 16 }}>
             <Notice tone="danger" icon={<Icon name="alert" size={16} />}>
@@ -1826,6 +1849,7 @@ function ContentPageInner() {
         onUpdate={(patch) => {
           if (editItem) handleItemUpdate(editItem.id, patch as Partial<ContentItem>);
         }}
+        onScheduledSync={(result) => setSyncNotice(scheduledSyncNotice(result, lang))}
       />
 
       <ScheduleModal

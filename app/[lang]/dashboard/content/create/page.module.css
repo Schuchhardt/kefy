@@ -558,6 +558,18 @@
   font-weight: 600;
 }
 
+.scheduledFor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+  min-width: 0;
+}
+.scheduledFor time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .date {
   margin-left: auto;
   font-size: 12px;

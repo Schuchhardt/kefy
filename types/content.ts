@@ -59,6 +59,8 @@ export interface ContentMetadata {
 
 export interface ContentItem {
   id:               string;
+  /** Solo en GET /api/content con status 'scheduled': la próxima fecha a la que sale. */
+  next_scheduled_at?: string | null;
   /** Marca dueña. NULL en filas antiguas, anteriores a las marcas. */
   brand_id?:        string | null;
   channel:          Channel;
@@ -145,6 +147,17 @@ export interface ScheduledPost {
   created_at:             string;
   kefy_content_items:     ScheduledPostContent | null;
   kefy_social_accounts:   { id: string; platform: string; username: string; avatar_url: string | null; status: string } | null;
+}
+
+/**
+ * Resultado de reenviar un contenido editado a sus publicaciones programadas
+ * (Zernio guarda una copia al programar).
+ */
+export interface ScheduledSyncResult {
+  /** Publicaciones programadas que recibieron el contenido nuevo. */
+  updated: number;
+  /** Las que siguen con el contenido anterior en la red. */
+  failed: Array<{ scheduled_post_id: string; platform: string | null; error: string }>;
 }
 
 // ─── Dashboard summary ───────────────────────────────────────────────────────

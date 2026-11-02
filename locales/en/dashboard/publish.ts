@@ -60,6 +60,28 @@ const en: PublishCopy = {
     },
   },
 
+  scheduled: {
+    scheduledFor: (when: string) => `Scheduled for ${when}`,
+    publishedOn: (when: string) => `Published on ${when}`,
+    failedOn: (when: string) => `Failed on ${when}`,
+    goingOut: 'Being published now',
+    reschedule: 'Change date',
+    editContent: 'Edit content',
+    editHint: 'If you edit the content, the change also applies to what is scheduled.',
+    rescheduleTitle: 'Change publish date',
+    rescheduleCurrent: (when: string) => `It currently goes out on ${when}.`,
+    rescheduleSave: 'Save date',
+    rescheduleCancel: 'Back',
+    rescheduleSaved: (when: string) => `Done: it will go out on ${when}.`,
+    reschedulePast: 'Pick a future date and time.',
+    rescheduleError: 'Could not change the date. Please try again.',
+    syncOk: (n: number) => (n === 1
+      ? 'The change was applied to the scheduled post.'
+      : `The change was applied to the ${n} scheduled posts.`),
+    syncFailed: (networks: string) => `The change did not reach ${networks}: that post would go out with the previous version. Cancel it and schedule it again.`,
+    syncError: 'Could not apply the change to what is scheduled: the previous version might go out. Check the calendar or schedule it again.',
+  },
+
   dateTime: {
     dayLabel: 'Publishing day',
     timeLabel: 'Time',

@@ -28,12 +28,15 @@ import { useBrand } from '@/lib/brand-context';
 import { statusColors, TONE_COLORS } from '@/lib/status';
 import { toLocale } from '@/lib/i18n';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
+import RescheduleModal, { formatScheduledDate } from '@/components/dashboard/content/RescheduleModal';
 import ViewPublishedLink from '@/components/dashboard/content/ViewPublishedLink';
 import { NET_LABEL } from '@/components/dashboard/NetworkPreview';
 import type { PostStatus, ScheduledPost } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
 
 import esT from '@/locales/es/dashboard/calendar';
+import esPublish from '@/locales/es/dashboard/publish';
+import enPublish from '@/locales/en/dashboard/publish';
 import enT from '@/locales/en/dashboard/calendar';
 import esCommon from '@/locales/es/dashboard/common';
 import enCommon from '@/locales/en/dashboard/common';
@@ -41,6 +44,7 @@ import styles from './page.module.css';
 
 const T = { es: esT, en: enT } as const;
 const COMMON = { es: esCommon, en: enCommon } as const;
+const PUBLISH = { es: esPublish, en: enPublish } as const;
 
 const LEGEND: PostStatus[] = ['scheduled', 'published', 'failed', 'pending'];
 
@@ -50,6 +54,11 @@ const LEGEND: PostStatus[] = ['scheduled', 'published', 'failed', 'pending'];
  */
 function postWhen(post: ScheduledPost): string {
   return post.scheduled_at ?? post.published_at ?? post.created_at;
+}
+
+/** Programada y con la hora todavía por delante: se puede mover o editar. */
+function isEditable(post: ScheduledPost): boolean {
+  return post.status === 'scheduled' && !!post.scheduled_at && new Date(post.scheduled_at).getTime() > Date.now();
 }
 
 /** Clave local `YYYY-MM-DD` de una fecha. */
@@ -74,6 +83,7 @@ export default function CalendarPage() {
   const lang = toLocale(rawLang);
   const t = T[lang];
   const common = COMMON[lang];
+  const ts = PUBLISH[lang].scheduled;
   const locale = lang === 'en' ? 'en-US' : 'es-ES';
   const { confirm, dialog } = useConfirm();
   const monthHeadingId = useId();
@@ -94,6 +104,10 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   /** Día vacío cuyo panel («Crear» / «Programar») está abierto. */
   const [emptyDay, setEmptyDay] = useState<string | null>(null);
+
+  /** Publicación cuya fecha se está cambiando. */
+  const [reschedulePost, setReschedulePost] = useState<ScheduledPost | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // ScheduleModal
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
@@ -132,6 +146,7 @@ export default function CalendarPage() {
     if (!activeBrand?.id) return;
     void fetchData();
     setScheduleModalOpen(false);
+    setReschedulePost(null);
     setEmptyDay(null);
   }, [activeBrand?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -217,12 +232,12 @@ export default function CalendarPage() {
     });
     if (!ok) return;
     setActionError(null);
+    setNotice(null);
     try {
+      // DELETE: la ruta no tenía PATCH, así que cancelar desde aquí fallaba.
       const res = await fetch(`/api/social/schedule/${post.id}`, {
-        method: 'PATCH',
+        method: 'DELETE',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'cancelled' }),
       });
       if (!res.ok) throw new Error(`cancel ${res.status}`);
     } catch {
@@ -234,6 +249,16 @@ export default function CalendarPage() {
   const formatDay = (key: string, withYear = false) => keyToDate(key).toLocaleDateString(locale, {
     weekday: 'long', day: 'numeric', month: 'long', ...(withYear ? { year: 'numeric' as const } : {}),
   });
+
+  /** Cuándo sale o salió, con el día completo: «Programada para el lunes…». */
+  function whenLabel(post: ScheduledPost): string {
+    const when = formatScheduledDate(postWhen(post), lang);
+    if (post.status === 'published') return ts.publishedOn(when);
+    if (post.status === 'failed') return ts.failedOn(when);
+    if (post.status === 'scheduled' && !isEditable(post)) return ts.goingOut;
+    if (post.status === 'cancelled') return when;
+    return ts.scheduledFor(when);
+  }
 
   function renderPost(post: ScheduledPost) {
     const text = post.kefy_content_items?.body?.slice(0, 80) || post.kefy_content_items?.title || t.noText;
@@ -256,6 +281,7 @@ export default function CalendarPage() {
           <p className={styles.postMeta}>
             {platform ? `${account} · ${NET_LABEL[platform] ?? platform}` : account}
           </p>
+          <p className={styles.postWhen}>{whenLabel(post)}</p>
           {post.error_message && <p className={styles.postError}>{post.error_message}</p>}
         </div>
         <div className={styles.postSide}>
@@ -263,10 +289,20 @@ export default function CalendarPage() {
           {post.status === 'published' && (
             <ViewPublishedLink url={post.platform_post_url} platform={platform} lang={lang} variant="ghost" />
           )}
-          {post.status === 'scheduled' && (
-            <Button variant="ghost" size="sm" onClick={() => void handleCancel(post)}>
-              {t.cancelPost}
-            </Button>
+          {isEditable(post) && (
+            <div className={styles.postActions}>
+              <Button variant="secondary" size="sm" icon={<Icon name="calendar" size={14} />} onClick={() => { setNotice(null); setReschedulePost(post); }}>
+                {ts.reschedule}
+              </Button>
+              {contentId && (
+                <ButtonLink href={`/${lang}/dashboard/content/${contentId}`} variant="ghost" size="sm" icon={<Icon name="edit" size={14} />}>
+                  {ts.editContent}
+                </ButtonLink>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => void handleCancel(post)}>
+                {t.cancelPost}
+              </Button>
+            </div>
           )}
         </div>
       </li>
@@ -298,6 +334,7 @@ export default function CalendarPage() {
         </div>
       )}
       {actionError && <div className={styles.notice}><Notice tone="danger">{actionError}</Notice></div>}
+      {notice && <div className={styles.notice}><Notice tone="success">{notice}</Notice></div>}
 
       {/* Connected accounts */}
       {accounts && accounts.length > 0 && (
@@ -528,6 +565,17 @@ export default function CalendarPage() {
         lang={lang}
         showCalendarLink={false}
         onSuccess={() => { void fetchData(); }}
+      />
+
+      <RescheduleModal
+        open={!!reschedulePost}
+        onClose={() => setReschedulePost(null)}
+        post={reschedulePost}
+        lang={lang}
+        onSuccess={(at) => {
+          setNotice(ts.rescheduleSaved(formatScheduledDate(at, lang)));
+          void fetchData();
+        }}
       />
 
       {dialog}

@@ -57,7 +57,7 @@ describe('EditContentModal — slides', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Bajar slide 1' }));
 
     await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url, init]) => url === '/api/content/item-c' && init?.method === 'PATCH');
+      const call = fetchMock.mock.calls.find(([url, init]) => url === '/api/content/item-c?sync=defer' && init?.method === 'PATCH');
       expect(call).toBeTruthy();
       const body = JSON.parse(call![1]!.body as string);
       expect(body.slides.map((s: { title: string }) => s.title)).toEqual(['Segundo', 'Primero']);
@@ -102,5 +102,42 @@ describe('EditContentModal — campos y errores', () => {
     render(<EditContentModal open onClose={onClose} item={postItem()} lang="en" onUpdate={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Zernio guarda una copia de lo programado: el autoguardado no sincroniza en
+// cada tecla (?sync=defer) y cerrar el editor reenvía el cambio una sola vez.
+describe('EditContentModal — contenido programado', () => {
+  it('al cerrar guarda lo pendiente y sincroniza lo programado una vez', async () => {
+    const fetchMock = vi.fn(async (url: string) => (url.endsWith('/sync-scheduled')
+      ? jsonResponse({ updated: 2, failed: [] })
+      : jsonResponse({ item: {} })));
+    vi.stubGlobal('fetch', fetchMock);
+    const onScheduledSync = vi.fn();
+    const item = { ...postItem(), status: 'scheduled' } as ContentItem;
+    render(<EditContentModal open onClose={() => {}} item={item} lang="es" onUpdate={() => {}} onScheduledSync={onScheduledSync} />);
+
+    fireEvent.change(screen.getByLabelText('Texto'), { target: { value: 'Texto corregido' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Listo' }));
+
+    await waitFor(() => expect(onScheduledSync).toHaveBeenCalledWith({ updated: 2, failed: [] }));
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls).toEqual(['/api/content/item-p?sync=defer', '/api/content/item-p/sync-scheduled']);
+  });
+
+  it('sin cambios, o si no está programado, cerrar no sincroniza', async () => {
+    const fetchMock = vi.fn(async (_url: string) => jsonResponse({ item: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    const onScheduledSync = vi.fn();
+    const { rerender } = render(<EditContentModal open onClose={() => {}} item={{ ...postItem(), status: 'scheduled' } as ContentItem} lang="es" onUpdate={() => {}} onScheduledSync={onScheduledSync} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Listo' }));
+
+    rerender(<EditContentModal open onClose={() => {}} item={postItem()} lang="es" onUpdate={() => {}} onScheduledSync={onScheduledSync} />);
+    fireEvent.change(screen.getByLabelText('Texto'), { target: { value: 'Otro' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Listo' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/content/item-p?sync=defer');
+    expect(onScheduledSync).not.toHaveBeenCalled();
   });
 });
