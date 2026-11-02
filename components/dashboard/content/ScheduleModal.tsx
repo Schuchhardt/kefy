@@ -21,6 +21,8 @@ import Icon, { type IconName } from '@/components/ui/icons';
 import ChannelIcon from '@/components/ui/ChannelIcon';
 import DateTimePicker from './DateTimePicker';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
+import { brandImages } from '@/components/dashboard/BrandAvatar';
+import { useActiveBrand } from '@/lib/brand-context';
 import FormatExample from './FormatExample';
 import ViewPublishedLink from './ViewPublishedLink';
 import { RenditionGenerating } from './RenditionGenerating';
@@ -702,6 +704,8 @@ function FormatPreview({
   onGenerate: () => void;
   onReelRenderDone?: (itemId: string, url: string) => void;
 }) {
+  // El avatar de la vista previa es el mismo que el del selector de marca.
+  const activeBrand = useActiveBrand();
   const isPrimary = format === item.content_type;
   const [activeSlide, setActiveSlide] = useState(0);
 
@@ -751,7 +755,7 @@ function FormatPreview({
         activeSlide={activeSlide}
         onActiveSlideChange={setActiveSlide}
         username={brandKit?.name ?? copy.preview.defaultUsername}
-        logoUrl={brandKit?.logo_url ?? undefined}
+        logoUrl={brandImages(activeBrand, brandKit?.logo_url)}
         imagePending={isPrimary && !imageUrl && item.image_status === 'generating'}
         accentColor={brandKit?.accent_color ?? undefined}
         brandFont={brandKit?.font_heading}

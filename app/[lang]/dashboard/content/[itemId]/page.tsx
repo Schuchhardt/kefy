@@ -28,6 +28,7 @@ import Icon, { type IconName } from '@/components/ui/icons';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { toLocale } from '@/lib/i18n';
 import { useBrand } from '@/lib/brand-context';
+import { brandImages } from '@/components/dashboard/BrandAvatar';
 import ScheduleModal from '@/components/dashboard/content/ScheduleModal';
 import EditContentModal from '@/components/dashboard/content/EditContentModal';
 import RescheduleModal, { formatScheduledDate } from '@/components/dashboard/content/RescheduleModal';
@@ -347,7 +348,7 @@ export default function ContentDetailPage() {
                 activeSlide={activeSlide}
                 onActiveSlideChange={setActiveSlide}
                 username={brandKit?.name ?? PUBLISH[locale].preview.defaultUsername}
-                logoUrl={brandKit?.logo_url ?? undefined}
+                logoUrl={brandImages(activeBrand, brandKit?.logo_url)}
                 imagePending={!item.image_url && item.image_status === 'generating'}
                 accentColor={brandKit?.accent_color ?? undefined}
                 brandFont={brandKit?.font_heading}

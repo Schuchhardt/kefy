@@ -5,6 +5,7 @@ import Icon from '@/components/ui/icons';
 import { aspectLimitsFor } from '@/lib/image-fit';
 import type { ContentChannel } from '@/types/ai';
 import { previewCopy } from './CarouselPreview';
+import PreviewAvatarImage, { hasAvatar, type AvatarSource } from '@/components/dashboard/PreviewAvatarImage';
 
 // La interfaz de cada red (acciones, «Seguir», «Me gusta»…) es una imitación
 // visual: va con aria-hidden y sin botones de verdad. Antes eran <button> que
@@ -52,20 +53,15 @@ function FeedImage({ src, channel, radius = 0, alt }: {
 }
 
 interface AvatarProps {
-  logoUrl?:     string | null;
+  logoUrl?:     AvatarSource;
   username:     string;
   size?:        number;
   gradientRing?: boolean;
 }
 
 function Avatar({ logoUrl, username, size = 36, gradientRing = false }: AvatarProps) {
-  const inner = logoUrl ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={logoUrl}
-      alt={username}
-      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', display: 'block' }}
-    />
+  const inner = hasAvatar(logoUrl) ? (
+    <PreviewAvatarImage src={logoUrl} alt={username} />
   ) : (
     <div
       style={{
@@ -435,7 +431,7 @@ interface PostPreviewProps {
   imageUrl?: string | null;
   hashtags:  string[];
   username:  string;
-  logoUrl?:  string | null;
+  logoUrl?:  AvatarSource;
   /** Custom media node rendered in place of `imageUrl` — lets carousel slides
    *  (see `SlideCanvas`) reuse each network's chrome. */
   media?:    React.ReactNode;

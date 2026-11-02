@@ -202,3 +202,8 @@ export function useBrand(): BrandContextValue {
   if (!ctx) throw new Error('useBrand must be used within a BrandProvider');
   return ctx;
 }
+
+/** La marca activa, o null fuera de un BrandProvider (piezas que no la exigen). */
+export function useActiveBrand(): Brand | null {
+  return useContext(BrandContext)?.activeBrand ?? null;
+}
