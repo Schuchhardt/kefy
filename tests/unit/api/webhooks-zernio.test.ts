@@ -90,6 +90,42 @@ describe('POST /api/webhooks/zernio — URL pública del post', () => {
   });
 });
 
+// post.scheduled no traía la fecha al normalizar (Zernio la manda como
+// `scheduledFor`) y dejaba scheduled_at en NULL: la publicación desaparecía del
+// calendario.
+describe('POST /api/webhooks/zernio — fecha programada', () => {
+  beforeEach(() => {
+    db.reset();
+    db.seed('kefy_scheduled_posts', [{ id: 'sp1', zernio_post_id: 'zp1', status: 'pending', scheduled_at: '2026-11-05T15:00:00.000Z' }]);
+  });
+
+  it('post.scheduled guarda scheduledFor', async () => {
+    await send({
+      id: 'evt-s1', event: 'post.scheduled', timestamp: '2026-11-02T10:00:00Z',
+      post: { id: 'zp1', content: 'Hola', status: 'scheduled', scheduledFor: '2026-11-06T12:00:00.000Z', platforms: [] },
+    });
+    expect(post()).toMatchObject({ status: 'scheduled', scheduled_at: '2026-11-06T12:00:00.000Z' });
+  });
+
+  it('post.scheduled sin fecha conserva la que guardó Kefy', async () => {
+    await send({
+      id: 'evt-s2', event: 'post.scheduled', timestamp: '2026-11-02T10:00:00Z',
+      post: { id: 'zp1', content: 'Hola', status: 'scheduled', platforms: [] },
+    });
+    expect(post()).toMatchObject({ status: 'scheduled', scheduled_at: '2026-11-05T15:00:00.000Z' });
+  });
+
+  it('un post.scheduled que llega después de post.published no lo devuelve a programado', async () => {
+    db.reset();
+    db.seed('kefy_scheduled_posts', [{ id: 'sp1', zernio_post_id: 'zp1', status: 'published', scheduled_at: '2026-11-05T15:00:00.000Z' }]);
+    await send({
+      id: 'evt-s3', event: 'post.scheduled', timestamp: '2026-11-02T10:00:00Z',
+      post: { id: 'zp1', content: 'Hola', status: 'scheduled', platforms: [] },
+    });
+    expect(post().status).toBe('published');
+  });
+});
+
 describe('POST /api/webhooks/zernio — respuestas automáticas', () => {
   beforeEach(() => {
     vi.mocked(executeEngagementRules).mockClear();

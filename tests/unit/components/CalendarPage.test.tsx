@@ -126,6 +126,13 @@ describe('CalendarPage — rejilla (escritorio)', () => {
     expect([date.getMonth(), date.getDate(), date.getHours(), date.getMinutes()]).toEqual([8, 20, 9, 0]);
   });
 
+  it('las publicaciones de «publicar ahora» (sin scheduled_at) van al día en que salieron', async () => {
+    renderCalendar({ posts: [{
+      ...POSTS[2], id: 'p-now', scheduled_at: null, published_at: at(22, 11), created_at: at(22, 11),
+    }] });
+    expect(await screen.findByRole('button', { name: 'martes, 22 de septiembre, 1 publicación' })).toBeTruthy();
+  });
+
   it('navegar de mes: flechas con nombre y «Hoy» para volver', async () => {
     renderCalendar();
     expect(await screen.findByRole('heading', { name: 'Septiembre 2026' })).toBeTruthy();

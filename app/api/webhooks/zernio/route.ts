@@ -56,6 +56,10 @@ function normalizePayload(raw: Record<string, unknown>): Data {
     if (p.platform)   d.platform   = p.platform;
     if (p.accountId)  d.account_id = p.accountId;
     if (p.publishedAt) d.published_at = p.publishedAt;
+    // La fecha programada viene como `scheduledFor`. Sin este mapeo
+    // post.scheduled dejaba scheduled_at en NULL y la publicación desaparecía
+    // del calendario.
+    if (p.scheduledFor) d.scheduled_at = p.scheduledFor;
     if (p.content)    d.content    = p.content;
     const url = safePostUrl(changed.publishedUrl ?? target.publishedUrl ?? target.platformPostUrl ?? p.url);
     if (url)          d.platform_post_url = url;
@@ -168,13 +172,17 @@ async function handlePostUrlResolved(db: DB, data: Data) {
 
 async function handlePostScheduled(db: DB, data: Data) {
   const zernioPostId = str(data.post_id);
-  const scheduledAt  = strOrNull(data.scheduled_at);
+  const scheduledAt  = str(data.scheduled_at);
   if (!zernioPostId) return;
 
+  // Sin fecha en el evento se conserva la que guardó Kefy al programar. Y un
+  // post.scheduled que llega tarde (después de post.published) no devuelve a
+  // 'scheduled' una publicación que ya salió.
   await db
     .from('kefy_scheduled_posts')
-    .update({ status: 'scheduled', scheduled_at: scheduledAt, error_message: null })
-    .eq('zernio_post_id', zernioPostId);
+    .update({ status: 'scheduled', error_message: null, ...(scheduledAt ? { scheduled_at: scheduledAt } : {}) })
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'published');
 }
 
 async function handlePostPublished(db: DB, data: Data) {
@@ -229,12 +237,12 @@ async function handlePostCancelled(db: DB, data: Data) {
 // post.recycled: post was re-queued (e.g. for evergreen recycling)
 async function handlePostRecycled(db: DB, data: Data) {
   const zernioPostId = str(data.post_id);
-  const scheduledAt  = strOrNull(data.scheduled_at);
+  const scheduledAt  = str(data.scheduled_at);
   if (!zernioPostId) return;
 
   await db
     .from('kefy_scheduled_posts')
-    .update({ status: 'scheduled', scheduled_at: scheduledAt, error_message: null, published_at: null })
+    .update({ status: 'scheduled', error_message: null, published_at: null, ...(scheduledAt ? { scheduled_at: scheduledAt } : {}) })
     .eq('zernio_post_id', zernioPostId);
 }
 
