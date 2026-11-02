@@ -107,7 +107,7 @@ export interface CustomStrategy {
 
 // ─── Recommendation block (strategy → content/create page) ───────────────────
 
-export type RecSource = 'strategy' | 'industry_fallback' | 'ai_only';
+export type RecSource = 'strategy' | 'industry_fallback' | 'ai_only' | 'history';
 
 export interface RecRationale {
   source:           RecSource;

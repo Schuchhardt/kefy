@@ -22,6 +22,8 @@ import { wrapUntrusted } from '@/lib/assistant/untrusted';
 import type { ToolLink } from '@/lib/assistant/types';
 import { ServiceError, msg } from '@/lib/services/errors';
 import { getActiveBrandById } from '@/lib/brands';
+import { createSupabaseServer } from '@/lib/supabase';
+import { loadContentHistory } from '@/lib/services/recommendations';
 import type { ToolContext } from '@/lib/assistant/types';
 import {
   getBrandStrategy, getStrategyCatalog, getStrategyIdeas, previewStrategy, saveCustomStrategy, setBrandStrategy,
@@ -373,15 +375,25 @@ const getContentIdeasTool = defineTool({
   description:
     "Returns this week's content ideas (topic, format, goal) from the calendar of the active strategy of the brand " +
     'in brand_id. With no strategy, it uses the catalog strategy that matches the industry of the brand profile ' +
-    '(source "industry_fallback"); with neither, it returns hint "no_strategy" and you can brainstorm ideas ' +
-    'yourself. Costs no credits.',
+    '(source "industry_fallback"); with neither, it returns hint "no_strategy". It also returns recent_content: ' +
+    "the brand's latest pieces (newest first) with their metrics and top_performer flags. When recent_content is " +
+    'not empty, do not hand the calendar topics over as-is: propose ideas that continue the themes the brand ' +
+    'already covered, weighting the most recent piece and the top performers, and use the strategy ideas as ' +
+    'angles to apply. Costs no credits.',
   input: z.object({
     offset: z.number().int().min(0).max(50).optional().describe('Skip this many ideas to rotate through the calendar.'),
   }).strict(),
   confirm: 'never',
   handler: async (ctx, input) => {
-    const ideas = await getStrategyIdeas(ctx, { offset: input.offset });
-    return { data: ideas, links: [strategyLink(ctx.language)] };
+    const [ideas, history] = await Promise.all([
+      getStrategyIdeas(ctx, { offset: input.offset }),
+      loadContentHistory(createSupabaseServer(), ctx, 10),
+    ]);
+    const recent_content = history.map((h) => ({
+      ...h,
+      topic: wrapUntrusted('content', h.topic),
+    }));
+    return { data: { ...ideas, recent_content }, links: [strategyLink(ctx.language)] };
   },
 });
 
