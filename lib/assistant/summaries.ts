@@ -32,6 +32,7 @@ export const ASSISTANT_TOOL_NAMES = [
   'get_content_ideas',
   'list_content',
   'get_content',
+  'review_content',
   'create_post',
   'create_starter_posts',
   'create_carousel',

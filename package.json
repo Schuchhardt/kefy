@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "node scripts/generate-build-id.mjs",
+    "predev": "node scripts/generate-build-id.mjs && npm run build:mcp-app",
     "dev": "next dev -p 3099",
-    "prebuild": "node scripts/generate-build-id.mjs",
+    "prebuild": "node scripts/generate-build-id.mjs && npm run build:mcp-app",
     "build": "next build",
+    "build:mcp-app": "vite build --config mcp-app/vite.config.mts",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -53,6 +54,9 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/core": "^2.4.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.1",
@@ -68,9 +72,12 @@
     "eslint-config-next": "16.2.6",
     "happy-dom": "^20.9.0",
     "jsdom": "^27.0.1",
+    "preact": "^10.27.2",
     "promptfoo": "^0.120.19",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite": "^6.4.2",
+    "vite-plugin-singlefile": "^2.3.4",
     "vitest": "^4.1.7"
   }
 }

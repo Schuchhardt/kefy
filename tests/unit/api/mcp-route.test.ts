@@ -134,7 +134,7 @@ describe('JSON-RPC', () => {
   });
 
   it('método desconocido → -32601 con el mismo id', async () => {
-    const body = await (await mcp(rpc('resources/list', {}, 'abc'))).json();
+    const body = await (await mcp(rpc('prompts/list', {}, 'abc'))).json();
     expect(body).toMatchObject({ id: 'abc', error: { code: JSONRPC_ERRORS.methodNotFound } });
   });
 
@@ -160,18 +160,18 @@ describe('JSON-RPC', () => {
 });
 
 describe('initialize', () => {
-  it('acepta la versión pedida si la hablamos y anuncia solo tools', async () => {
+  it('acepta la versión pedida si la hablamos y anuncia tools y resources (vistas MCP Apps)', async () => {
     const body = await (await mcp(rpc('initialize', {
       protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' },
     }))).json();
 
     expect(body.result).toMatchObject({
       protocolVersion: '2025-06-18',
-      capabilities: { tools: { listChanged: false } },
+      capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
       serverInfo: { name: 'kefy' },
       instructions: MCP_INSTRUCTIONS,
     });
-    expect(body.result.capabilities.resources).toBeUndefined();
+    expect(body.result.capabilities.prompts).toBeUndefined();
   });
 
   it('ante una versión desconocida ofrece la más reciente', async () => {

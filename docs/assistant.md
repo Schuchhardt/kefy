@@ -334,8 +334,10 @@ Transporte *Streamable HTTP* sin estado:
   rechazan con `-32600`.
 - Métodos: `initialize` (versiones `2025-11-25`, `2025-06-18`, `2025-03-26`; si
   el cliente pide otra, se ofrece la más reciente), `ping`, `tools/list`,
-  `tools/call`. Las notificaciones (`notifications/initialized`…) responden
-  `202` sin cuerpo.
+  `tools/call`, y `resources/list`, `resources/templates/list` y
+  `resources/read` para las vistas `ui://` de MCP Apps (ver
+  [`docs/mcp-apps.md`](mcp-apps.md)). Las notificaciones
+  (`notifications/initialized`…) responden `202` sin cuerpo.
 - La cabecera `MCP-Protocol-Version`, si viene, tiene que ser una de esas
   versiones (400 si no). Un `Origin` distinto del de la app → 403 (protección
   contra DNS rebinding). `GET` y `DELETE` → 405.
@@ -354,6 +356,13 @@ Transporte *Streamable HTTP* sin estado:
   `brand_required`). Herramienta desconocida → error JSON-RPC `-32602`.
 - Idempotencia: `params._meta.idempotencyKey` (string ≤ 200) funciona como la
   cabecera `Idempotency-Key` de la API REST.
+- **MCP Apps** ([`docs/mcp-apps.md`](mcp-apps.md)): las herramientas con `app`
+  (`create_post`, `create_story`, `create_carousel`, `create_reel`,
+  `get_content`, `review_content` y las de video) anuncian `_meta.ui` y
+  `outputSchema` en `tools/list` y añaden `structuredContent.view` a su
+  resultado; el host (Claude) monta con eso una tarjeta interactiva en el chat.
+  El `content[].text` es el mismo de siempre. `review_content` solo existe en
+  MCP.
 
 ### OAuth (conectores de claude.ai y clientes que sigan la especificación)
 
@@ -533,6 +542,7 @@ Los links del asistente abren la página en la opción concreta:
 | `db/migrations/20261021000001_create_oauth.sql` | `kefy_oauth_clients`, `kefy_oauth_codes` y `kind = 'oauth'` en `kefy_api_keys` |
 | `lib/assistant/http.ts` | `withApiKey`, `toolErrorResponse`: formato común de `/api/v1` |
 | `lib/assistant/mcp.ts` | Despachador JSON-RPC puro (`handleMcpMessage`) |
+| `lib/mcp-app/**`, `mcp-app/**`, `lib/services/{content,video}-view.ts`, `lib/assistant/app-views.ts`, `lib/assistant/tools/apps.ts` | MCP Apps: recursos `ui://`, contrato de las vistas, bundle de la UI y `review_content` (ver `docs/mcp-apps.md`) |
 | `lib/assistant/audit.ts` | Filas de `kefy_assistant_actions`: confirmaciones, idempotencia, auditoría |
 | `lib/services/*.ts` | Lógica de negocio compartida con las rutas de la UI |
 | `app/api/v1/**`, `app/api/mcp/route.ts` | Puertas externas (en `PUBLIC_API_PATHS` de `proxy.ts`: no aceptan cookie) |

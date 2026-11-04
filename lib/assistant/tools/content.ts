@@ -38,6 +38,7 @@ import { RENDITION_FORMATS, generateRendition, renditionCredits } from '@/lib/se
 import { generateReel, REEL_SCENE_COUNT_MAX, REEL_SCENE_COUNT_MIN, REEL_VARIANT_COUNT_MAX } from '@/lib/services/reel';
 import { CREDIT_COSTS } from '@/lib/usage';
 import { DESCRIPTION_MAX, STARTER_ANGLES, createStarterPosts } from '@/lib/services/onboarding';
+import { contentReviewApp, createdItem } from '@/lib/assistant/app-views';
 
 // ─── Esquemas compartidos ─────────────────────────────────────────────────────
 
@@ -189,6 +190,7 @@ const getContentTool = defineTool({
   input: z.object({ item_id: z.uuid().describe('Content item of this brand (from list_content or a create_* tool).') }).strict(),
   confirm: 'never',
   taints: hasExternalItems,
+  app: contentReviewApp((input: { item_id: string }) => ({ itemIds: [input.item_id] })),
   handler: async (ctx, input) => {
     const { item, drafts, scheduled_posts } = await getContent(ctx, input.item_id, { withScheduled: true });
 
@@ -264,6 +266,7 @@ const createPostTool = defineTool({
   confirm: 'never',
   estimateCredits: (input) => CREDIT_COSTS.text + (input.with_image !== false ? CREDIT_COSTS.image : 0),
   describe: async (_ctx, input) => ({ topic: input.topic, channel: input.channel, with_image: input.with_image }),
+  app: contentReviewApp((_input, data) => createdItem(data)),
   handler: async (ctx, input) => {
     // Las referencias se re-alojan antes de cobrar nada: una URL inválida no
     // debe dejar un borrador a medias.
@@ -373,6 +376,7 @@ const createCarouselTool = defineTool({
     slide_count: input.slide_count,
     generate_images: input.generate_images,
   }),
+  app: contentReviewApp((_input, data) => createdItem(data)),
   handler: async (ctx, input) => {
     const out = await generateCarousel(ctx, {
       topic: input.topic,
@@ -441,6 +445,12 @@ const createReelTool = defineTool({
     scene_count: input.scene_count,
     variant_count: input.variant_count,
     generate_images: input.generate_images,
+  }),
+  // Con variant_count > 1 la vista muestra las variantes en pestañas.
+  app: contentReviewApp((_input, data) => {
+    const d = (data ?? {}) as { variant_group_id?: string | null; variants?: Array<{ item_id?: unknown }> };
+    const itemIds = (d.variants ?? []).map((v) => v.item_id).filter((id): id is string => typeof id === 'string');
+    return itemIds.length ? { itemIds, variantGroupId: d.variant_group_id ?? null } : null;
   }),
   handler: async (ctx, input) => {
     const references = await resolveReferenceImages(ctx, input.reference_image_urls, 2);
@@ -600,6 +610,8 @@ const updateContentTool = defineTool({
       message: 'Provide at least one field to update',
     }),
   confirm: (_ctx, input, preview) => input.status === 'archived' || preview?.current_status === 'scheduled',
+  // La tarjeta de revisión aprueba, archiva y edita con esta herramienta.
+  app: { visibility: ['model', 'app'] },
   // La tarjeta muestra los valores nuevos, no solo qué campos cambian: si la
   // confirmación la forzó contenido no confiable, es lo único que la persona
   // puede revisar antes de que el texto quede escrito.
@@ -687,6 +699,7 @@ const generateContentImageTool = defineTool({
     .strict(),
   confirm: 'never',
   estimateCredits: () => CREDIT_COSTS.image,
+  app: { visibility: ['model', 'app'] },
   handler: async (ctx, input) => {
     const { image } = await generateImageForItem(ctx, {
       itemId: input.item_id,
@@ -727,6 +740,7 @@ const createStoryTool = defineTool({
   confirm: 'never',
   estimateCredits: (input) => CREDIT_COSTS.text + (input.with_image !== false ? CREDIT_COSTS.image : 0),
   describe: async (_ctx, input) => ({ topic: input.topic, channel: input.channel, with_image: input.with_image }),
+  app: contentReviewApp((_input, data) => createdItem(data)),
   handler: async (ctx, input) => {
     const references = input.with_image
       ? await resolveReferenceImages(ctx, input.reference_image_urls, 3)
@@ -768,6 +782,7 @@ const prepareStoryVideoTool = defineTool({
   input: z.object({ item_id: z.uuid().describe('Content item of this brand (from list_content or a create_* tool).') }).strict(),
   confirm: 'never',
   estimateCredits: () => CREDIT_COSTS.text,
+  app: { visibility: ['model', 'app'] },
   handler: async (ctx, input) => {
     const { script } = await writeStoryVideoScript(ctx, { itemId: input.item_id });
     return {
@@ -810,6 +825,7 @@ const convertContentFormatTool = defineTool({
     .strict(),
   confirm: 'never',
   estimateCredits: (input) => renditionCredits(input.format),
+  app: { visibility: ['model', 'app'] },
   describe: async (ctx, input) => {
     const item = await loadOwnedItem<{ title: string | null; body: string | null; content_type: string }>(
       ctx, input.item_id, 'title, body, content_type',

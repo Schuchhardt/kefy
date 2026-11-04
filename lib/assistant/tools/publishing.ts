@@ -167,6 +167,8 @@ const listSocialAccountsTool = defineTool({
     'Costs no credits.',
   input: z.object({}).strict(),
   confirm: 'never',
+  // El selector de cuentas de la tarjeta de revisión.
+  app: { visibility: ['model', 'app'] },
   handler: async (ctx) => {
     const { accounts } = await listSocialAccounts(ctx, { forTool: true });
     return { data: { accounts } };
@@ -253,6 +255,7 @@ const publishContentTool = defineTool({
     'Always call list_social_accounts first and confirm targets with the user.',
   input: publishInput,
   confirm: 'always',
+  app: { visibility: ['model', 'app'] },
   describe: async (ctx, input) => {
     const content = await loadPublishText(ctx, input.item_id, input.format);
 
