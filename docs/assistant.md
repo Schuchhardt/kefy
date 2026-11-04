@@ -407,9 +407,29 @@ autorización de MCP (`lib/assistant/oauth.ts`):
   Ajustes → API y MCP con la etiqueta «Conexión OAuth» y se revoca igual; no
   cuenta para el tope de 10 keys.
 - **Tokens.** Access `kefy_at_…` (1 hora, `access_expires_at`); refresh
-  `kefy_rt_…` que rota en cada uso: el anterior deja de valer en el acto. La
-  conexión caduca a los 90 días sin usar (`expires_at`, se renueva en cada
-  refresh). Código `kefy_ac_…`: un solo uso, 10 minutos. Solo se guardan hashes.
+  `kefy_rt_…` que rota en cada uso. La conexión caduca a los 90 días sin usar
+  (`expires_at`, se renueva en cada refresh). Código `kefy_ac_…`: un solo uso,
+  10 minutos. Solo se guardan hashes.
+- **Margen al rotar** (migración `20261104000002_oauth_rotation_grace.sql`).
+  Antes el access y el refresh anteriores dejaban de valer en el acto: si un
+  cliente renovaba dos veces a la vez (dos llamadas que reciben 401 juntas, como
+  hace el modo de voz de Claude), la segunda recibía `invalid_grant` y el
+  cliente daba la conexión por caducada; y una llamada en curso recibía 401 si
+  otra renovaba. Ahora:
+  - el access anterior (`prev_key_hash`) sigue valiendo hasta 10 minutos, nunca
+    más allá de su propia caducidad;
+  - el refresh anterior (`prev_refresh_hash`), reutilizado dentro de 2 minutos,
+    devuelve **el mismo par** ya emitido sin rotar otra vez: el par de una
+    rotación se deriva del refresh con un HMAC (`OAUTH_TOKEN_SECRET`, o
+    `JWT_SECRET` si falta). Sin secreto los tokens son aleatorios y una
+    renovación simultánea sigue recibiendo `invalid_grant`;
+  - pasado el margen, o tras otra rotación encima, `invalid_grant` como antes.
+    Revocar la conexión corta todo en el acto.
+- **Logs de `/api/mcp`.** Una línea `[mcp]` por cada 401/403 con token (el
+  motivo: `Access token expired`, `Invalid API key`, `forbidden origin=…`) y
+  por cada `tools/call` (herramienta, key, duración y código de error), sin
+  tokens ni argumentos. Sirven para diagnosticar herramientas que «caducan» en
+  un cliente.
 - **Quién autoriza.** Igual que para crear una key: dueño o administrador, con
   suscripción activa. Un miembro ve la pantalla pero no puede aprobar.
 - **Permisos.** La persona elige scopes y marca en el consentimiento. Lectura y
