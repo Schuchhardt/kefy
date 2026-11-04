@@ -23,6 +23,8 @@ vi.mock('@/lib/zernio', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/zernio')>();
   return { ...actual, publishPost: vi.fn() };
 });
+// Los avisos por correo tienen su propio módulo: aquí solo importa que se pidan.
+vi.mock('@/lib/autopilot-alerts', () => ({ sendAutopilotAlert: vi.fn(async () => true) }));
 vi.mock('@/lib/storage', () => ({ uploadBase64Image: vi.fn(async (_b64: string, _org: string, name: string) => `https://kefy.test/${name}`) }));
 // El ajuste de imagen por red descarga y procesa la imagen: aquí, la misma URL.
 vi.mock('@/lib/publish-images', () => ({
@@ -43,12 +45,15 @@ vi.mock('@/lib/services/video', () => ({
 import { generateCarouselSlides, generateContentImage, generateContentText, generateVideoScript } from '@/lib/ai';
 import { publishPost } from '@/lib/zernio';
 import { produceVideo } from '@/lib/services/video';
+import { sendAutopilotAlert } from '@/lib/autopilot-alerts';
 import { normalizeVideoScript } from '@/lib/video/script';
 import { serviceContext } from '@/lib/services/context';
 import {
   autopilotInputFromUiBody, createAutopilotRule, defaultAutopilotFormat, estimateAutopilotCredits,
   listAutopilotRules, parseAutopilotTopic, runAutopilotNow, runScheduledAutopilot, updateAutopilotRule,
+  MAX_VIDEO_ATTEMPTS,
 } from '@/lib/services/autopilot';
+import { STORY_CONVERSION_CREDITS, estimateRunCredits } from '@/lib/autopilot-formats';
 import { executeTool } from '@/lib/assistant/registry';
 import { ensureToolsRegistered } from '@/lib/assistant/tools';
 import { chatToolContext } from '@/lib/assistant/context';
@@ -63,6 +68,7 @@ import type { ToolContext } from '@/lib/assistant/types';
 const ACCOUNT = IDS.uuid(500);
 const ACCOUNT_BRAND_2 = IDS.uuid(501);
 const TIKTOK = IDS.uuid(502);
+const LINKEDIN = IDS.uuid(503);
 const OTHER_RULE = IDS.uuid(510);
 
 const ctx = (brandId: string = IDS.BRAND, scope: 'strict' | 'org' = 'strict') =>
@@ -97,6 +103,7 @@ beforeEach(() => {
     { id: ACCOUNT, org_id: IDS.ORG, brand_id: IDS.BRAND, platform: 'instagram', zernio_account_id: 'z-1', status: 'active', username: '@cafe' },
     { id: ACCOUNT_BRAND_2, org_id: IDS.ORG, brand_id: IDS.BRAND_2, platform: 'instagram', zernio_account_id: 'z-2', status: 'active', username: '@bar' },
     { id: TIKTOK, org_id: IDS.ORG, brand_id: IDS.BRAND, platform: 'tiktok', zernio_account_id: 'z-3', status: 'active', username: '@cafe' },
+    { id: LINKEDIN, org_id: IDS.ORG, brand_id: IDS.BRAND, platform: 'linkedin', zernio_account_id: 'z-4', status: 'active', username: 'Café' },
   ]);
   db.seed('kefy_brand_kits', [
     { id: IDS.uuid(520), org_id: IDS.ORG, brand_id: IDS.BRAND, tone: ['friendly'], tagline: 'Café de barrio', notes: null },
@@ -244,12 +251,15 @@ describe('ejecutar ahora', () => {
     expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'failed' });
   });
 
-  it('sin créditos para el formato no genera nada, responde 429 y no adelanta la regla', async () => {
+  it('sin créditos para el formato no genera nada, responde 429 y no adelanta ni pausa la regla', async () => {
     const rule = await createAutopilotRule(ctx(), RULE);
     db.seed('kefy_usage_counters', [{ org_id: IDS.ORG, period: new Date().toISOString().slice(0, 7), credits: 148 }]);
     await expect(runAutopilotNow(ctx(), [rule.id], 'test')).rejects.toMatchObject({ status: 429 });
     expect(generateContentText).not.toHaveBeenCalled();
-    expect(db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!.next_run_at).toBe(rule.next_run_at);
+    const after = db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!;
+    expect(after.next_run_at).toBe(rule.next_run_at);
+    // Quien pidió ejecutar ve el 429: pausarla es cosa del cron.
+    expect(after.status).toBe('active');
   });
 
   it('no ejecuta reglas de otra org', async () => {
@@ -288,18 +298,46 @@ describe('reels', () => {
     expect(publishPost).toHaveBeenCalledTimes(1);
   });
 
-  it('si la producción del video falla, la ejecución queda fallida y no se publica nada', async () => {
+  it('si la producción del video falla, la relanza una vez; si vuelve a fallar, queda fallida y avisa', async () => {
     const rule = await createAutopilotRule(ctx(), { ...RULE, social_account_ids: [TIKTOK], topic_hints: ['[REEL 20s] Tip'] });
     makeDue(rule.id);
     await runScheduledAutopilot(null);
+    expect(produceVideo).toHaveBeenCalledTimes(1);
 
     const item = db.rows('kefy_content_items').find((r) => r.content_type === 'reel')!;
+    // Primer fallo (el motor deja la pieza 'not_rendered'): se reintenta; los
+    // créditos del intento fallido ya se devolvieron.
+    item.render_status = 'not_rendered';
+    const retry = await runScheduledAutopilot(null);
+    expect(retry.results).toMatchObject([{ status: 'success', video_retry: true, content_item_id: item.id }]);
+    expect(produceVideo).toHaveBeenCalledTimes(MAX_VIDEO_ATTEMPTS);
+    expect(item.metadata).toMatchObject({ autopilot_publish: { status: 'waiting', attempts: 2 } });
+    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'success', video_status: 'producing', video_attempts: 2 });
+
+    // Segundo fallo: no hay más intentos.
     item.render_status = 'not_rendered';
     const summary = await runScheduledAutopilot(null);
-
     expect(summary.results).toMatchObject([{ status: 'failed', content_item_id: item.id }]);
+    expect(produceVideo).toHaveBeenCalledTimes(MAX_VIDEO_ATTEMPTS);
     expect(publishPost).not.toHaveBeenCalled();
-    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'failed' });
+    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'failed', video_status: 'failed' });
+    expect(sendAutopilotAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: 'video_failed', ruleId: rule.id }));
+  });
+
+  it('list_autopilot_rules muestra la última ejecución con el estado del video', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, social_account_ids: [TIKTOK], format: 'reel' });
+    makeDue(rule.id);
+    await runScheduledAutopilot(null);
+
+    const r = await executeTool('list_autopilot_rules', { brand_id: IDS.BRAND }, apiCtx());
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) return;
+    const [view] = (r.data as { rules: Array<Record<string, unknown>> }).rules;
+    expect(view).toMatchObject({
+      format: 'reel',
+      last_run: { status: 'success', format: 'reel', video: { status: 'producing', attempts: 1 } },
+      cost: { per_run_max: estimateAutopilotCredits('reel') },
+    });
   });
 });
 
@@ -326,10 +364,152 @@ describe('cron', () => {
     db.seed('kefy_usage_counters', [{ org_id: IDS.ORG, period: new Date().toISOString().slice(0, 7), credits: 150 }]);
 
     const summary = await runScheduledAutopilot(null);
-    expect(summary).toMatchObject({ executed: 0, failed: 1 });
+    expect(summary).toMatchObject({ executed: 0, failed: 1, results: [{ paused: true }] });
     expect(generateContentText).not.toHaveBeenCalled();
     expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'failed' });
     expect(String(db.rows('kefy_autopilot_runs')[0].error_message)).toContain('créditos');
+    // En vez de fallar en cada hueco, la regla se pausa y se avisa.
+    expect(db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)).toMatchObject({
+      status: 'paused', paused_reason: 'credits_exhausted',
+    });
+    expect(sendAutopilotAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paused_credits', ruleId: rule.id }));
+  });
+
+  it('una regla pausada por créditos se reanuda sola al empezar el mes siguiente; una pausada a mano, no', async () => {
+    const byCredits = await createAutopilotRule(ctx(), RULE);
+    const byHand = await createAutopilotRule(ctx(), { ...RULE, name: 'A mano' });
+    await updateAutopilotRule(ctx(), byHand.id, { status: 'paused' });
+    Object.assign(db.rows('kefy_autopilot_rules').find((r) => r.id === byCredits.id)!, {
+      status: 'paused', paused_reason: 'credits_exhausted', paused_at: '2026-01-20T10:00:00.000Z', next_run_at: '2026-01-21T13:00:00.000Z',
+    });
+
+    const summary = await runScheduledAutopilot(null);
+    expect(summary.resumed).toEqual([byCredits.id]);
+    const resumed = db.rows('kefy_autopilot_rules').find((r) => r.id === byCredits.id)!;
+    expect(resumed).toMatchObject({ status: 'active', paused_reason: null, paused_at: null });
+    expect(new Date(resumed.next_run_at as string).getTime()).toBeGreaterThan(Date.now());
+    expect(db.rows('kefy_autopilot_rules').find((r) => r.id === byHand.id)).toMatchObject({ status: 'paused', paused_reason: null });
+  });
+
+  it('reanudarla a mano olvida el motivo de la pausa', async () => {
+    const rule = await createAutopilotRule(ctx(), RULE);
+    Object.assign(db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!, {
+      status: 'paused', paused_reason: 'credits_exhausted', paused_at: new Date().toISOString(),
+    });
+    const resumed = await updateAutopilotRule(ctx(), rule.id, { status: 'active' });
+    expect(resumed).toMatchObject({ status: 'active', paused_reason: null, paused_at: null });
+  });
+});
+
+describe('formato de la regla', () => {
+  it('el formato de la regla manda sobre la etiqueta del tema', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, format: 'post', topic_hints: ['[REEL 30s] Tema'] });
+    const summary = await runAutopilotNow(ctx(), [rule.id], 'test');
+    expect(summary).toMatchObject({ executed: 1, results: [{ format: 'post', credits_estimated: 4 }] });
+    expect(produceVideo).not.toHaveBeenCalled();
+    expect(vi.mocked(generateContentText).mock.calls[0][0]).toMatchObject({ topic: 'Tema' });
+    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ format: 'post', credits_estimated: 4 });
+  });
+
+  it('una historia se genera vertical y solo se publica en las cuentas con Stories', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, format: 'story', social_account_ids: [ACCOUNT, LINKEDIN] });
+    const summary = await runAutopilotNow(ctx(), [rule.id], 'test');
+
+    expect(summary).toMatchObject({ executed: 1, results: [{ format: 'story' }] });
+    expect(vi.mocked(generateContentImage).mock.calls[0][0]).toMatchObject({ size: '1024x1536' });
+    expect(publishPost).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(publishPost).mock.calls[0][0]).toMatchObject({ platform: 'instagram', content_type: 'story' });
+    expect(db.rows('kefy_content_items')[0]).toMatchObject({ content_type: 'story', status: 'scheduled' });
+  });
+
+  it('no se puede guardar una regla con historias sin cuentas que las tengan', async () => {
+    await expect(createAutopilotRule(ctx(), { ...RULE, social_account_ids: [LINKEDIN], format: 'story' }))
+      .rejects.toMatchObject({ status: 422 });
+    await expect(createAutopilotRule(ctx(), { ...RULE, social_account_ids: [TIKTOK], also_story: true }))
+      .rejects.toMatchObject({ status: 422 });
+  });
+
+  it('la mezcla semanal solo vale para reglas diarias y con algún día que publique', async () => {
+    await expect(createAutopilotRule(ctx(), { ...RULE, frequency: 'weekly', weekly_formats: { 4: 'reel' } }))
+      .rejects.toMatchObject({ status: 422 });
+    const allSkip = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, 'skip']));
+    await expect(createAutopilotRule(ctx(), { ...RULE, frequency: 'daily', weekly_formats: allSkip }))
+      .rejects.toMatchObject({ status: 422 });
+  });
+
+  it('post todos los días y reel los jueves: el formato sale del día del hueco, en la zona de la regla', async () => {
+    const rule = await createAutopilotRule(ctx(), {
+      ...RULE, frequency: 'daily', format: 'post', weekly_formats: { 4: 'reel' }, social_account_ids: [ACCOUNT],
+    });
+    const row = db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!;
+
+    // Miércoles 2 de enero de 2030, 10:00 en Santiago (UTC-3): post.
+    row.next_run_at = '2030-01-02T13:00:00.000Z';
+    expect((await runAutopilotNow(ctx(), [rule.id], 'test')).results).toMatchObject([{ format: 'post' }]);
+
+    // Jueves 3 de enero, 10:00 en Santiago: reel.
+    row.next_run_at = '2030-01-03T13:00:00.000Z';
+    expect((await runAutopilotNow(ctx(), [rule.id], 'test')).results).toMatchObject([{ format: 'reel', pending_video: true }]);
+    expect(produceVideo).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('historia derivada (also_story)', () => {
+  it('tras programar el post, convierte la pieza a historia y la programa 2 horas después en las cuentas con Stories', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, also_story: true, social_account_ids: [ACCOUNT, LINKEDIN] });
+    const slot = db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!.next_run_at as string;
+    const summary = await runAutopilotNow(ctx(), [rule.id], 'test');
+
+    expect(summary.results[0]).toMatchObject({
+      format: 'post', credits_estimated: estimateRunCredits('post', { alsoStory: true }), story: { status: 'scheduled' },
+    });
+    expect(creditsSpent()).toBe(estimateAutopilotCredits('post') + STORY_CONVERSION_CREDITS);
+
+    const calls = vi.mocked(publishPost).mock.calls.map((c) => c[0]);
+    expect(calls.filter((p) => p.content_type === 'post').map((p) => p.platform).sort()).toEqual(['instagram', 'linkedin']);
+    const story = calls.filter((p) => p.content_type === 'story');
+    expect(story).toHaveLength(1);
+    expect(story[0]).toMatchObject({ platform: 'instagram' });
+    expect(new Date(story[0].scheduled_at!).getTime()).toBe(new Date(slot).getTime() + 120 * 60_000);
+
+    expect(db.rows('kefy_content_renditions')).toMatchObject([{ format: 'story', status: 'ready' }]);
+    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'success', story_status: 'scheduled' });
+    expect((db.rows('kefy_autopilot_runs')[0].story_scheduled_post_ids as string[]).length).toBe(1);
+  });
+
+  it('si la historia falla, el post sigue publicado y el fallo queda en la ejecución', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, also_story: true, story_delay_minutes: 30 });
+    // Texto del post y de la historia bien; la imagen de la historia falla.
+    vi.mocked(generateContentImage)
+      .mockResolvedValueOnce({ b64: 'aW1n', revisedPrompt: null } as never)
+      .mockRejectedValueOnce(new Error('proveedor caído'));
+    const summary = await runAutopilotNow(ctx(), [rule.id], 'test');
+
+    expect(summary).toMatchObject({ executed: 1, results: [{ status: 'success', story: { status: 'failed' } }] });
+    expect(vi.mocked(publishPost).mock.calls.map((c) => c[0].content_type)).toEqual(['post']);
+    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'success', story_status: 'failed' });
+  });
+
+  it('en un reel, la historia sale cuando el video se publica', async () => {
+    const rule = await createAutopilotRule(ctx(), {
+      ...RULE, format: 'reel', also_story: true, social_account_ids: [ACCOUNT, TIKTOK],
+    });
+    makeDue(rule.id);
+    await runScheduledAutopilot(null);
+    expect(publishPost).not.toHaveBeenCalled();
+
+    const item = db.rows('kefy_content_items').find((r) => r.content_type === 'reel')!;
+    item.render_status = 'ready';
+    item.video_url = 'https://kefy.test/reel.mp4';
+    const summary = await runScheduledAutopilot(null);
+
+    // El hueco ya pasó: el reel sale ahora y su historia, 2 horas después.
+    expect(summary.results[0]).toMatchObject({ status: 'success', format: 'reel', story: { status: 'scheduled' } });
+    const types = vi.mocked(publishPost).mock.calls.map((c) => `${c[0].content_type}:${c[0].platform}`).sort();
+    expect(types).toEqual(['reel:instagram', 'reel:tiktok', 'story:instagram']);
+    const story = vi.mocked(publishPost).mock.calls.find((c) => c[0].content_type === 'story')![0];
+    expect(new Date(story.scheduled_at!).getTime() - Date.now()).toBeGreaterThan(119 * 60_000);
+    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ video_status: 'published', story_status: 'scheduled' });
   });
 });
 
@@ -360,6 +540,31 @@ describe('herramientas del asistente', () => {
   it('un miembro no gestiona el autopilot', async () => {
     const r = await executeTool('run_autopilot_now', { rule_ids: [OTHER_RULE], brand_id: IDS.BRAND }, apiCtx({ role: 'member' }));
     expect(r).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+  });
+
+  it('save_autopilot_rule por MCP acepta formato, mezcla semanal e historia derivada', async () => {
+    const r = await executeTool('save_autopilot_rule', {
+      ...RULE, brand_id: IDS.BRAND, frequency: 'daily', format: 'post', weekly_formats: { 4: 'reel' },
+      also_story: true, story_delay_minutes: 90,
+    }, { ...apiCtx(), source: 'mcp' });
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) return;
+    expect((r.data as { rule: Record<string, unknown> }).rule).toMatchObject({
+      format: 'post', weekly_formats: { 4: 'reel' }, also_story: true, story_delay_minutes: 90,
+      cost: { per_run_min: 8, per_run_max: estimateRunCredits('reel', { alsoStory: true }) },
+    });
+  });
+
+  it('la tarjeta de confirmación anuncia el formato, la mezcla y el costo por ejecución y al mes', async () => {
+    const r = await executeTool('save_autopilot_rule', {
+      ...RULE, frequency: 'daily', format: 'post', weekly_formats: { 4: 'reel' },
+    }, chat());
+    expect(r.ok).toBe('pending');
+    if (r.ok !== 'pending') return;
+    expect(r.preview).toMatchObject({
+      format: 'Post con imagen', weekly_formats: 'Jue: Reel', credits_per_run: `4–${estimateAutopilotCredits('reel')}`,
+    });
+    expect(r.preview.credits_per_month).toBeGreaterThan(300);
   });
 
   it('run_autopilot_now en el chat anuncia el coste en créditos', async () => {
