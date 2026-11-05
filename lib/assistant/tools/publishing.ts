@@ -1,8 +1,8 @@
 // ─── Herramientas del asistente: publicación ─────────────────────────────────
 //
 // list_social_accounts, list_publish_targets, publish_content,
-// list_scheduled_posts, reschedule_scheduled_post y cancel_scheduled_post.
-// Son finas: validan con zod y llaman a los servicios
+// list_scheduled_posts, reschedule_scheduled_post, cancel_scheduled_post y
+// delete_published_post. Son finas: validan con zod y llaman a los servicios
 // de lib/services/{social,publish}.ts, los mismos que usan las rutas de
 // /api/social/*. Antes de tocar la publicación, leer docs/zernio.md.
 //
@@ -25,8 +25,8 @@ import { getActiveBrandById } from '@/lib/brands';
 import { ORGANIC_CHANNELS, getChannelLabel } from '@/lib/channels';
 import type { Channel } from '@/types/channels';
 import {
-  cancelScheduledPost, listPublishTargets, listScheduledPosts, publishContent, rescheduleScheduledPost,
-  SCHEDULED_POST_STATUSES,
+  cancelScheduledPost, deletePublishedPost, listPublishTargets, listScheduledPosts, loadDeletablePost, publishContent,
+  rescheduleScheduledPost, SCHEDULED_POST_STATUSES,
 } from '@/lib/services/publish';
 import { reportError } from '@/lib/observability';
 import type { ContentType } from '@/types/content';
@@ -582,6 +582,49 @@ const cancelScheduledPostTool = defineTool({
   },
 });
 
+// ─── delete_published_post ───────────────────────────────────────────────────
+
+const deletePublishedPostTool = defineTool({
+  name: 'delete_published_post',
+  title: { es: 'Borrar publicación publicada', en: 'Delete published post' },
+  kind: 'publish',
+  description:
+    'Deletes an already published post from the social network and marks it as "deleted" in Kefy. The content itself ' +
+    'is kept and can be published again. Works on Facebook, X, LinkedIn, Threads, YouTube, Pinterest, Reddit, Bluesky, ' +
+    'Google Business and Telegram. Instagram, TikTok and Snapchat do not allow it: the call fails without changing ' +
+    'anything and returns post_url (the direct link) and removal_instructions (the steps to take it down by hand); relay both to the user. For a post that has not gone out, ' +
+    'use cancel_scheduled_post. Get the id from list_scheduled_posts. Always requires user confirmation. Cannot be ' +
+    'undone. Costs no credits.',
+  input: z.object({ scheduled_post_id: z.uuid().describe('Published post of this brand (from list_scheduled_posts).') }).strict(),
+  confirm: 'always',
+  describe: async (ctx, input) => {
+    const post = await loadDeletablePost(ctx, input.scheduled_post_id);
+    const { data: item } = await createSupabaseServer()
+      .from('kefy_content_items')
+      .select('title')
+      .eq('id', post.content_item_id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    return {
+      title: (item as { title?: string | null } | null)?.title ?? msg(ctx.language, '(sin título)', '(untitled)'),
+      account: accountLabel(post),
+      published: post.published_at ? formatWhen(ctx, post.published_at) : null,
+      post_url: post.platform_post_url,
+      irreversible: true,
+    };
+  },
+  // Si cambió de estado entre la tarjeta y el clic, no se borra a ciegas.
+  snapshot: async (ctx, input) => (await loadDeletablePost(ctx, input.scheduled_post_id)).status,
+  handler: async (ctx, input) => {
+    const out = await deletePublishedPost(ctx, input.scheduled_post_id);
+    return {
+      data: { deleted: true, scheduled_post_id: out.id, platform: out.platform, content_status: out.item_status },
+      links: [itemLink(ctx.language, out.content_item_id), calendarLink(ctx.language)],
+      dataChanged: ['scheduled', 'content'],
+    };
+  },
+});
+
 // ─── disconnect_social_account ───────────────────────────────────────────────
 
 const disconnectSocialAccountTool = defineTool({
@@ -636,5 +679,6 @@ export const publishingTools = [
   listScheduledPostsTool,
   rescheduleScheduledPostTool,
   cancelScheduledPostTool,
+  deletePublishedPostTool,
   disconnectSocialAccountTool,
 ];

@@ -45,6 +45,7 @@ const statusLabels: Record<string, string> = {
   publishing: 'publishing',
   failed: 'failed',
   cancelled: 'cancelled',
+  deleted: 'deleted',
   pending: 'pending',
   active: 'active',
   paused: 'paused',
@@ -153,6 +154,7 @@ const en = {
     list_scheduled_posts: 'Checking scheduled posts…',
     reschedule_scheduled_post: 'Changing the date…',
     cancel_scheduled_post: 'Cancelling post…',
+    delete_published_post: 'Deleting post…',
     get_analytics_overview: 'Checking metrics…',
     list_post_performance: 'Analyzing posts…',
     sync_social_data: 'Syncing social data…',
@@ -299,6 +301,12 @@ const en = {
       const account = str(p.account);
       const when = str(p.when);
       return `Cancel the post ${quote(title)}${account ? ` on ${account}` : ''}${when ? ` scheduled for ${when}` : ''}`;
+    },
+    delete_published_post: (_i, p) => {
+      const title = str(p.title, 'content');
+      const account = str(p.account);
+      const warn = p.irreversible ? ' This cannot be undone.' : '';
+      return `Delete the post ${quote(title)}${account ? ` on ${account}` : ''} from the network.${warn}`;
     },
     get_analytics_overview: () => 'Check the metrics overview',
     list_post_performance: () => 'Check how your posts perform',

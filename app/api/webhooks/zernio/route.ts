@@ -3,6 +3,7 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { executeEngagementRules } from '@/lib/engagement-executor';
 import { safePostUrl } from '@/lib/zernio';
 import { reportError } from '@/lib/observability';
+import { syncContentItemStatus } from '@/lib/services/content-status';
 import { createHmac, timingSafeEqual } from 'crypto';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
@@ -148,6 +149,18 @@ async function resolveAccount(db: DB, zernioAccountId: string) {
 
 // ─── Post handlers ─────────────────────────────────────────────────────────────
 
+// Lo que le pasa a una publicación cambia el estado de su contenido: sin esto,
+// lo que salía seguía «Programado» para siempre.
+async function syncItemsOf(db: DB, rows: unknown) {
+  const ids = new Set(((rows ?? []) as Array<{ content_item_id?: string | null }>)
+    .map((r) => r.content_item_id)
+    .filter((id): id is string => !!id));
+  for (const id of ids) await syncContentItemStatus(db, id);
+}
+
+// Los handlers de estado saltan las filas 'deleted': al borrar de la red, Zernio
+// pasa el post a cancelado y ese evento (o uno atrasado) no debe resucitarlas.
+
 // La URL solo se escribe si el evento la trae: un post.published de TikTok
 // llega sin ella y no debe borrar la que ya hubiera.
 function postUrlUpdate(data: Data): { platform_post_url?: string } {
@@ -179,11 +192,14 @@ async function handlePostScheduled(db: DB, data: Data) {
   // Sin fecha en el evento se conserva la que guardó Kefy al programar. Y un
   // post.scheduled que llega tarde (después de post.published) no devuelve a
   // 'scheduled' una publicación que ya salió.
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'scheduled', error_message: null, ...(scheduledAt ? { scheduled_at: scheduledAt } : {}) })
     .eq('zernio_post_id', zernioPostId)
-    .neq('status', 'published');
+    .neq('status', 'published')
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 async function handlePostPublished(db: DB, data: Data) {
@@ -192,10 +208,13 @@ async function handlePostPublished(db: DB, data: Data) {
   const publishedAt    = strOrNull(data.published_at) ?? new Date().toISOString();
   if (!zernioPostId) return;
 
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'published', published_at: publishedAt, platform_post_id: platformPostId, error_message: null, ...postUrlUpdate(data) })
-    .eq('zernio_post_id', zernioPostId);
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 async function handlePostFailed(db: DB, data: Data) {
@@ -203,10 +222,13 @@ async function handlePostFailed(db: DB, data: Data) {
   const errorMessage = strOrNull(data.error) ?? 'Publish failed';
   if (!zernioPostId) return;
 
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'failed', error_message: errorMessage })
-    .eq('zernio_post_id', zernioPostId);
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 // post.partial: some platforms failed — map to 'failed' with an informative message
@@ -219,20 +241,26 @@ async function handlePostPartial(db: DB, data: Data) {
   const msg = failedPlatforms
     ? `Partial publish — failed on: ${failedPlatforms}`
     : 'Partial publish — some platforms failed';
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'failed', error_message: msg })
-    .eq('zernio_post_id', zernioPostId);
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 async function handlePostCancelled(db: DB, data: Data) {
   const zernioPostId = str(data.post_id);
   if (!zernioPostId) return;
 
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'cancelled' })
-    .eq('zernio_post_id', zernioPostId);
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 // post.recycled: post was re-queued (e.g. for evergreen recycling)
@@ -241,10 +269,13 @@ async function handlePostRecycled(db: DB, data: Data) {
   const scheduledAt  = str(data.scheduled_at);
   if (!zernioPostId) return;
 
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'scheduled', error_message: null, published_at: null, ...(scheduledAt ? { scheduled_at: scheduledAt } : {}) })
-    .eq('zernio_post_id', zernioPostId);
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 // post.platform.published: one specific platform within a multi-platform post published
@@ -255,10 +286,13 @@ async function handlePostPlatformPublished(db: DB, data: Data) {
   if (!zernioPostId) return;
 
   // Mark the row for this specific platform as published
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'published', published_at: publishedAt, platform_post_id: platformPostId, error_message: null, ...postUrlUpdate(data) })
-    .eq('zernio_post_id', zernioPostId);
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 // post.platform.failed: one specific platform failed
@@ -267,10 +301,13 @@ async function handlePostPlatformFailed(db: DB, data: Data) {
   const errorMessage = strOrNull(data.error) ?? 'Platform publish failed';
   if (!zernioPostId) return;
 
-  await db
+  const { data: rows } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'failed', error_message: errorMessage })
-    .eq('zernio_post_id', zernioPostId);
+    .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'deleted')
+    .select('content_item_id');
+  await syncItemsOf(db, rows);
 }
 
 // ─── Account handlers ──────────────────────────────────────────────────────────

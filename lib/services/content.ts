@@ -43,6 +43,9 @@ export const CONTENT_STATUSES = [
   'draft', 'approved', 'scheduled', 'published', 'archived',
 ] as const satisfies readonly ContentStatus[];
 export const CONTENT_TYPES = ['post', 'carousel', 'reel', 'story'] as const satisfies readonly ContentType[];
+/** created: la creación. publication: cuándo sale o salió (la fecha de la tarjeta). */
+export const CONTENT_SORTS = ['created', 'publication'] as const;
+export type ContentSort = (typeof CONTENT_SORTS)[number];
 export const RENDER_STATUSES = ['not_rendered', 'rendering', 'ready', 'error'] as const;
 export const IMAGE_SIZES = ['1024x1024', '1536x1024', '1024x1536', '1080x1080', '1024x1792', 'auto'] as const;
 export const IMAGE_QUALITIES = ['low', 'medium', 'high', 'auto'] as const;
@@ -181,6 +184,7 @@ export interface ListContentInput {
   offset?: number;
   /** Incluye `metadata` (las herramientas lo necesitan para saber el origen). */
   withMetadata?: boolean;
+  sort?: ContentSort | null;
 }
 
 /**
@@ -221,6 +225,9 @@ export async function listContent(
     query = query.or(`title.ilike.%${esc}%,body.ilike.%${esc}%`);
   }
 
+  // kefy_publication_at es una columna calculada: db/migrations/20261105000001.
+  if (input.sort === 'publication') query = query.order('kefy_publication_at', { ascending: false });
+
   const { data, error, count } = await query
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
@@ -233,20 +240,22 @@ export async function listContent(
   }
 
   const items = (data ?? []) as unknown as Record<string, unknown>[];
-  await addNextScheduledAt(db, ctx, items);
+  await addPublicationDates(db, ctx, items);
   return { items, total: count ?? 0 };
 }
 
 /**
- * `next_scheduled_at` de los contenidos programados de la página: la próxima
- * fecha a la que sale (si va a varias redes, la más cercana). Una sola
- * consulta para toda la página. Sin fecha por delante queda en null.
+ * Cuándo sale o salió cada contenido de la página: `next_scheduled_at` en los
+ * programados (si va a varias redes, la más cercana; sin fecha por delante,
+ * null) y `last_published_at` en los publicados (la más reciente).
  */
-async function addNextScheduledAt(
+async function addPublicationDates(
   db: ReturnType<typeof createSupabaseServer>,
   ctx: ServiceContext,
   items: Record<string, unknown>[],
 ): Promise<void> {
+  await addLastPublishedAt(db, ctx, items);
+
   const ids = items.filter((it) => it.status === 'scheduled').map((it) => it.id as string);
   for (const it of items) if (it.status === 'scheduled') it.next_scheduled_at = null;
   if (ids.length === 0) return;
@@ -267,6 +276,31 @@ async function addNextScheduledAt(
   for (const it of items) {
     if (it.status === 'scheduled') it.next_scheduled_at = next.get(it.id as string) ?? null;
   }
+}
+
+async function addLastPublishedAt(
+  db: ReturnType<typeof createSupabaseServer>,
+  ctx: ServiceContext,
+  items: Record<string, unknown>[],
+): Promise<void> {
+  const published = items.filter((it) => it.status === 'published');
+  for (const it of published) it.last_published_at = null;
+  if (published.length === 0) return;
+
+  const { data } = await db
+    .from('kefy_scheduled_posts')
+    .select('content_item_id, published_at')
+    .eq('org_id', ctx.auth.orgId)
+    .in('content_item_id', published.map((it) => it.id as string))
+    .eq('status', 'published')
+    .not('published_at', 'is', null)
+    .order('published_at', { ascending: false });
+
+  const last = new Map<string, string>();
+  for (const row of (data ?? []) as Array<{ content_item_id: string; published_at: string }>) {
+    if (!last.has(row.content_item_id)) last.set(row.content_item_id, row.published_at);
+  }
+  for (const it of published) it.last_published_at = last.get(it.id as string) ?? null;
 }
 
 // ─── getContent ───────────────────────────────────────────────────────────────

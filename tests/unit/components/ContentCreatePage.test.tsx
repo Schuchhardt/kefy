@@ -200,7 +200,8 @@ describe('Página de contenido — lista', () => {
 
   it('un contenido programado dice para cuándo sale', async () => {
     render(<BrandProvider><ContentPage /></BrandProvider>);
-    // El día de la semana depende del año en curso: no se fija.
-    expect(await screen.findByText(/^Programada para el \S+, 4 nov, 19:00$/)).toBeInTheDocument();
+    // Es la fecha principal de la tarjeta, completa. El día de la semana depende del año: no se fija.
+    const date = await screen.findByText(/^\S+ 4 nov · 19:00$/);
+    expect(date.closest('time')).toHaveAttribute('title', expect.stringMatching(/^Programada para el /));
   });
 });

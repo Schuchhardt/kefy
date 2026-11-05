@@ -28,6 +28,7 @@ import ContentActions      from '@/components/dashboard/content/ContentActions';
 import EditContentModal    from '@/components/dashboard/content/EditContentModal';
 import { scheduledSyncNotice } from '@/components/dashboard/content/scheduled-sync';
 import { formatScheduledDate } from '@/components/dashboard/content/RescheduleModal';
+import { contentCardDate, formatCardDateTime, formatCardDay } from '@/lib/content-dates';
 import ManualCreateModal   from '@/components/dashboard/content/ManualCreateModal';
 import RecommendModal      from '@/components/dashboard/content/RecommendModal';
 import ContentLibraryModal from '@/components/dashboard/content/ContentLibraryModal';
@@ -400,7 +401,7 @@ function ReferenceThumbs({ thumbs, referenceImages, onToggle, t }: {
 // ─── Content card (grid / list) ──────────────────────────────────────────────
 
 function ContentCard({
-  item, mode, lang, t, href, brandKit, perf, typeLabel, channelLabel, dateLabel,
+  item, mode, lang, t, href, brandKit, perf, typeLabel, channelLabel,
   onView, onEdit, onDelete,
 }: {
   item: ContentItem;
@@ -412,7 +413,6 @@ function ContentCard({
   perf?: { impressions: number; likes: number };
   typeLabel: string;
   channelLabel: string;
-  dateLabel: string;
   onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -445,16 +445,24 @@ function ContentCard({
       {typeLabel}
     </span>
   );
-  const date = <time className={styles.date} dateTime={item.created_at}>{dateLabel}</time>;
-  // Programado: para cuándo, no solo la etiqueta «Programado».
-  const scheduledFor = item.status === 'scheduled' && item.next_scheduled_at ? (
-    <p className={styles.scheduledFor}>
+  // La fecha que importa según el estado: cuándo sale, cuándo salió o cuándo se creó.
+  const cardDate = contentCardDate(item);
+  const date = cardDate.kind === 'scheduled' ? (
+    <time
+      className={`${styles.date} ${styles.dateScheduled}`}
+      dateTime={cardDate.iso}
+      title={(lang === 'en' ? enPublish : esPublish).scheduled.scheduledFor(formatScheduledDate(cardDate.iso, lang))}
+    >
       <Icon name="calendar" size={12} />
-      <time dateTime={item.next_scheduled_at}>
-        {(lang === 'en' ? enPublish : esPublish).scheduled.scheduledFor(formatScheduledDate(item.next_scheduled_at, lang, { short: true }))}
-      </time>
-    </p>
-  ) : null;
+      {formatCardDateTime(cardDate.iso, lang)}
+    </time>
+  ) : (
+    <time className={styles.date} dateTime={cardDate.iso}>
+      {cardDate.kind === 'published'
+        ? t.cardPublished(formatCardDay(cardDate.iso, lang))
+        : t.cardCreated(formatCardDay(cardDate.iso, lang))}
+    </time>
+  );
   const link = (
     <Link href={href} className={styles.cardLink}>
       <span className={styles.cardText}>{text}</span>
@@ -505,7 +513,6 @@ function ContentCard({
           )}
           {date}
         </div>
-        {scheduledFor}
         {link}
       </div>
       <div className={styles.gridActions}>{actions}</div>
@@ -555,7 +562,6 @@ function ContentCard({
           )}
           {date}
         </div>
-        {scheduledFor}
         {link}
       </div>
 
@@ -596,6 +602,7 @@ function ContentPageInner() {
   const [syncNotice, setSyncNotice] = useState<ReturnType<typeof scheduledSyncNotice>>(null);
   const [filterChannel, setFilterChannel] = useState<Channel | ''>('');
   const [filterStatus, setFilterStatus]   = useState<ContentStatus | ''>('');
+  const [sortBy, setSortBy]               = useState<'created' | 'publication'>('created');
   const [brandKit, setBrandKit]     = useState<BrandKitInfo | null>(null);
   const [perfByContentId, setPerfByContentId] = useState<Map<string, { impressions: number; likes: number; engagement_rate: number }>>(new Map());
   const [viewMode, setViewMode]     = useState<'list' | 'grid'>('grid');
@@ -698,6 +705,7 @@ function ContentPageInner() {
     const params = new URLSearchParams({ limit: '50' });
     if (filterChannel) params.set('channel', filterChannel);
     if (filterStatus)  params.set('status', filterStatus);
+    if (sortBy !== 'created') params.set('sort', sortBy);
 
     try {
       const res = await fetch(`/api/content?${params}`, { credentials: 'include' });
@@ -710,7 +718,7 @@ function ContentPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [filterChannel, filterStatus, common.errors.load, setItems, setLoading, setListError]);
+  }, [filterChannel, filterStatus, sortBy, common.errors.load, setItems, setLoading, setListError]);
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
 
@@ -1515,7 +1523,6 @@ function ContentPageInner() {
               perf={perf}
               typeLabel={listTypeLabel(item.content_type)}
               channelLabel={channelLabel(item.channel)}
-              dateLabel={new Date(item.created_at).toLocaleDateString(t.dateLocale, { day: '2-digit', month: 'short' })}
               onView={() => router.push(detailHref(item.id))}
               onEdit={() => setEditItem(item)}
               onDelete={() => void handleDelete(item.id)}
@@ -1848,6 +1855,15 @@ function ContentPageInner() {
                   {CONTENT_STATUSES.map((s) => (
                     <option key={s} value={s}>{common.status[s]}</option>
                   ))}
+                </Select>
+                <Select
+                  aria-label={t.sortLabel}
+                  className={styles.filter}
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as 'created' | 'publication')}
+                >
+                  <option value="created">{t.sortCreated}</option>
+                  <option value="publication">{t.sortPublication}</option>
                 </Select>
               </div>
             </>

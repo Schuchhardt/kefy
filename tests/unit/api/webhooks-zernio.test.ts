@@ -199,3 +199,68 @@ describe('POST /api/webhooks/zernio — respuestas automáticas', () => {
     }));
   });
 });
+
+describe('POST /api/webhooks/zernio — estado del contenido', () => {
+  const item = () => db.rows('kefy_content_items')[0];
+  const row = (id: string) => db.rows('kefy_scheduled_posts').find((r) => r.id === id)!;
+
+  beforeEach(() => {
+    db.reset();
+    db.seed('kefy_content_items', [{ id: 'ci1', status: 'scheduled' }]);
+    db.seed('kefy_scheduled_posts', [{ id: 'a', zernio_post_id: 'za', content_item_id: 'ci1', status: 'scheduled' }]);
+  });
+
+  it('post.published pasa el contenido de programado a publicado', async () => {
+    await send({ event: 'post.published', post: { id: 'za' } });
+    expect(item().status).toBe('published');
+  });
+
+  it('con otra red aún por salir, ya cuenta como publicado', async () => {
+    db.seed('kefy_scheduled_posts', [{ id: 'b', zernio_post_id: 'zb', content_item_id: 'ci1', status: 'scheduled' }]);
+    await send({ event: 'post.published', post: { id: 'za' } });
+    expect(item().status).toBe('published');
+    await send({ event: 'post.platform.published', post: { id: 'zb' } });
+    expect(item().status).toBe('published');
+  });
+
+  it('si todo falla vuelve a aprobado; si una red salió, queda publicado', async () => {
+    db.seed('kefy_scheduled_posts', [{ id: 'b', zernio_post_id: 'zb', content_item_id: 'ci1', status: 'scheduled' }]);
+    await send({ event: 'post.failed', post: { id: 'za' } });
+    expect(item().status).toBe('scheduled');
+    await send({ event: 'post.published', post: { id: 'zb' } });
+    expect(item().status).toBe('published');
+
+    db.reset();
+    db.seed('kefy_content_items', [{ id: 'ci1', status: 'scheduled' }]);
+    db.seed('kefy_scheduled_posts', [{ id: 'a', zernio_post_id: 'za', content_item_id: 'ci1', status: 'scheduled' }]);
+    await send({ event: 'post.failed', post: { id: 'za' } });
+    expect(item().status).toBe('approved');
+  });
+
+  it('post.recycled lo vuelve a programado', async () => {
+    db.reset();
+    db.seed('kefy_content_items', [{ id: 'ci1', status: 'published' }]);
+    db.seed('kefy_scheduled_posts', [{ id: 'a', zernio_post_id: 'za', content_item_id: 'ci1', status: 'published' }]);
+    await send({ event: 'post.recycled', post: { id: 'za', scheduledFor: '2027-01-01T00:00:00Z' } });
+    expect(item().status).toBe('scheduled');
+  });
+
+  it('no toca un contenido archivado', async () => {
+    db.reset();
+    db.seed('kefy_content_items', [{ id: 'ci1', status: 'archived' }]);
+    db.seed('kefy_scheduled_posts', [{ id: 'a', zernio_post_id: 'za', content_item_id: 'ci1', status: 'scheduled' }]);
+    await send({ event: 'post.published', post: { id: 'za' } });
+    expect(item().status).toBe('archived');
+  });
+
+  it('un evento no resucita una publicación borrada', async () => {
+    db.reset();
+    db.seed('kefy_content_items', [{ id: 'ci1', status: 'approved' }]);
+    db.seed('kefy_scheduled_posts', [{ id: 'a', zernio_post_id: 'za', content_item_id: 'ci1', status: 'deleted' }]);
+    for (const event of ['post.cancelled', 'post.published', 'post.scheduled', 'post.failed']) {
+      await send({ event, post: { id: 'za' } });
+      expect(row('a').status).toBe('deleted');
+    }
+    expect(item().status).toBe('approved');
+  });
+});

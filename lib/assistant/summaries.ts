@@ -49,6 +49,7 @@ export const ASSISTANT_TOOL_NAMES = [
   'list_scheduled_posts',
   'reschedule_scheduled_post',
   'cancel_scheduled_post',
+  'delete_published_post',
   'get_analytics_overview',
   'list_post_performance',
   'sync_social_data',

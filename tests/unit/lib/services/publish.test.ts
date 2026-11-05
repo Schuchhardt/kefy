@@ -12,11 +12,16 @@ const zernio = vi.hoisted(() => ({
   publishPost: vi.fn(),
   cancelPost: vi.fn(),
   updatePost: vi.fn(),
+  unpublishPost: vi.fn(),
+  getPublishedPostUrl: vi.fn(),
 }));
 vi.mock('@/lib/zernio', () => ({
   publishPost: zernio.publishPost,
   cancelPost: zernio.cancelPost,
   updatePost: zernio.updatePost,
+  unpublishPost: zernio.unpublishPost,
+  getPublishedPostUrl: zernio.getPublishedPostUrl,
+  UNPUBLISH_PLATFORMS: new Set(['facebook', 'twitter', 'linkedin', 'youtube']),
   STORY_CAPABLE_PLATFORMS: new Set(['instagram', 'facebook']),
 }));
 vi.mock('@/lib/publish-images', () => ({
@@ -25,7 +30,7 @@ vi.mock('@/lib/publish-images', () => ({
 }));
 
 import {
-  publishContent, cancelScheduledPost, rescheduleScheduledPost, syncScheduledPosts, listPublishTargets,
+  publishContent, cancelScheduledPost, deletePublishedPost, rescheduleScheduledPost, syncScheduledPosts, listPublishTargets,
 } from '@/lib/services/publish';
 import { updateContent } from '@/lib/services/content';
 import { prepareSingleImage } from '@/lib/publish-images';
@@ -675,5 +680,153 @@ describe('herramienta list_publish_targets y also_available', () => {
     if (r.ok !== true) return;
     const data = r.data as { also_available: Array<{ social_account_id: string; platform: string }> };
     expect(data.also_available).toEqual([{ social_account_id: ACC_2, platform: 'facebook', username: 'acme' }]);
+  });
+});
+
+describe('deletePublishedPost', () => {
+  const POST = IDS.uuid(410);
+  const OTHER_POST = IDS.uuid(411);
+  const posts = () => db.rows('kefy_scheduled_posts');
+  const item = () => db.rows('kefy_content_items').find((r) => r.id === ITEM)!;
+  const post = () => posts().find((r) => r.id === POST)!;
+
+  function seed(platform: string, row: Record<string, unknown> = {}) {
+    db.reset();
+    seedWorkspace(db);
+    db.seed('kefy_content_items', [{ id: ITEM, org_id: IDS.ORG, brand_id: IDS.BRAND, status: 'published', body: 'keep me' }]);
+    db.seed('kefy_social_accounts', [{
+      id: ACC, org_id: IDS.ORG, brand_id: IDS.BRAND, platform, username: 'acme', zernio_account_id: 'za-1', status: 'active',
+    }]);
+    db.seed('kefy_scheduled_posts', [{
+      id: POST, org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, social_account_id: ACC,
+      zernio_post_id: 'zp-1', status: 'published', published_at: '2026-10-27T01:00:00Z',
+      platform_post_url: 'https://network.example/p/1', ...row,
+    }]);
+  }
+
+  beforeEach(() => {
+    zernio.unpublishPost.mockReset().mockResolvedValue(undefined);
+    zernio.getPublishedPostUrl.mockReset();
+  });
+
+  it('borra en la red, marca deleted y deja el contenido listo para republicar', async () => {
+    seed('facebook');
+    const out = await deletePublishedPost(strict, POST);
+    expect(zernio.unpublishPost).toHaveBeenCalledWith('zp-1', 'facebook', 'za-1');
+    expect(post().status).toBe('deleted');
+    expect(post().platform_post_url).toBeNull();
+    expect(out.item_status).toBe('approved');
+    expect(item().status).toBe('approved');
+    expect(item().body).toBe('keep me');
+  });
+
+  it('si salió en otra red, el contenido sigue publicado', async () => {
+    seed('facebook');
+    db.seed('kefy_scheduled_posts', [{
+      id: OTHER_POST, org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, social_account_id: ACC, status: 'published',
+    }]);
+    await deletePublishedPost(strict, POST);
+    expect(item().status).toBe('published');
+  });
+
+  it('Instagram no se puede borrar: error con el link y nada cambia', async () => {
+    seed('instagram');
+    const err = await deletePublishedPost(strict, POST).catch((e) => e) as ServiceError;
+    expect(err).toBeInstanceOf(ServiceError);
+    expect(err.status).toBe(409);
+    expect(err.message).toContain('Instagram');
+    expect(err.message).toContain('https://network.example/p/1');
+    expect(err.body).toMatchObject({
+      manual_removal_required: true, platform: 'instagram', post_url: 'https://network.example/p/1',
+    });
+    const steps = (err.body as { removal_instructions: string[] }).removal_instructions;
+    expect(steps[1]).toContain('https://network.example/p/1');
+    expect(steps[2]).toContain('Delete');
+    expect(err.message).toContain(steps[2]);
+    expect(zernio.unpublishPost).not.toHaveBeenCalled();
+    expect(post().status).toBe('published');
+  });
+
+  it('sin URL guardada la busca en Zernio para dar el link', async () => {
+    seed('instagram', { platform_post_url: null });
+    zernio.getPublishedPostUrl.mockResolvedValue({ url: 'https://instagram.example/p/2', platform_post_id: 'ig2' });
+    const err = await deletePublishedPost(strict, POST).catch((e) => e) as ServiceError;
+    expect(err.body).toMatchObject({ post_url: 'https://instagram.example/p/2' });
+  });
+
+  it('sin link posible, los pasos explican dónde encontrarla', async () => {
+    seed('instagram', { platform_post_url: null });
+    zernio.getPublishedPostUrl.mockResolvedValue(null);
+    const err = await deletePublishedPost(strict, POST).catch((e) => e) as ServiceError;
+    expect(err.body).toMatchObject({ post_url: null });
+    expect((err.body as { removal_instructions: string[] }).removal_instructions[1]).toContain('profile');
+  });
+
+  it('si la red se niega, explica el error y la fila sigue publicada', async () => {
+    seed('linkedin');
+    zernio.unpublishPost.mockRejectedValue(new Error('No access token'));
+    const err = await deletePublishedPost(strict, POST).catch((e) => e) as ServiceError;
+    expect(err.status).toBe(502);
+    expect(err.message).toContain('LinkedIn');
+    expect(err.message).toContain('No access token');
+    expect(post().status).toBe('published');
+    expect(item().status).toBe('published');
+  });
+
+  it('solo sirve para lo ya publicado', async () => {
+    for (const status of ['scheduled', 'deleted']) {
+      seed('facebook', { status });
+      const err = await deletePublishedPost(strict, POST).catch((e) => e) as ServiceError;
+      expect(err.status).toBe(409);
+    }
+    expect(zernio.unpublishPost).not.toHaveBeenCalled();
+  });
+
+  it('la herramienta pide confirmación siempre y no borra hasta confirmar', async () => {
+    seed('facebook');
+    await ensureToolsRegistered();
+    const r = await executeTool('delete_published_post', { scheduled_post_id: POST }, chatToolContext({
+      auth: AUTH, brandId: IDS.BRAND, language: 'en', conversationId: IDS.uuid(900), turnId: IDS.uuid(901), tainted: false,
+    }));
+    expect(r.ok).toBe('pending');
+    expect(zernio.unpublishPost).not.toHaveBeenCalled();
+    expect(post().status).toBe('published');
+  });
+});
+
+describe('deletePublishedPost con otra red por salir', () => {
+  it('el contenido vuelve a programado, no a aprobado', async () => {
+    const POST = IDS.uuid(430);
+    db.reset();
+    seedWorkspace(db);
+    zernio.unpublishPost.mockReset().mockResolvedValue(undefined);
+    db.seed('kefy_content_items', [{ id: ITEM, org_id: IDS.ORG, brand_id: IDS.BRAND, status: 'published' }]);
+    db.seed('kefy_social_accounts', [{
+      id: ACC, org_id: IDS.ORG, brand_id: IDS.BRAND, platform: 'facebook', username: 'acme', zernio_account_id: 'za-1', status: 'active',
+    }]);
+    db.seed('kefy_scheduled_posts', [
+      { id: POST, org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, social_account_id: ACC, status: 'published', zernio_post_id: 'zp-1' },
+      { id: IDS.uuid(431), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, status: 'scheduled' },
+    ]);
+    const out = await deletePublishedPost(strict, POST);
+    expect(out.item_status).toBe('scheduled');
+    expect(db.rows('kefy_content_items')[0].status).toBe('scheduled');
+  });
+});
+
+describe('cancelScheduledPost con otra red ya publicada', () => {
+  it('el contenido queda publicado, no aprobado', async () => {
+    const POST = IDS.uuid(420);
+    db.reset();
+    seedWorkspace(db);
+    zernio.cancelPost.mockReset().mockResolvedValue(undefined);
+    db.seed('kefy_content_items', [{ id: ITEM, org_id: IDS.ORG, brand_id: IDS.BRAND, status: 'scheduled' }]);
+    db.seed('kefy_scheduled_posts', [
+      { id: POST, org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, status: 'scheduled', zernio_post_id: 'zp-1' },
+      { id: IDS.uuid(421), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, status: 'published' },
+    ]);
+    const r = await cancelScheduledPost(strict, POST);
+    expect(r.itemReverted).toBe(false);
+    expect(db.rows('kefy_content_items')[0].status).toBe('published');
   });
 });

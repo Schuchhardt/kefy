@@ -256,7 +256,7 @@ export default function CalendarPage() {
     if (post.status === 'published') return ts.publishedOn(when);
     if (post.status === 'failed') return ts.failedOn(when);
     if (post.status === 'scheduled' && !isEditable(post)) return ts.goingOut;
-    if (post.status === 'cancelled') return when;
+    if (post.status === 'cancelled' || post.status === 'deleted') return when;
     return ts.scheduledFor(when);
   }
 
