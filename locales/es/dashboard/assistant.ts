@@ -134,6 +134,7 @@ const es = {
     get_content_ideas: 'Buscando ideas de contenido…',
     list_content: 'Buscando contenidos…',
     get_content: 'Leyendo el contenido…',
+    review_content: 'Abriendo la tarjeta de revisión…',
     create_post: 'Creando post…',
     create_starter_posts: 'Creando tus 3 posts de inicio…',
     create_carousel: 'Creando carrusel…',
@@ -217,6 +218,7 @@ const es = {
     get_content_ideas: () => 'Buscar ideas de contenido',
     list_content: () => 'Buscar contenidos',
     get_content: () => 'Leer un contenido',
+    review_content: () => 'Mostrar el contenido para revisarlo',
     create_post: (i, p) => {
       const topic = str(p.topic, str(i.topic));
       const img = (p.with_image ?? i.with_image) !== false ? ' con imagen' : '';

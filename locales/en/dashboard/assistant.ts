@@ -131,6 +131,7 @@ const en = {
     get_content_ideas: 'Finding content ideas…',
     list_content: 'Searching content…',
     get_content: 'Reading the content…',
+    review_content: 'Opening the review card…',
     create_post: 'Creating post…',
     create_starter_posts: 'Creating your 3 starter posts…',
     create_carousel: 'Creating carousel…',
@@ -214,6 +215,7 @@ const en = {
     get_content_ideas: () => 'Find content ideas',
     list_content: () => 'Search content',
     get_content: () => 'Read a content item',
+    review_content: () => 'Show the content for review',
     create_post: (i, p) => {
       const topic = str(p.topic, str(i.topic));
       const img = (p.with_image ?? i.with_image) !== false ? ' with an image' : '';

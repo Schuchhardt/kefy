@@ -15,9 +15,14 @@ import { itemLink } from '@/lib/assistant/links';
 import { wrapUntrusted } from '@/lib/assistant/untrusted';
 import { getVideoPlan, getVideoProduction, produceVideo } from '@/lib/services/video';
 import { MOTION_LEVELS } from '@/lib/video/plan';
+import type { VideoJobSnapshot } from '@/lib/video/engine';
+import { videoPlanApp } from '@/lib/assistant/app-views';
 
 const format = z.enum(['reel', 'story']).optional()
   .describe("Only needed to produce a reel/story version of an item whose own type is different.");
+/** Lo que las vistas leen de la entrada de las herramientas de video. */
+type VideoToolInput = { item_id: string; format?: 'reel' | 'story'; motion?: string };
+
 const motion = z.enum(MOTION_LEVELS)
   .describe('"none": photos with camera moves only. "key" (default): the hook and up to 3 key shots are AI-animated. "full": every shot is animated.');
 
@@ -33,6 +38,7 @@ const getVideoPlanTool = defineTool({
   input: z.object({ item_id: z.uuid().describe('Reel or story content item of this brand (from list_content).'), format, motion: motion.default('key') }).strict(),
   confirm: 'never',
   taints: 'always',
+  app: videoPlanApp((input: VideoToolInput) => ({ itemId: input.item_id, format: input.format, motion: input.motion, withPlan: true })),
   handler: async (ctx, input) => {
     const plan = await getVideoPlan(ctx, { itemId: input.item_id, format: input.format, motion: input.motion });
     return {
@@ -70,6 +76,11 @@ const produceVideoTool = defineTool({
     force: z.boolean().default(false),
   }).strict(),
   confirm: 'always',
+  // Sin plan: la vista ya lo tiene y pasa al estado «produciendo».
+  app: videoPlanApp((input: VideoToolInput, data) => ({
+    itemId: input.item_id, format: input.format, motion: input.motion, withPlan: false,
+    production: (data ?? null) as VideoJobSnapshot | null,
+  })),
   describe: async (ctx, input) => {
     const plan = await getVideoPlan(ctx, { itemId: input.item_id, format: input.format, motion: input.motion });
     return {
@@ -101,6 +112,11 @@ const getVideoStatusTool = defineTool({
     'when it is running. Returns null production if the item was never produced.',
   input: z.object({ item_id: z.uuid().describe('Reel or story content item of this brand (from list_content).'), format }).strict(),
   confirm: 'never',
+  // La vista la llama cada 5 s mientras el trabajo corre: también lo avanza.
+  app: videoPlanApp((input: VideoToolInput, data) => ({
+    itemId: input.item_id, format: input.format, withPlan: false,
+    production: ((data ?? {}) as { production?: VideoJobSnapshot | null }).production ?? null,
+  })),
   handler: async (ctx, input) => {
     // Vuelta corta y sin pasos síncronos: no bloquea el turno del chat con
     // una imagen de un minuto.
