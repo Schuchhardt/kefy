@@ -385,6 +385,88 @@ en `kefy_scheduled_posts.platform_post_url` y llega por tres caminos
 Tests: `tests/unit/lib/zernio.test.ts`, `tests/unit/lib/services/post-urls.test.ts`,
 `tests/unit/lib/services/publish.test.ts` y `tests/unit/api/webhooks-zernio.test.ts`.
 
+### Publicar el mismo contenido en otras redes
+
+Un contenido no es «de Instagram»: se puede publicar en **todas** las cuentas
+conectadas de su marca, esté en borrador, programado o ya publicado. Cada
+publicación es una fila de `kefy_scheduled_posts` (contenido × cuenta ×
+formato), así que llevarlo a una red más es publicarlo otra vez con otras
+cuentas.
+
+**Dónde está y dónde más puede ir.** `lib/publish-targets.ts` (puro) calcula,
+por cuenta y para un formato, uno de estos estados:
+
+| Estado | Cuándo |
+|---|---|
+| `published` / `scheduled` | Ya salió (o va a salir) en esa cuenta **en ese formato**. Las filas `failed` y `cancelled` no cuentan |
+| `available` | Se puede publicar ahí: son las que se **recomiendan** (`suggested_account_ids`) |
+| `incompatible` | La red no admite el formato, con `issue` (ver tabla de abajo) |
+| `inactive` | Cuenta desconectada o con el token vencido |
+
+El mismo contenido en **otro** formato (la story de un post) no cuenta como
+publicado: va en `other_formats` y la cuenta sigue `available`. Una story en
+una red sin stories sale como post (`as_post`), como hacía ya `publishPost`.
+
+Lo usan `listPublishTargets` (`lib/services/publish.ts`), la ruta
+`GET /api/content/[itemId]/publish-targets?format=`, la herramienta
+`list_publish_targets` (también la llama la tarjeta MCP) y `publish_content`,
+que devuelve `also_available` con las compatibles que faltan.
+
+En la interfaz:
+
+- **Modal de publicar** (`ScheduleModal`): cada cuenta dice «Ya publicado
+  aquí», «Ya programado aquí» o por qué su red no admite el formato, y esas no
+  se pueden marcar (`aria-disabled`, siguen enfocables). «Elegir las N
+  compatibles» marca todas las que faltan. Al terminar, «También puedes
+  publicarlo en…» vuelve al formulario con esas cuentas marcadas.
+- **Ficha del contenido**: la tarjeta «Redes» (`PublishTargetsCard`) aparece en
+  cualquier estado y abre el modal con las compatibles que faltan ya marcadas.
+  Lo programado se puede mover o cancelar también en un contenido publicado.
+- **Tarjeta MCP** (`PublishPanel`): publicar se ofrece también en programado y
+  publicado, y las cuentas que ya lo tienen o no lo admiten no se marcan.
+
+**Qué admite cada red** (`PLATFORM_CAPS`, verificado contra
+`docs.zernio.com/platforms/<red>` el 5-nov-2026). Solo se marca incompatible
+lo que la documentación prohíbe; una red desconocida se da por compatible:
+
+| Red | Solo texto | Imágenes por post | Video | Stories |
+|---|---|---|---|---|
+| instagram | no | 10 | sí | sí |
+| facebook | sí | 10 | sí | sí |
+| linkedin | sí | 20 | sí | no (sale como post) |
+| twitter (X) | sí | 4 | sí | no |
+| tiktok | no | 35 | sí | no |
+| youtube | no | 0 (solo video) | sí | no |
+| threads | sí | 10 | sí | no |
+| reddit | sí | 20 | sí | no |
+| pinterest | no | 1 | sí | no |
+| bluesky | sí | 4 | sí | no |
+| googlebusiness | sí | 1 | **no** | no |
+| telegram | sí | 10 | sí | no |
+| snapchat | no | 1 | sí | sí |
+| discord | sí | 10 | sí | no |
+| whatsapp | no recibe posts (solo plantillas y difusiones): `no_publishing` | | | |
+
+`issue`: `needs_media` (la red exige imagen o video), `video_only` (YouTube),
+`no_video` (Google Business), `too_many_images` (con `max_images`; un carrusel
+aún sin generar cuenta como 2 imágenes) y `no_publishing`.
+
+**El estado del contenido no retrocede.** Antes, programar en otra red un
+contenido ya publicado lo pasaba a `scheduled` (y la ficha volvía a dejar
+editar un post que ya estaba en la red); que fallara publicarlo en una red más
+lo devolvía a `approved`, y cancelar esa programación también. Ahora
+`publishContent` conserva `published` (y `scheduled` si todo falla), y
+`cancelScheduledPost` solo vuelve a `approved` si no hay ninguna fila
+publicada. `updateContent` reenvía las ediciones a lo programado también cuando
+el contenido ya está publicado.
+
+Tests: `tests/unit/lib/publish-targets.test.ts`,
+`tests/unit/lib/services/publish.test.ts` (*publicar en otra red un contenido
+que ya salió*), `tests/unit/api/content-publish-targets.test.ts`,
+`tests/unit/components/ScheduleModal.test.tsx`,
+`tests/unit/components/PublishTargetsCard.test.tsx` y
+`tests/unit/mcp-app/content-review.test.tsx`.
+
 ### Editar un post programado
 
 ```
@@ -721,6 +803,7 @@ Envía un mensaje en una conversación de inbox. Es el endpoint correcto para re
 | Callback OAuth | `app/api/social/oauth/callback/route.ts` | Recibe `?connected=...&accountId=...` y guarda en DB |
 | Listar / desconectar cuentas | `app/api/social/accounts/route.ts` | `GET` lista de DB; `POST` conecta via código OAuth (headless) |
 | Publicar | `app/api/social/publish/route.ts` | Llama `POST /v1/posts` |
+| Dónde más publicar un contenido | `app/api/content/[itemId]/publish-targets/route.ts`, `lib/publish-targets.ts` | Estado por cuenta y compatibilidad por red (ver *Publicar el mismo contenido en otras redes*) |
 | Cambiar fecha / editar lo programado | `app/api/social/schedule/[postId]/route.ts` (PATCH), `app/api/content/[itemId]/sync-scheduled/route.ts` | `PUT /v1/posts/{id}` (ver *Editar un post programado*) |
 | Estado y URL de los posts | `app/api/webhooks/zernio/route.ts` | Webhooks `post.*`; guarda `platform_post_url` (ver *URL pública del post*) |
 | Sync inbox | `app/api/messaging/sync/route.ts` | Llama `GET /v1/inbox/conversations?sortOrder=desc&limit=100` y hace upsert en `kefy_messages` |

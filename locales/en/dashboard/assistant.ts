@@ -144,6 +144,7 @@ const en = {
     get_video_status: 'Checking the video…',
     list_social_accounts: 'Checking connected accounts…',
     get_connect_account_link: 'Preparing the connection link…',
+    list_publish_targets: 'Checking where else it can go…',
     list_autopilot_rules: 'Checking autopilot…',
     save_autopilot_rule: 'Saving the rule…',
     delete_autopilot_rule: 'Deleting the rule…',
@@ -265,6 +266,7 @@ const en = {
     get_video_status: () => 'Check how the video is going',
     list_social_accounts: () => 'Check connected accounts',
     get_connect_account_link: (i) => `Prepare the link to connect ${str(i.platform, 'an account')}`,
+    list_publish_targets: () => 'Check where else the content can be published',
     list_autopilot_rules: () => 'Check the autopilot rules',
     save_autopilot_rule: (i, p) => {
       const name = quote(str(p.name, str(i.name)));

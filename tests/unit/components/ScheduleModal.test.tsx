@@ -443,3 +443,103 @@ describe('ScheduleModal — resultado', () => {
     expect(screen.getByRole('link', { name: /connect accounts/i })).toHaveAttribute('href', '/en/dashboard/settings#social');
   });
 });
+
+// ─── Publicar el mismo contenido en más redes ────────────────────────────────
+// Cada cuenta dice si el contenido ya está ahí o si su red no admite el
+// formato (GET /api/content/[id]/publish-targets), y al terminar se recomiendan
+// las compatibles que faltan.
+
+describe('ScheduleModal — publicar en más redes', () => {
+  const ACCOUNTS = [
+    { id: 'sa-ig', platform: 'instagram', username: 'marca', status: 'active' },
+    { id: 'sa-li', platform: 'linkedin', username: 'marca_li', status: 'active' },
+    { id: 'sa-x', platform: 'twitter', username: 'marca_x', status: 'active' },
+    { id: 'sa-yt', platform: 'youtube', username: 'marca_yt', status: 'active' },
+  ];
+  const target = (id: string, platform: string, state: string, extra: Record<string, unknown> = {}) => ({
+    social_account_id: id, platform, username: id, avatar_url: null, state, other_formats: [], ...extra,
+  });
+  let published: string[];
+
+  function postItem(): ContentItem {
+    return reelItem({ content_type: 'post', status: 'published', slides: null, video_url: null });
+  }
+
+  function stubTargets() {
+    published = ['sa-ig'];
+    fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/social/accounts')) return jsonResponse({ accounts: ACCOUNTS });
+      if (url.includes('/publish-targets')) {
+        const targets = [
+          ...ACCOUNTS.filter((a) => a.platform !== 'youtube').map((a) =>
+            target(a.id, a.platform, published.includes(a.id) ? 'published' : 'available')),
+          target('sa-yt', 'youtube', 'incompatible', { issue: 'video_only' }),
+        ];
+        return jsonResponse({ targets, suggested_account_ids: targets.filter((t) => t.state === 'available').map((t) => t.social_account_id) });
+      }
+      if (url.includes('/renditions')) return jsonResponse({ renditions: [] });
+      if (url === '/api/social/publish') {
+        const ids = JSON.parse(String(init?.body)).social_account_ids as string[];
+        published = [...published, ...ids];
+        return jsonResponse({ results: ids.map((id) => ({ social_account_id: id, status: 'published' })) });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+  }
+
+  const account = (name: RegExp) => screen.findByRole('button', { name });
+
+  it('la cuenta donde ya está y la red que no admite el formato no se pueden elegir, y dicen por qué', async () => {
+    stubTargets();
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} lang="es" />);
+
+    const ig = await account(/@marca Ya publicado aquí/);
+    const yt = await account(/@marca_yt Solo publica video/);
+    expect(ig).toHaveAttribute('aria-disabled', 'true');
+    expect(yt).toHaveAttribute('aria-disabled', 'true');
+
+    fireEvent.click(yt);
+    expect(yt).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(await account(/@marca_li/));
+    expect(await account(/@marca_li/)).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('«Elegir las compatibles» marca todas las que todavía no lo tienen', async () => {
+    stubTargets();
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} lang="es" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Elegir las 2 compatibles' }));
+
+    expect(await account(/@marca_li/)).toHaveAttribute('aria-pressed', 'true');
+    expect(await account(/@marca_x/)).toHaveAttribute('aria-pressed', 'true');
+    expect(await account(/@marca Ya publicado/)).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('las cuentas que llegan marcadas desde la ficha ignoran las que ya lo tienen', async () => {
+    stubTargets();
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} initialAccountIds={['sa-ig', 'sa-li']} lang="es" />);
+
+    await waitFor(async () => expect(await account(/@marca_li/)).toHaveAttribute('aria-pressed', 'true'));
+    expect(await account(/@marca Ya publicado/)).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('tras publicar recomienda las compatibles que faltan y vuelve al formulario con ellas', async () => {
+    stubTargets();
+    render(<ScheduleModal open onClose={() => {}} initialItem={postItem()} initialAccountIds={['sa-li']} lang="es" />);
+
+    await waitFor(async () => expect(await account(/@marca_li/)).toHaveAttribute('aria-pressed', 'true'));
+    await clickPublish();
+
+    expect(await screen.findByText('También puedes publicarlo en')).toBeTruthy();
+    expect(screen.getByText('@marca_x')).toBeTruthy();
+    // Ni la recién publicada ni la incompatible se recomiendan.
+    expect(screen.queryByText('@marca_li')).toBeNull();
+    expect(screen.queryByText('@marca_yt')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publicar también en esa cuenta' }));
+
+    expect(await account(/@marca_x/)).toHaveAttribute('aria-pressed', 'true');
+    expect(await account(/@marca_li Ya publicado aquí/)).toHaveAttribute('aria-disabled', 'true');
+  });
+});

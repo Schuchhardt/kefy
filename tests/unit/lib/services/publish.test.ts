@@ -24,7 +24,9 @@ vi.mock('@/lib/publish-images', () => ({
   prepareCarouselSlides: vi.fn(async (slides: Array<{ image_url: string }>) => slides.map((s) => s.image_url)),
 }));
 
-import { publishContent, cancelScheduledPost, rescheduleScheduledPost, syncScheduledPosts } from '@/lib/services/publish';
+import {
+  publishContent, cancelScheduledPost, rescheduleScheduledPost, syncScheduledPosts, listPublishTargets,
+} from '@/lib/services/publish';
 import { updateContent } from '@/lib/services/content';
 import { prepareSingleImage } from '@/lib/publish-images';
 import { serviceContext } from '@/lib/services/context';
@@ -547,5 +549,131 @@ describe('herramienta publish_content en el chat', () => {
 
     expect(done).toMatchObject({ ok: false, error: { code: 'content_changed', status: 409 } });
     expect(zernio.publishPost).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Publicar el mismo contenido en más redes ────────────────────────────────
+// Un contenido publicado o programado en una cuenta se puede llevar a las
+// demás. Antes, programarlo en otra red lo devolvía a 'scheduled' (y la ficha
+// dejaba editar un post que ya estaba en Instagram), y cancelar esa
+// programación lo dejaba en 'approved'.
+
+describe('publicar en otra red un contenido que ya salió', () => {
+  const ACC_YT = IDS.uuid(305);
+  const later = () => new Date(Date.now() + 3_600_000).toISOString();
+
+  beforeEach(() => {
+    item().status = 'published';
+    db.seed('kefy_scheduled_posts', [{
+      id: IDS.uuid(520), org_id: IDS.ORG, brand_id: IDS.BRAND, content_item_id: ITEM, social_account_id: ACC,
+      status: 'published', format: 'post', published_at: '2026-11-01T10:00:00Z',
+      platform_post_url: 'https://www.instagram.com/p/AbC/', zernio_post_id: 'zp-ig', kefy_content_items: { brand_id: IDS.BRAND },
+    }]);
+  });
+
+  it('programarlo en otra cuenta no lo devuelve a scheduled', async () => {
+    const out = await publishContent(strict, { itemId: ITEM, accountIds: [ACC_2], mode: 'schedule', scheduledAt: later() });
+    expect(out.status).toBe(201);
+    expect(item().status).toBe('published');
+  });
+
+  it('si falla publicarlo en otra cuenta sigue publicado', async () => {
+    zernio.publishPost.mockRejectedValue(new Error('Zernio down'));
+    const out = await publishContent(strict, { itemId: ITEM, accountIds: [ACC_2], mode: 'now' });
+    expect(out.status).toBe(502);
+    expect(item().status).toBe('published');
+  });
+
+  it('un contenido programado al que le falla publicar ahora en otra red sigue programado', async () => {
+    item().status = 'scheduled';
+    db.rows('kefy_scheduled_posts')[0].status = 'scheduled';
+    zernio.publishPost.mockRejectedValue(new Error('Zernio down'));
+    await publishContent(strict, { itemId: ITEM, accountIds: [ACC_2], mode: 'now' });
+    expect(item().status).toBe('scheduled');
+  });
+
+  it('cancelar su programación en otra red no lo devuelve a approved', async () => {
+    const out = await publishContent(strict, { itemId: ITEM, accountIds: [ACC_2], mode: 'schedule', scheduledAt: later() });
+    const scheduledId = out.body.results[0].scheduled_post_id!;
+    // El fake no embebe: la fila nueva necesita la marca de su contenido.
+    db.rows('kefy_scheduled_posts').find((p) => p.id === scheduledId)!.kefy_content_items = { brand_id: IDS.BRAND };
+
+    const r = await cancelScheduledPost(strict, scheduledId);
+
+    expect(r.itemReverted).toBe(false);
+    expect(item().status).toBe('published');
+  });
+
+  it('listPublishTargets: dónde está, dónde más puede ir y por qué YouTube no', async () => {
+    db.seed('kefy_social_accounts', [
+      { id: ACC_YT, org_id: IDS.ORG, brand_id: IDS.BRAND, status: 'active', platform: 'youtube', zernio_account_id: 'z6', username: 'acme-yt' },
+    ]);
+
+    const out = await listPublishTargets(strict, ITEM);
+
+    expect(out).toMatchObject({ item_id: ITEM, format: 'post', primary_format: 'post', media_ready: true });
+    const by = Object.fromEntries(out.targets.map((t) => [t.social_account_id, t]));
+    expect(by[ACC]).toMatchObject({ state: 'published', post_url: 'https://www.instagram.com/p/AbC/' });
+    expect(by[ACC_2].state).toBe('available');
+    expect(by[ACC_YT]).toMatchObject({ state: 'incompatible', issue: 'video_only' });
+    expect(by[ACC_INACTIVE].state).toBe('inactive');
+    // Solo las cuentas de la marca del contenido.
+    expect(by[ACC_OTHER_BRAND]).toBeUndefined();
+    expect(by[ACC_OTHER_ORG]).toBeUndefined();
+    expect(out.suggested_account_ids).toEqual([ACC_2]);
+  });
+
+  it('listPublishTargets por formato: la story de un post publicado sigue disponible en Instagram', async () => {
+    db.seed('kefy_content_renditions', [{
+      content_item_id: ITEM, format: 'story', status: 'ready', body: 'Story', hashtags: [], slides: null,
+      image_url: 'https://cdn.test/story.jpg', video_url: null,
+    }]);
+
+    const out = await listPublishTargets(strict, ITEM, { format: 'story' });
+
+    const ig = out.targets.find((t) => t.social_account_id === ACC)!;
+    expect(ig).toMatchObject({ state: 'available', other_formats: ['post'] });
+    expect(out.media_ready).toBe(true);
+    expect(out.suggested_account_ids).toEqual(expect.arrayContaining([ACC, ACC_2]));
+  });
+
+  it('listPublishTargets: un formato sin generar todavía se puede consultar (media_ready false)', async () => {
+    const out = await listPublishTargets(strict, ITEM, { format: 'carousel' });
+    expect(out.media_ready).toBe(false);
+    expect(out.targets.length).toBeGreaterThan(0);
+  });
+
+  it('listPublishTargets de un contenido de otra marca es 404', async () => {
+    await expect(listPublishTargets(strict, ITEM_OTHER_BRAND)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('herramienta list_publish_targets y also_available', () => {
+  beforeEach(() => { ensureToolsRegistered(); });
+
+  it('es de lectura: funciona con una key de solo lectura y no deja fila de auditoría', async () => {
+    const r = await executeTool('list_publish_targets', { item_id: ITEM }, apiCtx({ brandId: IDS.BRAND, scopes: ['read'] }));
+
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) return;
+    const data = r.data as { suggested_account_ids: string[]; targets: Array<Record<string, unknown>> };
+    expect(data.suggested_account_ids).toEqual([ACC, ACC_2]);
+    // Lo que ve el modelo: sin avatar ni datos de Zernio.
+    for (const t of data.targets) {
+      expect(t).not.toHaveProperty('avatar_url');
+      expect(t).not.toHaveProperty('zernio_account_id');
+    }
+    expect(db.rows('kefy_assistant_actions')).toHaveLength(0);
+  });
+
+  it('publish_content devuelve las otras cuentas compatibles donde todavía no está', async () => {
+    const r = await executeTool('publish_content', {
+      item_id: ITEM, social_account_ids: [ACC], when: 'now',
+    }, apiCtx({ brandId: IDS.BRAND }));
+
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) return;
+    const data = r.data as { also_available: Array<{ social_account_id: string; platform: string }> };
+    expect(data.also_available).toEqual([{ social_account_id: ACC_2, platform: 'facebook', username: 'acme' }]);
   });
 });

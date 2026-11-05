@@ -147,6 +147,7 @@ const es = {
     get_video_status: 'Revisando el video…',
     list_social_accounts: 'Revisando cuentas conectadas…',
     get_connect_account_link: 'Preparando el link de conexión…',
+    list_publish_targets: 'Revisando dónde más se puede publicar…',
     list_autopilot_rules: 'Revisando el autopilot…',
     save_autopilot_rule: 'Guardando la regla…',
     delete_autopilot_rule: 'Borrando la regla…',
@@ -268,6 +269,7 @@ const es = {
     get_video_status: () => 'Revisar cómo va el video',
     list_social_accounts: () => 'Revisar las cuentas conectadas',
     get_connect_account_link: (i) => `Preparar el link para conectar ${str(i.platform, 'una cuenta')}`,
+    list_publish_targets: () => 'Revisar dónde más se puede publicar el contenido',
     list_autopilot_rules: () => 'Revisar las reglas del autopilot',
     save_autopilot_rule: (i, p) => {
       const name = quote(str(p.name, str(i.name)));

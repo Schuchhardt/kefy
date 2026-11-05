@@ -1,7 +1,8 @@
 // ─── Herramientas del asistente: publicación ─────────────────────────────────
 //
-// list_social_accounts, publish_content, list_scheduled_posts,
-// reschedule_scheduled_post y cancel_scheduled_post. Son finas: validan con zod y llaman a los servicios
+// list_social_accounts, list_publish_targets, publish_content,
+// list_scheduled_posts, reschedule_scheduled_post y cancel_scheduled_post.
+// Son finas: validan con zod y llaman a los servicios
 // de lib/services/{social,publish}.ts, los mismos que usan las rutas de
 // /api/social/*. Antes de tocar la publicación, leer docs/zernio.md.
 //
@@ -24,8 +25,12 @@ import { getActiveBrandById } from '@/lib/brands';
 import { ORGANIC_CHANNELS, getChannelLabel } from '@/lib/channels';
 import type { Channel } from '@/types/channels';
 import {
-  cancelScheduledPost, listScheduledPosts, publishContent, rescheduleScheduledPost, SCHEDULED_POST_STATUSES,
+  cancelScheduledPost, listPublishTargets, listScheduledPosts, publishContent, rescheduleScheduledPost,
+  SCHEDULED_POST_STATUSES,
 } from '@/lib/services/publish';
+import { reportError } from '@/lib/observability';
+import type { ContentType } from '@/types/content';
+import type { PublishTarget } from '@/lib/publish-targets';
 
 const FORMATS = ['post', 'carousel', 'reel', 'story'] as const;
 
@@ -217,6 +222,76 @@ const getConnectAccountLinkTool = defineTool({
   },
 });
 
+// ─── list_publish_targets ────────────────────────────────────────────────────
+// Un mismo contenido se puede publicar en todas las cuentas de su marca, esté
+// en borrador, programado o ya publicado. Esta herramienta dice dónde está y
+// dónde más puede ir (docs/zernio.md, «Publicar el mismo contenido en otras
+// redes»).
+
+/** Lo que ven el modelo y la tarjeta de una cuenta destino (sin avatar). */
+function targetForTool(t: PublishTarget) {
+  return {
+    social_account_id: t.social_account_id,
+    platform: t.platform,
+    username: t.username,
+    state: t.state,
+    ...(t.issue ? { issue: t.issue } : {}),
+    ...(t.max_images !== undefined ? { max_images: t.max_images } : {}),
+    ...(t.as_post ? { as_post: true } : {}),
+    ...(t.state === 'published' ? { post_url: t.post_url ?? null, published_at: t.published_at ?? null } : {}),
+    ...(t.state === 'scheduled' ? { scheduled_post_id: t.scheduled_post_id, scheduled_at: t.scheduled_at ?? null } : {}),
+    other_formats: t.other_formats,
+  };
+}
+
+const listPublishTargetsTool = defineTool({
+  name: 'list_publish_targets',
+  title: { es: 'Ver dónde más publicar', en: 'See where else to publish' },
+  kind: 'read',
+  description:
+    "For one content item, lists every connected account of its brand with the item's state there: 'published' " +
+    "(with post_url), 'scheduled' (with scheduled_at), 'available' (compatible and not used yet), 'incompatible' " +
+    "(the network does not accept this format: issue is needs_media, video_only, no_video, too_many_images or " +
+    "no_publishing) or 'inactive' (reconnect it). suggested_account_ids are the available ones: the same item can go " +
+    'to all of them with publish_content, whether it is a draft, scheduled or already published. Use it when the user ' +
+    "wants to publish an item on more networks. as_post means a story goes out as a regular post on that network. " +
+    "format checks an alternate format (its rendition); media_ready false means that format can't be published yet. " +
+    'Costs no credits.',
+  input: z.object({
+    item_id: z.uuid().describe('Content item (from list_content or a create_* tool).'),
+    format: z.enum(FORMATS).optional().describe("Format to check. Defaults to the item's own format."),
+  }).strict(),
+  confirm: 'never',
+  // La tarjeta de revisión marca en su selector dónde ya está publicado.
+  app: { visibility: ['model', 'app'] },
+  handler: async (ctx, input) => {
+    const out = await listPublishTargets(ctx, input.item_id, { format: input.format });
+    return {
+      data: { ...out, targets: out.targets.map(targetForTool) },
+      links: [itemLink(ctx.language, input.item_id)],
+    };
+  },
+});
+
+/**
+ * Tras publicar: las demás cuentas compatibles donde el contenido todavía no
+ * está, para que el asistente las ofrezca. Best-effort: si falla, la
+ * publicación ya ocurrió y no se convierte en error.
+ */
+async function alsoAvailable(
+  ctx: ToolContext, itemId: string, format: ContentType | undefined,
+): Promise<Array<{ social_account_id: string; platform: string; username: string | null }>> {
+  try {
+    const { targets } = await listPublishTargets(ctx, itemId, { format });
+    return targets
+      .filter((t) => t.state === 'available')
+      .map((t) => ({ social_account_id: t.social_account_id, platform: t.platform, username: t.username }));
+  } catch (err) {
+    reportError(err, { route: 'lib/assistant/tools/publishing', auth: ctx.auth, extra: { op: 'alsoAvailable', itemId } });
+    return [];
+  }
+}
+
 // ─── publish_content ─────────────────────────────────────────────────────────
 
 const publishInput = z.object({
@@ -251,8 +326,11 @@ const publishContentTool = defineTool({
   kind: 'publish',
   description:
     "Publishes a content item to one or more of the brand's connected accounts, either immediately (when: 'now') or " +
-    'scheduled for a future date and time. Reels need a rendered video. Costs no credits. ' +
-    'Always call list_social_accounts first and confirm targets with the user.',
+    'scheduled for a future date and time. Works for drafts and also for items already published or scheduled on ' +
+    'other accounts (publishing the same item on more networks). Reels need a rendered video. Costs no credits. ' +
+    'Always call list_social_accounts (or list_publish_targets for an item) first and confirm targets with the user. ' +
+    'The result lists also_available: other compatible accounts where the item is not published or scheduled yet; ' +
+    'offer them to the user.',
   input: publishInput,
   confirm: 'always',
   app: { visibility: ['model', 'app'] },
@@ -311,7 +389,7 @@ const publishContentTool = defineTool({
 
     const links: ToolLink[] = [itemLink(ctx.language, input.item_id), calendarLink(ctx.language)];
     return {
-      data: { mode, results },
+      data: { mode, results, also_available: await alsoAvailable(ctx, input.item_id, input.format) },
       links,
       dataChanged: ['content', 'scheduled'],
     };
@@ -553,6 +631,7 @@ const disconnectSocialAccountTool = defineTool({
 export const publishingTools = [
   listSocialAccountsTool,
   getConnectAccountLinkTool,
+  listPublishTargetsTool,
   publishContentTool,
   listScheduledPostsTool,
   rescheduleScheduledPostTool,

@@ -29,6 +29,10 @@ import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, msg } from '@/lib/services/errors';
 import { loadOwnedItem, loadOwnedScheduledPost } from '@/lib/services/ownership';
 import { fillMissingPostUrls, type PostUrlRow } from '@/lib/services/post-urls';
+import {
+  buildPublishTargets, mediaShapeOf, suggestedAccountIds,
+  type PublishTarget, type TargetAccount, type TargetPost,
+} from '@/lib/publish-targets';
 
 export type PublishMode = 'now' | 'schedule';
 
@@ -405,18 +409,27 @@ export async function publishContent(
 
   const allFailed = results.every((r) => r.status === 'failed');
 
+  // Un contenido que ya salió (o está programado) en otra red no retrocede
+  // porque falle publicarlo en una red más, ni deja de estar publicado porque
+  // se programe en otra: antes pasaba a 'approved' o a 'scheduled' y la ficha
+  // volvía a dejar editar un post que ya estaba en la red.
+  const alreadyOut = item.status === 'published' || item.status === 'scheduled';
+
   if (mode === 'now') {
     const anyPublished = results.some((r) => r.status === 'published');
-    await db
-      .from('kefy_content_items')
-      .update({ status: allFailed ? 'approved' : 'published' })
-      .eq('id', item.id)
-      .eq('org_id', orgId);
+    const nextStatus = !allFailed ? 'published' : alreadyOut ? item.status : 'approved';
+    if (nextStatus !== item.status) {
+      await db
+        .from('kefy_content_items')
+        .update({ status: nextStatus })
+        .eq('id', item.id)
+        .eq('org_id', orgId);
+    }
 
     return { status: allFailed ? 502 : anyPublished ? 200 : 207, body: { results } };
   }
 
-  if (!allFailed) {
+  if (!allFailed && item.status !== 'published') {
     await db
       .from('kefy_content_items')
       .update({ status: 'scheduled' })
@@ -425,6 +438,103 @@ export async function publishContent(
   }
 
   return { status: allFailed ? 502 : 201, body: { results } };
+}
+
+// ─── Dónde más se puede publicar ─────────────────────────────────────────────
+
+export interface PublishTargetsResult {
+  item_id: string;
+  /** Formato para el que se calculó (por defecto, el del propio contenido). */
+  format: ContentType;
+  primary_format: ContentType;
+  /**
+   * false si ese formato todavía no se puede publicar: su versión no está
+   * generada (convert_content_format) o el reel no tiene video. La
+   * compatibilidad se calcula entonces con lo que tendrá el formato.
+   */
+  media_ready: boolean;
+  /** Una entrada por cuenta de la marca (ver buildPublishTargets). */
+  targets: PublishTarget[];
+  /** Cuentas compatibles donde el contenido todavía no está: las que se recomiendan. */
+  suggested_account_ids: string[];
+}
+
+/**
+ * Por cada cuenta de la marca del contenido: si ya está publicado o programado
+ * ahí, si todavía se puede publicar o si la red no admite el formato. Sirve
+ * para cualquier estado del contenido (borrador, programado o publicado): un
+ * mismo contenido se puede llevar a todas las redes conectadas.
+ */
+export async function listPublishTargets(
+  ctx: ServiceContext,
+  itemId: string,
+  input: { format?: ContentType } = {},
+): Promise<PublishTargetsResult> {
+  const db = createSupabaseServer();
+  const item = await loadOwnedItem<PublishItemRow>(ctx, itemId, ITEM_SELECT, 'Content item not found');
+  const primaryFormat = item.content_type as ContentType;
+  const format = input.format ?? primaryFormat;
+
+  // El media de ese formato: las columnas del contenido o su rendición lista.
+  let source: PublishMediaSource | null = null;
+  if (format === primaryFormat) {
+    source = {
+      body: item.body, image_url: item.image_url, slides: item.slides,
+      video_url: item.video_url, mux_playback_id: item.mux_playback_id, hashtags: item.hashtags ?? [],
+    };
+  } else {
+    const { data: rendition } = await db
+      .from('kefy_content_renditions')
+      .select('body, image_url, slides, video_url, mux_playback_id, hashtags, status')
+      .eq('content_item_id', item.id)
+      .eq('format', format)
+      .maybeSingle();
+    if (rendition && (rendition as { status?: string }).status === 'ready') source = rendition as PublishMediaSource;
+  }
+  const { shape, ready } = mediaShapeOf(format, source);
+
+  // Mismas cuentas que acepta publishContent: las de la marca del contenido.
+  const brandId = item.brand_id ?? (ctx.brandId || null);
+  let accountsQuery = db
+    .from('kefy_social_accounts')
+    .select('id, platform, username, avatar_url, status')
+    .eq('org_id', ctx.auth.orgId)
+    .order('created_at', { ascending: true });
+  if (brandId) accountsQuery = accountsQuery.eq('brand_id', brandId);
+
+  const [{ data: accountRows, error: accountsError }, { data: postRows, error: postsError }] = await Promise.all([
+    accountsQuery,
+    db
+      .from('kefy_scheduled_posts')
+      .select('id, social_account_id, status, format, scheduled_at, published_at, platform_post_url')
+      .eq('content_item_id', item.id)
+      .eq('org_id', ctx.auth.orgId)
+      .in('status', ['published', 'scheduled', 'pending']),
+  ]);
+
+  if (accountsError || postsError) {
+    reportError(new Error((accountsError ?? postsError)!.message), {
+      route: 'lib/services/publish', service: 'supabase', auth: ctx.auth, extra: { op: 'listPublishTargets', itemId },
+    });
+    throw new ServiceError('unavailable', 500, 'Failed to load publish targets').markReported();
+  }
+
+  const targets = buildPublishTargets({
+    accounts: (accountRows ?? []) as TargetAccount[],
+    posts: (postRows ?? []) as TargetPost[],
+    format,
+    primaryFormat,
+    shape,
+  });
+
+  return {
+    item_id: item.id,
+    format,
+    primary_format: primaryFormat,
+    media_ready: ready,
+    targets,
+    suggested_account_ids: suggestedAccountIds(targets),
+  };
 }
 
 // ─── Listado de publicaciones ────────────────────────────────────────────────
@@ -664,6 +774,8 @@ export async function cancelScheduledPost(
     .eq('org_id', ctx.auth.orgId);
 
   // El contenido vuelve a 'approved' si solo estaba programado por esta fila.
+  // Si ya salió en otra red sigue publicado: cancelar el envío a una red más no
+  // lo devuelve a borrador.
   const { count } = await db
     .from('kefy_scheduled_posts')
     .select('id', { count: 'exact', head: true })
@@ -671,11 +783,19 @@ export async function cancelScheduledPost(
     .eq('org_id', ctx.auth.orgId)
     .eq('status', 'scheduled');
 
-  const itemReverted = (count ?? 0) === 0;
-  if (itemReverted) {
+  let itemReverted = false;
+  if ((count ?? 0) === 0) {
+    const { count: publishedCount } = await db
+      .from('kefy_scheduled_posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('content_item_id', post.content_item_id)
+      .eq('org_id', ctx.auth.orgId)
+      .eq('status', 'published');
+
+    itemReverted = (publishedCount ?? 0) === 0;
     await db
       .from('kefy_content_items')
-      .update({ status: 'approved' })
+      .update({ status: itemReverted ? 'approved' : 'published' })
       .eq('id', post.content_item_id)
       .eq('org_id', ctx.auth.orgId);
   }

@@ -191,4 +191,29 @@ describe('publicar', () => {
     }));
     await waitFor(() => expect(host.sendMessage).toHaveBeenCalledWith('Publiqué «Lanzamiento» en 1 cuenta.'));
   });
+
+  it('un contenido ya publicado se lleva a las cuentas que faltan: las que ya lo tienen o no lo admiten no se marcan', async () => {
+    const published = makeItem({ status: 'published', actions: { ...makeItem().actions, approve: false, publish: true }, publish_blocked: null });
+    const { host, calls } = fakeHost({
+      list_social_accounts: () => ({ ok: true, view: null, data: { accounts: [
+        { id: 'acc-1', platform: 'instagram', username: 'kefy.app', status: 'active' },
+        { id: 'acc-2', platform: 'linkedin', username: 'kefy-li', status: 'active' },
+        { id: 'acc-3', platform: 'youtube', username: 'kefy-yt', status: 'active' },
+      ] } }),
+      list_publish_targets: () => ({ ok: true, view: null, data: { targets: [
+        { social_account_id: 'acc-1', state: 'published' },
+        { social_account_id: 'acc-2', state: 'available' },
+        { social_account_id: 'acc-3', state: 'incompatible', issue: 'video_only' },
+      ] } }),
+    });
+    renderReview(makeView([published]), host);
+
+    fireEvent.click(btn('Publicar o programar'));
+    const ig = await screen.findByRole('checkbox', { name: /@kefy\.app.*ya publicado aquí/ });
+    expect(ig).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /@kefy-yt.*solo publica video/ })).toBeDisabled();
+    // La única que queda viene marcada.
+    expect(screen.getByRole('checkbox', { name: /@kefy-li/ })).toBeChecked();
+    expect(calls.find((c) => c.name === 'list_publish_targets')?.args).toMatchObject({ item_id: ITEM });
+  });
 });

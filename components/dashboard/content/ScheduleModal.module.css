@@ -124,3 +124,26 @@
 .successLinks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
 .successDetail { margin: 0; font-size: 14px; color: var(--muted); max-width: 420px; }
 .success :global(.ui-notice) { margin-top: 8px; text-align: left; }
+
+/* ─── Estado de cada cuenta (lib/publish-targets.ts) ──────────────────────
+   Una cuenta que ya tiene el contenido, o cuya red no admite el formato, no
+   se puede elegir: queda enfocable (aria-disabled) y dice por qué. */
+.accountText { display: inline-flex; flex-direction: column; align-items: flex-start; min-width: 0; text-align: left; }
+.accountWithNote { border-radius: 14px; padding-block: 6px; }
+.accountNote { font-size: 11px; font-weight: 500; line-height: 1.3; color: var(--muted); white-space: normal; }
+.account[aria-disabled="true"] { cursor: not-allowed; background: var(--bg); color: var(--muted); }
+.account[aria-disabled="true"]:hover, .account[aria-disabled="true"]:active { border-color: var(--border); }
+.account[aria-disabled="true"] .accountName { color: var(--text); }
+
+/* ─── Recomendación tras publicar ─────────────────────────────────────── */
+.suggest {
+  width: 100%; max-width: 440px; margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.suggestList { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.suggestItem {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+  font-size: 13px; font-weight: 600; color: var(--text);
+}

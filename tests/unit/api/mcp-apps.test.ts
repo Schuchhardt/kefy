@@ -118,7 +118,7 @@ describe('tools/list', () => {
   it('las que la vista llama sin abrir vista: solo visibility model+app', async () => {
     db.rows('kefy_api_keys')[0].scopes = ['read', 'write', 'publish'];
     const list = await tools();
-    for (const name of ['update_content', 'generate_content_image', 'convert_content_format', 'prepare_story_video', 'list_social_accounts', 'publish_content']) {
+    for (const name of ['update_content', 'generate_content_image', 'convert_content_format', 'prepare_story_video', 'list_social_accounts', 'list_publish_targets', 'publish_content']) {
       expect(list.get(name)!._meta, name).toEqual({ ui: { visibility: ['model', 'app'] } });
       expect(list.get(name)!.outputSchema, name).toBeUndefined();
     }

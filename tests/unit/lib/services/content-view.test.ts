@@ -61,14 +61,20 @@ describe('contentActions', () => {
     expect(act('draft', 'carousel').actions.produce_video).toBe(false);
   });
 
-  it('programado, publicado o archivado: sin edición ni publicación', () => {
-    for (const status of ['scheduled', 'published', 'archived']) {
+  it('programado o publicado: sin edición, pero se puede publicar en las cuentas que faltan', () => {
+    for (const status of ['scheduled', 'published']) {
       const { actions, publish_blocked } = act(status);
-      expect(actions).toMatchObject({ approve: false, unapprove: false, edit: false, archive: false, regenerate_image: false, publish: false });
-      expect(publish_blocked).toBe('status');
+      expect(actions).toMatchObject({ approve: false, unapprove: false, edit: false, archive: false, regenerate_image: false, publish: true });
+      expect(publish_blocked).toBeNull();
     }
-    expect(act('archived').actions.convert).toBe(false);
     expect(act('published').actions.convert).toBe(true);
+  });
+
+  it('archivado: sin edición ni publicación', () => {
+    const { actions, publish_blocked } = act('archived');
+    expect(actions).toMatchObject({ approve: false, unapprove: false, edit: false, archive: false, regenerate_image: false, publish: false });
+    expect(publish_blocked).toBe('status');
+    expect(actions.convert).toBe(false);
   });
 
   it('sin scope write no hay ningún botón que mute; sin publish no se publica (OAuth)', () => {

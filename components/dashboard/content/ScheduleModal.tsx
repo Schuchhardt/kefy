@@ -10,6 +10,10 @@
 // - Al terminar no se cierra solo: muestra el resultado y el usuario decide
 //   (cerrar o ir al calendario).
 // - Las acciones viven en el pie fijo del modal, y el cuerpo es un <form>.
+// - Un mismo contenido va a todas las cuentas de la marca, esté en borrador,
+//   programado o publicado: cada cuenta dice si ya está ahí o si su red no
+//   admite el formato (GET /api/content/[id]/publish-targets), y al terminar
+//   se recomiendan las compatibles que faltan.
 
 import { useEffect, useState, useMemo, useId, useRef } from 'react';
 import dynamic from 'next/dynamic';
@@ -29,6 +33,7 @@ import { RenditionGenerating } from './RenditionGenerating';
 import { notifyLocal, requestNotificationPermission, shouldNotify } from '@/lib/notify';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ContentType, ContentRendition, ReelScene } from '@/types/content';
 import type { SocialAccount } from '@/types/social';
+import type { PublishTarget } from '@/lib/publish-targets';
 import esPublish from '@/locales/es/dashboard/publish';
 import enPublish from '@/locales/en/dashboard/publish';
 import styles from './ScheduleModal.module.css';
@@ -64,6 +69,9 @@ interface ScheduleModalProps {
    *  "publish on this network too" shortcut for a network the item hasn't
    *  gone out to yet). */
   initialPlatform?: string;
+  /** Cuentas que llegan marcadas (p. ej. «Publicar en N cuentas más» desde la
+   *  ficha). Las que ya tienen el contenido o no lo admiten se ignoran. */
+  initialAccountIds?: string[];
   brandKit?:        BrandKitInfo | null;
   lang:             'es' | 'en';
   /** Se llama en cuanto la publicación o programación sale bien (para que el
@@ -91,10 +99,20 @@ interface SuccessState {
   when:   Date | null;
   /** «Ver publicado» de cada cuenta que ya tiene URL pública. */
   links:  Array<{ id: string; platform: string | null; url: string }>;
+  /** Cuentas de este envío: no se recomiendan aunque la lista aún no se refresque. */
+  used:   string[];
+}
+
+/** Respuesta de GET /api/content/[itemId]/publish-targets. */
+interface TargetsResponse { targets?: PublishTarget[]; suggested_account_ids?: string[] }
+
+/** Una cuenta que no se puede elegir: ya tiene el contenido o su red no lo admite. */
+function isBlocked(t: PublishTarget | undefined): boolean {
+  return !!t && (t.state === 'published' || t.state === 'scheduled' || t.state === 'incompatible');
 }
 
 export default function ScheduleModal({
-  open, onClose, initialItem, initialDate, initialPlatform, brandKit, lang, onSuccess,
+  open, onClose, initialItem, initialDate, initialPlatform, initialAccountIds, brandKit, lang, onSuccess,
   showCalendarLink = true,
 }: ScheduleModalProps) {
   const copy = COPY[lang];
@@ -124,6 +142,11 @@ export default function ScheduleModal({
   const [renditionGenerating, setRenditionGenerating] = useState(false);
   const [renditionError, setRenditionError]   = useState<string | null>(null);
 
+  // ── Dónde está ya el contenido y dónde más puede ir (por formato) ──────────
+  const [targets, setTargets] = useState<PublishTarget[] | null>(null);
+  const [targetsVersion, setTargetsVersion] = useState(0);
+  const initialPickDoneRef = useRef(false);
+
   // Reset state each time the modal opens. Only on the closed → open edge: the
   // parent may refetch the item after a successful publish (new object, same
   // content) and that must not wipe the success view.
@@ -134,6 +157,8 @@ export default function ScheduleModal({
     if (!opening) return;
     setSelectedItem(initialItem ?? null);
     setSelectedAccountIds([]);
+    setTargets(null);
+    initialPickDoneRef.current = false;
     setMode(initialDate ? 'scheduled' : 'now');
     setScheduledAt(initialDate ?? null);
     setError(null);
@@ -163,6 +188,24 @@ export default function ScheduleModal({
   const activeRendition = useMemo(
     () => renditions.find((r) => r.format === selectedFormat) ?? null,
     [renditions, selectedFormat],
+  );
+
+  // El estado de cada cuenta depende del formato: el post puede estar en
+  // Instagram y su story todavía no. Si falla, el selector funciona como antes.
+  useEffect(() => {
+    if (!open || !selectedItem || !selectedFormat) return;
+    let alive = true;
+    fetch(`/api/content/${selectedItem.id}/publish-targets?format=${selectedFormat}`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`targets ${r.status}`))))
+      .then((d: TargetsResponse) => { if (alive) setTargets(d.targets ?? []); })
+      .catch(() => { if (alive) setTargets([]); });
+    return () => { alive = false; };
+  // La versión de la rendición también cambia lo que admite cada red.
+  }, [open, selectedItem, selectedFormat, activeRendition?.status, targetsVersion]);
+
+  const targetById = useMemo(
+    () => new Map((targets ?? []).map((t) => [t.social_account_id, t])),
+    [targets],
   );
 
   async function handleGenerateRendition(format: ContentType) {
@@ -232,13 +275,35 @@ export default function ScheduleModal({
     [accounts],
   );
 
-  // Pre-check the account(s) on `initialPlatform` once they've loaded — only
-  // while nothing else has been picked yet, so it never fights a manual choice.
+  // Las cuentas que llegan marcadas (`initialAccountIds`, o las de
+  // `initialPlatform`) se aplican una sola vez, cuando ya se sabe cuáles se
+  // pueden elegir: nunca pelean con una elección manual.
   useEffect(() => {
-    if (!open || !initialPlatform || selectedAccountIds.length > 0) return;
-    const matches = activeAccounts.filter((a) => a.platform === initialPlatform).map((a) => a.id);
-    if (matches.length > 0) setSelectedAccountIds(matches);
-  }, [open, initialPlatform, activeAccounts, selectedAccountIds.length]);
+    if (!open || initialPickDoneRef.current || targets === null || activeAccounts.length === 0) return;
+    initialPickDoneRef.current = true;
+    const wanted = new Set(initialAccountIds ?? []);
+    const picks = activeAccounts
+      .filter((a) => wanted.has(a.id) || (!!initialPlatform && a.platform === initialPlatform))
+      .filter((a) => !isBlocked(targetById.get(a.id)))
+      .map((a) => a.id);
+    if (picks.length > 0) setSelectedAccountIds((prev) => (prev.length > 0 ? prev : picks));
+  }, [open, targets, activeAccounts, initialAccountIds, initialPlatform, targetById]);
+
+  // Al cambiar de formato una cuenta elegida puede dejar de admitirlo.
+  useEffect(() => {
+    if (!targets) return;
+    setSelectedAccountIds((prev) => {
+      const next = prev.filter((id) => !isBlocked(targetById.get(id)));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [targets, targetById]);
+
+  /** Compatibles y todavía sin este contenido: las que se recomiendan. */
+  const suggestedIds = useMemo(
+    () => activeAccounts.filter((a) => targetById.get(a.id)?.state === 'available').map((a) => a.id),
+    [activeAccounts, targetById],
+  );
+  const missingSuggested = suggestedIds.filter((id) => !selectedAccountIds.includes(id));
 
   // La vista previa se ciñe a las redes elegidas: cada una recorta y tapa el
   // contenido a su manera, así que mostrar sólo las que aplican evita aprobar
@@ -321,8 +386,12 @@ export default function ScheduleModal({
         links:  results
           .filter((r) => r.status === 'published' && r.post_url)
           .map((r) => ({ id: r.social_account_id, platform: r.platform ?? null, url: r.post_url! })),
+        used:   selectedAccountIds,
       });
       onSuccess?.(scheduling ? 'scheduled' : 'now');
+      // Las cuentas recién usadas pasan a «publicado» / «programado» y las
+      // compatibles que faltan se recomiendan en el resultado.
+      setTargetsVersion((v) => v + 1);
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : (mode === 'scheduled' ? t.errors.schedule : t.errors.publish));
     } finally {
@@ -384,7 +453,17 @@ export default function ScheduleModal({
       footer={footer}
     >
       {success ? (
-        <SuccessView success={success} copy={copy} lang={lang} />
+        <SuccessView
+          success={success}
+          copy={copy}
+          lang={lang}
+          suggestions={activeAccounts.filter((a) => suggestedIds.includes(a.id) && !success.used.includes(a.id))}
+          onPublishMore={(ids) => {
+            setSuccess(null);
+            setError(null);
+            setSelectedAccountIds(ids);
+          }}
+        />
       ) : !selectedItem ? (
         <div className={styles.body}>
           <ContentPicker items={availableItems} brandKit={brandKit} onPick={setSelectedItem} lang={lang} copy={copy} />
@@ -480,26 +559,53 @@ export default function ScheduleModal({
                 )}
               />
             ) : (
-              <div className={styles.accounts}>
-                {activeAccounts.map((acc) => {
-                  const isSelected = selectedAccountIds.includes(acc.id);
-                  return (
-                    <button
-                      key={acc.id}
-                      type="button"
-                      className={styles.account}
-                      aria-pressed={isSelected}
-                      onClick={() => setSelectedAccountIds((prev) =>
-                        isSelected ? prev.filter((id) => id !== acc.id) : [...prev, acc.id],
-                      )}
+              <>
+                {missingSuggested.length > 0 && suggestedIds.length > 1 && (
+                  <div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<Icon name="check-circle" size={14} />}
+                      onClick={() => setSelectedAccountIds((prev) => [...new Set([...prev, ...suggestedIds])])}
                     >
-                      <ChannelIcon name={acc.platform} size={18} />
-                      <span className={styles.accountName}>@{acc.username}</span>
-                      {isSelected && <Icon name="check" size={14} strokeWidth={2.4} />}
-                    </button>
-                  );
-                })}
-              </div>
+                      {copy.targets.selectSuggested(suggestedIds.length)}
+                    </Button>
+                  </div>
+                )}
+                <div className={styles.accounts}>
+                  {activeAccounts.map((acc) => {
+                    const isSelected = selectedAccountIds.includes(acc.id);
+                    const target = targetById.get(acc.id);
+                    const blocked = isBlocked(target);
+                    const note = accountNote(target, copy);
+                    return (
+                      <button
+                        key={acc.id}
+                        type="button"
+                        className={`${styles.account}${note ? ` ${styles.accountWithNote}` : ''}`}
+                        aria-pressed={isSelected}
+                        aria-disabled={blocked || undefined}
+                        data-state={target?.state}
+                        onClick={() => {
+                          if (blocked) return;
+                          setSelectedAccountIds((prev) =>
+                            isSelected ? prev.filter((id) => id !== acc.id) : [...prev, acc.id],
+                          );
+                        }}
+                      >
+                        <ChannelIcon name={acc.platform} size={18} />
+                        <span className={styles.accountText}>
+                          <span className={styles.accountName}>@{acc.username}</span>
+                          {note && <span className={styles.accountNote}>{note}</span>}
+                        </span>
+                        {isSelected && <Icon name="check" size={14} strokeWidth={2.4} />}
+                        {!isSelected && target?.state === 'published' && <Icon name="check-circle" size={14} />}
+                        {!isSelected && target?.state === 'scheduled' && <Icon name="clock" size={14} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </fieldset>
 
@@ -530,8 +636,33 @@ export default function ScheduleModal({
 
 // ─── Resultado ──────────────────────────────────────────────────────────────
 
-function SuccessView({ success, copy, lang }: { success: SuccessState; copy: Copy; lang: 'es' | 'en' }) {
+/** La línea pequeña bajo una cuenta: por qué no se puede elegir, o cómo sale. */
+function accountNote(target: PublishTarget | undefined, copy: Copy): string | null {
+  const t = copy.targets;
+  if (!target) return null;
+  if (target.state === 'published') return t.alreadyPublished;
+  if (target.state === 'scheduled') return t.alreadyScheduled;
+  if (target.state === 'incompatible') {
+    if (target.issue === 'too_many_images') return t.issues.too_many_images(target.max_images ?? 1);
+    return target.issue ? t.issues[target.issue] : null;
+  }
+  if (target.as_post) return t.asPost;
+  return null;
+}
+
+function SuccessView({
+  success, copy, lang, suggestions, onPublishMore,
+}: {
+  success: SuccessState;
+  copy: Copy;
+  lang: 'es' | 'en';
+  /** Cuentas compatibles donde el contenido todavía no está. */
+  suggestions: SocialAccount[];
+  onPublishMore: (ids: string[]) => void;
+}) {
   const t = copy.schedule.success;
+  const tt = copy.targets;
+  const suggestId = useId();
   const when = success.when?.toLocaleString(lang === 'en' ? 'en-US' : 'es-ES', {
     weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
   });
@@ -559,6 +690,26 @@ function SuccessView({ success, copy, lang }: { success: SuccessState; copy: Cop
         <Notice tone="warning" live={false} icon={<Icon name="alert" size={16} />}>
           {t.partial(success.failed.join(', '))}
         </Notice>
+      )}
+      {suggestions.length > 0 && (
+        <section className={styles.suggest} aria-labelledby={suggestId}>
+          <h3 id={suggestId} className={styles.label}>{tt.suggestTitle}</h3>
+          <ul className={styles.suggestList}>
+            {suggestions.map((a) => (
+              <li key={a.id} className={styles.suggestItem}>
+                <ChannelIcon name={a.platform} size={16} />
+                <span className={styles.accountName}>@{a.username}</span>
+              </li>
+            ))}
+          </ul>
+          <Button
+            variant="secondary"
+            icon={<Icon name="send" size={16} />}
+            onClick={() => onPublishMore(suggestions.map((a) => a.id))}
+          >
+            {tt.suggestCta(suggestions.length)}
+          </Button>
+        </section>
       )}
     </div>
   );

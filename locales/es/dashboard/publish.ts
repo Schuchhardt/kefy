@@ -67,6 +67,40 @@ const es = {
     },
   },
 
+  /**
+   * Dónde está un contenido y dónde más puede ir (lib/publish-targets.ts): el
+   * selector de cuentas del modal y la tarjeta «Redes» de la ficha.
+   */
+  targets: {
+    title: 'Redes',
+    intro: 'Este contenido ya salió o está programado en algunas cuentas. Puedes publicar el mismo en las demás.',
+    draftIntro: 'Puedes publicar este mismo contenido en todas tus cuentas compatibles a la vez.',
+    loading: 'Revisando tus cuentas…',
+    loadError: 'No se pudo revisar dónde está publicado este contenido.',
+    published: 'Publicado',
+    scheduled: (when: string) => `Programado · ${when}`,
+    available: 'Todavía no está aquí',
+    inactive: 'Cuenta desconectada: vuelve a conectarla para publicar',
+    alreadyPublished: 'Ya publicado aquí',
+    alreadyScheduled: 'Ya programado aquí',
+    asPost: 'Esta red no tiene stories: sale como post',
+    otherFormats: (formats: string) => `Ya está como ${formats}`,
+    issues: {
+      no_publishing: 'Esta red no recibe publicaciones',
+      needs_media: 'Necesita una imagen o un video',
+      video_only: 'Solo publica video',
+      no_video: 'No admite video',
+      too_many_images: (max: number) => (max === 1 ? 'Admite una sola imagen' : `Admite hasta ${max} imágenes`),
+    },
+    selectSuggested: (n: number) => (n === 1 ? 'Elegir la cuenta compatible' : `Elegir las ${n} compatibles`),
+    publishMore: (n: number) => (n === 1 ? 'Publicar en 1 cuenta más' : `Publicar en ${n} cuentas más`),
+    publishAll: (n: number) => (n === 1 ? 'Publicar en la cuenta compatible' : `Publicar en las ${n} compatibles`),
+    allCovered: 'Ya está en todas tus cuentas compatibles.',
+    connectMore: 'Conectar otra red',
+    suggestTitle: 'También puedes publicarlo en',
+    suggestCta: (n: number) => (n === 1 ? 'Publicar también en esa cuenta' : `Publicar también en esas ${n} cuentas`),
+  },
+
   /** Una publicación ya programada: su fecha, cambiarla y editarla. */
   scheduled: {
     scheduledFor: (when: string) => `Programada para el ${when}`,

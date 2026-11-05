@@ -44,6 +44,7 @@ export const ASSISTANT_TOOL_NAMES = [
   'produce_video',
   'get_video_status',
   'list_social_accounts',
+  'list_publish_targets',
   'publish_content',
   'list_scheduled_posts',
   'reschedule_scheduled_post',
