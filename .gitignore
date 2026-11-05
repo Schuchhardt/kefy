@@ -46,3 +46,6 @@ next-env.d.ts
 test-results
 test-results/*
 .env*
+
+# bundle de la vista MCP Apps (npm run build:mcp-app)
+/mcp-app/dist/

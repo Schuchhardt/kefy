@@ -25,6 +25,10 @@ import type { Frequency, AutopilotRule } from '@/types/automations';
 import type { SocialAccount } from '@/types/social';
 import { useDataChanged } from '@/lib/data-events';
 import { useBrand } from '@/lib/brand-context';
+import {
+  AUTOPILOT_FORMATS, STORY_DELAY_DEFAULT_MINUTES, STORY_PLATFORMS, WEEKDAY_SKIP, autopilotRuleCost, usesStory,
+  type AutopilotFormat, type WeeklyFormats, type WeeklyFormatValue,
+} from '@/lib/autopilot-formats';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,6 +39,19 @@ const FREQUENCIES: Frequency[] = ['daily', 'weekly', 'biweekly', 'monthly'];
 /** Frecuencias que piden día de la semana. */
 const WEEKLY: Frequency[] = ['weekly', 'biweekly'];
 const MODEL_LABELS: Record<AIModel, string> = { claude: 'Claude', gpt: 'GPT-4o' };
+/** Desfases de la historia derivada que ofrece el formulario (minutos). */
+const STORY_DELAYS = [0, 60, 120, 240, 480, 1440];
+/** Orden de la mezcla semanal en el formulario: de lunes a domingo. */
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+type FormFormat = AutopilotFormat | 'auto';
+
+/** La mezcla del formulario sin los días «como la regla»; null si no queda nada. */
+function weeklyPayload(weekly: Record<string, WeeklyFormatValue | ''>): WeeklyFormats | null {
+  const out: WeeklyFormats = {};
+  for (const [day, value] of Object.entries(weekly)) if (value) out[day as keyof WeeklyFormats] = value;
+  return Object.keys(out).length ? out : null;
+}
 
 function badgeTone(tone: Tone): CSSProperties {
   const c = TONE_COLORS[tone];
@@ -78,6 +95,10 @@ export default function AutopilotPage() {
   const [formTz, setFormTz]             = useState('America/Mexico_City');
   const [formModel, setFormModel]       = useState<AIModel>('claude');
   const [formHint, setFormHint]         = useState('');
+  const [formFormat, setFormFormat]     = useState<FormFormat>('auto');
+  const [formWeekly, setFormWeekly]     = useState<Record<string, WeeklyFormatValue | ''>>({});
+  const [formAlsoStory, setFormAlsoStory] = useState(false);
+  const [formStoryDelay, setFormStoryDelay] = useState(STORY_DELAY_DEFAULT_MINUTES);
   const [saving, setSaving]             = useState(false);
   const [formError, setFormError]       = useState<string | null>(null);
 
@@ -118,6 +139,26 @@ export default function AutopilotPage() {
   // El asistente creó, pausó o ejecutó una regla: se recarga la lista.
   useDataChanged(['autopilot'], () => { void fetchData(); });
 
+  // Lo que va a costar la regla, con las cuentas elegidas (la red decide el
+  // formato automático). La misma cuenta que hace el servidor.
+  const formWeeklyFormats = formFreq === 'daily' ? weeklyPayload(formWeekly) : null;
+  const formConfig = {
+    format: formFormat === 'auto' ? null : formFormat,
+    weekly_formats: formWeeklyFormats,
+    also_story: formAlsoStory,
+  };
+  const selectedPlatforms = accounts.filter((a) => formAccounts.includes(a.id)).map((a) => a.platform as string);
+  const formCost = autopilotRuleCost({
+    ...formConfig,
+    name: formName,
+    frequency: formFreq,
+    timezone: formTz,
+    topic_hints: formHint.trim() ? [formHint.trim()] : [],
+  }, selectedPlatforms);
+  const formHasReel = Object.keys(formCost.by_format).includes('reel');
+  const storyWithoutAccounts = usesStory(formConfig) && selectedPlatforms.length > 0
+    && !selectedPlatforms.some((p) => STORY_PLATFORMS.includes(p));
+
   function toggleAccount(id: string) {
     setFormAccounts((prev) =>
       prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id],
@@ -149,12 +190,17 @@ export default function AutopilotPage() {
           timezone:           formTz,
           ai_model:           formModel,
           prompt_hint:        formHint.trim() || null,
+          format:             formConfig.format,
+          weekly_formats:     formConfig.weekly_formats,
+          also_story:         formAlsoStory,
+          story_delay_minutes: formStoryDelay,
         }),
       });
       const data = await res.json() as { rule?: AutopilotRule; error?: string };
       if (!res.ok) throw new Error(data.error ?? t.errorCreate);
       setShowForm(false);
       setFormName(''); setFormHint(''); setFormAccounts([]);
+      setFormFormat('auto'); setFormWeekly({}); setFormAlsoStory(false); setFormStoryDelay(STORY_DELAY_DEFAULT_MINUTES);
       fetchData();
     } catch (err) {
       setFormError(err instanceof Error && err.message ? err.message : t.errorUnknown);
@@ -208,9 +254,10 @@ export default function AutopilotPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rule_ids: [ruleId] }),
       });
-      const data = await res.json() as { executed?: number; error?: string };
+      const data = await res.json() as { executed?: number; error?: string; results?: Array<{ pending_video?: boolean }> };
       if (!res.ok) throw new Error(data.error ?? t.errorRun);
-      setNotice({ tone: 'success', text: t.runSuccess(data.executed ?? 0) });
+      const reelPending = data.results?.some((r) => r.pending_video);
+      setNotice({ tone: 'success', text: `${t.runSuccess(data.executed ?? 0)}${reelPending ? ` ${t.runReelPending}` : ''}` });
       fetchData();
     } catch (err) {
       setNotice({ tone: 'danger', text: err instanceof Error && err.message ? err.message : t.errorUnknown });
@@ -277,6 +324,13 @@ export default function AutopilotPage() {
               </Field>
             </div>
 
+            <Field label={t.formatLabel} hint={t.formatHint}>
+              <Select value={formFormat} onChange={(e) => setFormFormat(e.target.value as FormFormat)}>
+                <option value="auto">{t.formats.auto}</option>
+                {AUTOPILOT_FORMATS.map((f) => <option key={f} value={f}>{t.formats[f]}</option>)}
+              </Select>
+            </Field>
+
             <div role="group" aria-labelledby={accountsLabelId} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span id={accountsLabelId} className="ui-label">{t.accountsLabel}</span>
               {accounts.length === 0 ? (
@@ -325,6 +379,50 @@ export default function AutopilotPage() {
               </Field>
             </div>
 
+            {formFreq === 'daily' && (
+              <fieldset style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                <legend className="ui-label" style={{ marginBottom: 4 }}>{t.weeklyLegend}</legend>
+                <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 8px' }}>{t.weeklyHint}</p>
+                <div className="auto-grid" style={{ '--min': '120px', '--gap': '10px' } as CSSProperties}>
+                  {WEEK_ORDER.map((d) => (
+                    <Field key={d} label={DAYS[d]}>
+                      <Select
+                        value={formWeekly[String(d)] ?? ''}
+                        onChange={(e) => setFormWeekly((prev) => ({ ...prev, [String(d)]: e.target.value as WeeklyFormatValue | '' }))}
+                      >
+                        <option value="">{t.weeklyBase}</option>
+                        {AUTOPILOT_FORMATS.map((f) => <option key={f} value={f}>{t.formatShort[f]}</option>)}
+                        <option value={WEEKDAY_SKIP}>{t.weeklySkip}</option>
+                      </Select>
+                    </Field>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minHeight: 44, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={formAlsoStory}
+                  onChange={(e) => setFormAlsoStory(e.target.checked)}
+                  style={{ width: 20, height: 20, marginTop: 2, flexShrink: 0, accentColor: 'var(--accent)' }}
+                />
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{t.alsoStoryLabel}</span>
+                  <span style={{ fontSize: 13, color: 'var(--muted)' }}>{t.alsoStoryHint}</span>
+                </span>
+              </label>
+              {formAlsoStory && (
+                <Field label={t.storyDelayLabel}>
+                  <Select value={formStoryDelay} onChange={(e) => setFormStoryDelay(Number(e.target.value))}>
+                    {STORY_DELAYS.map((m) => <option key={m} value={m}>{t.storyDelays[m]}</option>)}
+                  </Select>
+                </Field>
+              )}
+              {storyWithoutAccounts && <Notice tone="warning">{t.storyAccountsWarning}</Notice>}
+            </div>
+
             <Field label={t.tzLabel} hint={t.tzHint}>
               <Input
                 value={formTz}
@@ -344,6 +442,12 @@ export default function AutopilotPage() {
                 placeholder={t.hintPlaceholder}
               />
             </Field>
+
+            <Notice live={false} icon={<Icon name="bolt" size={16} />}>
+              <strong style={{ color: 'var(--text)' }}>{t.costPerRun(formCost.per_run_min, formCost.per_run_max)}</strong>
+              {' · '}{t.costPerMonth(formCost.per_month)}
+              {formHasReel && <><br />{t.costReelNote}</>}
+            </Notice>
 
             {formError && <Notice tone="danger">{formError}</Notice>}
 
@@ -408,6 +512,12 @@ export default function AutopilotPage() {
           {rules.map((rule) => {
             const active = rule.status === 'active';
             const nameId = `${uid}-rule-${rule.id}`;
+            const weekly = rule.weekly_formats
+              ? WEEK_ORDER.filter((d) => rule.weekly_formats?.[String(d) as keyof WeeklyFormats])
+                .map((d) => `${DAYS[d]}: ${t.formatShort[rule.weekly_formats![String(d) as keyof WeeklyFormats]!]}`)
+                .join(' · ')
+              : '';
+            const last = rule.last_run;
             return (
               <li key={rule.id}>
                 <article
@@ -422,6 +532,9 @@ export default function AutopilotPage() {
                         <span className="ui-badge" style={badgeTone(active ? 'accent' : 'neutral')}>
                           {active ? t.active : t.paused}
                         </span>
+                        <span className="ui-badge">
+                          {t.formatShort[rule.format ?? 'auto']}{rule.also_story ? ` ${t.withStory}` : ''}
+                        </span>
                       </div>
                       <h2 id={nameId} style={{ fontFamily: 'inherit', fontSize: 15, fontWeight: 600, margin: '0 0 4px', overflowWrap: 'anywhere' }}>
                         {rule.name}
@@ -432,7 +545,31 @@ export default function AutopilotPage() {
                         {rule.time_of_day} ({rule.timezone}) ·{' '}
                         {MODEL_LABELS[rule.ai_model] ?? rule.ai_model}
                       </p>
-                      {rule.next_run_at && (
+                      {weekly && (
+                        <p style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 0' }}>{weekly}</p>
+                      )}
+                      {rule.cost && (
+                        <p style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 0' }}>
+                          {t.costPerRun(rule.cost.per_run_min, rule.cost.per_run_max)} · {t.costPerMonth(rule.cost.per_month)}
+                        </p>
+                      )}
+                      {last && (
+                        <p style={{ fontSize: 12, color: last.status === 'failed' ? 'var(--danger)' : 'var(--muted)', margin: '4px 0 0', overflowWrap: 'anywhere' }}>
+                          {t.lastRun}{' '}
+                          {new Date(last.ran_at).toLocaleString(dateLocale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          {' · '}{last.format ? `${t.formatShort[last.format]} · ` : ''}
+                          {last.status === 'failed' ? t.lastRunFailed : t.lastRunOk}
+                          {last.video_status ? ` · ${t.videoStatus[last.video_status]}${t.videoAttempts(last.video_attempts)}` : ''}
+                          {last.story_status ? ` · ${t.storyStatus[last.story_status]}` : ''}
+                          {last.status === 'failed' && last.error_message ? ` — ${last.error_message}` : ''}
+                        </p>
+                      )}
+                      {rule.paused_reason === 'credits_exhausted' && (
+                        <div style={{ marginTop: 10 }}>
+                          <Notice tone="warning" live={false}>{t.pausedCredits}</Notice>
+                        </div>
+                      )}
+                      {rule.next_run_at && active && (
                         <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
                           {t.nextRun}{' '}
                           {new Date(rule.next_run_at).toLocaleString(dateLocale, {

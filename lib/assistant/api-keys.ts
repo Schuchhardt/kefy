@@ -109,16 +109,35 @@ export async function authenticateApiKey(req: Request, now = new Date()): Promis
 
   const db = createSupabaseServer();
 
-  // 1. La key, buscada por hash: el secreto nunca se compara como texto.
+  // 1. La key, buscada por hash: el secreto nunca se compara como texto. Un
+  //    access token OAuth recién rotado se busca también como el anterior de
+  //    su conexión (prev_key_hash): sigue valiendo unos minutos para que una
+  //    llamada en curso no reciba 401 porque otra renovó (lib/assistant/oauth.ts).
   let key: ApiKeyRow | null;
+  const tokenHash = hashToken(token);
   try {
+    const columns = 'id, org_id, brand_id, created_by, scopes, key_prefix, expires_at, access_expires_at, revoked_at, last_used_at';
     const { data, error } = await db
       .from('kefy_api_keys')
-      .select('id, org_id, brand_id, created_by, scopes, key_prefix, expires_at, access_expires_at, revoked_at, last_used_at')
-      .eq('key_hash', hashToken(token))
+      .select(columns)
+      .eq('key_hash', tokenHash)
       .maybeSingle();
     if (error) throw new Error(error.message);
     key = (data as ApiKeyRow | null) ?? null;
+    if (!key && OAUTH_ACCESS_TOKEN_RE.test(token)) {
+      const { data: prev, error: prevError } = await db
+        .from('kefy_api_keys')
+        .select(`${columns}, prev_access_expires_at`)
+        .eq('prev_key_hash', tokenHash)
+        .eq('kind', 'oauth')
+        .maybeSingle();
+      if (prevError) throw new Error(prevError.message);
+      const row = prev as (ApiKeyRow & { prev_access_expires_at: string | null }) | null;
+      if (row) {
+        // Vale lo que le quede de margen, no la caducidad del access nuevo.
+        key = { ...row, access_expires_at: row.prev_access_expires_at ?? now.toISOString() };
+      }
+    }
   } catch (err) {
     reportError(err, { route: 'api-key', service: 'supabase', extra: { step: 'lookup' } });
     return UNAVAILABLE;

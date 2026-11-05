@@ -134,6 +134,7 @@ const es = {
     get_content_ideas: 'Buscando ideas de contenido…',
     list_content: 'Buscando contenidos…',
     get_content: 'Leyendo el contenido…',
+    review_content: 'Abriendo la tarjeta de revisión…',
     create_post: 'Creando post…',
     create_starter_posts: 'Creando tus 3 posts de inicio…',
     create_carousel: 'Creando carrusel…',
@@ -217,6 +218,7 @@ const es = {
     get_content_ideas: () => 'Buscar ideas de contenido',
     list_content: () => 'Buscar contenidos',
     get_content: () => 'Leer un contenido',
+    review_content: () => 'Mostrar el contenido para revisarlo',
     create_post: (i, p) => {
       const topic = str(p.topic, str(i.topic));
       const img = (p.with_image ?? i.with_image) !== false ? ' con imagen' : '';
@@ -269,7 +271,7 @@ const es = {
     list_autopilot_rules: () => 'Revisar las reglas del autopilot',
     save_autopilot_rule: (i, p) => {
       const name = quote(str(p.name, str(i.name)));
-      if (!i.id) return `Crear la regla de autopilot ${name}: generará y programará posts solos`;
+      if (!i.id) return `Crear la regla de autopilot ${name}: generará y programará piezas solas`;
       if (i.status === 'paused') return `Pausar la regla de autopilot ${name}`;
       if (i.status === 'active') return `Reanudar la regla de autopilot ${name}`;
       return `Editar la regla de autopilot ${name}`;
@@ -277,7 +279,7 @@ const es = {
     delete_autopilot_rule: (_i, p) => `Borrar la regla de autopilot ${quote(str(p.name))}`,
     run_autopilot_now: (i) => {
       const n = Array.isArray(i.rule_ids) ? i.rule_ids.length : 1;
-      return n === 1 ? 'Ejecutar ahora una regla de autopilot (genera y programa un post)' : `Ejecutar ahora ${n} reglas de autopilot`;
+      return n === 1 ? 'Ejecutar ahora una regla de autopilot (genera y programa una pieza)' : `Ejecutar ahora ${n} reglas de autopilot`;
     },
     publish_content: (i, p) => {
       const title = str(p.title, 'contenido');
@@ -407,6 +409,11 @@ const es = {
     sample_topics: 'Algunos temas',
     activate: 'Activarla ahora',
     frequency: 'Frecuencia',
+    weekly_formats: 'Mezcla semanal',
+    also_story: 'También como historia',
+    story_delay_minutes: 'Historia después de',
+    credits_per_run: 'Créditos por ejecución',
+    credits_per_month: 'Créditos al mes (aprox.)',
   } as Record<string, string>,
   fieldLabels,
   statusLabels,

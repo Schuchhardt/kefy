@@ -228,23 +228,45 @@ tabla nueva). Sin `PLATFORM_ALERT_EMAIL` o `RESEND_API_KEY`, no hace nada.
 
 Cada ejecución genera la pieza con su media por los mismos servicios que la
 UI (`lib/services/autopilot.ts`), y esos servicios cobran cada operación con
-`chargeOrThrow`: un post con imagen son 4 créditos (texto + imagen), un
-carrusel 1 + 3 por slide y un reel lo que cuesta su producción (~55 con 5
-planos, docs/video-pipeline.md). Antes solo se generaba texto y se publicaba
-sin media; TikTok e Instagram lo convertían en una imagen con puro texto.
+`chargeOrThrow`: un post con imagen son 4 créditos (texto + imagen), una
+historia 4 (texto + imagen vertical), un carrusel 1 + 3 por slide y un reel lo
+que cuesta su producción (~55 con 5 planos, docs/video-pipeline.md). La
+historia derivada (`also_story`) es una conversión de formato: 4 créditos más
+por ejecución. Los números salen de `lib/autopilot-formats.ts`
+(`estimateRunCredits`, `autopilotRuleCost`), los mismos que muestran la UI, la
+tarjeta de confirmación del chat y `list_autopilot_rules` (`cost`: por
+ejecución, por formato y al mes).
 
 **El cron también cobra.** Generar imágenes y videos sin pasar por la guardia
 sería gasto ilimitado. Antes de gastar nada, la ejecución mira la suscripción
-y que el saldo alcance para ese formato (`preflight`). Si no alcanza, no genera
-nada, la ejecución queda en `kefy_autopilot_runs` como fallida con el motivo y
-la regla sigue con su calendario. «Ejecutar ahora» responde 402 / 429 y no
-adelanta la regla. Falta un aviso en la UI cuando una ejecución programada se
-salta por créditos: es deuda conocida.
+y que el saldo alcance para la ejecución entera, pieza + historia derivada
+(`preflight`). Si no alcanza:
+
+- **En el cron, la regla se pausa** (`status = 'paused'`, `paused_reason =
+  'credits_exhausted'`), la ejecución queda en `kefy_autopilot_runs` como
+  fallida con el motivo y se avisa por correo a quien creó la regla
+  (`lib/autopilot-alerts.ts`, plantilla `emails/AutopilotAlert.tsx`, como mucho
+  un correo cada 12 h por regla y motivo con `kefy_rate_limits`). Lo mismo si
+  los créditos se acaban a mitad (la imagen de la historia, el reintento de un
+  reel). Antes fallaba en cada hueco sin que nadie se enterara.
+- **Se reanuda sola** cuando empieza el mes de créditos siguiente
+  (`resumeCreditPausedRules`, al principio de cada vuelta del cron), o antes si
+  una persona la reactiva. Una pausa hecha a mano deja `paused_reason = null`
+  y el cron no la toca.
+- **«Ejecutar ahora»** responde 402 / 429, no adelanta la regla y no la pausa:
+  quien lo pidió ya ve el error.
 
 Una ejecución reclama su hueco (`next_run_at`) antes de gastar, con un
 `UPDATE … WHERE next_run_at = <el leído>`. Así dos vueltas del cron no generan
 la misma regla dos veces, y una ejecución fallida no se reintenta cada 5
 minutos gastando otra vez (antes, un fallo dejaba `next_run_at` en el pasado).
+
+Un reel cuya producción falla se relanza **una vez** (`MAX_VIDEO_ATTEMPTS`):
+los créditos del intento fallido ya se devolvieron (docs/video-pipeline.md,
+«Devoluciones»), así que el reintento cobra de nuevo, no el doble. Si vuelve a
+fallar, la ejecución queda fallida (`video_status = 'failed'`) y se avisa por
+correo. El correo de aviso no lo dispara una persona ni una ruta: lo manda el
+cron, con el tope de arriba.
 
 ### Respuestas automáticas (engagement)
 

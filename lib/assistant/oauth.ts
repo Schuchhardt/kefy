@@ -21,7 +21,7 @@
 //
 // Ver docs/assistant.md §7.
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { hashToken } from '@/lib/auth';
 import { appUrl } from '@/lib/app-url';
 import { createSupabaseServer } from '@/lib/supabase';
@@ -35,6 +35,13 @@ const CODE_PREFIX = 'kefy_ac_';
 const CODE_RE = /^kefy_ac_[A-Za-z0-9_-]{43}$/;
 
 export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
+/**
+ * Tras una rotación, el refresh anterior todavía vale este rato para pedir de
+ * nuevo el MISMO par (renovaciones simultáneas del mismo cliente).
+ */
+export const REFRESH_REUSE_GRACE_SECONDS = 2 * 60;
+/** Tras una rotación, el access anterior sigue valiendo como mucho esto (y nunca más allá de su caducidad). */
+export const PREVIOUS_ACCESS_GRACE_SECONDS = 10 * 60;
 /** Una conexión sin usar caduca a los 90 días; cada refresh la renueva. */
 export const CONNECTION_TTL_DAYS = 90;
 const CODE_TTL_SECONDS = 10 * 60;
@@ -401,9 +408,28 @@ interface CodeRow {
   expires_at: string;
 }
 
-function newTokenPair(now: Date) {
-  const access = randomToken(ACCESS_TOKEN_PREFIX);
-  const refresh = randomToken(REFRESH_TOKEN_PREFIX);
+/**
+ * Secreto con el que se derivan los tokens de una rotación. Sin él, los
+ * tokens son aleatorios y una renovación simultánea recibe invalid_grant.
+ */
+function rotationSecret(): string | null {
+  return process.env.OAUTH_TOKEN_SECRET || process.env.JWT_SECRET || null;
+}
+
+/**
+ * El par que sale de rotar `refresh`: siempre el mismo para el mismo refresh
+ * (HMAC con el secreto del servidor), así una segunda renovación simultánea
+ * puede devolver el par que ya se emitió sin guardarlo en claro. Quien tiene
+ * el refresh ya podía pedir ese par; sin el secreto no se puede adivinar.
+ */
+function derivedToken(prefix: string, label: string, refresh: string, secret: string): string {
+  return prefix + createHmac('sha256', secret).update(`kefy-oauth-rotation\0${label}\0${refresh}`).digest('base64url');
+}
+
+function newTokenPair(now: Date, rotatedFrom?: string) {
+  const secret = rotatedFrom ? rotationSecret() : null;
+  const access = secret ? derivedToken(ACCESS_TOKEN_PREFIX, 'access', rotatedFrom!, secret) : randomToken(ACCESS_TOKEN_PREFIX);
+  const refresh = secret ? derivedToken(REFRESH_TOKEN_PREFIX, 'refresh', rotatedFrom!, secret) : randomToken(REFRESH_TOKEN_PREFIX);
   return {
     access,
     refresh,
@@ -417,11 +443,11 @@ function newTokenPair(now: Date) {
   };
 }
 
-function tokenBody(access: string, refresh: string, scopes: string[]): TokenResponse {
+function tokenBody(access: string, refresh: string, scopes: string[], expiresIn = ACCESS_TOKEN_TTL_SECONDS): TokenResponse {
   return {
     access_token: access,
     token_type: 'Bearer',
-    expires_in: ACCESS_TOKEN_TTL_SECONDS,
+    expires_in: expiresIn,
     refresh_token: refresh,
     scope: scopes.join(' '),
   };
@@ -501,8 +527,16 @@ export async function exchangeAuthorizationCode(
 
 /**
  * grant_type=refresh_token: rota el access y el refresh token en la misma
- * fila. El refresh anterior deja de valer en el acto (un refresh robado y ya
- * usado no sirve) y la conexión vuelve a durar CONNECTION_TTL_DAYS.
+ * fila, y la conexión vuelve a durar CONNECTION_TTL_DAYS.
+ *
+ * Con margen, porque un cliente puede renovar dos veces a la vez (dos
+ * llamadas que reciben 401 juntas; el modo de voz de Claude lo hace):
+ *  - el access anterior sigue valiendo hasta PREVIOUS_ACCESS_GRACE_SECONDS
+ *    (una llamada en curso no recibe 401 porque otra renovó);
+ *  - el refresh anterior, reutilizado dentro de REFRESH_REUSE_GRACE_SECONDS,
+ *    devuelve el mismo par ya emitido (derivedToken), sin rotar otra vez.
+ * Pasado el margen, o si ya hubo otra rotación encima, invalid_grant como
+ * antes. Revocar la conexión corta todo en el acto.
  */
 export async function refreshAccessToken(params: ParamSource, now = new Date()): Promise<TokenResult> {
   const refresh = params.get('refresh_token') ?? '';
@@ -512,23 +546,70 @@ export async function refreshAccessToken(params: ParamSource, now = new Date()):
     return { ok: false, status: 401, error: oauthError('invalid_client', 'client_id is required') };
   }
 
-  const pair = newTokenPair(now);
+  const hash = hashToken(refresh);
   const db = createSupabaseServer();
-  const { data, error } = await db
+  const load = () => db
     .from('kefy_api_keys')
-    .update(pair.columns)
-    .eq('refresh_hash', hashToken(refresh))
+    .select('id, scopes, key_hash, access_expires_at, refresh_hash, prev_refresh_hash, prev_refresh_expires_at')
+    // `hash` es hexadecimal: no puede romper el filtro.
+    .or(`refresh_hash.eq.${hash},prev_refresh_hash.eq.${hash}`)
     .eq('kind', 'oauth')
     .eq('oauth_client_id', clientId)
     .is('revoked_at', null)
     .gt('expires_at', now.toISOString())
-    .select('id, scopes')
     .maybeSingle();
+
+  type GrantRow = {
+    id: string; scopes: string[] | null; key_hash: string; access_expires_at: string | null;
+    refresh_hash: string; prev_refresh_hash: string | null; prev_refresh_expires_at: string | null;
+  };
+  let { data, error } = await load();
   if (error) {
     reportError(new Error(error.message), { route: 'POST /api/oauth/token', service: 'supabase', extra: { step: 'refresh' } });
     return tokenServerError;
   }
-  if (!data) return invalidGrant('Invalid, revoked or expired refresh token');
+  let row = data as GrantRow | null;
+  if (!row) return invalidGrant('Invalid, revoked or expired refresh token');
 
-  return { ok: true, body: tokenBody(pair.access, pair.refresh, (data.scopes as string[]) ?? []) };
+  if (row.refresh_hash === hash) {
+    const pair = newTokenPair(now, refresh);
+    const accessExpiry = row.access_expires_at ? new Date(row.access_expires_at).getTime() : now.getTime();
+    const { data: rotated, error: rotateError } = await db
+      .from('kefy_api_keys')
+      .update({
+        ...pair.columns,
+        prev_key_hash: row.key_hash,
+        prev_access_expires_at: new Date(Math.min(accessExpiry, now.getTime() + PREVIOUS_ACCESS_GRACE_SECONDS * 1000)).toISOString(),
+        prev_refresh_hash: hash,
+        prev_refresh_expires_at: new Date(now.getTime() + REFRESH_REUSE_GRACE_SECONDS * 1000).toISOString(),
+      })
+      .eq('id', row.id)
+      // Solo si nadie rotó entre la lectura y aquí.
+      .eq('refresh_hash', hash)
+      .select('id, scopes');
+    if (rotateError) {
+      reportError(new Error(rotateError.message), { route: 'POST /api/oauth/token', service: 'supabase', extra: { step: 'refresh' } });
+      return tokenServerError;
+    }
+    if ((rotated ?? []).length > 0) return { ok: true, body: tokenBody(pair.access, pair.refresh, row.scopes ?? []) };
+
+    // Otra renovación con este mismo refresh ganó: se responde con su par.
+    ({ data, error } = await load());
+    row = (data as GrantRow | null) ?? null;
+    if (error || !row) return invalidGrant('Invalid, revoked or expired refresh token');
+  }
+
+  const inGrace = row.prev_refresh_hash === hash
+    && !!row.prev_refresh_expires_at && new Date(row.prev_refresh_expires_at).getTime() > now.getTime();
+  if (inGrace) {
+    const pair = newTokenPair(now, refresh);
+    // El par vigente es el que salió de ESTE refresh (no hubo otra rotación encima).
+    if (pair.columns.refresh_hash === row.refresh_hash && pair.columns.key_hash === row.key_hash) {
+      const left = row.access_expires_at
+        ? Math.max(1, Math.floor((new Date(row.access_expires_at).getTime() - now.getTime()) / 1000))
+        : ACCESS_TOKEN_TTL_SECONDS;
+      return { ok: true, body: tokenBody(pair.access, pair.refresh, row.scopes ?? [], left) };
+    }
+  }
+  return invalidGrant('Invalid, revoked or expired refresh token');
 }

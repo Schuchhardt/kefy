@@ -412,7 +412,13 @@ export interface AutopilotRuleRow {
   ai_model:           AutopilotAiModel;
   tone:               string | null;
   topic_hints:        string[];
+  format:             'post' | 'carousel' | 'story' | 'reel' | null;
+  weekly_formats:     Partial<Record<'0' | '1' | '2' | '3' | '4' | '5' | '6', 'post' | 'carousel' | 'story' | 'reel' | 'skip'>> | null;
+  also_story:         boolean;
+  story_delay_minutes: number;
   status:             AutopilotStatus;
+  paused_reason:      'credits_exhausted' | null;
+  paused_at:          ISODate | null;
   last_run_at:        ISODate | null;
   next_run_at:        ISODate | null;
   created_at:         ISODate;
@@ -427,6 +433,13 @@ export interface AutopilotRunRow {
   scheduled_post_ids:  string[];
   status:              'success' | 'failed';
   error_message:       string | null;
+  format:              'post' | 'carousel' | 'story' | 'reel' | null;
+  credits_estimated:   number | null;
+  video_status:        'producing' | 'published' | 'failed' | 'cancelled' | null;
+  video_attempts:      number;
+  story_status:        'scheduled' | 'published' | 'failed' | 'skipped' | null;
+  story_scheduled_post_ids: string[];
+  story_error:         string | null;
   ran_at:              ISODate;
 }
 

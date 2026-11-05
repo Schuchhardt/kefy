@@ -35,6 +35,9 @@ const nextConfig: NextConfig = {
     // una publicación programada y no compone ninguna imagen.
     '/api/social/publish/route':  ['./assets/fonts/**'],
     '/api/social/schedule/route': ['./assets/fonts/**'],
+    // La vista MCP Apps (un solo HTML, `npm run build:mcp-app`), que
+    // resources/read lee del disco (lib/mcp-app/server.ts).
+    '/api/mcp/route':             ['./mcp-app/dist/**'],
   },
   // Prevent Next.js from bundling heavy server-only packages into the edge runtime.
   // @remotion/lambda/client uses AWS SDK which must stay external.

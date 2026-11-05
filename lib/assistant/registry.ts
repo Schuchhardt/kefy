@@ -24,6 +24,7 @@ import {
 } from '@/lib/assistant/audit';
 import { summarizeTool } from '@/lib/assistant/summaries';
 import { truncateJson } from '@/lib/assistant/untrusted';
+import type { AppResourceUri, ToolVisibility } from '@/lib/mcp-app/server';
 import type {
   Source, ToolContext, ToolErrorBody, ToolKind, ToolResult, ToolSuccess,
 } from '@/lib/assistant/types';
@@ -77,7 +78,27 @@ export interface ToolDef<S extends z.ZodObject<any>> {
    * falla con 409 content_changed en vez de ejecutarse sobre otro contenido.
    */
   snapshot?: (ctx: ToolContext, input: z.infer<S>) => Promise<unknown>;
+  /** MCP Apps: la vista que abre en el chat y quién puede llamarla (ver docs/mcp-apps.md). */
+  app?: ToolApp<z.infer<S>>;
   handler: (ctx: ToolContext, input: z.infer<S>) => Promise<Omit<ToolSuccess, 'ok'>>;
+}
+
+/**
+ * Metadatos MCP Apps de una herramienta. Solo los usa el servidor MCP
+ * (lib/assistant/mcp.ts): el chat, la API REST y la auditoría no cambian.
+ */
+export interface ToolApp<I> {
+  /** Vista `ui://` que el host monta al llamarla el modelo. Sin ella, la herramienta no abre vista. */
+  resourceUri?: AppResourceUri;
+  /** Quién puede llamarla: el modelo, la vista o ambos (por defecto ambos). */
+  visibility?: ToolVisibility[];
+  /** Esquema de `structuredContent.view`; se publica como `outputSchema`. */
+  viewSchema?: z.ZodType;
+  /**
+   * Arma la vista tras un resultado correcto (solo lectura, nunca cobra). Si
+   * falla, el resultado sale igual sin `view`: la pieza ya se creó.
+   */
+  view?: (ctx: ToolContext, input: I, data: unknown) => Promise<unknown>;
 }
 
 type AnyToolDef = ToolDef<any>;

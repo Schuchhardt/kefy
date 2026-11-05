@@ -131,6 +131,7 @@ const en = {
     get_content_ideas: 'Finding content ideas…',
     list_content: 'Searching content…',
     get_content: 'Reading the content…',
+    review_content: 'Opening the review card…',
     create_post: 'Creating post…',
     create_starter_posts: 'Creating your 3 starter posts…',
     create_carousel: 'Creating carousel…',
@@ -214,6 +215,7 @@ const en = {
     get_content_ideas: () => 'Find content ideas',
     list_content: () => 'Search content',
     get_content: () => 'Read a content item',
+    review_content: () => 'Show the content for review',
     create_post: (i, p) => {
       const topic = str(p.topic, str(i.topic));
       const img = (p.with_image ?? i.with_image) !== false ? ' with an image' : '';
@@ -266,7 +268,7 @@ const en = {
     list_autopilot_rules: () => 'Check the autopilot rules',
     save_autopilot_rule: (i, p) => {
       const name = quote(str(p.name, str(i.name)));
-      if (!i.id) return `Create the autopilot rule ${name}: it will generate and schedule posts on its own`;
+      if (!i.id) return `Create the autopilot rule ${name}: it will generate and schedule pieces on its own`;
       if (i.status === 'paused') return `Pause the autopilot rule ${name}`;
       if (i.status === 'active') return `Resume the autopilot rule ${name}`;
       return `Edit the autopilot rule ${name}`;
@@ -274,7 +276,7 @@ const en = {
     delete_autopilot_rule: (_i, p) => `Delete the autopilot rule ${quote(str(p.name))}`,
     run_autopilot_now: (i) => {
       const n = Array.isArray(i.rule_ids) ? i.rule_ids.length : 1;
-      return n === 1 ? 'Run an autopilot rule now (generates and schedules a post)' : `Run ${n} autopilot rules now`;
+      return n === 1 ? 'Run an autopilot rule now (generates and schedules a piece)' : `Run ${n} autopilot rules now`;
     },
     publish_content: (i, p) => {
       const title = str(p.title, 'content');
@@ -403,6 +405,11 @@ const en = {
     sample_topics: 'Some topics',
     activate: 'Activate it now',
     frequency: 'Frequency',
+    weekly_formats: 'Weekly mix',
+    also_story: 'Also as a story',
+    story_delay_minutes: 'Story after',
+    credits_per_run: 'Credits per run',
+    credits_per_month: 'Credits per month (approx.)',
   } as Record<string, string>,
   fieldLabels,
   statusLabels,

@@ -98,6 +98,48 @@ describe('Piloto automático', () => {
     expect(deleteCalls()).toHaveLength(1);
     expect(nativeConfirm).not.toHaveBeenCalled();
   });
+
+  it('el formulario dice cuánto cuesta la regla según el formato y la mezcla semanal', async () => {
+    render(<AutopilotPage />);
+    await screen.findByText('Posts semanales');
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva regla' }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: /^Formato/ }), { target: { value: 'post' } });
+    expect(screen.getByText('4 créditos por ejecución')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Frecuencia' }), { target: { value: 'daily' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Jue' }), { target: { value: 'reel' } });
+    expect(screen.getByText('4–55 créditos por ejecución')).toBeInTheDocument();
+    expect(screen.getByText(/Un reel cuesta ~55 créditos/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /historia derivada/ }));
+    expect(screen.getByText('8–59 créditos por ejecución')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'La historia sale' })).toHaveValue('120');
+  });
+
+  it('la tarjeta muestra la pausa por créditos y la última ejecución con el estado del video', async () => {
+    const paused: AutopilotRule = {
+      ...autopilotRule, status: 'paused', paused_reason: 'credits_exhausted', format: 'reel', also_story: true,
+      cost: { per_run_min: 59, per_run_max: 59, by_format: { reel: 59 }, per_month: 253 },
+      last_run: {
+        id: 'run-1', status: 'failed', ran_at: now, format: 'reel', content_item_id: 'item-1', scheduled_post_ids: [],
+        error_message: 'La producción del video falló (2 intentos).', credits_estimated: 59,
+        video_status: 'failed', video_attempts: 2, story_status: null, story_error: null,
+      },
+    };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/autopilot/rules') return jsonResponse({ data: [paused] });
+      return jsonResponse({ accounts: [] });
+    });
+    render(<AutopilotPage />);
+    await screen.findByText('Posts semanales');
+
+    expect(screen.getByText('Reel + historia')).toBeInTheDocument();
+    expect(screen.getByText(/59 créditos por ejecución · ≈ 253 créditos al mes/)).toBeInTheDocument();
+    expect(screen.getByText(/se acabaron los créditos del mes/)).toBeInTheDocument();
+    expect(screen.getByText(/el video falló \(2 intentos\)/)).toBeInTheDocument();
+  });
 });
 
 describe('Respuestas automáticas', () => {

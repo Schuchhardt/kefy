@@ -367,7 +367,7 @@ describe('POST /api/oauth/token', () => {
     expect((await res.json()).error).toBe('unsupported_grant_type');
   });
 
-  it('el refresh rota los dos tokens: los anteriores dejan de valer', async () => {
+  it('el refresh rota los dos tokens en la misma conexión', async () => {
     const { clientId, tokens } = await connect();
     const { res, body } = await refresh(clientId, tokens.refresh_token);
     expect(res.status).toBe(200);
@@ -375,10 +375,44 @@ describe('POST /api/oauth/token', () => {
     expect(body.refresh_token).not.toBe(tokens.refresh_token);
 
     expect((await mcp(body.access_token)).status).toBe(200);
-    expect((await mcp(tokens.access_token)).status).toBe(401);
-    expect((await refresh(clientId, tokens.refresh_token)).body.error).toBe('invalid_grant');
     // Sigue siendo la misma conexión: no se acumulan filas.
     expect(db.rows('kefy_api_keys')).toHaveLength(1);
+  });
+
+  // El modo de voz de Claude (o dos herramientas a la vez) renueva dos veces
+  // con el mismo refresh: antes la segunda recibía invalid_grant y el cliente
+  // daba la conexión por caducada.
+  it('dos renovaciones simultáneas con el mismo refresh reciben el mismo par', async () => {
+    const { clientId, tokens } = await connect();
+    const [a, b] = await Promise.all([refresh(clientId, tokens.refresh_token), refresh(clientId, tokens.refresh_token)]);
+    expect([a.res.status, b.res.status]).toEqual([200, 200]);
+    expect(b.body.access_token).toBe(a.body.access_token);
+    expect(b.body.refresh_token).toBe(a.body.refresh_token);
+    expect((await mcp(a.body.access_token)).status).toBe(200);
+    // Y el refresh nuevo sigue rotando con normalidad.
+    expect((await refresh(clientId, a.body.refresh_token)).res.status).toBe(200);
+  });
+
+  it('el access anterior sigue valiendo unos minutos tras rotar; después, 401', async () => {
+    const { clientId, tokens } = await connect();
+    await refresh(clientId, tokens.refresh_token);
+    expect((await mcp(tokens.access_token)).status).toBe(200);
+
+    db.rows('kefy_api_keys')[0].prev_access_expires_at = new Date(Date.now() - 1000).toISOString();
+    const res = await mcp(tokens.access_token);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('WWW-Authenticate')).toContain('error="invalid_token"');
+  });
+
+  it('el refresh anterior deja de valer pasado el margen, o si ya hubo otra rotación encima', async () => {
+    const { clientId, tokens } = await connect();
+    const first = await refresh(clientId, tokens.refresh_token);
+    db.rows('kefy_api_keys')[0].prev_refresh_expires_at = new Date(Date.now() - 1000).toISOString();
+    expect((await refresh(clientId, tokens.refresh_token)).body.error).toBe('invalid_grant');
+
+    // Dos rotaciones: el refresh original ya no es ni el vigente ni el anterior.
+    await refresh(clientId, first.body.refresh_token);
+    expect((await refresh(clientId, tokens.refresh_token)).body.error).toBe('invalid_grant');
   });
 
   it('el refresh de otro cliente no sirve', async () => {

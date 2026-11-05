@@ -20,8 +20,18 @@ const eslintConfig = defineConfig([
       }],
     },
   },
+  // La vista MCP Apps (mcp-app/) no es Next: corre en el iframe del host, sin
+  // next/image ni optimizador de imágenes.
+  {
+    files: ['mcp-app/**'],
+    rules: {
+      '@next/next/no-img-element': 'off',
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    // Bundle de la vista MCP Apps (npm run build:mcp-app).
+    "mcp-app/dist/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
