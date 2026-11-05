@@ -199,6 +199,27 @@ GET /v1/accounts
 }
 ```
 
+### Integridad de las cuentas
+
+`lib/services/social-integrity.ts`. El `status` de `kefy_social_accounts` es de
+Kefy; Zernio puede perder la cuenta sin avisar, y una fila puede apuntar a otra
+cuenta y publicar en un perfil distinto del que muestra.
+
+- **Al conectar:** el callback de OAuth confirma la cuenta en el listado del
+  perfil de la organización y guarda el usuario que dice Zernio. Sin certeza no
+  guarda nada (`?error=account_ambiguous`). Nunca usar `accounts[0]`.
+- **Cada día:** `reconcileSocialAccounts` (cron
+  `/api/social/accounts/reconcile`) revoca con `status_reason` lo que no coincide
+  (`missing_in_zernio`, `account_mismatch`) y reactiva solo lo que revocó ella. Se
+  compara contra `username` y `displayName`. Si el listado parece incompleto, no
+  toca nada.
+- **Reglas de autopilot:** al perder una cuenta guardan cuál era en
+  `lost_accounts`; sin cuentas se pausan (`paused_reason: 'no_accounts'`) y
+  avisan por correo. Al reconectar la misma red y usuario, la recuperan y se
+  reanudan.
+- **Al desconectar:** si otra fila usa el mismo id de Zernio, no se llama a
+  `DELETE`, porque le cortaría la cuenta a la otra marca.
+
 ### Desconectar cuenta
 
 ```

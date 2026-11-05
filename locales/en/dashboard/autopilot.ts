@@ -61,6 +61,7 @@ const en: AutopilotCopy = {
   costPerMonth: (n: number) => `≈ ${n} credits per month`,
   costReelNote: 'A reel costs ~55 credits: script, images, voice, animation and editing.',
   withStory: '+ story',
+  pausedNoAccounts: 'Paused: the rule has no accounts left to post to. It resumes on its own when you reconnect the same account, or pick another one and activate it.',
   pausedCredits: "Paused: this month's credits ran out. It resumes on its own when they renew, or activate it if you upgrade your plan.",
   lastRun: 'Last run:',
   lastRunOk: 'ok',

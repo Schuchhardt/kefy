@@ -39,8 +39,8 @@ export interface AutopilotRule {
   also_story?:        boolean;
   story_delay_minutes?: number;
   status:             'active' | 'paused';
-  /** La pausó el sistema por falta de créditos (se reanuda sola el mes siguiente). */
-  paused_reason?:     'credits_exhausted' | null;
+  /** La pausó el sistema: sin créditos (se reanuda sola el mes siguiente) o sin cuentas (al reconectarla). */
+  paused_reason?:     'credits_exhausted' | 'no_accounts' | null;
   next_run_at:        string | null;
   last_run_at:        string | null;
   created_at:         string;

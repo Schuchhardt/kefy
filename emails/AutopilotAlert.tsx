@@ -5,7 +5,7 @@ import {
 // Aviso del autopilot al dueño de la regla: la regla se pausó por falta de
 // créditos, o el video de un reel no se pudo producir. Ver lib/autopilot-alerts.ts.
 
-export type AutopilotAlertKind = 'paused_credits' | 'video_failed' | 'publish_failed';
+export type AutopilotAlertKind = 'paused_credits' | 'paused_no_accounts' | 'video_failed' | 'publish_failed';
 
 export interface AutopilotAlertProps {
   kind: AutopilotAlertKind;
@@ -36,6 +36,13 @@ const COPY = {
         + (resumesOn ? `Se reanuda sola el ${resumesOn}, cuando se renueven tus créditos. ` : '')
         + 'Puedes reanudarla antes desde el piloto automático si mejoras tu plan.',
     },
+    paused_no_accounts: {
+      badge: 'Piloto automático · En pausa',
+      title: (name: string) => `Pausamos «${name}»: no tiene cuentas donde publicar`,
+      body: () =>
+        'La cuenta que usaba ya no está conectada. Reconéctala y la regla se reanuda sola, '
+        + 'o elige otra cuenta desde el piloto automático.',
+    },
     video_failed: {
       badge: 'Piloto automático · Reel',
       title: (name: string) => `El reel de «${name}» no se pudo producir`,
@@ -62,6 +69,13 @@ const COPY = {
         "The rule didn't generate anything this time, so nothing half-done gets posted. "
         + (resumesOn ? `It resumes on its own on ${resumesOn}, when your credits renew. ` : '')
         + 'You can resume it sooner from Autopilot if you upgrade your plan.',
+    },
+    paused_no_accounts: {
+      badge: 'Autopilot · Paused',
+      title: (name: string) => `We paused “${name}”: it has no accounts to post to`,
+      body: () =>
+        'The account it used is no longer connected. Reconnect it and the rule resumes on its own, '
+        + 'or pick another account from Autopilot.',
     },
     video_failed: {
       badge: 'Autopilot · Reel',

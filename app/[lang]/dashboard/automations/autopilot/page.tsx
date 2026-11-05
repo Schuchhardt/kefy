@@ -569,6 +569,11 @@ export default function AutopilotPage() {
                           <Notice tone="warning" live={false}>{t.pausedCredits}</Notice>
                         </div>
                       )}
+                      {rule.paused_reason === 'no_accounts' && (
+                        <div style={{ marginTop: 10 }}>
+                          <Notice tone="warning" live={false}>{t.pausedNoAccounts}</Notice>
+                        </div>
+                      )}
                       {rule.next_run_at && active && (
                         <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
                           {t.nextRun}{' '}

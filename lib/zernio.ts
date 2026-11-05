@@ -126,10 +126,13 @@ export async function connectAccount(
 export async function listAccounts(opts?: {
   profileId?: string;
   platform?: ZernioPlatform | string;
+  /** Incluye las de perfiles fuera del límite del plan (si no, parecen borradas). */
+  includeOverLimit?: boolean;
 }): Promise<ZernioAccount[]> {
   const q = new URLSearchParams();
   if (opts?.profileId) q.set('profileId', opts.profileId);
   if (opts?.platform)  q.set('platform', opts.platform);
+  if (opts?.includeOverLimit) q.set('includeOverLimit', 'true');
   const path = '/accounts' + (q.toString() ? `?${q}` : '');
   // Zernio returns `_id` in the accounts list; normalise to `id`
   const res = await zernioFetch<{ accounts: Array<ZernioAccount & { _id?: string }> }>('GET', path);

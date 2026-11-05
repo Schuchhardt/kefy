@@ -60,6 +60,7 @@ const es = {
   costPerMonth: (n: number) => `≈ ${n} créditos al mes`,
   costReelNote: 'Un reel cuesta ~55 créditos: guion, imágenes, voz, animación y montaje.',
   withStory: '+ historia',
+  pausedNoAccounts: 'En pausa: la regla se quedó sin cuentas donde publicar. Se reanuda sola al reconectar la misma cuenta, o elige otra y actívala.',
   pausedCredits: 'En pausa: se acabaron los créditos del mes. Se reanuda sola cuando se renueven, o actívala si mejoras tu plan.',
   lastRun: 'Última ejecución:',
   lastRunOk: 'ok',

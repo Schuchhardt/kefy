@@ -17,6 +17,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/social/accounts/reconcile",
+      "schedule": "30 6 * * *"
+    },
+    {
       "path": "/api/automations/engagement/run",
       "schedule": "*/5 * * * *"
     }

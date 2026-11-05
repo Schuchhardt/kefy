@@ -340,6 +340,9 @@ export default function SocialConnectionPanel({
                           {t.disconnect}
                         </Button>
                       </div>
+                      {acc.status_reason && t.accountProblem[acc.status_reason] && (
+                        <Notice tone="warning" live={false}>{t.accountProblem[acc.status_reason]}</Notice>
+                      )}
                       {/* Zernio's API has no sensitivity flag — X decides from the
                           account's own "may be sensitive" setting, so point the
                           user at it instead of leaving them stuck. */}

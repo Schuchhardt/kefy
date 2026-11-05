@@ -37,6 +37,8 @@ export interface SocialAccount {
   username:           string;
   avatar_url?:        string | null;
   status?:            string;
+  /** Por qué se revocó al compararla con Zernio (docs/zernio.md). */
+  status_reason?:     string | null;
   zernio_account_id?: string;
   token_expires_at?:  string | null;
 }
@@ -48,6 +50,8 @@ export interface ZernioAccount {
   platform:          ZernioPlatform;
   external_id:       string;
   username:          string;
+  /** Nombre visible; en Facebook y LinkedIn puede ser lo que Kefy guardó como usuario. */
+  displayName?:      string | null;
   avatar_url:        string | null;
   access_token:      string;
   refresh_token:     string | null;

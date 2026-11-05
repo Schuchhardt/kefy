@@ -10,16 +10,17 @@ import { reportError } from '@/lib/observability';
 import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError } from '@/lib/services/errors';
 import { loadOwnedAccount } from '@/lib/services/ownership';
+import { detachAccountFromRules } from '@/lib/services/social-integrity';
 
 /** Columnas que ve la UI (las mismas que devolvía la ruta). */
 const ROUTE_SELECT =
-  'id, platform, external_id, username, avatar_url, zernio_account_id, status, token_expires_at, created_at';
+  'id, platform, external_id, username, avatar_url, zernio_account_id, status, status_reason, token_expires_at, created_at';
 
 /**
  * Columnas para las herramientas: nunca tokens, zernio_account_id ni
  * external_id. Solo lo necesario para elegir a qué cuenta publicar.
  */
-const TOOL_SELECT = 'id, platform, username, avatar_url, status';
+const TOOL_SELECT = 'id, platform, username, avatar_url, status, status_reason';
 
 export interface ToolSocialAccount {
   id: string;
@@ -27,6 +28,15 @@ export interface ToolSocialAccount {
   username: string | null;
   avatar_url: string | null;
   status: string;
+  /** Por qué se revocó al compararla con Zernio; hay que reconectarla. */
+  status_reason: string | null;
+}
+
+/** Una fila revocada por la comparación no se muestra si ya se reconectó esa cuenta. */
+function withoutSuperseded(rows: Array<Record<string, unknown>>) {
+  const key = (r: Record<string, unknown>) => `${r.platform}:${String(r.username ?? '').toLowerCase()}`;
+  const active = new Set(rows.filter((r) => r.status === 'active').map(key));
+  return rows.filter((r) => !r.status_reason || !active.has(key(r)));
 }
 
 export async function listSocialAccounts(
@@ -47,7 +57,7 @@ export async function listSocialAccounts(
     throw new ServiceError('unavailable', 500, 'Failed to fetch accounts');
   }
 
-  return { accounts: (accounts ?? []) as unknown as Record<string, unknown>[] };
+  return { accounts: withoutSuperseded((accounts ?? []) as unknown as Record<string, unknown>[]) };
 }
 
 // ─── Desconectar ──────────────────────────────────────────────────────────────
@@ -67,8 +77,9 @@ export interface DisconnectResult {
  * reporta y se sigue) y borra la fila. Las claves foráneas borran en cascada
  * sus publicaciones (también el historial de publicadas), DMs, comentarios y
  * snapshots de seguidores en Kefy. Las reglas de autopilot guardan los ids en
- * un array sin clave foránea: se quita la cuenta de ellas para que no queden
- * apuntando a una cuenta que ya no existe.
+ * un array sin clave foránea: se quita la cuenta de ellas, y la recuperan si se
+ * reconecta. Si otra fila usa el mismo id de Zernio no se revoca allí: se le
+ * cortaría la cuenta a esa otra marca.
  */
 export async function disconnectSocialAccount(ctx: ServiceContext, accountId: string): Promise<DisconnectResult> {
   const db = createSupabaseServer();
@@ -83,7 +94,15 @@ export async function disconnectSocialAccount(ctx: ServiceContext, accountId: st
     .eq('org_id', ctx.auth.orgId)
     .in('status', ['pending', 'scheduled']);
 
-  if (account.zernio_account_id) {
+  const { count: sharing } = account.zernio_account_id
+    ? await db
+      .from('kefy_social_accounts')
+      .select('id', { count: 'exact', head: true })
+      .eq('zernio_account_id', account.zernio_account_id)
+      .neq('id', account.id)
+    : { count: 0 };
+
+  if (account.zernio_account_id && (sharing ?? 0) === 0) {
     try {
       const { disconnectAccount } = await import('@/lib/zernio');
       await disconnectAccount(account.zernio_account_id);
@@ -105,28 +124,7 @@ export async function disconnectSocialAccount(ctx: ServiceContext, accountId: st
     throw new ServiceError('unavailable', 500, 'Failed to disconnect account').markReported();
   }
 
-  let rulesQ = db
-    .from('kefy_autopilot_rules')
-    .select('id, social_account_ids')
-    .eq('org_id', ctx.auth.orgId);
-  if (account.brand_id) rulesQ = rulesQ.eq('brand_id', account.brand_id);
-  const { data: rules } = await rulesQ;
-
-  let rulesUpdated = 0;
-  for (const rule of (rules ?? []) as Array<{ id: string; social_account_ids: string[] | null }>) {
-    const ids = rule.social_account_ids ?? [];
-    if (!ids.includes(account.id)) continue;
-    const { error } = await db
-      .from('kefy_autopilot_rules')
-      .update({ social_account_ids: ids.filter((id) => id !== account.id) })
-      .eq('id', rule.id)
-      .eq('org_id', ctx.auth.orgId);
-    if (error) {
-      reportError(new Error(error.message), { route: 'lib/services/social', service: 'supabase', auth: ctx.auth });
-    } else {
-      rulesUpdated++;
-    }
-  }
+  const rulesUpdated = await detachAccountFromRules(db, { ...account, org_id: ctx.auth.orgId }, ctx.language);
 
   return {
     id: account.id,
