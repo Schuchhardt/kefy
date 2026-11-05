@@ -1,7 +1,24 @@
 import type { Channel } from '@/types/channels';
 import type { AIModel } from '@/types/ai';
+import type { AutopilotFormat, RuleCost, WeeklyFormats } from '@/lib/autopilot-formats';
 
 export type Frequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
+
+/** Última ejecución de una regla (GET /api/autopilot/rules, list_autopilot_rules). */
+export interface AutopilotLastRun {
+  id:                 string;
+  status:             'success' | 'failed';
+  ran_at:             string;
+  format:             AutopilotFormat | null;
+  content_item_id:    string | null;
+  scheduled_post_ids: string[];
+  error_message:      string | null;
+  credits_estimated:  number | null;
+  video_status:       'producing' | 'published' | 'failed' | 'cancelled' | null;
+  video_attempts:     number;
+  story_status:       'scheduled' | 'published' | 'failed' | 'skipped' | null;
+  story_error:        string | null;
+}
 
 export interface AutopilotRule {
   id:                 string;
@@ -14,10 +31,21 @@ export interface AutopilotRule {
   timezone:           string;
   ai_model:           AIModel;
   prompt_hint:        string | null;
+  topic_hints?:       string[];
+  /** null: automático (etiqueta del tema o red). */
+  format?:            AutopilotFormat | null;
+  /** Mezcla semanal (reglas diarias): día → formato o 'skip'. */
+  weekly_formats?:    WeeklyFormats | null;
+  also_story?:        boolean;
+  story_delay_minutes?: number;
   status:             'active' | 'paused';
+  /** La pausó el sistema por falta de créditos (se reanuda sola el mes siguiente). */
+  paused_reason?:     'credits_exhausted' | null;
   next_run_at:        string | null;
   last_run_at:        string | null;
   created_at:         string;
+  last_run?:          AutopilotLastRun | null;
+  cost?:              RuleCost;
 }
 
 // ─── Engagement rules ────────────────────────────────────────────────────────

@@ -55,8 +55,20 @@ function wwwAuthenticate(req: NextRequest): string {
   return `Bearer ${params.join(', ')}`;
 }
 
+/**
+ * Una línea por rechazo y por llamada a herramienta, sin tokens ni argumentos:
+ * cuando un cliente dice que una herramienta «caducó» (el modo de voz de
+ * Claude), los logs tienen que decir si fue un 401, un 403 de origen o una
+ * llamada lenta. Vercel guarda un día de logs.
+ */
+function logMcp(line: string): void {
+  console.info(`[mcp] ${line}`);
+}
+
 export async function POST(req: NextRequest) {
-  if (!isAllowedOrigin(req.headers.get('origin'))) {
+  const origin = req.headers.get('origin');
+  if (!isAllowedOrigin(origin)) {
+    logMcp(`403 forbidden origin=${origin}`);
     return json({ error: 'Forbidden origin' }, 403);
   }
 
@@ -71,6 +83,10 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) {
     const headers: Record<string, string> = { ...(auth.headers ?? {}) };
     if (auth.status === 401) headers['WWW-Authenticate'] = wwwAuthenticate(req);
+    // Sin cabecera es el descubrimiento normal del OAuth: no es un fallo.
+    if (req.headers.get('authorization')) {
+      logMcp(`${auth.status} auth ${String((auth.body as { error?: unknown }).error ?? '')}`);
+    }
     return json(auth.body, auth.status, headers);
   }
 
@@ -88,9 +104,19 @@ export async function POST(req: NextRequest) {
     return json(jsonRpcError(null, JSONRPC_ERRORS.invalidRequest, 'Batch requests are not supported'));
   }
 
+  const call = typeof payload === 'object' && payload !== null && (payload as { method?: unknown }).method === 'tools/call'
+    ? String((payload as { params?: { name?: unknown } }).params?.name ?? '?')
+    : null;
+  const startedAt = Date.now();
+
   let out: object | null;
   try {
     out = await handleMcpMessage(payload, ctx);
+    if (call) {
+      const result = (out as { result?: { isError?: boolean; content?: Array<{ text?: string }> } } | null)?.result;
+      const failed = result?.isError ? ` error=${String(result.content?.[0]?.text ?? '').split(':')[0]}` : '';
+      logMcp(`tools/call ${call} key=${ctx.apiKeyId} ${Date.now() - startedAt}ms${failed}`);
+    }
   } catch (err) {
     // executeTool ya convierte los fallos de las herramientas en isError; aquí
     // solo llega un fallo nuestro del despachador.

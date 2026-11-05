@@ -1,38 +1,60 @@
 // ─── Servicio: autopilot ─────────────────────────────────────────────────────
 //
-// Reglas que generan un post con IA y lo programan en las cuentas de la marca
-// según un calendario (diario, semanal…). Lo comparten /api/autopilot/** (UI y
-// cron) y las herramientas del asistente (list_autopilot_rules,
+// Reglas que generan una pieza con IA y la programan en las cuentas de la
+// marca según un calendario (diario, semanal…). Lo comparten /api/autopilot/**
+// (UI y cron) y las herramientas del asistente (list_autopilot_rules,
 // save_autopilot_rule, delete_autopilot_rule, run_autopilot_now).
 //
 // Las reglas son de una marca: se crean con brand_id, se listan por marca, y
 // la ejecución usa el brand kit de esa marca y deja el contenido en ella.
-// Antes la creación no guardaba brand_id (la lista filtraba por él, así que
-// una regla nueva no aparecía) y la ejecución leía el kit por org_id.
 //
-// Cada ejecución genera la pieza con su media (post con imagen, carrusel o
-// reel en video) por los mismos servicios que la UI, y la publica. Ver la
-// sección «Ejecución».
+// Cada ejecución genera la pieza con su media por los mismos servicios que la
+// UI y el asistente (create_post, create_carousel, create_story, create_reel +
+// produce_video) y la publica. El formato lo decide la regla (`format`, y la
+// mezcla semanal `weekly_formats`); sin formato fijo, la etiqueta del tema o la
+// red, como antes (lib/autopilot-formats.ts). Con `also_story`, cada pieza
+// trae además su story derivada (convert_content_format), `story_delay_minutes`
+// después. Ver la sección «Ejecución».
 //
 // Gasto: los servicios cobran cada operación (texto, imágenes, video) con la
 // guardia de siempre, también en el cron: sin eso, el autopilot generaría
 // imágenes y videos sin límite. Antes de gastar se comprueba que alcancen la
-// suscripción y los créditos; si no, la ejecución queda registrada como
-// fallida y la regla sigue con su calendario.
+// suscripción y los créditos de la ejecución entera (pieza + story). Si en el
+// cron no alcanzan los créditos, la regla se PAUSA (paused_reason
+// 'credits_exhausted'), se avisa por correo y se reanuda sola al renovarse el
+// mes; antes fallaba en cada hueco sin que nadie se enterara.
 
 import { z } from 'zod';
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
 import { checkSubscription } from '@/lib/subscription';
-import { costOf, getUsage } from '@/lib/usage';
+import { getUsage } from '@/lib/usage';
+import { sendAutopilotAlert } from '@/lib/autopilot-alerts';
+import {
+  AUTOPILOT_FORMATS, STORY_DELAY_DEFAULT_MINUTES, STORY_DELAY_MAX_MINUTES, STORY_PLATFORMS, WEEKDAY_SKIP,
+  WEEKLY_FORMAT_VALUES, autopilotRuleCost, estimateFormatCredits, estimateRunCredits, nextRunForRule,
+  parseAutopilotTopic, resolveRunFormat, usesStory,
+  type AutopilotFormat, type RuleCost, type RuleCostInput, type WeeklyFormats,
+} from '@/lib/autopilot-formats';
 import { serviceContext, type ServiceContext } from '@/lib/services/context';
 import { ServiceError, msg } from '@/lib/services/errors';
 import { generateCarousel, generateImageForItem, generateTextPost } from '@/lib/services/content';
-import { REEL_SCENE_COUNT_MAX, REEL_SCENE_COUNT_MIN, generateReel } from '@/lib/services/reel';
+import { generateReel } from '@/lib/services/reel';
+import { generateStory } from '@/lib/services/story';
+import { generateRendition } from '@/lib/services/renditions';
 import { produceVideo } from '@/lib/services/video';
 import { publishContent } from '@/lib/services/publish';
 import type { JWTPayload } from '@/types/auth';
-import type { Frequency } from '@/types/automations';
+import type { AutopilotLastRun, Frequency } from '@/types/automations';
+
+export type { AutopilotLastRun } from '@/types/automations';
+
+export {
+  AUTOPILOT_FORMATS, computeNextRun, defaultAutopilotFormat, parseAutopilotTopic,
+  type AutopilotFormat, type AutopilotTopic,
+} from '@/lib/autopilot-formats';
+/** Créditos de generar una pieza en ese formato (sin story derivada). */
+export const estimateAutopilotCredits = estimateFormatCredits;
 
 const ROUTE = 'lib/services/autopilot';
 
@@ -59,58 +81,32 @@ export interface AutopilotRuleRow {
   ai_model: 'claude' | 'gpt';
   tone: string | null;
   topic_hints: string[];
+  /** null: automático (etiqueta del tema o red). */
+  format: AutopilotFormat | null;
+  weekly_formats: WeeklyFormats | null;
+  also_story: boolean;
+  story_delay_minutes: number;
   status: 'active' | 'paused';
+  /** Por qué la pausó el sistema; null si la pausó una persona (o está activa). */
+  paused_reason: 'credits_exhausted' | null;
+  paused_at: string | null;
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-// ─── Calendario ──────────────────────────────────────────────────────────────
-
-/** Próxima ejecución según el calendario de la regla. */
-export function computeNextRun(
-  frequency: Frequency,
-  dayOfWeek: number | null,
-  timeOfDay: string, // "HH:MM"
-  timezone: string,
-  after: Date = new Date(),
-): Date {
-  const [hh, mm] = timeOfDay.split(':').map(Number);
-
-  const tzNow = new Date(
-    new Date(after).toLocaleString('en-US', { timeZone: timezone }),
-  );
-
-  const candidate = new Date(after);
-  candidate.setHours(hh, mm ?? 0, 0, 0);
-
-  // Primero, pasar de «ahora».
-  if (candidate <= after) {
-    if (frequency === 'daily') {
-      candidate.setDate(candidate.getDate() + 1);
-    } else {
-      candidate.setDate(candidate.getDate() + 7);
-    }
-  }
-
-  if (frequency === 'weekly' || frequency === 'biweekly') {
-    const targetDay = dayOfWeek ?? 1; // lunes por defecto
-    while (candidate.getDay() !== targetDay) {
-      candidate.setDate(candidate.getDate() + 1);
-    }
-    if (frequency === 'biweekly' && candidate <= after) {
-      candidate.setDate(candidate.getDate() + 14);
-    }
-  } else if (frequency === 'monthly') {
-    // El mismo día, el mes siguiente.
-    const next = new Date(tzNow);
-    next.setMonth(next.getMonth() + 1);
-    next.setHours(hh, mm ?? 0, 0, 0);
-    return next;
-  }
-
-  return candidate;
+/** Las columnas nuevas pueden faltar en filas leídas antes de la migración. */
+function withDefaults<T extends Partial<AutopilotRuleRow>>(row: T): T & AutopilotRuleRow {
+  return {
+    format: null,
+    weekly_formats: null,
+    also_story: false,
+    story_delay_minutes: STORY_DELAY_DEFAULT_MINUTES,
+    paused_reason: null,
+    paused_at: null,
+    ...row,
+  } as T & AutopilotRuleRow;
 }
 
 // ─── Entrada ─────────────────────────────────────────────────────────────────
@@ -124,6 +120,8 @@ function isTimeZone(tz: string): boolean {
   }
 }
 
+const weeklyValue = z.enum(WEEKLY_FORMAT_VALUES).optional();
+
 export const autopilotRuleFields = {
   name: z.string().trim().min(1).max(100),
   channel: z.enum(AUTOPILOT_CHANNELS).describe('Network the post is written for.'),
@@ -132,12 +130,35 @@ export const autopilotRuleFields = {
   frequency: z.enum(AUTOPILOT_FREQUENCIES),
   day_of_week: z.number().int().min(0).max(6).nullable().optional()
     .describe('0 = Sunday … 6 = Saturday. For weekly / biweekly.'),
-  time_of_day: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'HH:MM').describe('Local time, HH:MM.'),
+  time_of_day: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'HH:MM').describe('Local time in `timezone`, HH:MM.'),
   timezone: z.string().max(64).refine(isTimeZone, 'Unknown IANA time zone').describe('IANA zone, e.g. America/Santiago.'),
   ai_model: z.enum(AUTOPILOT_MODELS),
   tone: z.string().trim().max(100).nullable().optional(),
   topic_hints: z.array(z.string().trim().min(1).max(200)).max(20)
     .describe('Seed topics; each run picks one at random.'),
+  format: z.enum(AUTOPILOT_FORMATS).nullable()
+    .describe(
+      'What every run generates: "post" (create_post, text + image), "carousel" (create_carousel), "story" ' +
+      '(create_story, vertical image; only published to Instagram, Facebook and Snapchat accounts) or "reel" ' +
+      '(create_reel + produce_video; published once the video is ready). null = automatic: a topic tag like ' +
+      '[REEL 30s] decides, otherwise reel for TikTok/YouTube-only rules and post for the rest.',
+    ),
+  weekly_formats: z.object({
+    0: weeklyValue, 1: weeklyValue, 2: weeklyValue, 3: weeklyValue, 4: weeklyValue, 5: weeklyValue, 6: weeklyValue,
+  }).strict().nullable()
+    .describe(
+      'Weekly mix, only for frequency "daily": weekday (0 = Sunday … 6 = Saturday) → format, or "skip" for no ' +
+      'post that day. Days not listed use `format`. E.g. format "post" + {"4": "reel"} = a post every day and a ' +
+      'reel on Thursdays; {"0": "skip", "6": "skip"} = weekdays only. null removes the mix.',
+    ),
+  also_story: z.boolean()
+    .describe(
+      'Also publish a story derived from every piece (the same conversion as convert_content_format) on the ' +
+      'rule accounts that support Stories (Instagram, Facebook, Snapchat), story_delay_minutes after the piece. ' +
+      'Adds 4 credits per run.',
+    ),
+  story_delay_minutes: z.number().int().min(0).max(STORY_DELAY_MAX_MINUTES)
+    .describe(`Minutes between the piece and its derived story. Default ${STORY_DELAY_DEFAULT_MINUTES} (2 hours).`),
 };
 
 const createSchema = z.object({
@@ -147,6 +168,10 @@ const createSchema = z.object({
   timezone: autopilotRuleFields.timezone.default('UTC'),
   ai_model: autopilotRuleFields.ai_model.default('claude'),
   topic_hints: autopilotRuleFields.topic_hints.default([]),
+  format: autopilotRuleFields.format.optional(),
+  weekly_formats: autopilotRuleFields.weekly_formats.optional(),
+  also_story: autopilotRuleFields.also_story.default(false),
+  story_delay_minutes: autopilotRuleFields.story_delay_minutes.default(STORY_DELAY_DEFAULT_MINUTES),
 }).strict();
 
 const patchSchema = z.object({
@@ -158,7 +183,7 @@ const patchSchema = z.object({
 
 const RULE_KEYS = [
   'name', 'channel', 'social_account_ids', 'frequency', 'day_of_week', 'time_of_day', 'timezone',
-  'ai_model', 'tone', 'topic_hints',
+  'ai_model', 'tone', 'topic_hints', 'format', 'weekly_formats', 'also_story', 'story_delay_minutes',
 ] as const;
 
 /**
@@ -194,6 +219,13 @@ function parse<T extends z.ZodTypeAny>(ctx: ServiceContext, schema: T, input: un
   return r.data;
 }
 
+function invalid(ctx: ServiceContext, es: string, en: string, field?: string): ServiceError {
+  const message = msg(ctx.language, es, en);
+  return new ServiceError('invalid_input', 422, message, field
+    ? { error: message, issues: { formErrors: [], fieldErrors: { [field]: [message] } } }
+    : undefined);
+}
+
 function dbError(message: string, ctx: ServiceContext | null, error: { message: string }, extra?: Record<string, unknown>): ServiceError {
   reportError(new Error(error.message), { route: ROUTE, service: 'supabase', auth: ctx?.auth, extra });
   return new ServiceError('unavailable', 500, message).markReported();
@@ -203,13 +235,13 @@ function notFound(ctx: ServiceContext): ServiceError {
   return new ServiceError('not_found', 404, msg(ctx.language, 'Regla no encontrada', 'Rule not found'));
 }
 
-/** Las cuentas tienen que ser de la marca de la regla (y de la org). */
-async function assertAccountsInBrand(ctx: ServiceContext, db: Db, ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
+/** Las cuentas tienen que ser de la marca de la regla (y de la org). Devuelve sus redes. */
+async function assertAccountsInBrand(ctx: ServiceContext, db: Db, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
   const unique = [...new Set(ids)];
   const { data, error } = await db
     .from('kefy_social_accounts')
-    .select('id')
+    .select('id, platform')
     .in('id', unique)
     .eq('org_id', ctx.auth.orgId)
     .eq('brand_id', ctx.brandId);
@@ -221,12 +253,61 @@ async function assertAccountsInBrand(ctx: ServiceContext, db: Db, ids: string[])
       msg(ctx.language, 'Alguna cuenta no es de esta marca', 'Some accounts do not belong to this brand'),
     );
   }
+  return (data as Array<{ platform: string }>).map((a) => a.platform);
+}
+
+/** {} o sin días → null; se quitan las claves vacías. */
+function normalizeWeekly(weekly: WeeklyFormats | null | undefined): WeeklyFormats | null | undefined {
+  if (weekly === undefined || weekly === null) return weekly;
+  const out: WeeklyFormats = {};
+  for (const [day, value] of Object.entries(weekly)) if (value) out[day as keyof WeeklyFormats] = value;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Lo que tiene que cumplir la configuración ya completa (alta, o regla +
+ * cambios): la mezcla semanal solo en reglas diarias y con algún día que
+ * publique, y si algo sale como story, alguna cuenta con Stories.
+ */
+function assertRuleConfig(
+  ctx: ServiceContext,
+  cfg: {
+    frequency: Frequency; format: AutopilotFormat | null; weekly_formats: WeeklyFormats | null; also_story: boolean;
+  },
+  platforms: string[] | null,
+): void {
+  if (cfg.weekly_formats) {
+    if (cfg.frequency !== 'daily') {
+      throw invalid(ctx,
+        'La mezcla semanal (weekly_formats) es solo para reglas diarias: pon frequency "daily".',
+        'The weekly mix (weekly_formats) is only for daily rules: set frequency to "daily".', 'weekly_formats');
+    }
+    const skipped = Object.values(cfg.weekly_formats).filter((v) => v === WEEKDAY_SKIP).length;
+    if (skipped === 7) {
+      throw invalid(ctx, 'La mezcla semanal no publica ningún día.', 'The weekly mix skips every day.', 'weekly_formats');
+    }
+  }
+  if (platforms && usesStory(cfg) && !platforms.some((p) => STORY_PLATFORMS.includes(p))) {
+    throw invalid(ctx,
+      'Las historias solo se publican en Instagram, Facebook o Snapchat, y la regla no tiene ninguna de esas cuentas.',
+      'Stories are only published to Instagram, Facebook or Snapchat, and the rule has none of those accounts.',
+      cfg.also_story ? 'also_story' : 'format');
+  }
 }
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
-/** Reglas de la marca del contexto, las más nuevas primero. */
-export async function listAutopilotRules(ctx: ServiceContext): Promise<AutopilotRuleRow[]> {
+export type AutopilotRuleListItem = AutopilotRuleRow & { last_run: AutopilotLastRun | null; cost: RuleCost };
+
+const LAST_RUN_COLUMNS =
+  'id, status, ran_at, format, content_item_id, scheduled_post_ids, error_message, credits_estimated, ' +
+  'video_status, video_attempts, story_status, story_error';
+
+/**
+ * Reglas de la marca del contexto, las más nuevas primero, con su última
+ * ejecución (incluido el estado del video de un reel) y lo que cuestan.
+ */
+export async function listAutopilotRules(ctx: ServiceContext): Promise<AutopilotRuleListItem[]> {
   const db = createSupabaseServer();
   const { data, error } = await db
     .from('kefy_autopilot_rules')
@@ -235,7 +316,33 @@ export async function listAutopilotRules(ctx: ServiceContext): Promise<Autopilot
     .eq('brand_id', ctx.brandId)
     .order('created_at', { ascending: false });
   if (error) throw dbError('Failed to fetch rules', ctx, error);
-  return (data ?? []) as AutopilotRuleRow[];
+  const rules = ((data ?? []) as AutopilotRuleRow[]).map(withDefaults);
+  if (rules.length === 0) return [];
+
+  const { data: accountRows } = await db
+    .from('kefy_social_accounts')
+    .select('id, platform, status')
+    .eq('org_id', ctx.auth.orgId)
+    .eq('brand_id', ctx.brandId);
+  const accounts = (accountRows ?? []) as Array<{ id: string; platform: string; status: string }>;
+
+  return Promise.all(rules.map(async (rule) => {
+    const { data: runs } = await db
+      .from('kefy_autopilot_runs')
+      .select(LAST_RUN_COLUMNS)
+      .eq('rule_id', rule.id)
+      .order('ran_at', { ascending: false })
+      .limit(1);
+    const last = ((runs ?? []) as unknown as AutopilotLastRun[])[0] ?? null;
+    const platforms = accounts
+      .filter((a) => a.status === 'active' && rule.social_account_ids.includes(a.id))
+      .map((a) => a.platform);
+    return {
+      ...rule,
+      last_run: last ? { ...last, video_attempts: last.video_attempts ?? 0, scheduled_post_ids: last.scheduled_post_ids ?? [] } : null,
+      cost: autopilotRuleCost(rule, platforms),
+    };
+  }));
 }
 
 /**
@@ -250,7 +357,7 @@ export async function getAutopilotRule(
   const db = createSupabaseServer();
   let q = db
     .from('kefy_autopilot_rules')
-    .select('*, kefy_autopilot_runs ( id, status, ran_at, content_item_id, error_message )')
+    .select(`*, kefy_autopilot_runs ( ${LAST_RUN_COLUMNS} )`)
     .eq('id', ruleId)
     .eq('org_id', ctx.auth.orgId);
   if (ctx.brandScope === 'strict') q = q.eq('brand_id', ctx.brandId);
@@ -260,16 +367,26 @@ export async function getAutopilotRule(
     .maybeSingle();
   if (error) throw dbError('Failed to fetch rule', ctx, error);
   if (!data) throw notFound(ctx);
-  return data as AutopilotRuleRow & { kefy_autopilot_runs?: unknown[] };
+  return withDefaults(data as AutopilotRuleRow & { kefy_autopilot_runs?: unknown[] });
 }
 
 export async function createAutopilotRule(ctx: ServiceContext, input: unknown): Promise<AutopilotRuleRow> {
   const parsed = parse(ctx, createSchema, input);
   const db = createSupabaseServer();
-  await assertAccountsInBrand(ctx, db, parsed.social_account_ids);
+  const platforms = await assertAccountsInBrand(ctx, db, parsed.social_account_ids);
+
+  const config = {
+    frequency: parsed.frequency,
+    format: parsed.format ?? null,
+    weekly_formats: normalizeWeekly(parsed.weekly_formats) ?? null,
+    also_story: parsed.also_story,
+  };
+  assertRuleConfig(ctx, config, platforms);
 
   const dayOfWeek = parsed.day_of_week ?? null;
-  const nextRunAt = computeNextRun(parsed.frequency, dayOfWeek, parsed.time_of_day, parsed.timezone);
+  const nextRunAt = nextRunForRule({
+    ...config, day_of_week: dayOfWeek, time_of_day: parsed.time_of_day, timezone: parsed.timezone,
+  });
 
   const { data, error } = await db
     .from('kefy_autopilot_rules')
@@ -287,13 +404,17 @@ export async function createAutopilotRule(ctx: ServiceContext, input: unknown): 
       ai_model: parsed.ai_model,
       tone: parsed.tone ?? null,
       topic_hints: parsed.topic_hints,
+      format: config.format,
+      weekly_formats: config.weekly_formats,
+      also_story: config.also_story,
+      story_delay_minutes: parsed.story_delay_minutes,
       status: 'active',
       next_run_at: nextRunAt.toISOString(),
     })
     .select()
     .single();
   if (error || !data) throw dbError('Failed to create rule', ctx, error ?? { message: 'no row' });
-  return data as AutopilotRuleRow;
+  return withDefaults(data as AutopilotRuleRow);
 }
 
 export async function updateAutopilotRule(
@@ -304,25 +425,46 @@ export async function updateAutopilotRule(
   const parsed = parse(ctx, patchSchema, input);
   const existing = await getAutopilotRule(ctx, ruleId);
   const db = createSupabaseServer();
+  const weekly = normalizeWeekly(parsed.weekly_formats);
 
-  if (parsed.social_account_ids) {
-    // Las cuentas se validan contra la marca de la regla, no la del contexto.
-    await assertAccountsInBrand({ ...ctx, brandId: existing.brand_id ?? ctx.brandId }, db, parsed.social_account_ids);
+  // Las cuentas se validan contra la marca de la regla, no la del contexto.
+  const ruleCtx = { ...ctx, brandId: existing.brand_id ?? ctx.brandId };
+  const accountIds = parsed.social_account_ids ?? existing.social_account_ids;
+  const configTouched = parsed.social_account_ids !== undefined || parsed.format !== undefined
+    || parsed.weekly_formats !== undefined || parsed.also_story !== undefined || parsed.frequency !== undefined;
+  const merged = {
+    frequency: parsed.frequency ?? existing.frequency,
+    format: parsed.format !== undefined ? parsed.format : existing.format,
+    weekly_formats: weekly !== undefined ? weekly : existing.weekly_formats,
+    also_story: parsed.also_story ?? existing.also_story,
+  };
+  if (configTouched) {
+    const platforms = parsed.social_account_ids
+      ? await assertAccountsInBrand(ruleCtx, db, accountIds)
+      : await accountPlatforms(db, existing.org_id, existing.brand_id, accountIds);
+    assertRuleConfig(ctx, merged, platforms);
   }
 
   const patch: Record<string, unknown> = {};
-  for (const key of ['name', 'channel', 'social_account_ids', 'ai_model', 'tone', 'topic_hints', 'status'] as const) {
+  for (const key of [
+    'name', 'channel', 'social_account_ids', 'ai_model', 'tone', 'topic_hints', 'format', 'also_story',
+    'story_delay_minutes', 'status',
+  ] as const) {
     if (parsed[key] !== undefined) patch[key] = parsed[key];
   }
+  if (weekly !== undefined) patch.weekly_formats = weekly;
+  // Quien pausa o reanuda a mano manda: la pausa deja de ser «por créditos»
+  // (el cron no la reanuda sola) y al reanudar se olvida el motivo.
+  if (parsed.status !== undefined) Object.assign(patch, { paused_reason: null, paused_at: parsed.status === 'paused' ? new Date().toISOString() : null });
 
   const scheduleChanged =
     parsed.frequency !== undefined || parsed.day_of_week !== undefined ||
-    parsed.time_of_day !== undefined || parsed.timezone !== undefined;
+    parsed.time_of_day !== undefined || parsed.timezone !== undefined || weekly !== undefined;
   // Reanudar una regla pausada también recalcula: su next_run_at quedó en el pasado.
   const resumed = parsed.status === 'active' && existing.status === 'paused';
 
   if (scheduleChanged || resumed) {
-    const frequency = parsed.frequency ?? existing.frequency;
+    const frequency = merged.frequency;
     const dayOfWeek = parsed.day_of_week !== undefined ? parsed.day_of_week : existing.day_of_week;
     const timeOfDay = parsed.time_of_day ?? existing.time_of_day;
     const timezone = parsed.timezone ?? existing.timezone;
@@ -331,7 +473,9 @@ export async function updateAutopilotRule(
       day_of_week: dayOfWeek ?? null,
       time_of_day: timeOfDay,
       timezone,
-      next_run_at: computeNextRun(frequency, dayOfWeek ?? null, timeOfDay, timezone).toISOString(),
+      next_run_at: nextRunForRule({
+        ...merged, day_of_week: dayOfWeek ?? null, time_of_day: timeOfDay, timezone,
+      }).toISOString(),
     });
   }
 
@@ -347,7 +491,15 @@ export async function updateAutopilotRule(
     .select()
     .single();
   if (error || !data) throw dbError('Failed to update rule', ctx, error ?? { message: 'no row' });
-  return data as AutopilotRuleRow;
+  return withDefaults(data as AutopilotRuleRow);
+}
+
+async function accountPlatforms(db: Db, orgId: string, brandId: string | null, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  let q = db.from('kefy_social_accounts').select('platform').in('id', ids).eq('org_id', orgId);
+  if (brandId) q = q.eq('brand_id', brandId);
+  const { data } = await q;
+  return ((data ?? []) as Array<{ platform: string }>).map((a) => a.platform);
 }
 
 export async function deleteAutopilotRule(ctx: ServiceContext, ruleId: string): Promise<void> {
@@ -364,95 +516,40 @@ export async function deleteAutopilotRule(ctx: ServiceContext, ruleId: string): 
 // ─── Ejecución ───────────────────────────────────────────────────────────────
 //
 // Cada ejecución produce una pieza con media, por los mismos servicios que la
-// UI: un post lleva su imagen, un carrusel una imagen por slide y un reel es un
-// video producido por el pipeline (docs/video-pipeline.md). Antes solo se
-// generaba texto y se programaba sin media: TikTok e Instagram lo publicaban
-// como una imagen con puro texto.
+// UI y el asistente:
 //
-// El formato sale de la etiqueta del tema elegido ([REEL 30s], [CARRUSEL 5
-// slides], [POST]). Sin etiqueta: reel si todas las cuentas son de video
-// (TikTok, YouTube) y post con imagen en el resto.
+//   post     → generateTextPost + generateImageForItem   (create_post)
+//   carousel → generateCarousel, una imagen por slide     (create_carousel)
+//   story    → generateStory, imagen vertical             (create_story)
+//   reel     → generateReel + produceVideo                (create_reel + produce_video)
+//
+// Una story solo se publica en las cuentas con Stories (Instagram, Facebook,
+// Snapchat): en las demás Zernio la publicaría como un post normal.
 //
 // Un reel tarda minutos en producirse: la ejecución deja la pieza esperando
 // (`metadata.autopilot_publish`) y el cron la publica cuando el video está
-// listo (publishReadyAutopilotReels).
+// listo (publishReadyAutopilotReels). Si la producción falla, se reintenta una
+// vez; si vuelve a fallar, la ejecución queda fallida y se avisa por correo.
+//
+// La story derivada (`also_story`) se genera cuando la pieza se publica o
+// programa: con la conversión de formato (generateRendition, la de
+// convert_content_format) y programada `story_delay_minutes` después del hueco
+// de la pieza. Si falla, la pieza sigue publicada y el fallo queda en la
+// ejecución (story_status 'failed').
 
-export const AUTOPILOT_FORMATS = ['post', 'carousel', 'reel'] as const;
-export type AutopilotFormat = (typeof AUTOPILOT_FORMATS)[number];
-
-/** Redes donde un post sin video no tiene sentido: el formato por defecto es reel. */
-const VIDEO_FIRST_PLATFORMS = new Set(['tiktok', 'youtube']);
-const FORMAT_TAG = /^\s*\[([^\]]*)\]\s*/;
-/** Un plano de reel dura ~5 s: «[REEL 30s]» son 6 planos. */
-const SECONDS_PER_SCENE = 5;
 /** Más cerca que esto del hueco, se publica ya en vez de programar. */
 const MIN_SCHEDULE_LEAD_MS = 60 * 1000;
 /** Un reel que no terminó de producirse en este tiempo no se publica. */
 const REEL_WAIT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+/** Producciones de un reel: la primera y un reintento. */
+export const MAX_VIDEO_ATTEMPTS = 2;
 /** El cron no empieza otra regla pasado esto: generar media tarda (maxDuration 300 s). */
 const CRON_RUN_BUDGET_MS = 200 * 1000;
 const MAX_PENDING_REELS_PER_RUN = 10;
 
-const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(n)));
-
-export interface AutopilotTopic {
-  /** null: el tema no lo dice; decide la red (defaultAutopilotFormat). */
-  format: AutopilotFormat | null;
-  topic: string;
-  slideCount?: number;
-  sceneCount?: number;
-}
-
-/** «[REEL 30s] Tip…» → { format: 'reel', topic: 'Tip…', sceneCount: 6 }. */
-export function parseAutopilotTopic(raw: string): AutopilotTopic {
-  const m = FORMAT_TAG.exec(raw);
-  if (!m) return { format: null, topic: raw.trim() };
-  const tag = m[1].toLowerCase();
-  const topic = raw.slice(m[0].length).trim() || raw.trim();
-  const num = (re: RegExp) => {
-    const n = re.exec(tag);
-    return n ? Number(n[1]) : undefined;
-  };
-
-  if (/\b(reels?|videos?|shorts?)\b/.test(tag)) {
-    const seconds = num(/(\d+)\s*(?:s|seg|sec)/);
-    return {
-      format: 'reel',
-      topic,
-      sceneCount: seconds ? clamp(seconds / SECONDS_PER_SCENE, REEL_SCENE_COUNT_MIN, REEL_SCENE_COUNT_MAX) : undefined,
-    };
-  }
-  if (/\b(carrusel|carousel)\b/.test(tag)) {
-    const slides = num(/(\d+)/);
-    return { format: 'carousel', topic, slideCount: slides ? clamp(slides, 3, 10) : undefined };
-  }
-  if (/\b(post|imagen|image|foto|photo)\b/.test(tag)) return { format: 'post', topic };
-  // Una etiqueta que no es de formato es parte del tema.
-  return { format: null, topic: raw.trim() };
-}
-
-export function defaultAutopilotFormat(platforms: string[]): AutopilotFormat {
-  return platforms.length > 0 && platforms.every((p) => VIDEO_FIRST_PLATFORMS.has(p)) ? 'reel' : 'post';
-}
-
-/**
- * Créditos que cuesta una ejecución en ese formato. El reel es la estimación
- * del plan con animación `key` (docs/video-pipeline.md, «Costo») más el guion.
- */
-export function estimateAutopilotCredits(
-  format: AutopilotFormat,
-  opts: { slideCount?: number; sceneCount?: number } = {},
-): number {
-  if (format === 'post') return costOf('text') + costOf('image');
-  if (format === 'carousel') return costOf('text') + costOf('image') * (opts.slideCount ?? 5);
-  const scenes = opts.sceneCount ?? 5;
-  return costOf('text')
-    + scenes * (costOf('image') + costOf('voice'))
-    + Math.min(3, scenes) * costOf('animation')
-    + costOf('video');
-}
-
 type AccountRow = { id: string; zernio_account_id: string | null; platform: string };
+
+const isStoryAccount = (a: { platform: string }) => STORY_PLATFORMS.includes(a.platform);
 
 async function activeAccounts(db: Db, rule: AutopilotRuleRow): Promise<AccountRow[]> {
   if (rule.social_account_ids.length === 0) return [];
@@ -467,15 +564,32 @@ async function activeAccounts(db: Db, rule: AutopilotRuleRow): Promise<AccountRo
   return (data ?? []) as AccountRow[];
 }
 
+/** Lo que puede costar la regla: por formato, por ejecución y al mes. */
+export async function autopilotRuleCostFor(rule: AutopilotRuleRow): Promise<RuleCost> {
+  const r = withDefaults(rule);
+  const platforms = (await activeAccounts(createSupabaseServer(), r)).map((a) => a.platform);
+  return autopilotRuleCost(r, platforms);
+}
+
 /**
- * Lo más caro que puede costar una ejecución de la regla (cada una elige un
- * tema al azar). Es lo que la tarjeta de confirmación del chat anuncia.
+ * Costo de una configuración que todavía no está guardada (la tarjeta de
+ * confirmación de save_autopilot_rule): la regla actual con los cambios.
+ */
+export async function previewAutopilotRuleCost(
+  ctx: ServiceContext,
+  config: Omit<RuleCostInput, 'timezone'> & { social_account_ids: string[]; timezone?: string },
+): Promise<RuleCost> {
+  const platforms = await accountPlatforms(createSupabaseServer(), ctx.auth.orgId, ctx.brandId || null, config.social_account_ids);
+  return autopilotRuleCost({ ...config, timezone: config.timezone ?? 'UTC' }, platforms);
+}
+
+/**
+ * Lo más caro que puede costar una ejecución de la regla (formato de cada día,
+ * peor tema y story derivada). Es lo que la tarjeta de confirmación del chat
+ * anuncia.
  */
 export async function estimateAutopilotRuleCredits(rule: AutopilotRuleRow): Promise<number> {
-  const db = createSupabaseServer();
-  const fallback = defaultAutopilotFormat((await activeAccounts(db, rule)).map((a) => a.platform));
-  const topics = rule.topic_hints.length > 0 ? rule.topic_hints.map(parseAutopilotTopic) : [parseAutopilotTopic(rule.name)];
-  return Math.max(...topics.map((t) => estimateAutopilotCredits(t.format ?? fallback, t)));
+  return (await autopilotRuleCostFor(rule)).per_run_max;
 }
 
 /**
@@ -541,7 +655,7 @@ async function preflight(ctx: ServiceContext, credits: number): Promise<ServiceE
  * ejecución fallida no se reintenta cada 5 minutos gastando otra vez.
  */
 async function claimSlot(db: Db, rule: AutopilotRuleRow, now: Date): Promise<boolean> {
-  const nextRun = computeNextRun(rule.frequency, rule.day_of_week ?? null, rule.time_of_day, rule.timezone, now);
+  const nextRun = nextRunForRule(rule, now, { afterRun: true });
   let q = db
     .from('kefy_autopilot_rules')
     .update({ last_run_at: now.toISOString(), next_run_at: nextRun.toISOString() })
@@ -549,6 +663,66 @@ async function claimSlot(db: Db, rule: AutopilotRuleRow, now: Date): Promise<boo
   q = rule.next_run_at ? q.eq('next_run_at', rule.next_run_at) : q.is('next_run_at', null);
   const { data } = await q.select('id');
   return (data ?? []).length > 0;
+}
+
+/** Primer instante del mes de créditos siguiente (lib/usage: mes calendario en UTC). */
+export function nextCreditPeriodStart(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+}
+
+function currentCreditPeriodStart(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+/**
+ * Sin créditos en el cron: la regla se pausa (en vez de fallar en cada hueco)
+ * y se avisa a quien la creó. La reanuda resumeCreditPausedRules al empezar
+ * el mes siguiente, o una persona antes.
+ */
+async function pauseForCredits(db: Db, rule: AutopilotRuleRow, language: 'es' | 'en', reason: string, now: Date): Promise<boolean> {
+  const { data } = await db
+    .from('kefy_autopilot_rules')
+    .update({ status: 'paused', paused_reason: 'credits_exhausted', paused_at: now.toISOString() })
+    .eq('id', rule.id)
+    .eq('status', 'active')
+    .select('id');
+  if (!(data ?? []).length) return false;
+  await sendAutopilotAlert({
+    kind: 'paused_credits', orgId: rule.org_id, ruleId: rule.id, ruleName: rule.name, userId: rule.created_by,
+    language, detail: reason, resumesAt: nextCreditPeriodStart(now),
+  });
+  return true;
+}
+
+/**
+ * Reglas pausadas por créditos en un mes anterior: el saldo ya se renovó, así
+ * que vuelven a estar activas con su calendario. Lo llama el cron.
+ */
+export async function resumeCreditPausedRules(now: Date = new Date()): Promise<string[]> {
+  const db = createSupabaseServer();
+  const { data } = await db
+    .from('kefy_autopilot_rules')
+    .select('*')
+    .eq('status', 'paused')
+    .eq('paused_reason', 'credits_exhausted')
+    .lt('paused_at', currentCreditPeriodStart(now).toISOString())
+    .limit(100);
+  const resumed: string[] = [];
+  for (const raw of (data ?? []) as AutopilotRuleRow[]) {
+    const rule = withDefaults(raw);
+    const { data: done } = await db
+      .from('kefy_autopilot_rules')
+      .update({
+        status: 'active', paused_reason: null, paused_at: null,
+        next_run_at: nextRunForRule(rule, now).toISOString(),
+      })
+      .eq('id', rule.id)
+      .eq('status', 'paused')
+      .eq('paused_reason', 'credits_exhausted')
+      .select('id');
+    if ((done ?? []).length) resumed.push(rule.id);
+  }
+  return resumed;
 }
 
 async function mergeItemMetadata(db: Db, itemId: string, patch: Record<string, unknown>, extra: Record<string, unknown> = {}) {
@@ -564,7 +738,7 @@ async function publishToAccounts(
   format: AutopilotFormat,
   accountIds: string[],
   slot: string | null,
-): Promise<string[]> {
+): Promise<{ ids: string[]; scheduled: boolean }> {
   const scheduled = !!slot && new Date(slot).getTime() > Date.now() + MIN_SCHEDULE_LEAD_MS;
   const { body } = await publishContent(ctx, {
     itemId,
@@ -575,12 +749,18 @@ async function publishToAccounts(
   });
   const ok = body.results.filter((r) => r.status !== 'failed');
   if (ok.length === 0) throw new Error(body.results.find((r) => r.error)?.error ?? 'Publish failed');
-  return ok.map((r) => r.scheduled_post_id).filter((id): id is string => !!id);
+  return { ids: ok.map((r) => r.scheduled_post_id).filter((id): id is string => !!id), scheduled };
 }
 
 /** Genera la pieza con su media. Devuelve el id; un reel queda produciéndose. */
-async function produceItem(ctx: ServiceContext, rule: AutopilotRuleRow, pick: AutopilotTopic, format: AutopilotFormat): Promise<string> {
-  const topic = rule.tone ? `${pick.topic}\n(${msg(ctx.language, 'Tono', 'Tone')}: ${rule.tone})` : pick.topic;
+async function produceItem(
+  ctx: ServiceContext,
+  rule: AutopilotRuleRow,
+  pickTopic: string,
+  format: AutopilotFormat,
+  sizes: { slideCount?: number; sceneCount?: number },
+): Promise<string> {
+  const topic = rule.tone ? `${pickTopic}\n(${msg(ctx.language, 'Tono', 'Tone')}: ${rule.tone})` : pickTopic;
   const channel = rule.channel;
 
   if (format === 'post') {
@@ -590,7 +770,7 @@ async function produceItem(ctx: ServiceContext, rule: AutopilotRuleRow, pick: Au
     if (!itemId) throw new Error('Failed to save content item');
     try {
       // El mismo prompt que usa la UI para la imagen de un post: su texto.
-      await generateImageForItem(ctx, { itemId, prompt: result.body.slice(0, 400) || pick.topic });
+      await generateImageForItem(ctx, { itemId, prompt: result.body.slice(0, 400) || pickTopic });
     } catch (err) {
       throw withItem(err, itemId);
     }
@@ -598,7 +778,7 @@ async function produceItem(ctx: ServiceContext, rule: AutopilotRuleRow, pick: Au
   }
 
   if (format === 'carousel') {
-    const out = await generateCarousel(ctx, { topic, channel, slideCount: pick.slideCount });
+    const out = await generateCarousel(ctx, { topic, channel, slideCount: sizes.slideCount });
     if (!out.itemId) throw new Error('Failed to save carousel');
     // Slides sin imagen se publicarían como texto sobre un fondo: no.
     if (out.slides.some((s) => !s.image_url)) {
@@ -609,7 +789,21 @@ async function produceItem(ctx: ServiceContext, rule: AutopilotRuleRow, pick: Au
     return out.itemId;
   }
 
-  const out = await generateReel(ctx, { topic, channel, scene_count: pick.sceneCount });
+  if (format === 'story') {
+    const out = await generateStory(ctx, { topic, channel });
+    if (!out.itemId) throw new Error('Failed to save story');
+    // Una story sin imagen no se puede publicar (las Stories no muestran texto).
+    if (!out.image_url) {
+      const message = msg(ctx.language,
+        'La historia quedó sin imagen; queda como borrador.', 'The story has no image; it stays as a draft.');
+      throw withItem(out.imageError === 'credits_exhausted'
+        ? new ServiceError('credits_exhausted', 429, message, { error: message, creditsExhausted: true })
+        : new Error(message), out.itemId);
+    }
+    return out.itemId;
+  }
+
+  const out = await generateReel(ctx, { topic, channel, scene_count: sizes.sceneCount });
   const itemId = out.variants[0]!.itemId;
   try {
     await produceVideo(ctx, { itemId });
@@ -626,6 +820,58 @@ function withItem(err: unknown, itemId: string): Error {
   return e;
 }
 
+const isCreditsError = (err: unknown) => err instanceof ServiceError && err.code === 'credits_exhausted';
+
+export interface DerivedStoryResult {
+  status: 'scheduled' | 'published' | 'failed' | 'skipped';
+  scheduled_at?: string;
+  scheduled_post_ids?: string[];
+  error?: string;
+}
+
+/**
+ * La story derivada de una pieza ya publicada o programada: la conversión de
+ * formato (convert_content_format) y su publicación en las cuentas con Stories,
+ * `story_delay_minutes` después del hueco de la pieza. Nunca lanza: si falla,
+ * la pieza sigue en pie y el fallo queda en la ejecución.
+ */
+async function scheduleDerivedStory(
+  db: Db,
+  ctx: ServiceContext,
+  rule: AutopilotRuleRow,
+  args: { runId: string | null; itemId: string; mainAt: string | null; accounts: AccountRow[]; now: Date; cron: boolean },
+): Promise<DerivedStoryResult> {
+  const record = async (patch: Record<string, unknown>) => {
+    if (args.runId) await db.from('kefy_autopilot_runs').update(patch).eq('id', args.runId);
+  };
+  const targets = args.accounts.filter(isStoryAccount);
+  if (targets.length === 0) {
+    const error = msg(ctx.language,
+      'Ninguna cuenta de la regla tiene historias (Instagram, Facebook o Snapchat).',
+      'None of the rule accounts supports stories (Instagram, Facebook or Snapchat).');
+    await record({ story_status: 'skipped', story_error: error });
+    return { status: 'skipped', error };
+  }
+
+  try {
+    await generateRendition(ctx, { itemId: args.itemId, format: 'story' });
+    const mainAt = args.mainAt && new Date(args.mainAt) > args.now ? new Date(args.mainAt) : args.now;
+    const at = new Date(mainAt.getTime() + rule.story_delay_minutes * 60_000).toISOString();
+    const { ids, scheduled } = await publishToAccounts(ctx, args.itemId, 'story', targets.map((a) => a.id), at);
+    const status = scheduled ? 'scheduled' : 'published';
+    await record({ story_status: status, story_scheduled_post_ids: ids, story_error: null });
+    return { status, scheduled_at: at, scheduled_post_ids: ids };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : 'Story failed';
+    if (!(err instanceof ServiceError && (err.reported || err.status < 500))) {
+      reportError(err, { route: ROUTE, service: 'autopilot', extra: { ruleId: rule.id, itemId: args.itemId, fase: 'story' } });
+    }
+    await record({ story_status: 'failed', story_error: error });
+    if (args.cron && isCreditsError(err)) await pauseForCredits(db, rule, ctx.language, error, args.now);
+    return { status: 'failed', error };
+  }
+}
+
 export interface AutopilotRunResult {
   rule_id: string;
   rule_name: string;
@@ -633,8 +879,16 @@ export interface AutopilotRunResult {
   format?: AutopilotFormat;
   content_item_id?: string;
   scheduled_post_ids?: string[];
+  /** Lo que se estimó antes de gastar (pieza + story derivada). */
+  credits_estimated?: number;
   /** Reel: se publica cuando el video esté listo. */
   pending_video?: boolean;
+  /** Reel: la producción falló y se lanzó otra. */
+  video_retry?: boolean;
+  /** Story derivada (also_story). */
+  story?: DerivedStoryResult;
+  /** La regla quedó pausada por falta de créditos. */
+  paused?: boolean;
   error?: string;
 }
 
@@ -646,24 +900,31 @@ export interface ExecuteOptions {
 }
 
 /**
- * Ejecuta una regla: genera la pieza con su media en la marca de la regla, la
- * publica en sus cuentas activas para el hueco de la regla (un reel, cuando
- * su video esté listo) y adelanta next_run_at. Registra la ejecución en
- * kefy_autopilot_runs. Cobra por los servicios, como la UI.
+ * Ejecuta una regla: genera la pieza en el formato que toca, en la marca de la
+ * regla, la publica en sus cuentas activas para el hueco de la regla (un reel,
+ * cuando su video esté listo), con su story derivada si se pidió, y adelanta
+ * next_run_at. Registra la ejecución en kefy_autopilot_runs. Cobra por los
+ * servicios, como la UI.
  */
 export async function executeAutopilotRule(
   db: Db,
-  rule: AutopilotRuleRow,
+  rawRule: AutopilotRuleRow,
   now: Date = new Date(),
   opts: ExecuteOptions = {},
 ): Promise<AutopilotRunResult> {
+  const rule = withDefaults(rawRule);
+  const cron = !opts.ctx;
   const base = { rule_id: rule.id, rule_name: rule.name };
-  const fail = async (message: string, itemId?: string): Promise<AutopilotRunResult> => {
-    await db.from('kefy_autopilot_runs').insert({
-      rule_id: rule.id, org_id: rule.org_id, brand_id: rule.brand_id,
-      content_item_id: itemId ?? null, status: 'failed', error_message: message,
-    });
-    return { ...base, status: 'failed', content_item_id: itemId, error: message };
+  const runRow = (row: Record<string, unknown>) => ({ rule_id: rule.id, org_id: rule.org_id, brand_id: rule.brand_id, ...row });
+  const fail = async (
+    message: string, extra: { itemId?: string; format?: AutopilotFormat; credits?: number } = {},
+  ): Promise<AutopilotRunResult> => {
+    await db.from('kefy_autopilot_runs').insert(runRow({
+      content_item_id: extra.itemId ?? null, status: 'failed', error_message: message,
+      format: extra.format ?? null, credits_estimated: extra.credits ?? null,
+      ...(extra.format === 'reel' && extra.itemId ? { video_status: 'failed' } : {}),
+    }));
+    return { ...base, status: 'failed', format: extra.format, content_item_id: extra.itemId, credits_estimated: extra.credits, error: message };
   };
 
   let ctx: ServiceContext;
@@ -680,57 +941,85 @@ export async function executeAutopilotRule(
   const pick = parseAutopilotTopic(
     topicHints.length > 0 ? topicHints[Math.floor(Math.random() * topicHints.length)] : rule.name,
   );
-  const format = pick.format ?? defaultAutopilotFormat(accounts.map((a) => a.platform));
+  const slot = rule.next_run_at;
+  const format = resolveRunFormat(rule, pick, accounts.map((a) => a.platform), slot ? new Date(slot) : now);
+  // El tamaño de la etiqueta ([CARRUSEL 8 slides]) vale si el formato es el suyo.
+  const sizes = pick.format === format ? { slideCount: pick.slideCount, sceneCount: pick.sceneCount } : {};
+  const alsoStory = rule.also_story && format !== 'story';
+  const credits = estimateRunCredits(format, { ...sizes, alsoStory });
+  const targets = format === 'story' ? accounts.filter(isStoryAccount) : accounts;
 
   const blocked = accounts.length === 0
     ? new ServiceError('invalid_input', 422, msg(ctx.language,
       'La regla no tiene cuentas activas donde publicar.', 'The rule has no active accounts to post to.'))
-    : await preflight(ctx, estimateAutopilotCredits(format, pick));
+    : targets.length === 0
+      ? new ServiceError('invalid_input', 422, msg(ctx.language,
+        'Hoy toca una historia y la regla no tiene cuentas con historias (Instagram, Facebook o Snapchat).',
+        "Today's run is a story and the rule has no accounts with stories (Instagram, Facebook or Snapchat)."))
+      : await preflight(ctx, credits);
   if (blocked && opts.throwIfBlocked) throw blocked;
 
   // Se reclama el hueco antes de gastar: si otra vuelta ya lo tomó, nada.
-  const slot = rule.next_run_at;
   if (!(await claimSlot(db, rule, now))) return { ...base, status: 'failed', error: 'Already running' };
-  if (blocked) return fail(blocked.message);
+  if (blocked) {
+    const result = await fail(blocked.message, { format, credits });
+    if (cron && blocked.code === 'credits_exhausted') result.paused = await pauseForCredits(db, rule, ctx.language, blocked.message, now);
+    return result;
+  }
 
   let itemId: string | undefined;
   try {
-    itemId = await produceItem(ctx, rule, pick, format);
+    itemId = await produceItem(ctx, rule, pick.topic, format, sizes);
     const autopilotMeta = { autopilot: true, rule_id: rule.id, model: rule.ai_model, autopilot_format: format };
 
     if (format === 'reel') {
-      const { data: run } = await db.from('kefy_autopilot_runs').insert({
-        rule_id: rule.id, org_id: rule.org_id, brand_id: rule.brand_id,
-        content_item_id: itemId, scheduled_post_ids: [], status: 'success',
-      }).select('id').single();
+      const { data: run } = await db.from('kefy_autopilot_runs').insert(runRow({
+        content_item_id: itemId, scheduled_post_ids: [], status: 'success', format, credits_estimated: credits,
+        video_status: 'producing', video_attempts: 1,
+      })).select('id').single();
       await mergeItemMetadata(db, itemId, {
         ...autopilotMeta,
         autopilot_publish: {
           status: 'waiting',
           rule_id: rule.id,
           run_id: (run as { id?: string } | null)?.id ?? null,
-          account_ids: accounts.map((a) => a.id),
+          account_ids: targets.map((a) => a.id),
           scheduled_at: slot ?? now.toISOString(),
           requested_at: now.toISOString(),
+          attempts: 1,
+          also_story: alsoStory,
         },
       }, { status: 'approved' });
-      return { ...base, status: 'success', format, content_item_id: itemId, scheduled_post_ids: [], pending_video: true };
+      return {
+        ...base, status: 'success', format, content_item_id: itemId, scheduled_post_ids: [], pending_video: true,
+        credits_estimated: credits,
+      };
     }
 
     await mergeItemMetadata(db, itemId, autopilotMeta, { status: 'approved', content_type: format });
-    const scheduledPostIds = await publishToAccounts(ctx, itemId, format, accounts.map((a) => a.id), slot);
+    const { ids: scheduledPostIds } = await publishToAccounts(ctx, itemId, format, targets.map((a) => a.id), slot);
 
-    await db.from('kefy_autopilot_runs').insert({
-      rule_id: rule.id, org_id: rule.org_id, brand_id: rule.brand_id,
-      content_item_id: itemId, scheduled_post_ids: scheduledPostIds, status: 'success',
-    });
-    return { ...base, status: 'success', format, content_item_id: itemId, scheduled_post_ids: scheduledPostIds };
+    const { data: run } = await db.from('kefy_autopilot_runs').insert(runRow({
+      content_item_id: itemId, scheduled_post_ids: scheduledPostIds, status: 'success', format, credits_estimated: credits,
+    })).select('id').single();
+    const result: AutopilotRunResult = {
+      ...base, status: 'success', format, content_item_id: itemId, scheduled_post_ids: scheduledPostIds,
+      credits_estimated: credits,
+    };
+    if (alsoStory) {
+      result.story = await scheduleDerivedStory(db, ctx, rule, {
+        runId: (run as { id?: string } | null)?.id ?? null, itemId, mainAt: slot, accounts, now, cron,
+      });
+    }
+    return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    if (!(err instanceof ServiceError && err.reported)) {
+    if (!(err instanceof ServiceError && (err.reported || err.status < 500))) {
       reportError(err, { route: ROUTE, service: 'autopilot', extra: { ruleId: rule.id, orgId: rule.org_id, format } });
     }
-    return fail(message, itemId ?? (err as { itemId?: string }).itemId);
+    const result = await fail(message, { itemId: itemId ?? (err as { itemId?: string }).itemId, format, credits });
+    if (cron && isCreditsError(err)) result.paused = await pauseForCredits(db, rule, ctx.language, message, now);
+    return result;
   }
 }
 
@@ -741,12 +1030,16 @@ type PendingPublish = {
   account_ids: string[];
   scheduled_at: string;
   requested_at: string;
+  /** Producciones lanzadas (las piezas de antes no lo tienen: 1). */
+  attempts?: number;
+  also_story?: boolean;
   error?: string;
 };
 
 /**
- * Publica los reels del autopilot cuyo video ya está listo, y cierra los que
- * no van a estarlo (la producción falló o lleva demasiado). Lo llama el cron.
+ * Publica los reels del autopilot cuyo video ya está listo. Si la producción
+ * falló, la relanza una vez; si vuelve a fallar (o lleva demasiado), cierra la
+ * ejecución como fallida y avisa por correo. Lo llama el cron.
  */
 export async function publishReadyAutopilotReels(now: Date = new Date()): Promise<AutopilotRunResult[]> {
   const db = createSupabaseServer();
@@ -775,15 +1068,18 @@ export async function publishReadyAutopilotReels(now: Date = new Date()): Promis
     if (!claimed?.length) continue;
 
     const { data: rule } = await db.from('kefy_autopilot_rules').select('*').eq('id', pending.rule_id).maybeSingle();
-    const ruleRow = rule as AutopilotRuleRow | null;
+    const ruleRow = rule ? withDefaults(rule as AutopilotRuleRow) : null;
     const base = { rule_id: pending.rule_id, rule_name: ruleRow?.name ?? '', format: 'reel' as const, content_item_id: item.id };
+    const attempts = pending.attempts ?? 1;
 
+    const updateRun = async (patch: Record<string, unknown>) => {
+      if (pending.run_id) await db.from('kefy_autopilot_runs').update(patch).eq('id', pending.run_id);
+    };
     const close = async (status: PendingPublish['status'], patch: { error?: string; scheduled_post_ids?: string[] }) => {
       await mergeItemMetadata(db, item.id, { autopilot_publish: { ...pending, status, ...(patch.error ? { error: patch.error } : {}) } });
-      if (!pending.run_id) return;
-      await db.from('kefy_autopilot_runs').update(patch.error
-        ? { status: 'failed', error_message: patch.error }
-        : { scheduled_post_ids: patch.scheduled_post_ids ?? [] }).eq('id', pending.run_id);
+      await updateRun(patch.error
+        ? { status: 'failed', error_message: patch.error, video_status: status === 'cancelled' ? 'cancelled' : 'failed' }
+        : { scheduled_post_ids: patch.scheduled_post_ids ?? [], video_status: 'published' });
     };
 
     if (!ruleRow) {
@@ -791,22 +1087,70 @@ export async function publishReadyAutopilotReels(now: Date = new Date()): Promis
       await close('cancelled', { error: 'Rule deleted' });
       continue;
     }
+
+    let ctx: ServiceContext;
+    try {
+      ctx = await ruleContext(db, ruleRow);
+    } catch (err) {
+      reportError(err, { route: ROUTE, service: 'autopilot', extra: { ruleId: ruleRow.id, itemId: item.id } });
+      await close('failed', { error: err instanceof Error ? err.message : 'Unknown error' });
+      continue;
+    }
+
     if (!ready) {
-      const error = timedOut ? 'El video no terminó de producirse a tiempo' : 'La producción del video falló';
+      // La producción falló (no es que siga en curso): se relanza una vez. Los
+      // créditos del intento fallido ya se devolvieron (docs/video-pipeline.md).
+      let retryError: string | null = null;
+      if (!timedOut && attempts < MAX_VIDEO_ATTEMPTS) {
+        try {
+          await produceVideo(ctx, { itemId: item.id });
+          await mergeItemMetadata(db, item.id, {
+            autopilot_publish: { ...pending, status: 'waiting', attempts: attempts + 1, requested_at: now.toISOString() },
+          });
+          await updateRun({ video_status: 'producing', video_attempts: attempts + 1 });
+          results.push({ ...base, status: 'success', pending_video: true, video_retry: true });
+          continue;
+        } catch (err) {
+          retryError = err instanceof Error ? err.message : 'Retry failed';
+          if (!(err instanceof ServiceError && (err.reported || err.status < 500))) {
+            reportError(err, { route: ROUTE, service: 'autopilot', extra: { ruleId: ruleRow.id, itemId: item.id, fase: 'reintento' } });
+          }
+          if (isCreditsError(err)) await pauseForCredits(db, ruleRow, ctx.language, retryError, now);
+        }
+      }
+      const error = timedOut
+        ? msg(ctx.language, 'El video no terminó de producirse a tiempo.', 'The video did not finish in time.')
+        : retryError ?? msg(ctx.language,
+          `La producción del video falló (${attempts} ${attempts === 1 ? 'intento' : 'intentos'}).`,
+          `The video production failed (${attempts} ${attempts === 1 ? 'attempt' : 'attempts'}).`);
       await close('failed', { error });
+      await sendAutopilotAlert({
+        kind: 'video_failed', orgId: ruleRow.org_id, ruleId: ruleRow.id, ruleName: ruleRow.name,
+        userId: ruleRow.created_by, language: ctx.language, detail: error,
+      });
       results.push({ ...base, status: 'failed', error });
       continue;
     }
 
     try {
-      const ctx = await ruleContext(db, ruleRow);
-      const ids = await publishToAccounts(ctx, item.id, 'reel', pending.account_ids, pending.scheduled_at);
+      const { ids } = await publishToAccounts(ctx, item.id, 'reel', pending.account_ids, pending.scheduled_at);
       await close('done', { scheduled_post_ids: ids });
-      results.push({ ...base, status: 'success', scheduled_post_ids: ids });
+      const result: AutopilotRunResult = { ...base, status: 'success', scheduled_post_ids: ids };
+      if (pending.also_story) {
+        result.story = await scheduleDerivedStory(db, ctx, ruleRow, {
+          runId: pending.run_id, itemId: item.id, mainAt: pending.scheduled_at,
+          accounts: await activeAccounts(db, ruleRow), now, cron: true,
+        });
+      }
+      results.push(result);
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Publish failed';
       reportError(err, { route: ROUTE, service: 'zernio', extra: { itemId: item.id, ruleId: pending.rule_id } });
       await close('failed', { error });
+      await sendAutopilotAlert({
+        kind: 'publish_failed', orgId: ruleRow.org_id, ruleId: ruleRow.id, ruleName: ruleRow.name,
+        userId: ruleRow.created_by, language: ctx.language, detail: error,
+      });
       results.push({ ...base, status: 'failed', error });
     }
   }
@@ -817,6 +1161,8 @@ export interface AutopilotRunSummary {
   executed: number;
   failed: number;
   results: AutopilotRunResult[];
+  /** Cron: reglas pausadas por créditos que se reanudaron al renovarse el mes. */
+  resumed?: string[];
 }
 
 function summarize(results: AutopilotRunResult[]): AutopilotRunSummary {
@@ -833,6 +1179,7 @@ function summarize(results: AutopilotRunResult[]): AutopilotRunSummary {
  * servicios. Antes de gastar mira que alcancen la suscripción y los créditos:
  * si no alcanzan para la primera regla se lanza el error (402 / 429); para
  * las siguientes, esas quedan como fallidas y las que corrieron se conservan.
+ * Una persona que pide ejecutar ve el 429: la regla no se pausa.
  */
 export async function runAutopilotNow(
   ctx: ServiceContext,
@@ -875,16 +1222,17 @@ export async function runAutopilotNow(
 }
 
 /**
- * Cron: primero publica los reels que ya terminaron; después ejecuta las
+ * Cron: reanuda las reglas pausadas por créditos de un mes anterior, publica
+ * los reels que ya terminaron (o relanza los que fallaron) y ejecuta las
  * reglas activas vencidas de todas las orgs (o las `ruleIds` pedidas con el
- * secreto del cron). Cobra a cada org como la UI; sin saldo, la ejecución
- * queda registrada como fallida y la regla sigue con su calendario.
+ * secreto del cron). Cobra a cada org como la UI; sin saldo, la regla se pausa.
  */
 export async function runScheduledAutopilot(
   ruleIds: string[] | null,
   now: Date = new Date(),
 ): Promise<AutopilotRunSummary> {
   const startedAt = Date.now();
+  const resumed = await resumeCreditPausedRules(now);
   const results: AutopilotRunResult[] = await publishReadyAutopilotReels(now);
 
   const db = createSupabaseServer();
@@ -898,5 +1246,5 @@ export async function runScheduledAutopilot(
     if (Date.now() - startedAt > CRON_RUN_BUDGET_MS) break;
     results.push(await executeAutopilotRule(db, rule, now));
   }
-  return summarize(results);
+  return { ...summarize(results), ...(resumed.length ? { resumed } : {}) };
 }

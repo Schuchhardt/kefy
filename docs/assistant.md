@@ -221,13 +221,45 @@ protecciones de `lib/services/media-ingest.ts` y se re-aloja antes de usarla.
 
 **Autopilot.** Las reglas son de una marca. `save_autopilot_rule` crea (sin
 `id`) o edita (con `id`, incluido `status: "paused" | "active"`).
-`run_autopilot_now` genera y programa ahora. Cada ejecución sale con su media
-en el formato que marque el tema elegido (`[POST]` post con imagen,
-`[CARRUSEL 5 slides]`, `[REEL 30s]`; sin etiqueta, reel si todas las cuentas son
-de TikTok/YouTube y post con imagen si no) y cuesta lo de ese formato. La
-tarjeta de confirmación anuncia el peor caso entre los temas de la regla
-(`estimateAutopilotRuleCredits`). Un reel se publica cuando su video está listo
-(lo hace el cron). La ejecución programada del cron cobra igual.
+`run_autopilot_now` genera y programa ahora. Qué genera cada ejecución:
+
+| Campo | Qué hace |
+|---|---|
+| `format` | `post` (create_post: texto + imagen), `carousel` (create_carousel), `story` (create_story: imagen vertical; solo se publica en las cuentas de Instagram, Facebook y Snapchat) o `reel` (create_reel + produce_video; se publica cuando el video está listo). `null` = automático: la etiqueta del tema (`[POST]`, `[CARRUSEL 5 slides]`, `[HISTORIA]`, `[REEL 30s]`) o, sin etiqueta, reel si todas las cuentas son de TikTok/YouTube y post si no |
+| `weekly_formats` | Mezcla semanal, solo con `frequency: "daily"`: `{"4": "reel"}` = el formato de la regla todos los días y reel los jueves; `"skip"` deja ese día sin publicación. Día 0 = domingo, en la zona de la regla |
+| `also_story` | Cada pieza trae su historia derivada: la misma conversión que `convert_content_format`, publicada en las cuentas con Stories `story_delay_minutes` (por defecto 120) después del hueco de la pieza. En un reel, cuando el video se publica. +4 créditos |
+
+Precedencia del formato: mezcla semanal → `format` → etiqueta del tema → red
+(`resolveRunFormat` en `lib/autopilot-formats.ts`, módulo puro que comparten el
+servicio, las herramientas y la página). Guardar una regla que publica
+historias sin ninguna cuenta con Stories, o una mezcla semanal en una regla que
+no es diaria, responde 422.
+
+**La hora es la local de la zona de la regla** (`computeNextRun`). Antes se
+calculaba en la hora del servidor (UTC en Vercel): «09:00 America/Santiago»
+salía a las 09:00 UTC. La quincenal ahora salta dos semanas tras cada ejecución
+(antes caía cada semana).
+
+`list_autopilot_rules` devuelve por regla: `format` (`auto` si es `null`),
+`weekly_formats`, `also_story`, `story_delay_minutes`, `paused_reason`
+(`credits_exhausted` = la pausó el sistema y se reanuda sola al renovarse los
+créditos), `cost` (`per_run_min`, `per_run_max`, `by_format`, `per_month`) y
+`last_run` con su estado, error, créditos estimados, `video` (`producing` →
+`published` | `failed` | `cancelled`, con `attempts`) y `story` (`scheduled`,
+`published`, `failed` o `skipped`). El avance paso a paso de un reel sale de
+`get_video_status` con `last_run.content_item_id`. La tarjeta de confirmación de
+`save_autopilot_rule` muestra formato, mezcla y créditos por ejecución y al
+mes; la de `run_autopilot_now`, el peor caso entre los temas de cada regla
+(`estimateAutopilotRuleCredits`). La ejecución programada del cron cobra igual;
+si no alcanzan los créditos, pausa la regla y avisa (ver
+[`docs/beta-abierta.md`](beta-abierta.md), «Autopilot»). Un reel cuya
+producción falla se relanza una vez.
+
+Columnas nuevas (migración `20261104000001_autopilot_formats.sql`): en
+`kefy_autopilot_rules`, `format`, `weekly_formats`, `also_story`,
+`story_delay_minutes`, `paused_reason`, `paused_at`; en `kefy_autopilot_runs`,
+`format`, `credits_estimated`, `video_status`, `video_attempts`,
+`story_status`, `story_scheduled_post_ids`, `story_error`.
 
 Recomendaciones:
 
@@ -375,9 +407,29 @@ autorización de MCP (`lib/assistant/oauth.ts`):
   Ajustes → API y MCP con la etiqueta «Conexión OAuth» y se revoca igual; no
   cuenta para el tope de 10 keys.
 - **Tokens.** Access `kefy_at_…` (1 hora, `access_expires_at`); refresh
-  `kefy_rt_…` que rota en cada uso: el anterior deja de valer en el acto. La
-  conexión caduca a los 90 días sin usar (`expires_at`, se renueva en cada
-  refresh). Código `kefy_ac_…`: un solo uso, 10 minutos. Solo se guardan hashes.
+  `kefy_rt_…` que rota en cada uso. La conexión caduca a los 90 días sin usar
+  (`expires_at`, se renueva en cada refresh). Código `kefy_ac_…`: un solo uso,
+  10 minutos. Solo se guardan hashes.
+- **Margen al rotar** (migración `20261104000002_oauth_rotation_grace.sql`).
+  Antes el access y el refresh anteriores dejaban de valer en el acto: si un
+  cliente renovaba dos veces a la vez (dos llamadas que reciben 401 juntas, como
+  hace el modo de voz de Claude), la segunda recibía `invalid_grant` y el
+  cliente daba la conexión por caducada; y una llamada en curso recibía 401 si
+  otra renovaba. Ahora:
+  - el access anterior (`prev_key_hash`) sigue valiendo hasta 10 minutos, nunca
+    más allá de su propia caducidad;
+  - el refresh anterior (`prev_refresh_hash`), reutilizado dentro de 2 minutos,
+    devuelve **el mismo par** ya emitido sin rotar otra vez: el par de una
+    rotación se deriva del refresh con un HMAC (`OAUTH_TOKEN_SECRET`, o
+    `JWT_SECRET` si falta). Sin secreto los tokens son aleatorios y una
+    renovación simultánea sigue recibiendo `invalid_grant`;
+  - pasado el margen, o tras otra rotación encima, `invalid_grant` como antes.
+    Revocar la conexión corta todo en el acto.
+- **Logs de `/api/mcp`.** Una línea `[mcp]` por cada 401/403 con token (el
+  motivo: `Access token expired`, `Invalid API key`, `forbidden origin=…`) y
+  por cada `tools/call` (herramienta, key, duración y código de error), sin
+  tokens ni argumentos. Sirven para diagnosticar herramientas que «caducan» en
+  un cliente.
 - **Quién autoriza.** Igual que para crear una key: dueño o administrador, con
   suscripción activa. Un miembro ve la pantalla pero no puede aprobar.
 - **Permisos.** La persona elige scopes y marca en el consentimiento. Lectura y
@@ -549,6 +601,8 @@ Los links del asistente abren la página en la opción concreta:
 | `lib/services/leads.ts`, `app/api/automations/leads/**` | Leads de la marca |
 | `lib/services/lead-scoring.ts`, `app/api/automations/leads/scoring` | Puntos por interacción, umbrales de etapa y registro de interacciones |
 | `lib/services/autopilot.ts`, `app/api/autopilot/**` | Reglas y ejecución del autopilot |
+| `lib/autopilot-formats.ts` | Autopilot puro: formato de cada ejecución, costo, calendario en la zona de la regla (lo usa también la página) |
+| `lib/autopilot-alerts.ts`, `emails/AutopilotAlert.tsx` | Correo cuando una regla se pausa por créditos o un reel no sale |
 | `lib/safe-redirect.ts` | `?next=` del login y del registro: solo rutas propias del idioma (dashboard, onboarding, invitación, consentimiento OAuth) |
 | `lib/services/brand-enrich.ts` | Leer la web de una marca con Firecrawl (`enrichBrandFromUrl`, 1 crédito), `storeWebLogos` (todos sus logos e íconos a la biblioteca, sin duplicar), `fillEmptyFields` (solo rellena lo vacío) e `importBrandFromWebsite`. La usan `POST /api/brand-kit/enrich-url`, `POST /api/brand-kit/assets/import`, el onboarding y `import_brand_from_website` |
 | `lib/services/onboarding.ts`, `app/api/onboarding/starter` | «Pega tu web → 3 posts» (`createStarterPosts`): lee la web si la hay, completa lo vacío del Brand Kit y escribe 3 borradores. La usan la página `/{lang}/onboarding` y `create_starter_posts` |
