@@ -1,0 +1,15 @@
+.muted { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.6; display: flex; align-items: center; gap: 8px; }
+.intro { margin: 0 0 12px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+.list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; }
+.row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 0; }
+.row + .row { border-top: 1px solid var(--border); }
+.rowText { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.rowName { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowState { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.row[data-state="published"] .rowState,
+.row[data-state="scheduled"] .rowState,
+.row[data-state="available"] .rowState { color: var(--text); }
+.stateIcon { color: var(--accent-text); }
+
+.done { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }

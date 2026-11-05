@@ -174,6 +174,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Pasar contenido ya escrito desde otro proyecto | `create_manual_content`, `update_content` (texto, slides, estado, `image_url`, `video_url`) | write |
 | Ver y buscar contenido | `list_content`, `get_content` | read |
 | Publicar o programar | `publish_content`, `list_scheduled_posts`, `reschedule_scheduled_post`, `cancel_scheduled_post` | publish |
+| Ver dónde está un contenido y en qué otras cuentas compatibles se puede publicar (borrador, programado o publicado) | `list_publish_targets` (`publish_content` devuelve además `also_available`); ver `docs/zernio.md`, *Publicar el mismo contenido en otras redes* | read |
 | Estrategias (catálogo y propias) | `get_strategy_catalog`, `preview_strategy`, `save_custom_strategy`, `set_active_strategy`, `get_content_ideas` | read / write |
 | Estadísticas de contenido | `get_analytics_overview`, `list_post_performance`, `sync_social_data` | read / write |
 | Cuentas conectadas | `list_social_accounts` (read) · `disconnect_social_account` (write; borra en cascada sus publicaciones, DMs y comentarios y la quita de las reglas de autopilot) | read / write |

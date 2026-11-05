@@ -12,6 +12,10 @@
 //   - Publicado: de solo lectura (nada de editar un post que ya salió) más
 //     sus estadísticas reales, y un atajo para generar contenido nuevo con el
 //     mismo tema ("crear uno similar").
+//
+// En los dos casos la tarjeta «Redes» (PublishTargetsCard) dice en qué
+// cuentas está y recomienda publicar el mismo contenido en las compatibles
+// que faltan.
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -34,6 +38,7 @@ import EditContentModal from '@/components/dashboard/content/EditContentModal';
 import RescheduleModal, { formatScheduledDate } from '@/components/dashboard/content/RescheduleModal';
 import { scheduledSyncNotice } from '@/components/dashboard/content/scheduled-sync';
 import ViewPublishedLink from '@/components/dashboard/content/ViewPublishedLink';
+import PublishTargetsCard from '@/components/dashboard/content/PublishTargetsCard';
 import type { ContentItem, ContentType, CarouselSlide, ReelScene, BrandKitInfo } from '@/types/content';
 import esT from '@/locales/es/dashboard/content-detail';
 import enT from '@/locales/en/dashboard/content-detail';
@@ -104,6 +109,7 @@ export default function ContentDetailPage() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewChannel, setPreviewChannel] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
+  const [publishAccounts, setPublishAccounts] = useState<string[] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [brandSwitchFailed, setBrandSwitchFailed] = useState(false);
@@ -281,6 +287,52 @@ export default function ContentDetailPage() {
   const upcoming = scheduledPosts
     .filter(isUpcoming)
     .sort((a, b) => a.scheduled_at!.localeCompare(b.scheduled_at!));
+  // Cambia al publicar, programar o cancelar: la tarjeta «Redes» se relee.
+  const targetsKey = `${item.status}|${scheduledPosts.map((p) => `${p.id}:${p.status}`).join(',')}`;
+
+  const openPublish = (accountIds?: string[]) => {
+    setPublishAccounts(accountIds ?? null);
+    setScheduleOpen(true);
+  };
+
+  const targetsCard = (
+    <PublishTargetsCard itemId={item.id} lang={locale} refreshKey={targetsKey} onPublish={openPublish} />
+  );
+
+  // Lo programado se puede mover o cancelar también en un contenido ya
+  // publicado: su salida a otra red.
+  const upcomingCard = upcoming.length > 0 && (
+    <section className="ui-card" aria-labelledby="content-schedule-title">
+      <div className="ui-card-head">
+        <h2 id="content-schedule-title" className="ui-card-title">{t.scheduleTitle}</h2>
+      </div>
+      <ul className={styles.scheduleList}>
+        {upcoming.map((p) => {
+          const platform = p.kefy_social_accounts?.platform ?? null;
+          return (
+            <li key={p.id} className={styles.scheduleItem}>
+              <div className={styles.metricsNet}>
+                <ChannelIcon name={platform ?? item.channel} size={14} />
+                <span className={styles.metricsNetName}>
+                  {platform ? (NET_LABEL[platform] ?? platform) : channelLabel}
+                  {p.kefy_social_accounts?.username ? ` · @${p.kefy_social_accounts.username}` : ''}
+                </span>
+              </div>
+              <p className={styles.scheduleWhen}>{ts.scheduledFor(formatScheduledDate(p.scheduled_at!, locale))}</p>
+              <div className={styles.scheduleActions}>
+                <Button variant="secondary" size="sm" icon={<Icon name="calendar" size={14} />} onClick={() => { setScheduleNotice(null); setReschedulePost(p); }}>
+                  {ts.reschedule}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void handleCancelScheduled(p)}>
+                  {t.cancelScheduled}
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 
   return (
     <div className="page" style={{ maxWidth: 1000, margin: '0 auto' }}>
@@ -365,7 +417,7 @@ export default function ContentDetailPage() {
                   block
                   className={styles.publishOn}
                   icon={<Icon name="send" size={16} />}
-                  onClick={() => { setPublishTarget(previewChannel); setScheduleOpen(true); }}
+                  onClick={() => { setPublishTarget(previewChannel); openPublish(); }}
                 >
                   {t.publishOn(NET_LABEL[previewChannel] ?? previewChannel)}
                 </Button>
@@ -378,42 +430,12 @@ export default function ContentDetailPage() {
         <div className={styles.side}>
           {!isPublished ? (
             <>
-            {upcoming.length > 0 && (
-              <section className="ui-card" aria-labelledby="content-schedule-title">
-                <div className="ui-card-head">
-                  <h2 id="content-schedule-title" className="ui-card-title">{t.scheduleTitle}</h2>
-                </div>
-                <ul className={styles.scheduleList}>
-                  {upcoming.map((p) => {
-                    const platform = p.kefy_social_accounts?.platform ?? null;
-                    return (
-                      <li key={p.id} className={styles.scheduleItem}>
-                        <div className={styles.metricsNet}>
-                          <ChannelIcon name={platform ?? item.channel} size={14} />
-                          <span className={styles.metricsNetName}>
-                            {platform ? (NET_LABEL[platform] ?? platform) : channelLabel}
-                            {p.kefy_social_accounts?.username ? ` · @${p.kefy_social_accounts.username}` : ''}
-                          </span>
-                        </div>
-                        <p className={styles.scheduleWhen}>{ts.scheduledFor(formatScheduledDate(p.scheduled_at!, locale))}</p>
-                        <div className={styles.scheduleActions}>
-                          <Button variant="secondary" size="sm" icon={<Icon name="calendar" size={14} />} onClick={() => { setScheduleNotice(null); setReschedulePost(p); }}>
-                            {ts.reschedule}
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => void handleCancelScheduled(p)}>
-                            {t.cancelScheduled}
-                          </Button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            )}
+            {upcomingCard}
+            {targetsCard}
             <section className="ui-card">
               <p className={styles.draftNotice}>{upcoming.length > 0 ? ts.editHint : t.draftNotice}</p>
               <div className={styles.actions}>
-                <Button variant="primary" size="lg" block icon={<Icon name="send" size={16} />} onClick={() => setScheduleOpen(true)}>
+                <Button variant="primary" size="lg" block icon={<Icon name="send" size={16} />} onClick={() => openPublish()}>
                   {t.publish}
                 </Button>
                 <Button variant="secondary" block icon={<Icon name="edit" size={16} />} onClick={() => setEditOpen(true)}>
@@ -433,6 +455,8 @@ export default function ContentDetailPage() {
             </>
           ) : (
             <>
+              {targetsCard}
+              {upcomingCard}
               <section className="ui-card" aria-labelledby="content-stats-title">
                 <div className="ui-card-head">
                   <h2 id="content-stats-title" className="ui-card-title">{t.statsTitle}</h2>
@@ -493,9 +517,10 @@ export default function ContentDetailPage() {
       {/* ── Modales ──────────────────────────────────────────────────────── */}
       <ScheduleModal
         open={scheduleOpen}
-        onClose={() => { setScheduleOpen(false); setPublishTarget(null); }}
+        onClose={() => { setScheduleOpen(false); setPublishTarget(null); setPublishAccounts(null); }}
         initialItem={item}
         initialPlatform={publishTarget ?? undefined}
+        initialAccountIds={publishAccounts ?? undefined}
         brandKit={brandKit}
         lang={locale}
         onSuccess={() => {

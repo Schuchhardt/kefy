@@ -78,6 +78,8 @@ export async function viewCreditsRemaining(ctx: ServiceContext): Promise<number 
 // ─── Reglas de la tarjeta (puras, testeadas) ─────────────────────────────────
 
 const EDITABLE = new Set(['draft', 'approved']);
+/** Se publica (en una cuenta más) lo aprobado y lo que ya salió o va a salir. */
+const PUBLISHABLE = new Set(['approved', 'scheduled', 'published']);
 
 /**
  * Qué botones ofrece la tarjeta según el estado, el tipo y los scopes. El
@@ -86,7 +88,9 @@ const EDITABLE = new Set(['draft', 'approved']);
  * - Aprobar / volver a borrador / archivar / editar / regenerar: borrador o aprobado.
  * - Producir video: reel sin video, o story (la vista pasa antes por
  *   prepare_story_video si no tiene guion).
- * - Publicar: aprobado y, en un reel, con el video listo. Exige el scope
+ * - Publicar: aprobado y, en un reel, con el video listo. También programado
+ *   o publicado: el mismo contenido se lleva a las cuentas que todavía no lo
+ *   tienen (la vista las marca con list_publish_targets). Exige el scope
  *   `publish` (las conexiones OAuth nunca lo tienen: ver docs/assistant.md).
  */
 export function contentActions(
@@ -98,7 +102,7 @@ export function contentActions(
 
   let publish_blocked: PublishBlock | null = null;
   if (item.status === 'draft') publish_blocked = 'not_approved';
-  else if (item.status !== 'approved') publish_blocked = 'status';
+  else if (!PUBLISHABLE.has(item.status)) publish_blocked = 'status';
   else if (videoMissing) publish_blocked = 'video_missing';
   else if (!perms.publish) publish_blocked = 'no_publish_scope';
 

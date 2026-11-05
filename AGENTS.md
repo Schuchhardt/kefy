@@ -16,7 +16,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 
 | Área | Documento | Cuándo leerlo |
 |------|-----------|----------------|
-| Zernio / redes sociales | [`docs/zernio.md`](docs/zernio.md) | Antes de cualquier cambio en `lib/zernio.ts`, `app/api/social/**`, o cualquier flujo de conexión/publicación en redes sociales |
+| Zernio / redes sociales | [`docs/zernio.md`](docs/zernio.md) | Antes de cualquier cambio en `lib/zernio.ts`, `lib/publish-targets.ts`, `app/api/social/**`, o cualquier flujo de conexión/publicación en redes sociales (incluido publicar el mismo contenido en más redes) |
 | Render de reels / stories | [`docs/reel-render.md`](docs/reel-render.md) | Antes de tocar `app/api/content/reel/render/**`, `app/api/content/reel/reconcile/**`, `lib/reel-render.ts`, `remotion/**` o `MuxReelPlayer` |
 | Pipeline de video (guion → tools → montaje) | [`docs/video-pipeline.md`](docs/video-pipeline.md) | Antes de tocar `lib/video/**`, `lib/services/video.ts`, `lib/services/reel.ts`, `prompts/video-script.prompt.md`, `remotion/FilmComposition.tsx`, `app/api/content/reel/**`, `app/api/webhooks/video/**` o `VideoPlanPanel`. Cada herramienta nueva cobra su operación de créditos y la landing tiene que decirlo |
 | Brand Kit | [`docs/brand-kit.md`](docs/brand-kit.md) (y, si tu entorno la tiene, la memoria [`/memories/repo/brand-kit-architecture.md`](memories/repo/brand-kit-architecture.md)) | Antes de cambios en `app/api/brand-kit/**`, `lib/brand-kit.ts`, `lib/brand-setup.ts`, `lib/services/brand-*.ts`, `lib/services/onboarding.ts` o `components/dashboard/BrandKitWizard.tsx` |

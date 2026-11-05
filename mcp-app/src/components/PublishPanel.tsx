@@ -2,6 +2,11 @@
 // (list_social_accounts), deja elegir cuentas y «ahora» o fecha-hora, y antes
 // del botón final lista las cuentas destino con nombre y red. Publicar ahora es
 // irreversible: siempre pasa por ese paso de revisión.
+//
+// list_publish_targets dice en qué cuentas ya está el contenido (en este
+// formato) y cuáles no admiten el formato: esas no se pueden marcar. Así un
+// contenido publicado o programado se lleva a las cuentas que faltan. Si la
+// herramienta falla, el selector funciona como antes.
 
 import { useEffect, useId, useState } from 'react';
 import { CHANNEL_LABELS } from '@/lib/channels';
@@ -13,6 +18,9 @@ import { Button, Field, Notice, Panel, Spinner } from './ui';
 import type { Call } from './panels';
 
 interface Account { id: string; platform: string; username: string | null; status: string }
+
+/** Lo que importa de list_publish_targets para el selector. */
+interface Target { social_account_id: string; state: string; issue?: string; max_images?: number }
 
 export interface PublishOutcome {
   mode: 'now' | 'schedule';
@@ -28,6 +36,20 @@ function accountName(a: Account): string {
 
 function networkLabel(platform: string): string {
   return CHANNEL_LABELS[platform as Channel] ?? platform;
+}
+
+/** Ya tiene el contenido en este formato, o su red no lo admite. */
+function blockedBy(tg: Target | undefined): boolean {
+  return !!tg && (tg.state === 'published' || tg.state === 'scheduled' || tg.state === 'incompatible');
+}
+
+type PublishCopy = ReturnType<typeof useEnv>['t']['publish'];
+
+function targetNote(tg: Target, t: PublishCopy): string {
+  if (tg.state === 'published') return t.alreadyPublished;
+  if (tg.state === 'scheduled') return t.alreadyScheduled;
+  if (tg.issue === 'too_many_images') return t.issues.too_many_images(tg.max_images ?? 1);
+  return t.issues[tg.issue as keyof Omit<PublishCopy['issues'], 'too_many_images'>] ?? t.notCompatible;
 }
 
 export function PublishPanel({
@@ -51,19 +73,30 @@ export function PublishPanel({
   const [step, setStep] = useState<'pick' | 'review'>('pick');
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [targets, setTargets] = useState<Map<string, Target>>(new Map());
 
   useEffect(() => {
     let alive = true;
-    void call('list_social_accounts', {}).then((r) => {
+    void Promise.all([
+      call('list_social_accounts', {}),
+      call('list_publish_targets', { item_id: itemId, ...(format ? { format } : {}) }),
+    ]).then(([r, tr]) => {
       if (!alive) return;
       if (!r.ok) { setLoadError(`${r.code}: ${r.message}`); return; }
       const list = ((r.data as { accounts?: Account[] } | null)?.accounts ?? []).filter((a) => a && typeof a.id === 'string');
+      const byId = new Map<string, Target>();
+      if (tr.ok) {
+        for (const tg of ((tr.data as { targets?: Target[] } | null)?.targets ?? [])) {
+          if (tg && typeof tg.social_account_id === 'string') byId.set(tg.social_account_id, tg);
+        }
+      }
       setAccounts(list);
-      const active = list.filter((a) => a.status === 'active');
-      if (active.length === 1) setSelected([active[0].id]);
+      setTargets(byId);
+      const pickable = list.filter((a) => a.status === 'active' && !blockedBy(byId.get(a.id)));
+      if (pickable.length === 1) setSelected([pickable[0].id]);
     });
     return () => { alive = false; };
-  }, [call]);
+  }, [call, itemId, format]);
 
   const iso = mode === 'schedule' ? scheduleIso(local) : null;
   const chosen = (accounts ?? []).filter((a) => selected.includes(a.id));
@@ -102,12 +135,14 @@ export function PublishPanel({
             <legend>{t.publish.accounts}</legend>
             {accounts.map((a) => {
               const active = a.status === 'active';
+              const blocked = blockedBy(targets.get(a.id));
+              const note = !active ? t.publish.inactive : blocked ? targetNote(targets.get(a.id)!, t.publish) : null;
               return (
-                <label key={a.id} className={`k-check${active ? '' : ' is-disabled'}`}>
-                  <input type="checkbox" disabled={!active} checked={selected.includes(a.id)}
+                <label key={a.id} className={`k-check${active && !blocked ? '' : ' is-disabled'}`}>
+                  <input type="checkbox" disabled={!active || blocked} checked={selected.includes(a.id)}
                     onChange={(e) => setSelected((s) => (e.target.checked ? [...s, a.id] : s.filter((x) => x !== a.id)))} />
                   <span>{accountName(a)}</span>
-                  <span className="k-muted">{networkLabel(a.platform)}{active ? '' : ` · ${t.publish.inactive}`}</span>
+                  <span className="k-muted">{networkLabel(a.platform)}{note ? ` · ${note}` : ''}</span>
                 </label>
               );
             })}

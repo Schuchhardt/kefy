@@ -91,7 +91,7 @@ Botones (el servidor los decide en `item.actions`, la vista no recalcula reglas
 | Pedir cambios | `ui/message`: «Sobre el contenido {id}: {instrucción}» | siempre |
 | Convertir a otro formato (costo antes; «ya generada» es gratis) | `convert_content_format` | si no está archivado |
 | Producir video | abre la Vista 2 | reel sin video, o story |
-| Publicar / programar (cuentas reales, revisión antes del botón final) | `list_social_accounts` → `publish_content` | aprobado (y reel con video) y scope `publish` |
+| Publicar / programar (cuentas reales, revisión antes del botón final) | `list_social_accounts` + `list_publish_targets` → `publish_content` | aprobado, programado o publicado (y reel con video) y scope `publish`. En programado o publicado sirve para llevarlo a las cuentas que faltan: las que ya lo tienen o cuya red no admite el formato no se pueden marcar |
 | Abrir en Kefy | `ui/open-link` | siempre |
 
 Tras cada acción que muta, la vista vuelve a pedir la pieza con
@@ -123,7 +123,7 @@ se siguen recargando cada 5 s (hasta 3 min) hasta ver el cambio.
 | `review_content` (nueva, **solo MCP**) | Vista 1. Texto para el modelo: un resumen corto (tipo, estado, si tiene imagen o video), no el JSON de la vista. La vista también la usa para recargarse |
 | `create_post`, `create_story`, `create_carousel`, `create_reel`, `get_content` | Vista 1 |
 | `get_video_plan`, `produce_video`, `get_video_status` | Vista 2 |
-| `update_content`, `generate_content_image`, `convert_content_format`, `prepare_story_video`, `list_social_accounts`, `publish_content` | `visibility: ['model', 'app']`, sin vista propia |
+| `update_content`, `generate_content_image`, `convert_content_format`, `prepare_story_video`, `list_social_accounts`, `list_publish_targets`, `publish_content` | `visibility: ['model', 'app']`, sin vista propia |
 
 `ToolDef.app` (`lib/assistant/registry.ts`):
 

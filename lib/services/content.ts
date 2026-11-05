@@ -595,8 +595,11 @@ export async function updateContent(
   // Zernio guarda una copia de lo programado: si cambió lo que se publica, se
   // le reenvía. El fallo no deshace la edición, pero se devuelve para avisar
   // de que esa red sigue con la versión anterior.
+  // También un contenido ya publicado puede tener programada su salida a otra
+  // red (publicar el mismo contenido en más cuentas).
   const changedPublished = imageTextChanged || PUBLISHED_FIELDS.some((k) => k in update);
-  if (changedPublished && opts.syncScheduled !== false && (item as { status?: string }).status === 'scheduled') {
+  const itemStatus = (item as { status?: string }).status;
+  if (changedPublished && opts.syncScheduled !== false && (itemStatus === 'scheduled' || itemStatus === 'published')) {
     const scheduled_sync = await syncScheduledPosts(ctx, itemId);
     return { item: item as Record<string, unknown>, scheduled_sync };
   }
