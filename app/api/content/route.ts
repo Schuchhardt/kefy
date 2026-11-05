@@ -29,6 +29,8 @@ export async function GET(req: NextRequest) {
       status:  searchParams.get('status'),
       limit,
       offset,
+      // El editor se abre desde la lista y necesita saber cómo lleva el texto la imagen.
+      withMetadata: true,
     });
     const res = NextResponse.json(out);
     if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);

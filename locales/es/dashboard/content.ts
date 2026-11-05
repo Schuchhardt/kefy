@@ -24,6 +24,13 @@ const es = {
   kindCarouselLabel: 'Carrusel',
   kindStoryLabel: 'Story vertical',
   kindHint: 'Elige el formato exacto (post, carrusel, reel o story) al momento de publicar.',
+  imageTextLabel: 'Texto en la imagen',
+  imageTextModes: { none: 'Sin texto', overlay: 'Encima, editable', generated: 'Diseñado por la IA' },
+  imageTextHints: {
+    none: 'Una imagen limpia. El texto va solo en la descripción.',
+    overlay: 'Una imagen limpia con el texto encima, en la tipografía de tu marca. Puedes editarlo hasta publicar.',
+    generated: 'Tipo infografía: la IA diseña la imagen con el texto dentro. No se puede editar, solo regenerar. Revisa la ortografía y los datos antes de publicar.',
+  },
   slidesLabel: 'Cantidad de slides',
   scenesLabel: 'Cantidad de escenas',
   topicLabel: 'Tema',

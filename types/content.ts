@@ -54,6 +54,10 @@ export interface ContentMetadata {
   externally_modified?:  boolean;
   /** Origen de la última edición de texto (puede diferir de `created_via`). */
   last_modified_via?:    ContentOrigin;
+  /** Cómo lleva el texto la imagen (lib/image-text.ts). Sin valor, lo de cada formato. */
+  image_text?:           'none' | 'overlay' | 'generated';
+  /** Texto editable que se escribe sobre la imagen con `image_text: 'overlay'`. */
+  image_overlay?:        { title?: string; body?: string };
   [key: string]: unknown;
 }
 

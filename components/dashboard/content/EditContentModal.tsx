@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useId, type ReactNode } from 
 import dynamic from 'next/dynamic';
 import Modal from '@/components/ui/Modal';
 import Button, { Spinner, buttonClass } from '@/components/ui/Button';
-import { Field, Input, Textarea } from '@/components/ui/Field';
+import { Field, Input, Select, Textarea } from '@/components/ui/Field';
 import Notice from '@/components/ui/Notice';
 import Icon from '@/components/ui/icons';
 import { NetworkPreview } from '@/components/dashboard/NetworkPreview';
@@ -12,6 +12,10 @@ import { brandImages } from '@/components/dashboard/BrandAvatar';
 import { useActiveBrand } from '@/lib/brand-context';
 import { ImageGeneratingSpinner } from '@/components/dashboard/ImageGeneratingSpinner';
 import type { ContentItem, BrandKitInfo, CarouselSlide, ReelScene, ScheduledSyncResult } from '@/types/content';
+import {
+  IMAGE_TEXT_MODES, OVERLAY_BODY_MAX, OVERLAY_TITLE_MAX, readImageOverlay, readImageText, supportsImageText,
+  type ImageTextMode,
+} from '@/lib/image-text';
 import esPublish from '@/locales/es/dashboard/publish';
 import enPublish from '@/locales/en/dashboard/publish';
 import styles from './EditContentModal.module.css';
@@ -68,6 +72,12 @@ export default function EditContentModal({
   const [regenImageLoading, setRegenImageLoading] = useState(false);
   const [regenTextFeedback, setRegenTextFeedback] = useState('');
   const [regenImageFeedback, setRegenImageFeedback] = useState('');
+  // Lo elegido para la próxima imagen y lo que lleva la actual: pasar de o a
+  // `generated` cambia los píxeles, así que espera a regenerar.
+  const [imageText, setImageText] = useState<ImageTextMode>('none');
+  const [savedImageText, setSavedImageText] = useState<ImageTextMode>('none');
+  const [overlayTitle, setOverlayTitle] = useState('');
+  const [overlayBody, setOverlayBody] = useState('');
   const [editingSlide, setEditingSlide] = useState<number | null>(null);
   const [previewSlide, setPreviewSlide] = useState(0);
   const [regenSlideImageLoadingIdx, setRegenSlideImageLoadingIdx] = useState<number | null>(null);
@@ -96,6 +106,12 @@ export default function EditContentModal({
     if (!item) return;
     setTitle(item.title ?? '');
     setBodyText(item.body ?? '');
+    const mode = readImageText(item.content_type, item.metadata);
+    const overlay = readImageOverlay(item.metadata);
+    setImageText(mode);
+    setSavedImageText(mode);
+    setOverlayTitle(overlay.title);
+    setOverlayBody(overlay.body);
     setTagsText((item.hashtags ?? []).join(' '));
     setImageUrl(item.image_url);
     setVideoUrl(item.video_url);
@@ -228,6 +244,12 @@ export default function EditContentModal({
       const { url } = await uploadFile(file);
       setImageUrl(url);
       scheduleSave({ image_url: url });
+      // El servidor hace lo mismo: la foto subida no trae el texto de la generada.
+      if (savedImageText === 'generated') {
+        const mode = item ? readImageText(item.content_type, null) : 'none';
+        setImageText(mode);
+        setSavedImageText(mode);
+      }
     } catch (err) {
       setUploadError(aiMessage(err, t.uploadError));
     } finally {
@@ -250,6 +272,21 @@ export default function EditContentModal({
       setUploading(false);
       e.target.value = '';
     }
+  }
+
+  /** Guarda el modo y el texto de la imagen: no toca los píxeles, no cuesta créditos. */
+  function saveImageText(mode: ImageTextMode, title: string, body: string) {
+    if (!item) return;
+    setSavedImageText(mode);
+    scheduleSave({ image_text: mode, overlay_title: title, overlay_body: body } as Partial<ContentItem>);
+    onUpdateRef.current({
+      metadata: { ...item.metadata, image_text: mode, image_overlay: { title, body } },
+    });
+  }
+
+  function onImageTextChange(mode: ImageTextMode) {
+    setImageText(mode);
+    if (mode !== 'generated' && savedImageText !== 'generated') saveImageText(mode, overlayTitle, overlayBody);
   }
 
   function removeImage() {
@@ -432,14 +469,29 @@ export default function EditContentModal({
       const res = await fetch('/api/content/image', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt.slice(0, 900), size: item.content_type === 'story' ? '1024x1536' : '1024x1024', quality: 'medium', itemId: item.id }),
+        body: JSON.stringify({
+          prompt: prompt.slice(0, 900), quality: 'medium', itemId: item.id,
+          image_text: imageText, language: lang,
+          // Con `generated` el servidor elige una forma que ninguna red recorte.
+          ...(imageText === 'generated' ? {} : { size: item.content_type === 'story' ? '1024x1536' : '1024x1024' }),
+        }),
       });
-      const d = await res.json() as { image?: { url: string }; error?: string };
+      const d = await res.json() as { image?: { url: string; overlay?: { title: string; body: string } }; error?: string };
       if (!res.ok) throw new Error(d.error);
       if (d.image?.url) {
         setImageUrl(d.image.url);
+        setSavedImageText(imageText);
+        // Si el texto editable estaba vacío, lo escribió la IA.
+        if (d.image.overlay) { setOverlayTitle(d.image.overlay.title); setOverlayBody(d.image.overlay.body); }
         changedRef.current = true;
-        onUpdate({ image_url: d.image.url });
+        onUpdate({
+          image_url: d.image.url,
+          metadata: {
+            ...item.metadata,
+            image_text: imageText,
+            ...(d.image.overlay ? { image_overlay: d.image.overlay } : {}),
+          },
+        });
       }
       setRegenImageFeedback('');
     } catch (err) {
@@ -552,6 +604,9 @@ export default function EditContentModal({
               username={brandKit?.name ?? copy.preview.defaultUsername}
               logoUrl={brandImages(activeBrand, brandKit?.logo_url)}
               imagePending={item.image_status === 'generating'}
+              metadata={supportsImageText(item.content_type)
+                ? { image_text: savedImageText, image_overlay: { title: overlayTitle, body: overlayBody } }
+                : null}
               accentColor={brandKit?.accent_color ?? undefined}
               brandFont={brandKit?.font_heading}
               lang={lang}
@@ -727,6 +782,42 @@ export default function EditContentModal({
           )}
 
           {/* AI Regen — image (post & story) — carousel regenerates per-slide instead */}
+          {(isPost || isStory) && (
+            <Field
+              label={t.imageTextLabel}
+              hint={imageText !== savedImageText && (imageText === 'generated' || savedImageText === 'generated')
+                ? t.imageTextOnRegen
+                : imageText === 'generated'
+                  ? t.imageTextGeneratedHint
+                  : imageText === 'overlay' && isStory && !overlayTitle && !overlayBody
+                    ? t.storyOverlayHint
+                    : undefined}
+            >
+              <Select value={imageText} onChange={(e) => onImageTextChange(e.target.value as ImageTextMode)}>
+                {IMAGE_TEXT_MODES.map((mode) => <option key={mode} value={mode}>{t.imageTextModes[mode]}</option>)}
+              </Select>
+            </Field>
+          )}
+          {(isPost || isStory) && imageText === 'overlay' && savedImageText === 'overlay' && (
+            <>
+              <Field label={t.overlayTitle}>
+                <Input
+                  type="text"
+                  maxLength={OVERLAY_TITLE_MAX}
+                  value={overlayTitle}
+                  onChange={(e) => { setOverlayTitle(e.target.value); saveImageText('overlay', e.target.value, overlayBody); }}
+                />
+              </Field>
+              <Field label={t.overlayBody}>
+                <Textarea
+                  maxLength={OVERLAY_BODY_MAX}
+                  rows={2}
+                  value={overlayBody}
+                  onChange={(e) => { setOverlayBody(e.target.value); saveImageText('overlay', overlayTitle, e.target.value); }}
+                />
+              </Field>
+            </>
+          )}
           {(isPost || isStory) && (
             <RegenBlock
               title={t.regenImage}

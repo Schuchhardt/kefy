@@ -7,6 +7,8 @@ import type {
   GenerateTextOptions,
   GenerateTextResult,
   GenerateImageOptions,
+  GenerateInfographicCopyOptions,
+  InfographicCopy,
   GenerateImageResult,
   CarouselSlide,
   GenerateCarouselOptions,
@@ -23,6 +25,8 @@ import type {
 } from '@/types/ai';
 import { withSourceBlock } from '@/lib/content-source';
 import { withProviderAlerts } from '@/lib/provider-alerts';
+import { resolveBrandFontName } from '@/lib/google-fonts';
+import { parseInfographicCopy, STORY_MAX_POINTS } from '@/lib/infographic';
 import { normalizeVideoScript, type VideoScript } from '@/lib/video/script';
 
 // ─── Modelos ──────────────────────────────────────────────────────────────────
@@ -234,7 +238,72 @@ async function generateWithGPT(
   };
 }
 
-// ─── Image generation (gpt-image-2) ──────────────────────────────────────────
+// ─── Image generation ────────────────────────────────────────────────────────
+
+/**
+ * Modelos de imagen de OpenAI. Mismo precio por token; Flare tarda ~8 s y
+ * Sunburst ~35 s, pero Sunburst compone mejor el texto (ver
+ * docs/content-formats.md § 5). OpenAI no publica snapshots con fecha de la
+ * serie 2.6, así que no hay versión que fijar.
+ */
+export const IMAGE_MODELS = {
+  photo:       'gpt-image-2.6-flare',
+  infographic: 'gpt-image-2.6-sunburst',
+} as const;
+
+/** La API exige lados múltiplos de 16: 1080 responde 400. */
+function apiImageSize(size: GenerateImageOptions['size']): string {
+  if (!size || size === 'auto' || size === '1080x1080') return '1024x1024';
+  return size;
+}
+
+/** Una story se genera como post y se extiende después: ver extendToStoryCanvas. */
+function infographicMargins(format: 'post' | 'story'): string {
+  const margins = 'Keep all text, icons and the logo at least 7% away from every edge, because networks may trim the border.';
+  return format === 'post'
+    ? margins
+    : `${margins} Use a plain, flat background color that reaches the top and bottom edges with no shapes touching them: the background will be extended beyond this image.`;
+}
+
+/**
+ * Escribe el texto exacto de una infografía a partir del tema y el cuerpo de la
+ * pieza. No inventa datos: lo que no está en `source` no llega a la imagen.
+ */
+export async function generateInfographicCopy(
+  opts: GenerateInfographicCopyOptions,
+): Promise<InfographicCopy> {
+  const system = loadPrompt('infographic-copy', {
+    language: opts.language === 'en' ? 'English' : 'Spanish',
+    tone:     opts.tone?.join(', ') || 'clear and professional',
+    brandCtx: opts.brandName ? `Brand: "${opts.brandName}".` : '',
+    shape:    opts.format === 'story'
+      ? `1 to ${STORY_MAX_POINTS} points, for a vertical story that is read in about five seconds`
+      : '3 to 5 points',
+  });
+  if (!system) throw new Error('Missing infographic-copy prompt');
+
+  const response = await getAnthropic().messages.create({
+    model:      MODELS.content,
+    max_tokens: 700,
+    system,
+    messages:   [{ role: 'user', content: `Source:\n${opts.source}` }],
+  });
+
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
+
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(stripJsonFences(raw));
+  } catch {
+    // Se informa abajo, con el mismo error que una respuesta incompleta.
+  }
+  const copy = parseInfographicCopy(parsed, opts.format === 'story' ? STORY_MAX_POINTS : undefined);
+  if (!copy) throw new Error('The model did not return valid infographic copy');
+  return copy;
+}
 
 export async function generateContentImage(
   opts: GenerateImageOptions,
@@ -249,17 +318,31 @@ export async function generateContentImage(
   if (opts.brand?.accentColor)     brandParts.push(`Accent color: ${opts.brand.accentColor}.`);
   if (opts.brand?.tone?.length)    brandParts.push(`Visual style: ${opts.brand.tone.join(', ')}.`);
 
-  // Load enriched prompt from file if available
-  const imagePromptTemplate = loadPrompt('reel-image', {
-    prompt:    opts.prompt,
-    brandCtx:  brandParts.join(' '),
-  });
+  const isInfographic = opts.style === 'infographic';
+  const model = isInfographic ? IMAGE_MODELS.infographic : IMAGE_MODELS.photo;
+
+  // Load enriched prompt from file if available. Son plantillas opuestas: la de
+  // foto prohíbe cualquier letra y la de infografía exige imprimir un texto exacto.
+  const fontHeading = resolveBrandFontName(opts.brand?.fontHeading);
+  const imagePromptTemplate = isInfographic
+    ? loadPrompt('infographic-image', {
+        brief:    opts.prompt,
+        brandCtx: brandParts.join(' '),
+        margins:  infographicMargins(opts.format ?? 'post'),
+        fontCtx:  `Typefaces: headline in ${fontHeading} bold, everything else in ${
+          opts.brand?.fontBody ? resolveBrandFontName(opts.brand.fontBody) : fontHeading
+        }.`,
+      })
+    : loadPrompt('reel-image', {
+        prompt:    opts.prompt,
+        brandCtx:  brandParts.join(' '),
+      });
 
   const enrichedPrompt = imagePromptTemplate || (brandParts.length
     ? `${opts.prompt}\n\nBrand guidelines: ${brandParts.join(' ')}`
     : opts.prompt);
 
-  const size    = (opts.size === 'auto' || !opts.size) ? '1024x1024' : opts.size;
+  const size    = apiImageSize(opts.size);
   const quality = opts.quality === 'auto' ? 'medium' : (opts.quality ?? 'medium');
 
   const hasLogo       = !!(opts.brand?.logoB64 && opts.brand?.logoMimeType);
@@ -304,7 +387,7 @@ export async function generateContentImage(
     if (imageFiles.length === 0) {
       // All references failed to load — fall back to text-only generation
       response = await generateFn({
-        model:         'gpt-image-2-2026-04-21',
+        model,
         prompt:        enrichedPrompt,
         n:             1,
         size,
@@ -313,14 +396,18 @@ export async function generateContentImage(
       });
     } else {
       const referenceGuidance = refs.length > 0
-        ? ' Use the provided reference images to guide the visual style, composition, and mood.'
+        ? (isInfographic
+            ? ' Use the provided reference images only as a guide for visual style: never copy text from them.'
+            : ' Use the provided reference images to guide the visual style, composition, and mood.')
         : '';
       const logoGuidance = hasLogo
-        ? ' Incorporate the provided brand logo into the composition in a natural and visually balanced way.'
+        ? (isInfographic
+            ? ' Place the provided brand logo once, small, in a corner, inside the margins and without redrawing it.'
+            : ' Incorporate the provided brand logo into the composition in a natural and visually balanced way.')
         : '';
 
       response = await editFn({
-        model:         'gpt-image-2-2026-04-21',
+        model,
         image:         imageFiles.length === 1 ? imageFiles[0] : imageFiles,
         prompt:        enrichedPrompt + referenceGuidance + logoGuidance,
         n:             1,
@@ -331,7 +418,7 @@ export async function generateContentImage(
     }
   } else {
     response = await generateFn({
-      model:         'gpt-image-2-2026-04-21',
+      model,
       prompt:        enrichedPrompt,
       n:             1,
       size,
@@ -341,8 +428,14 @@ export async function generateContentImage(
   }
 
   const img = response.data?.[0];
-  const b64 = (img as { b64_json?: string })?.b64_json;
-  if (!b64) throw new Error('gpt-image-2 did not return base64 image data');
+  let b64 = (img as { b64_json?: string })?.b64_json;
+  if (!b64) throw new Error(`${model} did not return base64 image data`);
+
+  // Importado aquí para que las demás rutas de IA no carguen sharp.
+  if (isInfographic && opts.format === 'story') {
+    const { extendToStoryCanvas } = await import('@/lib/image-processor');
+    b64 = (await extendToStoryCanvas(Buffer.from(b64, 'base64'))).toString('base64');
+  }
 
   return {
     b64,

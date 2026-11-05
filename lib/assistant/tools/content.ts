@@ -14,6 +14,10 @@
 // envuelven con wrapUntrusted y, si algún contenido vino de fuera, el resultado
 // «contamina» el turno (ver registry.ts).
 
+import {
+  cleanImageOverlay, IMAGE_TEXT_MODES, OVERLAY_BODY_MAX, OVERLAY_TITLE_MAX,
+  readImageOverlay, readImageText, supportsImageText,
+} from '@/lib/image-text';
 import { z } from 'zod';
 import { defineTool } from '@/lib/assistant/registry';
 import { itemLink } from '@/lib/assistant/links';
@@ -48,6 +52,22 @@ const contentType = z.enum(['post', 'carousel', 'reel', 'story']);
 const imageQuality = z.enum(['low', 'medium', 'high']);
 const httpsUrl = z.url({ protocol: /^https$/ }).max(2048);
 const hashtags = z.array(z.string().max(100)).max(30);
+const imageText = z
+  .enum(IMAGE_TEXT_MODES)
+  .describe(
+    'How the image carries its text. none: image without text. overlay: clean image, and Kefy writes overlay_title and ' +
+    'overlay_body on top when publishing, so the text stays editable with update_content (on a story, the caption if ' +
+    'those are empty). generated: the AI designs the whole image, infographic style, with its text inside (written ' +
+    'from the source without inventing data; it cannot be edited, only regenerated, and the user should proofread it). ' +
+    'generated always uses high quality and a shape networks do not crop.',
+  );
+const overlayTitle = z.string().max(OVERLAY_TITLE_MAX).describe('Headline written on the image with image_text overlay.');
+const overlayBody = z.string().max(OVERLAY_BODY_MAX).describe('Supporting text written on the image with image_text overlay.');
+/** El texto propio solo se manda si se pidió: sin él, el servicio decide. */
+const overlayInput = (input: { overlay_title?: string; overlay_body?: string }) =>
+  input.overlay_title !== undefined || input.overlay_body !== undefined
+    ? { overlay: cleanImageOverlay(input.overlay_title, input.overlay_body) }
+    : {};
 const imageSize = z
   .enum(IMAGE_SIZES)
   .describe('1024x1024 square (default), 1024x1536 vertical 2:3, 1024x1792 vertical 9:16, 1536x1024 horizontal, 1080x1080, or auto.');
@@ -203,6 +223,11 @@ const getContentTool = defineTool({
           channel: item.channel,
           status: item.status,
           image_url: item.image_url ?? null,
+          ...(supportsImageText(item.content_type as string) ? {
+            image_text: readImageText(item.content_type as string, item.metadata),
+            overlay_title: wrapUntrusted('content', readImageOverlay(item.metadata).title || null),
+            overlay_body: wrapUntrusted('content', readImageOverlay(item.metadata).body || null),
+          } : {}),
           image_status: item.image_status ?? null,
           video_url: item.video_url ?? null,
           render_status: item.render_status ?? null,
@@ -248,7 +273,8 @@ const createPostTool = defineTool({
     'Generates a text post (copy plus hashtags) in the brand voice, plus an image unless with_image is false, and saves it as a draft of the brand. ' +
     `Cost: ${CREDIT_COSTS.text} credit for the text, plus ${CREDIT_COSTS.image} for the image. ` +
     'If only the image fails, the draft is kept and data.image_error explains why. ' +
-    'reference_image_urls guide the image (e.g. the real product); image_size sets its shape.',
+    'reference_image_urls guide the image (e.g. the real product); image_size sets its shape; ' +
+    'image_text chooses between no text, editable text on top, or text generated inside the image.',
   input: z
     .object({
       topic: z.string().trim().min(1).max(500).describe('What the post is about, with any key details to include.'),
@@ -258,6 +284,9 @@ const createPostTool = defineTool({
       image_prompt: z.string().max(1000).optional().describe('Image description. Defaults to one derived from the topic and copy.'),
       image_quality: imageQuality.default('medium'),
       image_size: imageSize.default('1024x1024'),
+      image_text: imageText.default('none'),
+      overlay_title: overlayTitle.optional(),
+      overlay_body: overlayBody.optional(),
       reference_image_urls: referenceImageUrls(3).optional(),
     })
     .strict(),
@@ -288,9 +317,14 @@ const createPostTool = defineTool({
           prompt: input.image_prompt?.trim() || `${input.topic}. ${body.slice(0, 300)}`,
           quality: input.image_quality,
           size: input.image_size,
+          // `none` es lo que ya tiene un post nuevo: no hay nada que guardar.
+          imageText: input.image_text === 'none' ? undefined : input.image_text,
+          ...overlayInput(input),
           referenceImageUrls: references,
         });
         data.image_url = img.image.url;
+        data.image_text = input.image_text;
+        if (img.image.overlay) data.overlay = img.image.overlay;
       } catch (err) {
         // El texto ya está guardado (y cobrado): se entrega sin imagen.
         data.image_error = errorInfo(err, ctx.language);
@@ -572,6 +606,7 @@ const updateSlide = z
   .strict();
 
 const UPDATE_FIELDS = ['title', 'body', 'hashtags', 'slides', 'status', 'image_url', 'video_url'] as const;
+const IMAGE_TEXT_FIELDS = ['image_text', 'overlay_title', 'overlay_body'] as const;
 const UPDATE_STATUSES = ['draft', 'approved', 'archived'] as const;
 
 const updateContentTool = defineTool({
@@ -582,7 +617,10 @@ const updateContentTool = defineTool({
     "Edits a content item's title, body, hashtags, slides, main image (image_url; null removes it) or video " +
     '(video_url, reels and stories only), or moves it between draft, approved and archived. Image and video URLs ' +
     'outside Kefy are copied into Kefy storage first. It cannot mark an item as scheduled or published (use ' +
-    'publish_content). Slides replace the whole list; read the item with get_content first and send every slide ' +
+    'publish_content). On posts and stories, image_text sets how the image carries its text and overlay_title / ' +
+    'overlay_body edit the text written on top; use image_text generated only if the current image already has its ' +
+    'text inside. Replacing the image of a generated item resets image_text, unless you send it too. ' +
+    'Slides replace the whole list; read the item with get_content first and send every slide ' +
     'back. To generate a new image instead, use generate_content_image. Costs no credits.',
   input: z
     .object({
@@ -594,9 +632,12 @@ const updateContentTool = defineTool({
       status: z.enum(UPDATE_STATUSES).optional(),
       image_url: httpsUrl.nullable().optional().describe('New main image (https). null removes it.'),
       video_url: httpsUrl.nullable().optional().describe('Finished video (https mp4/mov/webm) for a reel or story. null removes it.'),
+      image_text: imageText.optional(),
+      overlay_title: overlayTitle.optional(),
+      overlay_body: overlayBody.optional(),
     })
     .strict()
-    .refine((v) => UPDATE_FIELDS.some((k) => v[k] !== undefined), {
+    .refine((v) => [...UPDATE_FIELDS, ...IMAGE_TEXT_FIELDS].some((k) => v[k] !== undefined), {
       message: 'Provide at least one field to update',
     }),
   confirm: (_ctx, input, preview) => input.status === 'archived' || preview?.current_status === 'scheduled',
@@ -618,7 +659,9 @@ const updateContentTool = defineTool({
       title: wrapUntrusted('content', current.title),
       current_status: current.status,
       new_status: input.status ?? null,
-      fields: UPDATE_FIELDS.filter((k) => input[k] !== undefined),
+      fields: [...UPDATE_FIELDS, ...IMAGE_TEXT_FIELDS].filter((k) => input[k] !== undefined),
+      new_overlay_title: input.overlay_title ?? null,
+      new_overlay_body: input.overlay_body ?? null,
       new_title: input.title ?? null,
       text: input.body ?? null,
       hashtags: input.hashtags?.length ? input.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)) : null,
@@ -640,6 +683,9 @@ const updateContentTool = defineTool({
 
     const patch: Record<string, unknown> = {};
     for (const key of UPDATE_FIELDS) {
+      if (input[key] !== undefined) patch[key] = input[key];
+    }
+    for (const key of IMAGE_TEXT_FIELDS) {
       if (input[key] !== undefined) patch[key] = input[key];
     }
     // Media externa → Storage de Kefy: a Zernio solo le llegan archivos nuestros.
@@ -675,29 +721,47 @@ const generateContentImageTool = defineTool({
   description:
     'Generates or regenerates the main image of an existing content item with the brand colors and logo, replacing ' +
     'the current one. Use size 1024x1536 or 1024x1792 for stories and other vertical pieces. ' +
+    'image_text works on posts and stories, and keeps the current mode if omitted. ' +
     `Cost: ${CREDIT_COSTS.image} credits.`,
   input: z
     .object({
       item_id: z.uuid().describe('Content item of this brand (from list_content or a create_* tool).'),
-      prompt: z.string().trim().min(1).max(1000).describe('What the image should show. No text in the image: copy is overlaid later.'),
+      prompt: z.string().trim().min(1).max(1000).describe('What the image should show (no text in it, copy goes on top). With image_text generated, the facts and message the image must convey.'),
       quality: imageQuality.default('medium'),
       size: imageSize.default('1024x1024'),
+      image_text: imageText.optional(),
+      overlay_title: overlayTitle.optional(),
+      overlay_body: overlayBody.optional(),
       reference_image_urls: referenceImageUrls(3).optional(),
     })
     .strict(),
   confirm: 'never',
   estimateCredits: () => CREDIT_COSTS.image,
   handler: async (ctx, input) => {
+    const current = await loadOwnedItem<{ id: string; content_type: string; metadata: unknown }>(
+      ctx, input.item_id, 'id, content_type, metadata',
+    );
+    // Regenerar no cambia el modo sin que se pida. Un carrusel o reel no tiene.
+    const mode = input.image_text
+      ?? (supportsImageText(current.content_type) ? readImageText(current.content_type, current.metadata) : undefined);
     const { image } = await generateImageForItem(ctx, {
       itemId: input.item_id,
       prompt: input.prompt,
       quality: input.quality,
       size: input.size,
+      imageText: mode,
+      ...overlayInput(input),
       referenceImageUrls: await resolveReferenceImages(ctx, input.reference_image_urls, 3),
     });
 
     return {
-      data: { item_id: input.item_id, image_url: image.url, revised_prompt: image.revisedPrompt },
+      data: {
+        item_id: input.item_id,
+        image_url: image.url,
+        revised_prompt: image.revisedPrompt,
+        image_text: mode ?? null,
+        ...(image.overlay ? { overlay: image.overlay } : {}),
+      },
       links: [itemLink(ctx.language, input.item_id)],
       dataChanged: ['content'],
     };
@@ -721,17 +785,22 @@ const createStoryTool = defineTool({
       topic: z.string().trim().min(1).max(500).describe('What the story is about.'),
       channel: channel.default('generic'),
       with_image: z.boolean().default(true),
+      image_text: imageText.default('overlay'),
+      overlay_title: overlayTitle.optional(),
+      overlay_body: overlayBody.optional(),
       reference_image_urls: referenceImageUrls(3).optional(),
     })
     .strict(),
   confirm: 'never',
   estimateCredits: (input) => CREDIT_COSTS.text + (input.with_image !== false ? CREDIT_COSTS.image : 0),
-  describe: async (_ctx, input) => ({ topic: input.topic, channel: input.channel, with_image: input.with_image }),
+  describe: async (_ctx, input) => ({ topic: input.topic, channel: input.channel, with_image: input.with_image, image_text: input.image_text }),
   handler: async (ctx, input) => {
     const references = input.with_image
       ? await resolveReferenceImages(ctx, input.reference_image_urls, 3)
       : undefined;
     const out = await generateStory(ctx, {
+      imageText: input.image_text,
+      ...overlayInput(input),
       topic: input.topic,
       channel: input.channel,
       withImage: input.with_image,
@@ -746,6 +815,7 @@ const createStoryTool = defineTool({
         body: out.body,
         hashtags: out.hashtags,
         image_url: out.image_url,
+        image_text: out.imageText,
         ...(out.imageError ? { image_error: out.imageError } : {}),
       },
       links: [itemLink(ctx.language, itemId)],

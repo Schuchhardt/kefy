@@ -82,6 +82,57 @@ const GRADIENTS = [
   'linear-gradient(135deg, #96fbc4 0%, #f9f586 100%)',
 ];
 
+/** Overlay HTML: el mismo texto que el servidor quema al publicar, acotado a la
+ *  zona que la interfaz de la red no tapa. El padre tiene que ser `relative`. */
+export function ImageTextOverlay({
+  title, body, platform, format, brandFont,
+}: {
+  title?:     string;
+  body?:      string;
+  platform:   ContentChannel;
+  format:     ContentType;
+  brandFont?: string | null;
+}) {
+  const font = brandFontStack(brandFont);
+  return (
+    <>
+      {/* Degradado de legibilidad, debajo del texto. */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%',
+        background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 100%)',
+        pointerEvents: 'none',
+      }} />
+      <div
+        style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+          boxSizing: 'border-box',
+          pointerEvents: 'none',
+          ...safeAreaCss(platform, format),
+        }}
+      >
+        {title && (
+          <p style={{
+            margin: '0 0 5px', fontSize: 17, fontWeight: 800,
+            color: '#fff', lineHeight: 1.25, fontFamily: font,
+            textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 18px rgba(0,0,0,0.6)',
+          }}>
+            {title}
+          </p>
+        )}
+        {body && (
+          <p style={{
+            margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.92)', fontFamily: font,
+            lineHeight: 1.45, textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 14px rgba(0,0,0,0.6)',
+          }}>
+            {body}
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
 /** The media area of a carousel slide: the generated image with its text
  *  overlay, or a gradient card with the slide copy when there's no image yet.
  *  Extracted so channel-specific chrome (Instagram, LinkedIn, TikTok…) can
@@ -105,7 +156,6 @@ export function SlideCanvas({
   brandFont?:   string | null;
 }) {
   const frame = networkFrame(platform, format);
-  const safe  = safeAreaCss(platform, format);
   const font  = brandFontStack(brandFont);
 
   useEffect(() => { ensureGoogleFontLoaded(brandFont); }, [brandFont]);
@@ -125,39 +175,7 @@ export function SlideCanvas({
             alt={slide.title}
             style={{ width: '100%', height: '100%', objectFit: frame.fit, display: 'block' }}
           />
-          {/* Degradado de legibilidad, debajo del texto. */}
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%',
-            background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 100%)',
-            pointerEvents: 'none',
-          }} />
-          {/* Overlay HTML: el mismo texto que el servidor quema al publicar,
-              acotado a la zona que la interfaz de la red no tapa. */}
-          <div
-            style={{
-              position: 'absolute', inset: 0,
-              display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-              boxSizing: 'border-box',
-              pointerEvents: 'none',
-              ...safe,
-            }}
-          >
-            <p style={{
-              margin: '0 0 5px', fontSize: 17, fontWeight: 800,
-              color: '#fff', lineHeight: 1.25, fontFamily: font,
-              textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 18px rgba(0,0,0,0.6)',
-            }}>
-              {slide.title}
-            </p>
-            {slide.body && (
-              <p style={{
-                margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.92)', fontFamily: font,
-                lineHeight: 1.45, textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 14px rgba(0,0,0,0.6)',
-              }}>
-                {slide.body}
-              </p>
-            )}
-          </div>
+          <ImageTextOverlay title={slide.title} body={slide.body} platform={platform} format={format} brandFont={brandFont} />
         </>
       ) : (
         /* Gradient card with text */

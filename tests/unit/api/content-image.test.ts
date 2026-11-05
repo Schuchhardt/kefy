@@ -41,6 +41,8 @@ vi.mock('@/lib/auth', async (importOriginal) => {
 
 vi.mock('@/lib/ai', () => ({
   generateContentImage: vi.fn(),
+  generateInfographicCopy: vi.fn(),
+  generateSlideText: vi.fn(),
 }));
 
 vi.mock('@/lib/storage', () => ({
@@ -52,7 +54,7 @@ vi.mock('@/lib/image-processor', () => ({
 }));
 
 import { getAuthFromRequest } from '@/lib/auth';
-import { generateContentImage } from '@/lib/ai';
+import { generateContentImage, generateInfographicCopy, generateSlideText } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 
 const mockAuth = { userId: 'u1', orgId: 'org-1', role: 'owner', plan: 'pro' };
@@ -89,8 +91,131 @@ function mockDb(itemsChain: ReturnType<typeof makeItemsChain>) {
   });
 }
 
+/** Como makeItemsChain, pero el contenido se puede leer: lo pide la infografía. */
+function makeReadableItemsChain(row: Record<string, unknown>) {
+  const chain = Object.assign(makeItemsChain(), {
+    select: vi.fn(() => chain),
+    maybeSingle: vi.fn().mockResolvedValue({ data: row, error: null }),
+  });
+  return chain;
+}
+
+const COPY = { headline: 'Fideliza', points: [{ label: 'Escucha', detail: '' }], closing: '', visual: 'steps' };
+
 describe('POST /api/content/image', () => {
   beforeEach(() => { vi.resetAllMocks(); resetQuotaState(); resetSubscriptionState(); });
+
+  describe('image_text', () => {
+    const ITEM = '11111111-1111-4111-8111-111111111111';
+
+    it('imprime el texto escrito aparte, en calidad alta y sin forma recortable, y lo recuerda', async () => {
+      const { POST } = await import('@/app/api/content/image/route');
+      vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+      const items = makeReadableItemsChain({ content_type: 'post', metadata: { created_via: 'ui' } });
+      mockDb(items as never);
+      vi.mocked(generateInfographicCopy).mockResolvedValueOnce(COPY);
+      vi.mocked(generateContentImage).mockResolvedValueOnce({ b64: 'AAAA', revisedPrompt: null } as never);
+      vi.mocked(uploadBase64Image).mockResolvedValueOnce('https://cdn.example.com/info.jpeg');
+
+      const res = await POST(makeReq({
+        prompt: 'Cómo fidelizar', itemId: ITEM, image_text: 'generated', language: 'en', quality: 'medium', size: '1024x1792',
+      }));
+
+      expect(res.status).toBe(201);
+      expect(vi.mocked(generateInfographicCopy).mock.calls[0][0]).toMatchObject({ source: 'Cómo fidelizar', language: 'en' });
+      const [image] = vi.mocked(generateContentImage).mock.calls[0];
+      expect(image).toMatchObject({ style: 'infographic', quality: 'high', size: '1024x1280' });
+      expect(image.prompt).toContain('Headline: "Fideliza"');
+      expect(items.updates.at(-1)).toMatchObject({
+        image_status: 'ready',
+        metadata: { created_via: 'ui', image_text: 'generated' },
+      });
+    });
+
+    it('en una story generada genera para la zona que su interfaz no tapa', async () => {
+      const { POST } = await import('@/app/api/content/image/route');
+      vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+      mockDb(makeReadableItemsChain({ content_type: 'story', metadata: {} }) as never);
+      vi.mocked(generateInfographicCopy).mockResolvedValueOnce(COPY);
+      vi.mocked(generateContentImage).mockResolvedValueOnce({ b64: 'AAAA', revisedPrompt: null } as never);
+      vi.mocked(uploadBase64Image).mockResolvedValueOnce('https://cdn.example.com/info.jpeg');
+
+      const res = await POST(makeReq({ prompt: 'x', itemId: ITEM, image_text: 'generated' }));
+
+      expect(res.status).toBe(201);
+      expect(vi.mocked(generateInfographicCopy).mock.calls[0][0].format).toBe('story');
+      expect(vi.mocked(generateContentImage).mock.calls[0][0]).toMatchObject({ format: 'story', size: '1024x1280' });
+    });
+
+    it('rechaza un carrusel sin cobrar ni llamar a la IA: quedaría texto sobre texto', async () => {
+      const { POST } = await import('@/app/api/content/image/route');
+      vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+      mockDb(makeReadableItemsChain({ content_type: 'carousel' }) as never);
+
+      const res = await POST(makeReq({ prompt: 'x', itemId: ITEM, image_text: 'generated' }));
+
+      expect(res.status).toBe(422);
+      expect(generateInfographicCopy).not.toHaveBeenCalled();
+      expect(generateContentImage).not.toHaveBeenCalled();
+    });
+
+    it('overlay en un post: foto limpia, y el texto lo escribe la IA si nadie lo escribió', async () => {
+      const { POST } = await import('@/app/api/content/image/route');
+      vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+      const items = makeReadableItemsChain({ content_type: 'post', metadata: {} });
+      mockDb(items as never);
+      vi.mocked(generateSlideText).mockResolvedValueOnce({ title: 'Hola', body: 'Mundo' } as never);
+      vi.mocked(generateContentImage).mockResolvedValueOnce({ b64: 'AAAA', revisedPrompt: null } as never);
+      vi.mocked(uploadBase64Image).mockResolvedValueOnce('https://cdn.example.com/x.jpeg');
+
+      const res = await POST(makeReq({ prompt: 'x', itemId: ITEM, image_text: 'overlay' }));
+      const body = await res.json() as { image: { overlay: unknown } };
+
+      expect(vi.mocked(generateContentImage).mock.calls[0][0].style).toBeUndefined();
+      expect(body.image.overlay).toEqual({ title: 'Hola', body: 'Mundo' });
+      expect(items.updates.at(-1)).toMatchObject({
+        metadata: { image_text: 'overlay', image_overlay: { title: 'Hola', body: 'Mundo' } },
+      });
+    });
+
+    it('overlay: regenerar no reescribe el texto que la persona ya editó', async () => {
+      const { POST } = await import('@/app/api/content/image/route');
+      vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+      const items = makeReadableItemsChain({
+        content_type: 'post', metadata: { image_overlay: { title: 'Mío', body: '' } },
+      });
+      mockDb(items as never);
+      vi.mocked(generateContentImage).mockResolvedValueOnce({ b64: 'AAAA', revisedPrompt: null } as never);
+      vi.mocked(uploadBase64Image).mockResolvedValueOnce('https://cdn.example.com/x.jpeg');
+
+      await POST(makeReq({ prompt: 'x', itemId: ITEM, image_text: 'overlay' }));
+
+      expect(generateSlideText).not.toHaveBeenCalled();
+      expect(items.updates.at(-1)).toMatchObject({ metadata: { image_overlay: { title: 'Mío', body: '' } } });
+    });
+
+    it('si falla la redacción, responde error y marca la imagen sin generarla', async () => {
+      const { POST } = await import('@/app/api/content/image/route');
+      vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+      const items = makeReadableItemsChain({ content_type: 'post' });
+      mockDb(items as never);
+      vi.mocked(generateInfographicCopy).mockRejectedValueOnce(new Error('AI down'));
+
+      const res = await POST(makeReq({ prompt: 'x', itemId: ITEM, image_text: 'generated' }));
+
+      expect(res.status).toBe(502);
+      expect(generateContentImage).not.toHaveBeenCalled();
+      expect(items.updates.at(-1)).toMatchObject({ image_status: 'error' });
+    });
+
+    it('rechaza un modo desconocido', async () => {
+      const { POST } = await import('@/app/api/content/image/route');
+      vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+
+      const res = await POST(makeReq({ prompt: 'x', image_text: 'collage' }));
+      expect(res.status).toBe(422);
+    });
+  });
 
   it('devuelve 401 sin auth', async () => {
     const { POST } = await import('@/app/api/content/image/route');

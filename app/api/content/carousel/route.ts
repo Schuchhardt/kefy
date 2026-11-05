@@ -12,7 +12,7 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 
 // ─── POST /api/content/carousel ───────────────────────────────────────────────
 // Generate a multi-slide carousel.
-// Claude writes copy for each slide; gpt-image-2 optionally generates one image per slide.
+// Claude writes copy for each slide; gpt-image optionally generates one image per slide.
 //
 // Body:
 //   channel          — required

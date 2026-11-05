@@ -20,6 +20,7 @@
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
 import { prepareCarouselSlides, prepareSingleImage } from '@/lib/publish-images';
+import { imageTextToBake, type ImageOverlay } from '@/lib/image-text';
 import { resolvePublishMedia, type PublishMediaSource, type ResolvedPublishMedia } from '@/lib/publish-media';
 import type { CarouselSlide, ContentType, ScheduledSyncResult } from '@/types/content';
 import type { ContentChannel } from '@/types/ai';
@@ -76,7 +77,7 @@ interface PublishItemRow {
 }
 
 const ITEM_SELECT =
-  'id, title, body, image_url, hashtags, channel, status, content_type, slides, video_url, mux_playback_id, brand_id';
+  'id, title, body, image_url, hashtags, channel, status, content_type, slides, video_url, mux_playback_id, brand_id, metadata';
 
 // ─── Preparar lo que se manda a Zernio ───────────────────────────────────────
 //
@@ -89,6 +90,8 @@ interface PreparedPublish {
   carouselSlides: CarouselSlide[];
   imageDeps: { orgId: string; prefix: string; brandFonts: { heading?: string | null; body?: string | null } };
   sourceImageBuffer: Buffer | null;
+  /** Lo que se escribe sobre la imagen (lib/image-text.ts). */
+  bakeText?: string | ImageOverlay;
 }
 
 /** El texto y el media de un contenido en un formato, listos para cada cuenta. */
@@ -166,7 +169,11 @@ async function preparePublish(
     }
   }
 
-  return { media, carouselSlides, imageDeps, sourceImageBuffer };
+  // El modo de texto es de la pieza original: una versión convertida tiene su
+  // propia imagen limpia y se publica como siempre.
+  const bakeText = imageTextToBake(format, format === item.content_type ? item.metadata : null, media.text);
+
+  return { media, carouselSlides, imageDeps, sourceImageBuffer, bakeText };
 }
 
 /** El payload de Zernio para una cuenta (sin fecha ni request id). */
@@ -177,7 +184,7 @@ async function buildAccountPayload(
   tag: string,
 ): Promise<ZernioPublishPayload> {
   const { STORY_CAPABLE_PLATFORMS } = await import('@/lib/zernio');
-  const { media, carouselSlides, imageDeps, sourceImageBuffer } = prep;
+  const { media, carouselSlides, imageDeps, sourceImageBuffer, bakeText } = prep;
   const platform = (account.platform ?? 'generic') as ContentChannel;
 
   // Ajuste al formato de la red + texto quemado donde la red no lo muestra
@@ -187,8 +194,9 @@ async function buildAccountPayload(
     imageForAccount = await prepareSingleImage(
       media.image_url, sourceImageBuffer, platform, format,
       imageDeps,
-      format === 'story' && !media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform)
-        ? media.text
+      // Fuera de las redes con stories, la story sale como post y su texto va en el caption.
+      format !== 'story' || (!media.is_video && STORY_CAPABLE_PLATFORMS.has(account.platform))
+        ? bakeText
         : undefined,
     );
   }

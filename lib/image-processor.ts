@@ -2,7 +2,7 @@ import sharp from 'sharp';
 import type { ContentChannel } from '@/types/ai';
 import type { ContentType } from '@/types/content';
 import { planImageFit, type ImageFitPlan } from '@/lib/image-fit';
-import { safeBoxFor } from '@/lib/preview-layout';
+import { safeBoxFor, safeAreaFor } from '@/lib/preview-layout';
 import {
   FALLBACK_FONT_FAMILY,
   ensureFontsConfigured,
@@ -343,6 +343,35 @@ export async function bakeTextIfSupported(
     console.warn('[image-processor] no se pudo quemar el texto:', err);
     return input;
   }
+}
+
+/**
+ * Lleva a 9:16 una pieza con el texto ya dibujado, repitiendo el borde del fondo
+ * arriba y abajo para dejar libre lo que tapa la interfaz de la story. El modelo
+ * no respeta esas zonas aunque se le pidan (en las pruebas, el cierre terminaba
+ * sobre la caja de respuesta); así no depende de él. El 4:5 de `infographicSize`
+ * cabe justo en esa zona.
+ */
+export async function extendToStoryCanvas(input: Buffer): Promise<Buffer> {
+  const WIDTH = 1080;
+  const HEIGHT = 1920;
+  const content = await sharp(input)
+    .resize({ width: WIDTH, height: HEIGHT, fit: 'inside' })
+    .toBuffer({ resolveWithObject: true });
+  const safe = safeAreaFor('instagram', 'story');
+  const free = Math.max(0, HEIGHT - content.info.height);
+  const top = Math.round(free * (safe.top / (safe.top + safe.bottom)));
+  const sides = Math.max(0, WIDTH - content.info.width);
+  return sharp(content.data)
+    .extend({
+      top,
+      bottom: free - top,
+      left: Math.floor(sides / 2),
+      right: Math.ceil(sides / 2),
+      extendWith: 'copy',
+    })
+    .jpeg({ quality: 92 })
+    .toBuffer();
 }
 
 const STORY_CAPTION_MAX_CHARS = 150;

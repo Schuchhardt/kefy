@@ -1,7 +1,7 @@
 ---
 name: reel-image
-description: Prompt enrichment for AI image generation (gpt-image-2) for reel scenes
-model: openai:gpt-image-2-2026-04-21
+description: Prompt enrichment for AI image generation (gpt-image-2.6-flare) for reel scenes
+model: openai:gpt-image-2.6-flare
 ---
 
 {{prompt}}

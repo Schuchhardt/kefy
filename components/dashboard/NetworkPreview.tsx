@@ -8,8 +8,9 @@
 
 import { useEffect, useState, type CSSProperties } from 'react';
 import ChannelIcon from '@/components/ui/ChannelIcon';
-import { PostPreview } from './PostPreview';
-import { SlideCanvas, SlideDots, previewCopy } from './CarouselPreview';
+import { PostPreview, FeedImage } from './PostPreview';
+import { ImageTextOverlay, SlideCanvas, SlideDots, previewCopy } from './CarouselPreview';
+import { imageTextToBake } from '@/lib/image-text';
 import { ImageGeneratingSpinner } from './ImageGeneratingSpinner';
 import { safeAreaFor } from '@/lib/preview-layout';
 import { brandFontStack, ensureGoogleFontLoaded } from '@/lib/google-fonts';
@@ -49,6 +50,9 @@ interface NetworkPreviewProps {
    *  (no imageUrl yet, but it's not a failure — shows a spinner instead of
    *  the plain text-only fallback). */
   imagePending?:  boolean;
+  /** `metadata` del contenido, si esta vista es su formato original: dice qué
+   *  texto se escribe sobre la imagen al publicar (lib/image-text.ts). */
+  metadata?:      unknown;
   accentColor?:   string;
   /** Redes a mostrar. Por defecto, las relevantes para el formato; el modal de
    *  publicación pasa sólo las de las cuentas elegidas. */
@@ -78,7 +82,7 @@ interface NetworkPreviewProps {
 export function NetworkPreview({
   contentType, defaultChannel, body, imageUrl, videoUrl, hashtags,
   slides, activeSlide, onActiveSlideChange, username, logoUrl,
-  imagePending, accentColor, networks: networksProp, publishedNetworks,
+  imagePending, metadata, accentColor, networks: networksProp, publishedNetworks,
   channel: channelProp, onChannelChange, brandFont, lang = 'es', frameMaxHeight,
 }: NetworkPreviewProps) {
   useEffect(() => { ensureGoogleFontLoaded(brandFont); }, [brandFont]);
@@ -97,6 +101,11 @@ export function NetworkPreview({
   const slide = slides[idx];
 
   const frame = { maxHeight: frameMaxHeight, lang };
+
+  // Lo mismo que hará el servidor, para que se apruebe lo que se va a publicar.
+  const bake = imageTextToBake(contentType, metadata, body ?? '');
+  const overlay = typeof bake === 'object' ? bake : null;
+  const storyCaption = typeof bake === 'string' ? bake : '';
 
   return (
     <div>
@@ -127,8 +136,11 @@ export function NetworkPreview({
       {contentType === 'post' && channel === 'tiktok' && (
         <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''} {...frame}>
           {imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={t.imageAlt} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageUrl} alt={t.imageAlt} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+              {overlay && <ImageTextOverlay {...overlay} platform="tiktok" format="post" brandFont={brandFont} />}
+            </>
           ) : imagePending ? (
             <ImageGeneratingSpinner accentColor={accentColor} height="100%" />
           ) : (
@@ -148,6 +160,11 @@ export function NetworkPreview({
           lang={lang}
           media={!imageUrl && imagePending ? (
             <ImageGeneratingSpinner accentColor={accentColor} />
+          ) : imageUrl && overlay ? (
+            <div style={{ position: 'relative' }}>
+              <FeedImage src={imageUrl} channel={channel as ContentChannel} alt={t.imageAlt} />
+              <ImageTextOverlay {...overlay} platform={channel as ContentChannel} format="post" brandFont={brandFont} />
+            </div>
           ) : undefined}
         />
       )}
@@ -203,13 +220,18 @@ export function NetworkPreview({
         const media = videoUrl
           ? <video src={videoUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           : imageUrl
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={imageUrl} alt={t.imageAlt} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+            ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imageUrl} alt={t.imageAlt} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+                {overlay && channel !== 'tiktok' && <ImageTextOverlay {...overlay} platform={channel as ContentChannel} format="story" brandFont={brandFont} />}
+              </>
+            )
             : <div style={{ width: '100%', height: '100%', background: 'linear-gradient(160deg, #a18cd1 0%, #fbc2eb 100%)' }} />;
         return channel === 'tiktok' ? (
           <TikTokFrame username={username} logoUrl={logoUrl} caption={body ?? ''} {...frame}>{media}</TikTokFrame>
         ) : (
-          <VerticalNetworkFrame channel={channel} caption={body ?? ''} username={username} logoUrl={logoUrl} maxHeight={frameMaxHeight}>
+          <VerticalNetworkFrame channel={channel} caption={storyCaption} username={username} logoUrl={logoUrl} maxHeight={frameMaxHeight}>
             {media}
           </VerticalNetworkFrame>
         );

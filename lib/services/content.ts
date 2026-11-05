@@ -13,7 +13,12 @@
 // por la guardia). Ver docs/beta-abierta.md.
 
 import { createSupabaseServer } from '@/lib/supabase';
-import { generateCarouselSlides, generateContentImage, generateContentText } from '@/lib/ai';
+import { generateCarouselSlides, generateContentImage, generateContentText, generateInfographicCopy, generateSlideText } from '@/lib/ai';
+import { INFOGRAPHIC_QUALITY, infographicBrief, infographicSize } from '@/lib/infographic';
+import {
+  cleanImageOverlay, defaultImageText, isImageTextMode, readImageOverlay, supportsImageText,
+  type ImageOverlay, type ImageTextMode,
+} from '@/lib/image-text';
 import { consumeCredits, refundCredits } from '@/lib/usage';
 import { uploadBase64Image } from '@/lib/storage';
 import { reportError } from '@/lib/observability';
@@ -86,6 +91,8 @@ type KitRow = {
   secondary_color?: string | null;
   accent_color?: string | null;
   logo_url?: string | null;
+  font_heading?: string | null;
+  font_body?: string | null;
 };
 
 /**
@@ -502,7 +509,12 @@ export async function updateContent(
     update.slides = sanitizedSlides;
   }
 
-  if (Object.keys(update).length === 0) {
+  const wantsImageText = 'image_text' in input || 'overlay_title' in input || 'overlay_body' in input;
+  if (input.image_text !== undefined && !isImageTextMode(input.image_text)) {
+    throw new ServiceError('invalid_input', 422, 'Invalid image_text');
+  }
+
+  if (Object.keys(update).length === 0 && !wantsImageText) {
     throw new ServiceError('invalid_input', 422, 'No valid fields to update');
   }
 
@@ -512,12 +524,16 @@ export async function updateContent(
   // el texto, metadata.externally_modified queda en true para siempre y las
   // herramientas del chat que lo leen contaminan el turno (created_via no
   // cambia al editar). Un PATCH de la UI que reemplaza metadata no la borra.
-  const externalEdit = (ctx.source === 'api' || ctx.source === 'mcp') && TEXT_FIELDS.some((k) => k in update);
-  if (externalEdit || 'metadata' in update) {
-    let mq = db.from('kefy_content_items').select('metadata').eq('id', itemId).eq('org_id', ctx.auth.orgId);
+  const editsOverlayText = 'overlay_title' in input || 'overlay_body' in input;
+  const externalEdit = (ctx.source === 'api' || ctx.source === 'mcp')
+    && (TEXT_FIELDS.some((k) => k in update) || editsOverlayText);
+  let imageTextChanged = false;
+  if (externalEdit || 'metadata' in update || wantsImageText || 'image_url' in update) {
+    let mq = db.from('kefy_content_items').select('metadata, content_type, image_url').eq('id', itemId).eq('org_id', ctx.auth.orgId);
     if (ctx.brandScope === 'strict') mq = mq.eq('brand_id', ctx.brandId);
     const { data: cur } = await mq.maybeSingle();
-    const currentMeta = asRecord((cur as { metadata?: unknown } | null)?.metadata) ?? {};
+    const currentRow = cur as { metadata?: unknown; content_type?: string; image_url?: string | null } | null;
+    const currentMeta = asRecord(currentRow?.metadata) ?? {};
     const base = 'metadata' in update ? (asRecord(update.metadata) ?? {}) : currentMeta;
     if (externalEdit) {
       update.metadata = { ...base, externally_modified: true, last_modified_via: ctx.source };
@@ -527,6 +543,35 @@ export async function updateContent(
         externally_modified: true,
         last_modified_via: currentMeta.last_modified_via ?? null,
       };
+    }
+
+    // Una imagen nueva no trae el texto de la anterior: si no se dice otra cosa,
+    // vuelve a lo normal del formato para no publicarla sin él.
+    const imagePatch: Record<string, unknown> = {};
+    if (wantsImageText) {
+      if (currentRow?.content_type && !supportsImageText(currentRow.content_type)) {
+        throw new ServiceError(
+          'invalid_input', 422,
+          msg(ctx.language, 'Esta opción de texto es solo para posts y stories', 'This text option is only available for posts and stories'),
+        );
+      }
+      if (input.image_text !== undefined) imagePatch.image_text = input.image_text;
+      if (editsOverlayText) {
+        const current = readImageOverlay(currentMeta);
+        imagePatch.image_overlay = cleanImageOverlay(
+          'overlay_title' in input ? input.overlay_title : current.title,
+          'overlay_body' in input ? input.overlay_body : current.body,
+        );
+      }
+    } else if (
+      update.image_url && update.image_url !== currentRow?.image_url
+      && currentMeta.image_text === 'generated' && currentRow?.content_type
+    ) {
+      imagePatch.image_text = defaultImageText(currentRow.content_type);
+    }
+    if (Object.keys(imagePatch).length > 0) {
+      update.metadata = { ...(asRecord(update.metadata) ?? currentMeta), ...imagePatch };
+      imageTextChanged = true;
     }
   }
 
@@ -550,7 +595,7 @@ export async function updateContent(
   // Zernio guarda una copia de lo programado: si cambió lo que se publica, se
   // le reenvía. El fallo no deshace la edición, pero se devuelve para avisar
   // de que esa red sigue con la versión anterior.
-  const changedPublished = PUBLISHED_FIELDS.some((k) => k in update);
+  const changedPublished = imageTextChanged || PUBLISHED_FIELDS.some((k) => k in update);
   if (changedPublished && opts.syncScheduled !== false && (item as { status?: string }).status === 'scheduled') {
     const scheduled_sync = await syncScheduledPosts(ctx, itemId);
     return { item: item as Record<string, unknown>, scheduled_sync };
@@ -690,6 +735,39 @@ export async function generateTextPost(
   return { itemId, result, draft: (draft ?? null) as Record<string, unknown> | null };
 }
 
+// ─── generateTextImage ────────────────────────────────────────────────────────
+
+/**
+ * Imagen con todo su texto en los píxeles. El texto se escribe aparte y entra en
+ * el cobro de la imagen: el modelo de imagen solo imprime lo que le dan, sin
+ * inventar datos. Quien llama cobra y devuelve el crédito si esto falla.
+ */
+export async function generateTextImage(input: {
+  source: string;
+  format: 'post' | 'story';
+  language: 'es' | 'en';
+  size?: ImageSize;
+  brand?: BrandImageContext;
+  referenceImages?: string[];
+}) {
+  const copy = await generateInfographicCopy({
+    source:    input.source,
+    language:  input.language,
+    format:    input.format,
+    tone:      input.brand?.tone,
+    brandName: input.brand?.name,
+  });
+  return generateContentImage({
+    prompt:  infographicBrief(copy),
+    size:    infographicSize(input.format, input.size),
+    quality: INFOGRAPHIC_QUALITY,
+    style:   'infographic',
+    format:  input.format,
+    brand:   input.brand,
+    referenceImages: input.referenceImages,
+  });
+}
+
 // ─── generateImageForItem ─────────────────────────────────────────────────────
 
 export interface GenerateImageInput {
@@ -700,12 +778,20 @@ export interface GenerateImageInput {
   quality?: ImageQuality;
   /** URLs de imágenes de referencia (máx. 3), solo del Storage de Kefy. */
   referenceImageUrls?: string[];
+  /**
+   * Cómo lleva el texto la imagen (lib/image-text.ts). Solo en posts y stories.
+   * Si se indica y hay `itemId`, queda en `metadata.image_text`. Con `generated`,
+   * `prompt` es la fuente del texto.
+   */
+  imageText?: ImageTextMode;
+  /** Texto de `overlay`. Sin él se conserva el que ya hay o, en un post, lo escribe la IA. */
+  overlay?: ImageOverlay;
 }
 
 const IMAGE_ROUTE = 'POST /api/content/image';
 
 /** Descarga el logo del brand kit en base64. Si falla, se sigue sin logo. */
-async function fetchLogo(logoUrl: string | null | undefined): Promise<{ logoB64?: string; logoMimeType?: string }> {
+export async function fetchLogo(logoUrl: string | null | undefined): Promise<{ logoB64?: string; logoMimeType?: string }> {
   if (!logoUrl) return {};
   try {
     const logoRes = await fetch(logoUrl);
@@ -732,7 +818,7 @@ async function fetchLogo(logoUrl: string | null | undefined): Promise<{ logoB64?
 export async function generateImageForItem(
   ctx: ServiceContext,
   input: GenerateImageInput,
-): Promise<{ image: { url: string; revisedPrompt: string | null } }> {
+): Promise<{ image: { url: string; revisedPrompt: string | null; imageText?: ImageTextMode; overlay?: ImageOverlay } }> {
   const lang = ctx.language;
   const prompt = input.prompt.trim().slice(0, 1000);
   const itemId = input.itemId || null;
@@ -756,6 +842,29 @@ export async function generateImageForItem(
     );
   }
 
+  // Un carrusel o un reel llevan su texto por slide o escena: con el modo de la
+  // imagen quedaría uno encima del otro. Se comprueba antes de cobrar.
+  const imageText = input.imageText;
+  let format: 'post' | 'story' = 'post';
+  let overlay = input.overlay;
+  if (imageText && itemId) {
+    const { data: target } = await db
+      .from('kefy_content_items')
+      .select('content_type, metadata')
+      .eq('id', itemId)
+      .eq('org_id', ctx.auth.orgId)
+      .maybeSingle();
+    const row = target as { content_type?: string; metadata?: unknown } | null;
+    if (!row?.content_type || !supportsImageText(row.content_type)) {
+      throw new ServiceError(
+        'invalid_input', 422,
+        msg(lang, 'Esta opción de texto es solo para posts y stories', 'This text option is only available for posts and stories'),
+      );
+    }
+    format = row.content_type;
+    overlay ??= readImageOverlay(row.metadata);
+  }
+
   // 3. Cobro.
   const refund = await chargeOrThrow(ctx, 'image', IMAGE_ROUTE);
 
@@ -777,18 +886,40 @@ export async function generateImageForItem(
     secondaryColor: kit.secondary_color ?? undefined,
     accentColor:    kit.accent_color    ?? undefined,
     tone:           kit.tone            ?? undefined,
+    fontHeading:    kit.font_heading,
+    fontBody:       kit.font_body,
     ...logo,
   } : undefined;
 
+  // El texto editable de un post lo escribe la IA si nadie lo escribió. Si falla,
+  // la imagen sale igual y se puede escribir a mano.
+  if (imageText === 'overlay' && format === 'post' && !overlay?.title && !overlay?.body) {
+    try {
+      const written = await generateSlideText({
+        kind: 'carousel', channel: 'generic', language: lang, body: prompt,
+        tone: kit?.tone ?? undefined, brandName: kit?.name ?? undefined,
+      });
+      overlay = cleanImageOverlay(written.title, written.body);
+    } catch (err) {
+      reportError(err, { route: IMAGE_ROUTE, auth: ctx.auth, service: 'ai', extra: { fase: 'texto-overlay' } });
+    }
+  }
+
   let result;
   try {
-    result = await generateContentImage({
-      prompt,
-      size:    input.size ?? '1024x1024',
-      quality: input.quality ?? 'medium',
-      brand,
-      referenceImages,
-    });
+    if (imageText === 'generated') {
+      result = await generateTextImage({
+        source: prompt, format, language: lang, size: input.size, brand, referenceImages,
+      });
+    } else {
+      result = await generateContentImage({
+        prompt,
+        size:    input.size ?? '1024x1024',
+        quality: input.quality ?? 'medium',
+        brand,
+        referenceImages,
+      });
+    }
   } catch (err) {
     await refund();
     reportError(err, { route: IMAGE_ROUTE, auth: ctx.auth, service: 'ai', extra: { source: ctx.source } });
@@ -797,7 +928,7 @@ export async function generateImageForItem(
     throw new ServiceError('provider_error', 502, message).markReported();
   }
 
-  // La imagen se guarda limpia. El texto del slide se dibuja como overlay HTML
+  // La imagen se guarda limpia (salvo la infografía). El texto del slide se dibuja como overlay HTML
   // en la vista previa y se quema sobre los píxeles al publicar, con la zona
   // segura de la red destino (ver lib/image-processor y lib/preview-layout).
   let publicUrl: string;
@@ -814,9 +945,28 @@ export async function generateImageForItem(
 
   // Optionally link to a content item
   if (itemId) {
+    // metadata se lee justo ahora: la generación tarda y no hay que pisar lo que
+    // haya cambiado mientras tanto.
+    let metadataPatch = {};
+    if (imageText) {
+      const { data: current } = await db
+        .from('kefy_content_items')
+        .select('metadata')
+        .eq('id', itemId)
+        .eq('org_id', ctx.auth.orgId)
+        .maybeSingle();
+      const metadata = (current as { metadata?: Record<string, unknown> | null } | null)?.metadata ?? {};
+      metadataPatch = {
+        metadata: {
+          ...metadata,
+          image_text: imageText,
+          ...(imageText === 'overlay' && overlay ? { image_overlay: overlay } : {}),
+        },
+      };
+    }
     const { error } = await db
       .from('kefy_content_items')
-      .update({ image_url: publicUrl, image_prompt: prompt, image_status: 'ready' })
+      .update({ image_url: publicUrl, image_prompt: prompt, image_status: 'ready', ...metadataPatch })
       .eq('id', itemId)
       .eq('org_id', ctx.auth.orgId);
 
@@ -826,7 +976,14 @@ export async function generateImageForItem(
     }
   }
 
-  return { image: { url: publicUrl, revisedPrompt: result.revisedPrompt ?? null } };
+  return {
+    image: {
+      url: publicUrl,
+      revisedPrompt: result.revisedPrompt ?? null,
+      ...(imageText ? { imageText } : {}),
+      ...(imageText === 'overlay' && overlay ? { overlay } : {}),
+    },
+  };
 }
 
 // ─── generateCarousel ─────────────────────────────────────────────────────────

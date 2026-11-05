@@ -17,6 +17,7 @@
 
 import { createSupabaseServer } from '@/lib/supabase';
 import { generateContentText, generateContentImage, generateVideoScript, describeImageAsTopic } from '@/lib/ai';
+import { defaultImageText, readImageText, type ImageOverlay, type ImageTextMode } from '@/lib/image-text';
 import { buildDerivedTopic, topicImageFor } from '@/lib/content-source';
 import { consumeCredits, refundCredits } from '@/lib/usage';
 import { uploadBase64Image } from '@/lib/storage';
@@ -29,12 +30,12 @@ import type { ServiceContext } from '@/lib/services/context';
 import { ServiceError, chargeOrThrow } from '@/lib/services/errors';
 import { loadOwnedItem } from '@/lib/services/ownership';
 import { getBrandKitForBrand } from '@/lib/services/brand-kit';
-import { createdVia } from '@/lib/services/content';
+import { createdVia, fetchLogo, generateTextImage } from '@/lib/services/content';
 
 const POST_ROUTE = 'POST /api/content/story';
 const PATCH_ROUTE = 'PATCH /api/content/story';
 
-type KitRow = Pick<BrandKit, 'id' | 'name' | 'tagline' | 'tone' | 'industry' | 'primary_color' | 'secondary_color' | 'accent_color'>;
+type KitRow = Pick<BrandKit, 'id' | 'name' | 'tagline' | 'tone' | 'industry' | 'primary_color' | 'secondary_color' | 'accent_color' | 'logo_url' | 'font_heading' | 'font_body'>;
 
 async function loadKit(brandId: string | null | undefined): Promise<KitRow | null> {
   if (!brandId) return null;
@@ -54,6 +55,10 @@ export interface GenerateStoryInput {
   referenceImageUrls?: string[];
   /** false → solo genera, no guarda. Por defecto, true. */
   save?: boolean;
+  /** Cómo lleva el texto la imagen. Por defecto, `overlay`: el caption encima. */
+  imageText?: ImageTextMode;
+  /** Texto propio de `overlay`, en vez del caption. */
+  overlay?: ImageOverlay;
 }
 
 export interface GenerateStoryResult {
@@ -65,6 +70,7 @@ export interface GenerateStoryResult {
   tokensUsed: number;
   /** Por qué la story salió sin imagen, si se pidió. */
   imageError?: 'credits_exhausted' | 'failed';
+  imageText: ImageTextMode;
 }
 
 export async function generateStory(ctx: ServiceContext, input: GenerateStoryInput): Promise<GenerateStoryResult> {
@@ -103,19 +109,34 @@ export async function generateStory(ctx: ServiceContext, input: GenerateStoryInp
       imageError = 'credits_exhausted';
     } else {
       try {
-        const img = await generateContentImage({
-          prompt:  `Vertical story visual for: ${topic}. Eye-catching, mobile-first composition, no captions baked in.`,
-          size:    '1024x1536',
-          quality: 'medium',
-          brand: {
-            name:           kit?.name ?? undefined,
-            primaryColor:   kit?.primary_color ?? undefined,
-            secondaryColor: kit?.secondary_color ?? undefined,
-            accentColor:    kit?.accent_color ?? undefined,
-            tone:           kit?.tone ?? undefined,
-          },
-          referenceImages: input.referenceImageUrls?.slice(0, 3),
-        });
+        const brand = {
+          name:           kit?.name ?? undefined,
+          primaryColor:   kit?.primary_color ?? undefined,
+          secondaryColor: kit?.secondary_color ?? undefined,
+          accentColor:    kit?.accent_color ?? undefined,
+          tone:           kit?.tone ?? undefined,
+        };
+        const referenceImages = input.referenceImageUrls?.slice(0, 3);
+        const img = input.imageText === 'generated'
+          ? await generateTextImage({
+              source:   `${topic}\n\n${text.body}`.slice(0, 1000),
+              format:   'story',
+              language: ctx.language,
+              brand:    {
+                ...brand,
+                fontHeading: kit?.font_heading,
+                fontBody:    kit?.font_body,
+                ...(await fetchLogo(kit?.logo_url)),
+              },
+              referenceImages,
+            })
+          : await generateContentImage({
+              prompt:  `Vertical story visual for: ${topic}. Eye-catching, mobile-first composition, no captions baked in.`,
+              size:    '1024x1536',
+              quality: 'medium',
+              brand,
+              referenceImages,
+            });
         imageUrl = await uploadBase64Image(img.b64, ctx.auth.orgId, `story-${Date.now()}.jpeg`);
       } catch (err) {
         // La cuota se consumió: se devuelve, la imagen no llegó.
@@ -126,7 +147,13 @@ export async function generateStory(ctx: ServiceContext, input: GenerateStoryInp
     }
   }
 
+  // Sin imagen, `generated` no describe nada: una subida después lleva el caption.
+  const imageText = input.imageText === 'generated' && !imageUrl
+    ? defaultImageText('story')
+    : input.imageText ?? defaultImageText('story');
+
   const out: GenerateStoryResult = {
+    imageText,
     body:       text.body,
     hashtags:   text.hashtags,
     image_url:  imageUrl,
@@ -151,7 +178,12 @@ export async function generateStory(ctx: ServiceContext, input: GenerateStoryInp
       hashtags:      text.hashtags,
       status:        'draft',
       render_status: 'not_rendered',
-      metadata:      { model: text.model, created_via: createdVia(ctx) },
+      metadata:      {
+        model: text.model,
+        created_via: createdVia(ctx),
+        image_text: imageText,
+        ...(imageText === 'overlay' && input.overlay ? { image_overlay: input.overlay } : {}),
+      },
     })
     .select('id, content_type, channel, status, created_at')
     .single();
@@ -242,8 +274,10 @@ export async function writeStoryVideoScript(
     throw new ServiceError('provider_error', 502, message).markReported();
   }
 
-  // La imagen de la story es el primer plano: no se paga otra.
-  const storyImage = typeof item.image_url === 'string' && item.image_url ? item.image_url : null;
+  // La imagen de la story es el primer plano: no se paga otra. Salvo si ya trae
+  // el texto: el montaje le escribiría encima titular y subtítulos.
+  const storyImage = typeof item.image_url === 'string' && item.image_url
+    && readImageText('story', item.metadata) !== 'generated' ? item.image_url : null;
   if (storyImage && script.scenes[0]) script.scenes[0].visual.image_url = storyImage;
   const scenes = scriptToReelScenes(script, storyImage ? { s1: storyImage } : {});
 

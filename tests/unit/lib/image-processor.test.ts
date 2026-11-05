@@ -141,3 +141,34 @@ describe('resizeForFormat (sharp real)', () => {
     await expect(resizeForFormat(Buffer.from('no soy una imagen'), 'instagram', 'post')).rejects.toThrow();
   });
 });
+
+describe('extendToStoryCanvas', () => {
+  it('lleva un 4:5 a 1080x1920 y deja el contenido dentro de la zona segura', async () => {
+    const { extendToStoryCanvas } = await import('@/lib/image-processor');
+    const sharp = (await import('sharp')).default;
+    // Fondo azul con un bloque rojo que llega hasta casi el borde inferior.
+    const base = await sharp({ create: { width: 1024, height: 1280, channels: 3, background: '#0000ff' } })
+      .composite([{
+        input: await sharp({ create: { width: 800, height: 1240, channels: 3, background: '#ff0000' } }).png().toBuffer(),
+        left: 112, top: 20,
+      }])
+      .png()
+      .toBuffer();
+
+    const out = await extendToStoryCanvas(base);
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    expect([info.width, info.height]).toEqual([1080, 1920]);
+
+    const red = (y: number) => {
+      const i = (y * info.width + 540) * info.channels;
+      return data[i] > 200 && data[i + 2] < 60;
+    };
+    const rows = Array.from({ length: info.height }, (_, y) => y).filter(red);
+    // Lo que tapa la story: 13 % arriba, 17 % abajo.
+    expect(rows[0]).toBeGreaterThanOrEqual(Math.floor(1920 * 0.13));
+    expect(rows.at(-1)).toBeLessThanOrEqual(Math.ceil(1920 * 0.83));
+    // El fondo se extiende, no queda una banda de otro color.
+    const i = (5 * info.width + 540) * info.channels;
+    expect(data[i + 2]).toBeGreaterThan(200);
+  });
+});
