@@ -516,6 +516,42 @@ Query params: `profileId`, `platform`, `status`, `page`, `limit`.
 DELETE /v1/posts/{postId}
 ```
 
+Solo para lo que no ha salido (`cancelPost`): un post publicado responde 400 y
+nada de lo que ya está en la red se borra con este endpoint.
+
+### Borrar una publicación ya publicada
+
+```
+POST /v1/posts/{postId}/unpublish   { platform, accountId? }
+```
+
+Verificado contra `docs.zernio.com/posts/unpublish-post`. Borra el post de la red
+y deja el registro de Zernio como cancelado. `accountId` hace falta si salió en
+varias cuentas de esa red (si no, 409 `ambiguous_account`); Kefy lo manda
+siempre.
+
+- **Sí:** `threads`, `facebook`, `twitter`, `linkedin`, `youtube`, `pinterest`,
+  `reddit`, `bluesky`, `googlebusiness`, `telegram` (`UNPUBLISH_PLATFORMS`).
+- **No:** Instagram, TikTok y Snapchat. Zernio no lo soporta y archivar tampoco
+  está disponible. `delete_published_post` falla antes de pedir confirmación y
+  devuelve `manual_removal_required: true`, `post_url`, `account` y
+  `removal_instructions` (`lib/post-removal.ts`). Tras bajarla a mano, Kefy la
+  sigue mostrando como publicada.
+- Si la red rechaza el borrado (502), el error también trae `post_url` y
+  `removal_instructions`.
+- En YouTube el borrado es definitivo; en un hilo se borran todos sus elementos.
+
+`deletePublishedPost` (`lib/services/publish.ts`) marca la fila como `deleted`
+y no toca el contenido. El webhook ignora los eventos de una fila `deleted`:
+Zernio la pasa a cancelada y eso no debe pisar el estado.
+
+### Estado del contenido
+
+`kefy_content_items.status` resume sus publicaciones (`syncContentItemStatus`,
+`lib/services/content-status.ts`): algo publicado → `published`; si no, algo por
+salir → `scheduled`; si no, `approved`. Los webhooks de posts, cancelar y
+borrar lo recalculan. Un borrador o un archivado no se tocan.
+
 ---
 
 ## Analytics

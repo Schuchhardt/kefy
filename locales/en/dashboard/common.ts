@@ -71,6 +71,7 @@ const en: DashboardCommonCopy = {
     pending: 'Pending',
     failed: 'Failed',
     cancelled: 'Cancelled',
+    deleted: 'Deleted',
   },
   confirm: {
     deleteTitle: 'Delete?',

@@ -21,6 +21,7 @@ export const STATUS_TONE: Record<AnyStatus, Tone> = {
   pending: 'neutral',
   failed: 'danger',
   cancelled: 'neutral',
+  deleted: 'neutral',
 };
 
 export const TONE_COLORS: Record<Tone, { color: string; background: string; border: string }> = {

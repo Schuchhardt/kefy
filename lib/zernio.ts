@@ -371,6 +371,25 @@ export async function cancelPost(zernioPostId: string): Promise<void> {
 }
 
 /**
+ * Redes donde Zernio puede borrar un post ya publicado
+ * (docs.zernio.com/posts/unpublish-post). Instagram, TikTok y Snapchat no.
+ */
+export const UNPUBLISH_PLATFORMS: ReadonlySet<string> = new Set([
+  'threads', 'facebook', 'twitter', 'linkedin', 'youtube', 'pinterest', 'reddit', 'bluesky', 'googlebusiness', 'telegram',
+]);
+
+/**
+ * Borra de la red un post ya publicado. El registro sigue en Zernio, como
+ * cancelado. `accountId` evita el 409 si salió en varias cuentas de esa red.
+ */
+export async function unpublishPost(zernioPostId: string, platform: string, accountId?: string | null): Promise<void> {
+  await zernioFetch<unknown>('POST', `/posts/${encodeURIComponent(zernioPostId)}/unpublish`, {
+    platform,
+    ...(accountId ? { accountId } : {}),
+  });
+}
+
+/**
  * Get the current status of a post (useful for async publish tracking).
  */
 export async function getPostStatus(zernioPostId: string): Promise<ZernioPublishResult> {

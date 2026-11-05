@@ -65,6 +65,8 @@ export interface ContentItem {
   id:               string;
   /** Solo en GET /api/content con status 'scheduled': la próxima fecha a la que sale. */
   next_scheduled_at?: string | null;
+  /** Solo en GET /api/content con status 'published': la última fecha a la que salió. */
+  last_published_at?: string | null;
   /** Marca dueña. NULL en filas antiguas, anteriores a las marcas. */
   brand_id?:        string | null;
   channel:          Channel;
@@ -131,7 +133,7 @@ export interface RecentContentItem {
 
 // ─── Calendar ────────────────────────────────────────────────────────────────
 
-export type PostStatus = 'pending' | 'scheduled' | 'published' | 'failed' | 'cancelled';
+export type PostStatus = 'pending' | 'scheduled' | 'published' | 'failed' | 'cancelled' | 'deleted';
 
 export interface ScheduledPostContent {
   id:      string;

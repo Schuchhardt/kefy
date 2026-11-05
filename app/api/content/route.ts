@@ -9,7 +9,7 @@ import { createManualContent, listContent } from '@/lib/services/content';
 // del asistente. Aquí solo quedan auth, marca activa y el formato HTTP.
 
 // ─── GET /api/content ─────────────────────────────────────────────────────────
-// List content items for the active brand. Supports ?channel= ?status= ?limit= ?offset=
+// List content items for the active brand. Supports ?channel= ?status= ?sort= ?limit= ?offset=
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
     const out = await listContent(ctx, {
       channel: searchParams.get('channel'),
       status:  searchParams.get('status'),
+      sort:    searchParams.get('sort') === 'publication' ? 'publication' : 'created',
       limit,
       offset,
       // El editor se abre desde la lista y necesita saber cómo lleva el texto la imagen.

@@ -33,6 +33,10 @@ import {
   buildPublishTargets, mediaShapeOf, suggestedAccountIds,
   type PublishTarget, type TargetAccount, type TargetPost,
 } from '@/lib/publish-targets';
+import { syncContentItemStatus } from '@/lib/services/content-status';
+import { getChannelLabel } from '@/lib/channels';
+import { manualRemovalSteps } from '@/lib/post-removal';
+import type { Channel } from '@/types/channels';
 
 export type PublishMode = 'now' | 'schedule';
 
@@ -539,7 +543,7 @@ export async function listPublishTargets(
 
 // ─── Listado de publicaciones ────────────────────────────────────────────────
 
-export const SCHEDULED_POST_STATUSES = ['pending', 'scheduled', 'published', 'failed', 'cancelled'] as const;
+export const SCHEDULED_POST_STATUSES = ['pending', 'scheduled', 'published', 'failed', 'cancelled', 'deleted'] as const;
 export type ScheduledPostStatus = (typeof SCHEDULED_POST_STATUSES)[number];
 
 /**
@@ -756,6 +760,9 @@ export async function cancelScheduledPost(
   if (post.status === 'cancelled') {
     throw new ServiceError('conflict', 409, 'Post is already cancelled');
   }
+  if (post.status === 'deleted') {
+    throw new ServiceError('conflict', 409, 'Post was already deleted');
+  }
 
   // Cancelar en Zernio (best-effort)
   if (post.zernio_post_id) {
@@ -773,32 +780,127 @@ export async function cancelScheduledPost(
     .eq('id', post.id)
     .eq('org_id', ctx.auth.orgId);
 
-  // El contenido vuelve a 'approved' si solo estaba programado por esta fila.
-  // Si ya salió en otra red sigue publicado: cancelar el envío a una red más no
-  // lo devuelve a borrador.
-  const { count } = await db
-    .from('kefy_scheduled_posts')
-    .select('id', { count: 'exact', head: true })
-    .eq('content_item_id', post.content_item_id)
-    .eq('org_id', ctx.auth.orgId)
-    .eq('status', 'scheduled');
-
-  let itemReverted = false;
-  if ((count ?? 0) === 0) {
-    const { count: publishedCount } = await db
-      .from('kefy_scheduled_posts')
-      .select('id', { count: 'exact', head: true })
-      .eq('content_item_id', post.content_item_id)
-      .eq('org_id', ctx.auth.orgId)
-      .eq('status', 'published');
-
-    itemReverted = (publishedCount ?? 0) === 0;
-    await db
-      .from('kefy_content_items')
-      .update({ status: itemReverted ? 'approved' : 'published' })
-      .eq('id', post.content_item_id)
-      .eq('org_id', ctx.auth.orgId);
-  }
+  // Vuelve a 'approved' si nada más sale o salió; si otra red ya lo publicó, queda publicado.
+  const itemReverted = (await syncContentItemStatus(db, post.content_item_id)) === 'approved';
 
   return { id: post.id, content_item_id: post.content_item_id, itemReverted };
+}
+
+// ─── Borrar una publicación ya publicada ─────────────────────────────────────
+
+export interface DeletablePost {
+  id: string;
+  status: string;
+  content_item_id: string;
+  social_account_id: string;
+  zernio_post_id: string | null;
+  platform_post_url: string | null;
+  published_at: string | null;
+  platform: string | null;
+  username: string | null;
+  zernio_account_id: string | null;
+}
+
+/**
+ * La publicación si se puede borrar. Si no, un error que lo explica; en las
+ * redes sin borrado por API (Instagram, TikTok, Snapchat) trae el link directo
+ * y los pasos para bajarla a mano. Se comprueba antes de pedir confirmación.
+ */
+export async function loadDeletablePost(ctx: ServiceContext, postId: string): Promise<DeletablePost> {
+  const post = await loadOwnedScheduledPost<Omit<DeletablePost, 'platform' | 'username' | 'zernio_account_id'>>(ctx, postId);
+  const lang = ctx.language;
+
+  if (post.status === 'deleted') {
+    throw new ServiceError('conflict', 409, msg(lang, 'Esta publicación ya se borró.', 'This post was already deleted.'));
+  }
+  if (post.status !== 'published') {
+    throw new ServiceError('conflict', 409, msg(lang,
+      'Solo se pueden borrar publicaciones ya publicadas. Si aún no sale, cancélala con cancel_scheduled_post.',
+      'Only published posts can be deleted. If it has not gone out yet, cancel it with cancel_scheduled_post.'));
+  }
+
+  const { data: account } = await createSupabaseServer()
+    .from('kefy_social_accounts')
+    .select('platform, username, zernio_account_id')
+    .eq('id', post.social_account_id)
+    .eq('org_id', ctx.auth.orgId)
+    .maybeSingle();
+  const acc = account as { platform: string; username: string | null; zernio_account_id: string | null } | null;
+  const platform = acc?.platform ?? null;
+
+  const { UNPUBLISH_PLATFORMS } = await import('@/lib/zernio');
+  if (!post.zernio_post_id || !platform || !UNPUBLISH_PLATFORMS.has(platform)) {
+    await fillMissingPostUrls([post]);
+    const label = platform ? getChannelLabel(platform as Channel) : msg(lang, 'la red', 'the network');
+    const url = post.platform_post_url ?? null;
+    const username = acc?.username ?? null;
+    const steps = manualRemovalSteps(platform, lang, { username, postUrl: url });
+    const reason = post.zernio_post_id && platform
+      ? msg(lang, `${label} no permite borrar publicaciones por API.`, `${label} does not allow deleting posts through its API.`)
+      : msg(lang, 'Esta publicación no se puede borrar desde Kefy.', 'This post cannot be deleted from Kefy.');
+    const message = `${reason} ${msg(lang, 'Para bajarla a mano:', 'To take it down by hand:')} ${steps.join(' ')} ${msg(lang,
+      'Kefy la seguirá mostrando como publicada.',
+      'Kefy will keep showing it as published.')}`;
+    throw new ServiceError('conflict', 409, message, {
+      error: message, manual_removal_required: true, platform, account: username, post_url: url, removal_instructions: steps,
+    });
+  }
+
+  return {
+    ...post,
+    platform,
+    username: acc?.username ?? null,
+    zernio_account_id: acc?.zernio_account_id ?? null,
+  };
+}
+
+/**
+ * Borra de la red una publicación ya publicada y la marca 'deleted' en Kefy. El
+ * contenido no se toca, salvo su estado: sin otras publicaciones vuelve a
+ * 'approved' y se puede republicar.
+ */
+export async function deletePublishedPost(
+  ctx: ServiceContext,
+  postId: string,
+): Promise<{ id: string; content_item_id: string; platform: string; item_status: string | null }> {
+  const post = await loadDeletablePost(ctx, postId);
+  const platform = post.platform as string;
+  const label = getChannelLabel(platform as Channel);
+  const lang = ctx.language;
+
+  try {
+    const { unpublishPost } = await import('@/lib/zernio');
+    await unpublishPost(post.zernio_post_id as string, platform, post.zernio_account_id);
+  } catch (err) {
+    reportError(err, {
+      route: 'lib/services/publish', service: 'zernio', auth: ctx.auth, extra: { op: 'deletePublishedPost', postId: post.id, platform },
+    });
+    const detail = err instanceof Error ? err.message : '';
+    const url = post.platform_post_url;
+    const message = msg(lang,
+      `${label} no dejó borrar la publicación${detail ? ` (${detail})` : ''}. Sigue publicada${url ? `: ${url}` : '.'}`,
+      `${label} refused to delete the post${detail ? ` (${detail})` : ''}. It is still live${url ? `: ${url}` : '.'}`);
+    throw new ServiceError('provider_error', 502, message, {
+      error: message, platform, account: post.username, post_url: url,
+      removal_instructions: manualRemovalSteps(platform, lang, { username: post.username, postUrl: url }),
+    }).markReported();
+  }
+
+  const db = createSupabaseServer();
+  const { error } = await db
+    .from('kefy_scheduled_posts')
+    .update({ status: 'deleted', platform_post_url: null, error_message: null })
+    .eq('id', post.id)
+    .eq('org_id', ctx.auth.orgId);
+  if (error) {
+    reportError(new Error(error.message), {
+      route: 'lib/services/publish', service: 'supabase', auth: ctx.auth, extra: { op: 'deletePublishedPost', postId: post.id },
+    });
+    throw new ServiceError('unavailable', 500, msg(lang,
+      `La publicación ya se borró de ${label}, pero Kefy no pudo registrarlo.`,
+      `The post was deleted from ${label}, but Kefy could not record it.`)).markReported();
+  }
+
+  const item_status = await syncContentItemStatus(db, post.content_item_id);
+  return { id: post.id, content_item_id: post.content_item_id, platform, item_status };
 }

@@ -40,6 +40,7 @@ const statusLabels: Record<string, string> = {
   publishing: 'publicando',
   failed: 'fallido',
   cancelled: 'cancelado',
+  deleted: 'eliminado',
   pending: 'pendiente',
   active: 'activa',
   paused: 'pausada',
@@ -156,6 +157,7 @@ const es = {
     list_scheduled_posts: 'Revisando publicaciones programadas…',
     reschedule_scheduled_post: 'Cambiando la fecha…',
     cancel_scheduled_post: 'Cancelando publicación…',
+    delete_published_post: 'Borrando publicación…',
     get_analytics_overview: 'Revisando métricas…',
     list_post_performance: 'Analizando publicaciones…',
     sync_social_data: 'Sincronizando redes…',
@@ -302,6 +304,12 @@ const es = {
       const account = str(p.account);
       const when = str(p.when);
       return `Cancelar la publicación de ${quote(title)}${account ? ` en ${account}` : ''}${when ? ` del ${when}` : ''}`;
+    },
+    delete_published_post: (_i, p) => {
+      const title = str(p.title, 'contenido');
+      const account = str(p.account);
+      const warn = p.irreversible ? ' No se puede deshacer.' : '';
+      return `Borrar de la red la publicación de ${quote(title)}${account ? ` en ${account}` : ''}.${warn}`;
     },
     get_analytics_overview: () => 'Revisar el resumen de métricas',
     list_post_performance: () => 'Revisar el rendimiento de tus publicaciones',

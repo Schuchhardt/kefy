@@ -78,6 +78,7 @@ const es = {
     pending: 'Pendiente',
     failed: 'Falló',
     cancelled: 'Cancelado',
+    deleted: 'Eliminado',
   },
   confirm: {
     deleteTitle: '¿Eliminar?',
