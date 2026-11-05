@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { createHmac } from 'crypto';
 import { createFakeDb } from '../helpers/fake-db';
 
 const db = createFakeDb();
@@ -10,11 +11,47 @@ vi.mock('@/lib/engagement-executor', () => ({ executeEngagementRules: vi.fn() })
 import { POST } from '@/app/api/webhooks/zernio/route';
 import { executeEngagementRules } from '@/lib/engagement-executor';
 
-function send(body: unknown) {
-  return POST(new NextRequest('http://localhost/api/webhooks/zernio', {
-    method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
-  }));
+const SECRET = 'test-webhook-secret';
+process.env.ZERNIO_WEBHOOK_SECRET = SECRET;
+
+function sign(raw: string, secret = SECRET) {
+  return `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}`;
 }
+
+function send(body: unknown, signature?: string | null) {
+  const raw = JSON.stringify(body);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const sig = signature === undefined ? sign(raw) : signature;
+  if (sig) headers['x-zernio-signature'] = sig;
+  return POST(new NextRequest('http://localhost/api/webhooks/zernio', { method: 'POST', body: raw, headers }));
+}
+
+describe('POST /api/webhooks/zernio — firma', () => {
+  const evt = { event: 'post.failed', post: { id: 'zp1' } };
+  beforeEach(() => {
+    db.reset();
+    db.seed('kefy_scheduled_posts', [{ id: 'sp1', zernio_post_id: 'zp1', status: 'scheduled' }]);
+  });
+
+  it('rechaza sin firma, con firma errónea o firmada con otro secreto', async () => {
+    for (const sig of [null, 'sha256=deadbeef', sign(JSON.stringify(evt), 'otro')]) {
+      expect((await send(evt, sig)).status).toBe(401);
+    }
+    expect(db.rows('kefy_scheduled_posts')[0].status).toBe('scheduled');
+  });
+
+  it('rechaza todo si no hay secreto configurado', async () => {
+    delete process.env.ZERNIO_WEBHOOK_SECRET;
+    try {
+      expect((await send(evt, sign(JSON.stringify(evt)))).status).toBe(401);
+    } finally { process.env.ZERNIO_WEBHOOK_SECRET = SECRET; }
+  });
+
+  it('acepta una firma válida', async () => {
+    expect((await send(evt)).status).toBe(200);
+    expect(db.rows('kefy_scheduled_posts')[0].status).toBe('failed');
+  });
+});
 
 const post = () => db.rows('kefy_scheduled_posts')[0];
 
