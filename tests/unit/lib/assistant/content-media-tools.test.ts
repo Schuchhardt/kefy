@@ -10,6 +10,7 @@ vi.mock('@/lib/observability', () => ({ reportError: vi.fn() }));
 vi.mock('@/lib/ai', () => ({
   generateContentText:    vi.fn(),
   generateContentImage:   vi.fn(),
+  generateInfographicCopy: vi.fn(),
   generateCarouselSlides: vi.fn(),
   generateReelScript:     vi.fn(),
   generateVideoScript:    vi.fn(),
@@ -22,7 +23,7 @@ vi.mock('@/lib/services/media-ingest', () => ({
 
 import { executeTool } from '@/lib/assistant/registry';
 import { ensureToolsRegistered } from '@/lib/assistant/tools';
-import { generateCarouselSlides, generateContentImage, generateContentText, generateVideoScript } from '@/lib/ai';
+import { generateCarouselSlides, generateContentImage, generateContentText, generateInfographicCopy, generateVideoScript } from '@/lib/ai';
 import { ingestExternalMedia } from '@/lib/services/media-ingest';
 import { normalizeVideoScript } from '@/lib/video/script';
 
@@ -102,6 +103,79 @@ describe('generate_content_image', () => {
     expect(img.size).toBe('1024x1792');
     expect(img.referenceImages).toEqual([KEFY_REF]);
     expect(item(POST).image_url).toMatch(/^https:\/\/test\.supabase\.co\//);
+  });
+});
+
+// Lo mismo se configura por chat, API REST y MCP: todos pasan por estas herramientas.
+describe('image_text por API y MCP', () => {
+  const COPY = { headline: 'Hola', points: [{ label: 'Uno', detail: '' }], closing: '', visual: '' };
+
+  it('create_story con generated guarda el modo', async () => {
+    vi.mocked(generateInfographicCopy).mockResolvedValueOnce(COPY);
+    const r = await executeTool('create_story', { topic: 'Otoño', image_text: 'generated' }, ctx());
+
+    expect(r).toMatchObject({ ok: true, data: { image_text: 'generated' } });
+    expect(vi.mocked(generateContentImage).mock.calls[0]![0]).toMatchObject({ style: 'infographic', size: '1024x1280' });
+  });
+
+  it('create_story con texto propio lo guarda para escribirlo al publicar', async () => {
+    const r = await executeTool('create_story', {
+      topic: 'Otoño', image_text: 'overlay', overlay_title: 'Hola', overlay_body: 'Mundo',
+    }, ctx());
+    const id = (r as { data: { item_id: string } }).data.item_id;
+
+    expect(vi.mocked(generateContentImage).mock.calls[0]![0].style).toBeUndefined();
+    expect(item(id).metadata).toMatchObject({ image_text: 'overlay', image_overlay: { title: 'Hola', body: 'Mundo' } });
+  });
+
+  it('generate_content_image en una story conserva el modo si no se indica', async () => {
+    db.rows('kefy_content_items').find((i) => i.id === STORY)!.metadata = { image_text: 'generated' };
+    vi.mocked(generateInfographicCopy).mockResolvedValueOnce(COPY);
+
+    await executeTool('generate_content_image', { item_id: STORY, prompt: 'x' }, ctx());
+
+    expect(vi.mocked(generateContentImage).mock.calls[0]![0]).toMatchObject({ style: 'infographic', format: 'story' });
+  });
+
+  it('update_content edita el texto sin tocar la imagen ni gastar créditos', async () => {
+    const r = await executeTool('update_content', {
+      item_id: POST, image_text: 'overlay', overlay_title: 'Nuevo',
+    }, ctx());
+
+    expect(r.ok).toBe(true);
+    expect(item(POST).metadata).toMatchObject({
+      created_via: 'ui', image_text: 'overlay', image_overlay: { title: 'Nuevo', body: '' }, externally_modified: true,
+    });
+    expect(creditsSpent()).toBe(0);
+    expect(generateContentImage).not.toHaveBeenCalled();
+  });
+
+  it('update_content reemplaza la imagen generada y deja de considerarla con texto', async () => {
+    db.rows('kefy_content_items').find((i) => i.id === STORY)!.metadata = { image_text: 'generated' };
+
+    await executeTool('update_content', { item_id: STORY, image_url: KEFY_REF }, ctx());
+
+    expect(item(STORY).metadata).toMatchObject({ image_text: 'overlay' });
+  });
+
+  it('update_content acepta generated si la imagen propia ya trae su texto', async () => {
+    await executeTool('update_content', { item_id: STORY, image_url: KEFY_REF, image_text: 'generated' }, ctx());
+    expect(item(STORY).metadata).toMatchObject({ image_text: 'generated' });
+  });
+
+  it('get_content informa el modo y el texto', async () => {
+    db.rows('kefy_content_items').find((i) => i.id === POST)!.metadata = {
+      image_text: 'overlay', image_overlay: { title: 'Hola', body: '' },
+    };
+    const r = await executeTool('get_content', { item_id: POST }, ctx());
+    expect(JSON.stringify(r)).toContain('"image_text":"overlay"');
+    expect(JSON.stringify(r)).toContain('Hola');
+  });
+
+  it('rechaza un modo desconocido sin gastar', async () => {
+    const r = await executeTool('create_story', { topic: 'x', image_text: 'collage' }, ctx());
+    expect(r).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(creditsSpent()).toBe(0);
   });
 });
 

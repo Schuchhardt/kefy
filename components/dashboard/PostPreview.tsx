@@ -21,7 +21,7 @@ import PreviewAvatarImage, { hasAvatar, type AvatarSource } from '@/components/d
  * server-side. Previously every preview was a hard `object-fit: cover` crop, so
  * a 1080×1350 Instagram-ready photo looked cut in the app even when it wasn't.
  */
-function FeedImage({ src, channel, radius = 0, alt }: {
+export function FeedImage({ src, channel, radius = 0, alt }: {
   src:      string;
   channel:  ContentChannel;
   radius?:  number;

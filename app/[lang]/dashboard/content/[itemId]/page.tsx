@@ -350,6 +350,7 @@ export default function ContentDetailPage() {
                 username={brandKit?.name ?? PUBLISH[locale].preview.defaultUsername}
                 logoUrl={brandImages(activeBrand, brandKit?.logo_url)}
                 imagePending={!item.image_url && item.image_status === 'generating'}
+                metadata={item.metadata}
                 accentColor={brandKit?.accent_color ?? undefined}
                 brandFont={brandKit?.font_heading}
                 publishedNetworks={isPublished ? publishedNetworks : undefined}

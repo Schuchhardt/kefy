@@ -34,6 +34,7 @@ import ContentLibraryModal from '@/components/dashboard/content/ContentLibraryMo
 import ScheduleModal       from '@/components/dashboard/content/ScheduleModal';
 import { ESTIMATED_MS }    from '@/components/dashboard/content/RenditionGenerating';
 import type { BrandKitInfo, ContentItem, ContentType, ContentStatus, ReelScene, CarouselSlide } from '@/types/content';
+import { defaultImageText, IMAGE_TEXT_MODES, supportsImageText, type ImageTextMode } from '@/lib/image-text';
 import type { LibraryItemWithIndustry } from '@/types/content-library';
 import type { Channel } from '@/types/channels';
 import type { Locale } from '@/types/i18n';
@@ -182,6 +183,7 @@ interface GenRun {
   /** Portada del post: la genera una segunda petición. */
   image:     'none' | 'pending' | 'ready' | 'error';
   imagePrompt?: string;
+  imageText?: ImageTextMode;
 }
 
 // ─── Skeleton card ───────────────────────────────────────────────────────────
@@ -618,6 +620,8 @@ function ContentPageInner() {
   });
   const [genTopic, setGenTopic]     = useState(() => searchParams?.get('topic') ?? '');
   const [genSlides, setGenSlides]   = useState(5);
+  // null: lo normal del formato, hasta que se elija otra cosa.
+  const [genImageText, setGenImageText] = useState<ImageTextMode | null>(null);
   const [generating, setGenerating] = useState(false);
   const [run, setRun]               = useState<GenRun | null>(null);
   const runSeq = useRef(0);
@@ -820,7 +824,7 @@ function ContentPageInner() {
   }, [setItems, setEditItem]);
 
   /** Portada de un post recién escrito: segunda petición, en segundo plano. */
-  const generateCover = useCallback((runId: number, itemId: string, prompt: string, startedAt: number, refs: string[]) => {
+  const generateCover = useCallback((runId: number, itemId: string, prompt: string, startedAt: number, refs: string[], imageText: ImageTextMode) => {
     setImagePending((prev) => new Set(prev).add(itemId));
     setImageStartedAt((prev) => ({ ...prev, [itemId]: startedAt }));
     // fetchItems() ran before the image route flipped the row to
@@ -839,7 +843,11 @@ function ContentPageInner() {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, size: '1024x1024', quality: 'medium', itemId, reference_image_urls: refs }),
+      // Sin `size` con `generated`: el servidor elige una forma que ninguna red recorte.
+      body: JSON.stringify({
+        prompt, itemId, reference_image_urls: refs, image_text: imageText, language: lang, quality: 'medium',
+        ...(imageText === 'generated' ? {} : { size: '1024x1024' }),
+      }),
     })
       .then((r) => r.ok ? r.json() : null)
       .then(async (d: { image?: { url?: string } } | null) => {
@@ -861,20 +869,21 @@ function ContentPageInner() {
       .finally(() => {
         setImagePending((prev) => { const n = new Set(prev); n.delete(itemId); return n; });
       });
-  }, [handleItemUpdate]);
+  }, [handleItemUpdate, lang]);
 
   // `opts` lets callers (e.g. the recommendation modal) trigger a generation
   // immediately with explicit values, without waiting for genTopic/genType
   // state to catch up via setState — avoids a stale-state click-and-wait.
   async function handleGenerate(
     e: React.FormEvent | null,
-    opts?: { topic: string; type: ContentType; slides?: number; refs?: string[] },
+    opts?: { topic: string; type: ContentType; slides?: number; refs?: string[]; imageText?: ImageTextMode },
   ) {
     e?.preventDefault();
     const topic  = opts?.topic ?? genTopic;
     const type   = opts?.type ?? genType;
     const slides = opts?.slides ?? genSlides;
     const refs   = opts?.refs ?? referenceImages;
+    const imageText = opts?.imageText ?? genImageText ?? defaultImageText(type);
     if (!topic.trim()) {
       openGenerateForm();
       return;
@@ -911,7 +920,7 @@ function ContentPageInner() {
         payload = { topic, language, scene_count: slides, variant_count: 2, reference_image_urls: refs };
       } else if (type === 'story') {
         url = '/api/content/story';
-        payload = { topic, language, save: true };
+        payload = { topic, language, save: true, image_text: imageText };
       }
 
       let res: Response;
@@ -985,7 +994,10 @@ function ContentPageInner() {
 
       await fetchItems();
 
-      const imagePrompt = (data.body ?? topic).slice(0, 900);
+      // El texto de la imagen resume lo que dice la pieza: necesita el cuerpo, no solo el tema.
+      const imagePrompt = (imageText !== 'none' && resultExcerpt
+        ? `${topic}\n\n${resultExcerpt}`
+        : data.body ?? topic).slice(0, 900);
       setRun((prev) => (prev?.id !== runId ? prev : {
         ...prev,
         stage: 'ready',
@@ -995,6 +1007,7 @@ function ContentPageInner() {
         thumbUrl,
         image: coverItemId ? 'pending' : 'none',
         imagePrompt,
+        imageText,
       }));
       if (!coverItemId) {
         setAnnouncement(itemIds.length > 1 ? t.resultVariantsTitle(itemIds.length) : t.resultTitles[type]);
@@ -1002,7 +1015,7 @@ function ContentPageInner() {
 
       // For posts: kick off background image generation so the user sees the image
       // appear without needing to open the editor manually.
-      if (coverItemId) generateCover(runId, coverItemId, imagePrompt, startedAt, refs);
+      if (coverItemId) generateCover(runId, coverItemId, imagePrompt, startedAt, refs, imageText);
 
       // Clear form so user can start a new generation immediately
       setGenTopic('');
@@ -1024,14 +1037,14 @@ function ContentPageInner() {
   function retryGeneration() {
     if (!run) return;
     setRevealStatusReq((n) => n + 1);
-    void handleGenerate(null, { topic: run.topic, type: run.type, slides: run.slides, refs: run.refs });
+    void handleGenerate(null, { topic: run.topic, type: run.type, slides: run.slides, refs: run.refs, imageText: run.imageText });
   }
 
   function retryCover() {
     if (!run || run.type !== 'post' || !run.itemIds[0]) return;
     const startedAt = Date.now();
     setRun({ ...run, image: 'pending', startedAt });
-    generateCover(run.id, run.itemIds[0], run.imagePrompt ?? run.topic, startedAt, run.refs);
+    generateCover(run.id, run.itemIds[0], run.imagePrompt ?? run.topic, startedAt, run.refs, run.imageText ?? 'none');
   }
 
   function createAnother() {
@@ -1577,6 +1590,27 @@ function ContentPageInner() {
               </div>
               <p className="ui-hint">{t.kindHint}</p>
             </div>
+
+            {/* Texto de la imagen — post y story: carrusel y reel lo llevan por slide o escena */}
+            {supportsImageText(genType) && (
+              <div className="ui-field">
+                <span id="gen-image-text-label" className="ui-label">{t.imageTextLabel}</span>
+                <div role="group" aria-labelledby="gen-image-text-label" className={styles.kindOptions}>
+                  {IMAGE_TEXT_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={(genImageText ?? defaultImageText(genType)) === mode}
+                      onClick={() => setGenImageText(mode)}
+                      className={styles.kindOption}
+                    >
+                      {t.imageTextModes[mode]}
+                    </button>
+                  ))}
+                </div>
+                <p className="ui-hint">{t.imageTextHints[genImageText ?? defaultImageText(genType)]}</p>
+              </div>
+            )}
 
             {/* Topic — the one field; ideas are secondary helpers next to it */}
             <div>

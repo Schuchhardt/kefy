@@ -191,6 +191,18 @@ describe('publishContent — story solo imagen', () => {
     expect(vi.mocked(prepareSingleImage).mock.calls[0][5]).toBeFalsy();
   });
 
+  it('con el texto generado en la imagen no le escribe el caption encima', async () => {
+    seedStory({ body: 'Mi caption', metadata: { image_text: 'generated' } });
+    await publishContent(strict, { itemId: STORY, accountIds: [ACC], mode: 'now' });
+    expect(vi.mocked(prepareSingleImage).mock.calls[0][5]).toBeUndefined();
+  });
+
+  it('con texto propio escribe ese, no el caption', async () => {
+    seedStory({ body: 'Mi caption', metadata: { image_text: 'overlay', image_overlay: { title: 'Hola', body: 'Mundo' } } });
+    await publishContent(strict, { itemId: STORY, accountIds: [ACC], mode: 'now' });
+    expect(vi.mocked(prepareSingleImage).mock.calls[0][5]).toEqual({ title: 'Hola', body: 'Mundo' });
+  });
+
   it('también se programa', async () => {
     seedStory({});
     const out = await publishContent(strict, {
@@ -212,6 +224,27 @@ describe('publishContent — story solo imagen', () => {
     seedStory({ content_type: 'post' });
     const out = await publishContent(strict, { itemId: STORY, accountIds: [ACC], mode: 'now' });
     expect(out.status).toBe(200);
+  });
+});
+
+describe('publishContent — post con texto sobre la imagen', () => {
+  const POST_ID = IDS.uuid(211);
+  const seedPost = (metadata: unknown) => db.seed('kefy_content_items', [{
+    id: POST_ID, org_id: IDS.ORG, brand_id: IDS.BRAND, title: null, body: 'Un caption largo',
+    image_url: 'https://cdn.test/post.jpg', hashtags: [], channel: 'generic', status: 'approved',
+    content_type: 'post', slides: null, video_url: null, mux_playback_id: null, metadata,
+  }]);
+
+  it('overlay escribe el texto editable, y no el caption', async () => {
+    seedPost({ image_text: 'overlay', image_overlay: { title: 'Hola', body: '' } });
+    await publishContent(strict, { itemId: POST_ID, accountIds: [ACC], mode: 'now' });
+    expect(vi.mocked(prepareSingleImage).mock.calls[0][5]).toEqual({ title: 'Hola', body: '' });
+  });
+
+  it('un post anterior a la opción no recibe texto', async () => {
+    seedPost(null);
+    await publishContent(strict, { itemId: POST_ID, accountIds: [ACC], mode: 'now' });
+    expect(vi.mocked(prepareSingleImage).mock.calls[0][5]).toBeUndefined();
   });
 });
 

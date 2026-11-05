@@ -5,15 +5,17 @@ import type { JWTPayload } from '@/types/auth';
 import { serviceContext } from '@/lib/services/context';
 import { serviceErrorResponse } from '@/lib/services/errors';
 import { generateImageForItem, type ImageQuality, type ImageSize } from '@/lib/services/content';
+import { cleanImageOverlay, IMAGE_TEXT_MODES, isImageTextMode, type ImageTextMode } from '@/lib/image-text';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+// Una infografía encadena Claude y Sunburst, que OpenAI avisa que puede tardar 2 min.
+export const maxDuration = 240;
 
 const VALID_SIZES    = new Set(['1024x1024', '1536x1024', '1024x1536', '1080x1080', '1024x1792', 'auto']);
 const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
 
 // ─── POST /api/content/image ──────────────────────────────────────────────────
-// Generate an image with gpt-image-2.
+// Generate an image with gpt-image.
 // Uploads the result to Supabase Storage and returns a public URL.
 // Optionally links the image URL to an existing content item.
 //
@@ -22,6 +24,11 @@ const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
 //   size?      — '1024x1024' (default) | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto'
 //   quality?   — 'medium' (default) | 'low' | 'high' | 'auto'
 //   itemId?    — if provided, updates the content item's image_url
+//   image_text? — posts and stories: 'none' (no text) | 'overlay' (editable text
+//                 written on top when publishing) | 'generated' (the image carries
+//                 all its text; `prompt` is then the source of that text)
+//   overlay_title?, overlay_body? — text for 'overlay'
+//   language?  — 'es' (default) | 'en': language of the generated text and of errors
 //   reference_image_urls? — public URLs of reference images to guide the
 //     generated visual style/composition (max 3). Solo se aceptan las del
 //     Storage de Kefy (kefy-reference-images / kefy-content-media /
@@ -81,6 +88,9 @@ export async function POST(req: NextRequest) {
   if (input.quality !== undefined && !VALID_QUALITIES.has(input.quality as string)) {
     return NextResponse.json({ error: `quality must be one of: ${[...VALID_QUALITIES].join(', ')}` }, { status: 422 });
   }
+  if (input.image_text !== undefined && !isImageTextMode(input.image_text)) {
+    return NextResponse.json({ error: `image_text must be one of: ${IMAGE_TEXT_MODES.join(', ')}` }, { status: 422 });
+  }
 
   const itemId = typeof input.itemId === 'string' && input.itemId ? input.itemId : null;
   const referenceImages = Array.isArray(input.reference_image_urls)
@@ -89,13 +99,17 @@ export async function POST(req: NextRequest) {
 
   // Generación, cobro (antes de marcar el item como 'generating'), subida y
   // enlace al item: generateImageForItem.
-  const ctx = serviceContext(auth, await kitBrandId(req, auth), 'es', { brandScope: 'org', source: 'route' });
+  const ctx = serviceContext(auth, await kitBrandId(req, auth), input.language === 'en' ? 'en' : 'es', { brandScope: 'org', source: 'route' });
   try {
     const out = await generateImageForItem(ctx, {
       itemId,
       prompt:             input.prompt as string,
       size:               input.size as ImageSize | undefined,
       quality:            input.quality as ImageQuality | undefined,
+      imageText:          input.image_text as ImageTextMode | undefined,
+      ...(input.overlay_title !== undefined || input.overlay_body !== undefined
+        ? { overlay: cleanImageOverlay(input.overlay_title, input.overlay_body) }
+        : {}),
       referenceImageUrls: referenceImages,
     });
     return NextResponse.json(out, { status: 201 });

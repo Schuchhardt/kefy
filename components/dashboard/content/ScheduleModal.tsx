@@ -757,6 +757,7 @@ function FormatPreview({
         username={brandKit?.name ?? copy.preview.defaultUsername}
         logoUrl={brandImages(activeBrand, brandKit?.logo_url)}
         imagePending={isPrimary && !imageUrl && item.image_status === 'generating'}
+        metadata={isPrimary ? item.metadata : null}
         accentColor={brandKit?.accent_color ?? undefined}
         brandFont={brandKit?.font_heading}
         lang={lang}

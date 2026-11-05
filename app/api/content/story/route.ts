@@ -5,9 +5,11 @@ import type { ContentChannel } from '@/types/ai';
 import { serviceContext } from '@/lib/services/context';
 import { serviceErrorResponse } from '@/lib/services/errors';
 import { generateStory, writeStoryVideoScript } from '@/lib/services/story';
+import { cleanImageOverlay, IMAGE_TEXT_MODES, isImageTextMode, type ImageTextMode } from '@/lib/image-text';
 
 export const runtime = 'nodejs';
-export const maxDuration = 90;
+// `image_text: generated` encadena dos textos con Claude y Sunburst.
+export const maxDuration = 240;
 
 const VALID_CHANNELS = new Set<ContentChannel>([
   'linkedin', 'instagram', 'facebook', 'twitter', 'tiktok', 'threads', 'generic',
@@ -24,6 +26,9 @@ const VALID_CHANNELS = new Set<ContentChannel>([
 //   topic     — required
 //   language? — 'es' (default) | 'en'
 //   save?     — persist to DB (default true)
+//   image_text? — 'overlay' (default: editable text written on top when publishing)
+//                 | 'generated' (the image carries all its text) | 'none'
+//   overlay_title?, overlay_body? — text for 'overlay', instead of the caption
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
@@ -56,6 +61,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'topic is required' }, { status: 422 });
   }
 
+  if (input.image_text !== undefined && !isImageTextMode(input.image_text)) {
+    return NextResponse.json({ error: `image_text must be one of: ${IMAGE_TEXT_MODES.join(', ')}` }, { status: 422 });
+  }
+
   const language: 'es' | 'en' = input.language === 'en' ? 'en' : 'es';
 
   // Texto, imagen vertical, cobro y guardado: generateStory.
@@ -65,6 +74,10 @@ export async function POST(req: NextRequest) {
       topic:   input.topic as string,
       channel,
       save:    input.save !== false,
+      imageText: input.image_text as ImageTextMode | undefined,
+      ...(input.overlay_title !== undefined || input.overlay_body !== undefined
+        ? { overlay: cleanImageOverlay(input.overlay_title, input.overlay_body) }
+        : {}),
     });
     const payload = {
       ...(out.itemId ? { itemId: out.itemId } : {}),
@@ -73,6 +86,7 @@ export async function POST(req: NextRequest) {
       image_url:  out.image_url,
       model:      out.model,
       tokensUsed: out.tokensUsed,
+      image_text: out.imageText,
     };
     const res = NextResponse.json(payload, { status: out.itemId ? 201 : 200 });
     if (setCookieHeader) res.headers.set('Set-Cookie', setCookieHeader);

@@ -17,6 +17,13 @@ const en: ContentCopy = {
   kindCarouselLabel: 'Carousel',
   kindStoryLabel: 'Vertical story',
   kindHint: 'Pick the exact format (post, carousel, reel or story) when you publish.',
+  imageTextLabel: 'Text on the image',
+  imageTextModes: { none: 'No text', overlay: 'On top, editable', generated: 'Designed by AI' },
+  imageTextHints: {
+    none: 'A clean image. The text only goes in the caption.',
+    overlay: 'A clean image with the text on top, in your brand font. You can edit it until you publish.',
+    generated: 'Infographic style: AI designs the image with the text inside. It can only be regenerated, not edited. Check spelling and facts before publishing.',
+  },
   slidesLabel: 'Number of slides',
   scenesLabel: 'Number of scenes',
   topicLabel: 'Topic',

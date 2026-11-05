@@ -191,7 +191,7 @@ Cada herramienta cobra su operación de créditos (`OPERATION_CREDIT_COSTS` en
 
 | Herramienta | Proveedor | Créditos |
 |---|---|---|
-| `generate_image` | OpenAI (gpt-image) | 3 (`image`) |
+| `generate_image` | OpenAI (`gpt-image-2.6-flare`) | 3 (`image`) |
 | `text_to_speech` | ElevenLabs (Flash v2.5, `/with-timestamps`) o, de respaldo, OpenAI (`gpt-4o-mini-tts` + `whisper-1`) | 1 (`voice`) |
 | `animate_image` | Higgsfield (Kling 2.5 Turbo i2v, `HIGGSFIELD_ANIMATE_MODEL`) o fal.ai (Kling 2.1 i2v, `FAL_ANIMATE_MODEL`) | 8 (`animation`) |
 | `lip_sync` | fal.ai (sync-lipsync v2, `FAL_LIPSYNC_MODEL`). Con Higgsfield no se usa | 8 (`lipsync`) |

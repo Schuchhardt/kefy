@@ -46,6 +46,7 @@ vi.mock('@/lib/brands', () => ({
 vi.mock('@/lib/ai', () => ({
   generateContentText: vi.fn(),
   generateContentImage: vi.fn(),
+  generateInfographicCopy: vi.fn(),
   generateVideoScript: vi.fn(),
   describeImageAsTopic: vi.fn(),
 }));
@@ -56,7 +57,7 @@ vi.mock('@/lib/storage', () => ({
 
 import { getAuthFromRequest } from '@/lib/auth';
 import { getBrandFromRequest } from '@/lib/brands';
-import { generateContentText, generateContentImage, generateVideoScript, describeImageAsTopic } from '@/lib/ai';
+import { generateContentText, generateContentImage, generateInfographicCopy, generateVideoScript, describeImageAsTopic } from '@/lib/ai';
 import { uploadBase64Image } from '@/lib/storage';
 import { normalizeVideoScript } from '@/lib/video/script';
 
@@ -379,5 +380,66 @@ describe('PATCH /api/content/story', () => {
     const res = await PATCH(makeReq('PATCH', { itemId: 'story-2' }));
     expect(res.status).toBe(502);
     expect(generateVideoScript).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/content/story · image_text', () => {
+  beforeEach(() => { vi.resetAllMocks(); resetQuotaState(); resetSubscriptionState(); });
+
+  it('generated: escribe el texto aparte, se prepara para 9:16 y lo guarda en metadata', async () => {
+    const { POST } = await import('@/app/api/content/story/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+    const insert = vi.fn().mockReturnThis();
+    mockSupabaseClient.from
+      .mockReturnValueOnce(mockBrandKitChain())
+      .mockReturnValueOnce({
+        insert,
+        select: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: { id: 'story-1' }, error: null }),
+      });
+    vi.mocked(generateContentText).mockResolvedValueOnce({
+      body: 'Texto', hashtags: [], model: 'm', tokensUsed: 1,
+    });
+    vi.mocked(generateInfographicCopy).mockResolvedValueOnce({
+      headline: 'Hola', points: [{ label: 'Uno', detail: '' }], closing: '', visual: '',
+    });
+    vi.mocked(generateContentImage).mockResolvedValueOnce({ b64: 'ZmFrZQ==', revisedPrompt: 'x' });
+    vi.mocked(uploadBase64Image).mockResolvedValueOnce('https://cdn.example.com/s.jpg');
+
+    const res = await POST(makeReq('POST', { topic: 'Lanzamiento', image_text: 'generated' }));
+
+    expect(res.status).toBe(201);
+    expect(vi.mocked(generateContentImage).mock.calls[0][0]).toMatchObject({
+      style: 'infographic', format: 'story', size: '1024x1280', quality: 'high',
+    });
+    expect(insert.mock.calls[0][0].metadata.image_text).toBe('generated');
+  });
+
+  it('si la imagen generada falla, la story queda con el caption encima para una imagen futura', async () => {
+    const { POST } = await import('@/app/api/content/story/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+    mockSupabaseClient.from.mockReturnValueOnce(mockBrandKitChain());
+    vi.mocked(generateContentText).mockResolvedValueOnce({
+      body: 'Texto', hashtags: [], model: 'm', tokensUsed: 1,
+    });
+    vi.mocked(generateInfographicCopy).mockRejectedValueOnce(new Error('caído'));
+
+    const res = await POST(makeReq('POST', { topic: 'x', image_text: 'generated', save: false }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.image_url).toBeNull();
+    expect(body.image_text).toBe('overlay');
+  });
+
+  it('rechaza un modo desconocido', async () => {
+    const { POST } = await import('@/app/api/content/story/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    vi.mocked(getBrandFromRequest).mockResolvedValueOnce({ brand: mockBrand });
+
+    const res = await POST(makeReq('POST', { topic: 'x', image_text: 'collage' }));
+    expect(res.status).toBe(422);
   });
 });

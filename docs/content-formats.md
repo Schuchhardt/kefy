@@ -5,7 +5,7 @@ Una pieza de contenido se puede publicar como **post**, **carrusel**, **reel** o
 (`kefy_content_items`); los demás se generan a demanda y se guardan en
 `kefy_content_renditions`.
 
-Este documento cubre tres decisiones que están acopladas entre sí y que es fácil
+Este documento cubre decisiones que están acopladas entre sí y que es fácil
 romper por separado.
 
 ---
@@ -58,6 +58,8 @@ imagen. Cubierto por `tests/unit/lib/content-source.test.ts`,
 ---
 
 ## 2. El texto se quema al publicar, no al generar
+
+> Salvo que la pieza pida lo contrario: ver § 5.
 
 Las redes no dibujan texto propio sobre cada slide de un carrusel: lo único que
 viaja es la imagen. Aun así, el texto **no** se escribe sobre los píxeles en el
@@ -190,11 +192,69 @@ sube tal cual y la app la encaja), así que el preview lo muestra en 9:16 con
 
 ---
 
+## 5. Texto en la imagen de posts y stories
+
+`metadata.image_text` (`lib/image-text.ts`) decide cómo lleva el texto la imagen.
+Se elige en el formulario de creación y en el editor, y por API y MCP con
+`create_post`, `create_story`, `generate_content_image` y `update_content`
+(`image_text`, `overlay_title`, `overlay_body`). `get_content` lo devuelve.
+
+| Modo | Imagen | Texto | Se puede editar |
+|---|---|---|---|
+| `none` | Limpia | Solo en el caption | No aplica |
+| `overlay` | Limpia (Flare) | Kefy lo escribe al publicar, con la tipografía del Brand Kit | Sí, hasta publicar y sin gastar créditos |
+| `generated` | Tipo infografía (Sunburst) | La IA lo dibuja en los píxeles | No, solo regenerar |
+
+Sin valor guardado vale lo de siempre (`defaultImageText`): post `none`, story
+`overlay`. Así las piezas anteriores se siguen publicando igual. Una versión
+convertida a otro formato tiene su propia imagen limpia e ignora este campo.
+
+**`overlay`:** el texto va en `metadata.image_overlay` (título y cuerpo). En un
+post, si está vacío, lo escribe `generateSlideText` y entra en el cobro de la
+imagen. Regenerar la imagen no lo reescribe. En una story, sin texto propio se
+usa el caption, como siempre. `imageTextToBake` es la única decisión de qué se
+escribe: la usan la publicación y la vista previa, para que no diverjan.
+
+**`generated`:** funciona en dos pasos, y ambos entran en los 3 créditos de la
+imagen (`generateTextImage`):
+
+1. `generateInfographicCopy()` (Claude, `prompts/infographic-copy.prompt.md`)
+   escribe titular, puntos (3 a 5 en un post, 1 a 3 en una story) y cierre **solo
+   con datos del texto de la pieza**.
+2. `generateContentImage()` con `gpt-image-2.6-sunburst`
+   (`prompts/infographic-image.prompt.md`) imprime ese texto entre comillas.
+
+| Decisión | Por qué |
+|---|---|
+| Sunburst, no Flare | Mismo precio por token. En la prueba del 4-nov-2026 Flare tardó ~8 s y repitió la numeración («1. 1. Escucha»); Sunburst tardó ~34 s y salió bien. La guía de OpenAI lo recomienda para texto y layouts complejos |
+| Calidad siempre `high` | La guía de OpenAI: por debajo la letra chica se deshace |
+| Post cuadrado o 4:5 (`infographicSize`) | `lib/image-fit.ts` no recorta esas formas. Un 2:3 pierde el titular en Instagram |
+| Story generada en 4:5 y extendida a 9:16 (`extendToStoryCanvas`) | El 4:5 ocupa justo lo que la interfaz no tapa (`safeAreaFor`). Pedírselo al modelo no bastó: en las pruebas del 4-nov-2026, aun con la instrucción explícita, el cierre terminaba cerca del 90 % de la altura, sobre la caja de respuesta. El fondo extendido repite el borde, así que el prompt pide un fondo plano |
+| Video de una story `generated` | `writeStoryVideoScript` no reutiliza su imagen: el montaje le escribiría encima titular y subtítulos |
+| Imagen nueva sobre un `generated` | `updateContent` vuelve al modo por defecto, salvo que se indique otro: la nueva no trae el texto de la anterior |
+
+Con `update_content` también se puede marcar `generated` una imagen propia que ya
+trae su texto (hecha en Canva, por ejemplo), para que Kefy no le escriba encima.
+
+El texto de los píxeles **no se puede editar ni está garantizado**: OpenAI avisa
+que puede salir impreciso, y la tipografía del Brand Kit se pide por nombre, así
+que el modelo la aproxima. Por eso la interfaz pide revisar antes de publicar.
+
+### Modelos
+
+`IMAGE_MODELS` (`lib/ai.ts`) es el único lugar donde se nombran. Las fotos usan
+`gpt-image-2.6-flare`. Los lados de la imagen tienen que ser múltiplos de 16:
+`1080x1080` responde 400, y por eso `apiImageSize` lo convierte a `1024x1024`.
+
+---
+
 ## Archivos
 
 | Archivo | Rol |
 |---------|-----|
 | `lib/content-source.ts` | Contexto de origen de una conversión (puro) |
+| `lib/image-text.ts` | Modos de texto de la imagen y qué se escribe al publicar (puro) |
+| `lib/infographic.ts` | Validación y texto exacto de las infografías, formas permitidas (puro) |
 | `lib/preview-layout.ts` | Marcos y zonas seguras por red (puro) |
 | `lib/google-fonts.ts` | Catálogo de tipografías (compartido cliente/servidor) |
 | `lib/fonts.ts` | Resolución de la fuente de la marca + `FONTCONFIG_PATH` |

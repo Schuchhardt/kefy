@@ -70,14 +70,42 @@ export interface BrandImageContext {
   tone?:           string[];
   logoB64?:        string;
   logoMimeType?:   string;
+  /** Tipografías del Brand Kit. Solo las usan las imágenes con texto. */
+  fontHeading?:    string | null;
+  fontBody?:       string | null;
 }
+
+/** `photo`: imagen limpia, sin texto. `infographic`: el texto va en los píxeles. */
+export type ImageStyle = 'photo' | 'infographic';
 
 export interface GenerateImageOptions {
   prompt:           string;
-  size?:            '1024x1024' | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto';
+  size?:            '1024x1024' | '1024x1280' | '1536x1024' | '1024x1536' | '1080x1080' | '1024x1792' | 'auto';
   quality?:         'low' | 'medium' | 'high' | 'auto';
   brand?:           BrandImageContext;
   referenceImages?: string[];
+  /** Por defecto `photo`. Con `infographic`, `prompt` es el texto exacto a imprimir. */
+  style?:           ImageStyle;
+  /** Para respetar lo que tapa la interfaz de cada formato. Por defecto, `post`. */
+  format?:          'post' | 'story';
+}
+
+export interface InfographicCopy {
+  headline: string;
+  points:   Array<{ label: string; detail: string }>;
+  closing:  string;
+  /** Tipo de diagrama e iconos, en inglés. No se imprime. */
+  visual:   string;
+}
+
+export interface GenerateInfographicCopyOptions {
+  /** Tema y texto de la pieza: la única fuente de datos de la infografía. */
+  source:     string;
+  language:   'es' | 'en';
+  tone?:      string[];
+  brandName?: string;
+  /** Una story lleva menos texto. Por defecto, `post`. */
+  format?:    'post' | 'story';
 }
 
 export interface GenerateImageResult {

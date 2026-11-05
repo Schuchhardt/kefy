@@ -167,7 +167,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Quiero… | Herramienta | Scope |
 |---|---|---|
 | Ver el workspace (marcas, plan, créditos, estrategia activa) | `get_workspace_context` | read |
-| Crear contenido con IA | `create_post` (`model`, `image_size`, `reference_image_urls`), `create_carousel`, `create_reel` (`reference_image_urls`), `create_story`, `generate_content_image` (`size`, `reference_image_urls`) | write |
+| Crear contenido con IA | `create_post` (`model`, `image_size`, `image_text`, `reference_image_urls`), `create_carousel`, `create_reel` (`reference_image_urls`), `create_story` (`image_text`), `generate_content_image` (`size`, `image_text`, `reference_image_urls`); el texto sobre la imagen se edita con `update_content` (ver `docs/content-formats.md` § 5) | write |
 | Convertir un contenido a otro formato (lo que después publica `publish_content` con `format`) | `convert_content_format` | write |
 | Video (guion → herramientas → montaje) | `get_video_plan`, `get_video_status` (read) · `prepare_story_video` (guion de una story, 1 crédito; obligatorio antes de producirla) · `produce_video` (write, siempre con confirmación) — ver `docs/video-pipeline.md` | read / write |
 | Arrancar una marca nueva: leer su web (opcional) y escribir 3 posts de inicio | `create_starter_posts` | write |

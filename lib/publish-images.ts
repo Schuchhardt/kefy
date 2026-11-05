@@ -16,6 +16,7 @@
 import { resizeForFormat, bakeTextIfSupported, compositeStoryText } from '@/lib/image-processor';
 import { uploadBase64Image } from '@/lib/storage';
 import type { BrandFonts } from '@/lib/fonts';
+import type { ImageOverlay } from '@/lib/image-text';
 import type { ContentChannel } from '@/types/ai';
 import type { CarouselSlide, ContentType } from '@/types/content';
 
@@ -56,13 +57,18 @@ export async function prepareSingleImage(
   platform:  ContentChannel,
   format:    ContentType,
   deps:      PreparedImageDeps,
-  bakeStoryCaption?: string,
+  /** Un string es el caption de una story; un objeto, el texto propio de la imagen. */
+  bakeText?: string | ImageOverlay,
 ): Promise<string> {
   if (!buffer) return imageUrl;
   try {
     let out = await resizeForFormat(buffer, platform, format);
-    if (bakeStoryCaption) {
-      out = await compositeStoryText(out, bakeStoryCaption, platform, deps.brandFonts);
+    if (typeof bakeText === 'string') {
+      if (bakeText) out = await compositeStoryText(out, bakeText, platform, deps.brandFonts);
+    } else if (bakeText) {
+      out = await bakeTextIfSupported(out, {
+        title: bakeText.title, body: bakeText.body, platform, format, brandFonts: deps.brandFonts,
+      });
     }
     return await uploadBase64Image(
       out.toString('base64'),
