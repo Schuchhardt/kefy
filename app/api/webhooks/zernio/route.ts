@@ -318,7 +318,7 @@ async function handleAccountConnected(db: DB, data: Data) {
   const zernioAccountId = str(data.account_id);
   if (!zernioAccountId) return;
 
-  const updates: Record<string, unknown> = { status: 'active' };
+  const updates: Record<string, unknown> = { status: 'active', status_reason: null };
   if (str(data.username))         updates.username         = data.username;
   if (str(data.avatar_url))       updates.avatar_url       = data.avatar_url;
   if (str(data.access_token))     updates.access_token     = data.access_token;

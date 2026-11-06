@@ -635,7 +635,8 @@ const disconnectSocialAccountTool = defineTool({
   description:
     "Disconnects one of the brand's social accounts: revokes it in Zernio and removes it from Kefy. This also deletes, " +
     "in Kefy, the account's pending and scheduled posts, its publishing history, DMs and comments, and removes the " +
-    'account from the autopilot rules that targeted it. Posts already published stay on the network. To use it again ' +
+    'account from the autopilot rules that targeted it; a rule left with no accounts is paused, and reconnecting the same ' +
+    'account restores it. Posts already published stay on the network. To use it again ' +
     'the account has to be reconnected with get_connect_account_link. Always requires user confirmation. Costs no credits.',
   input: z.object({ account_id: z.uuid().describe('Social account of this brand (from list_social_accounts).') }).strict(),
   confirm: 'always',

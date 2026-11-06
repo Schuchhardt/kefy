@@ -417,7 +417,7 @@ export interface AutopilotRuleRow {
   also_story:         boolean;
   story_delay_minutes: number;
   status:             AutopilotStatus;
-  paused_reason:      'credits_exhausted' | null;
+  paused_reason:      'credits_exhausted' | 'no_accounts' | null;
   paused_at:          ISODate | null;
   last_run_at:        ISODate | null;
   next_run_at:        ISODate | null;

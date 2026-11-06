@@ -88,7 +88,7 @@ export interface AutopilotRuleRow {
   story_delay_minutes: number;
   status: 'active' | 'paused';
   /** Por qué la pausó el sistema; null si la pausó una persona (o está activa). */
-  paused_reason: 'credits_exhausted' | null;
+  paused_reason: 'credits_exhausted' | 'no_accounts' | null;
   paused_at: string | null;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -695,6 +695,25 @@ async function pauseForCredits(db: Db, rule: AutopilotRuleRow, language: 'es' | 
 }
 
 /**
+ * Sin cuentas activas en el cron: se pausa y avisa en vez de fallar en cada
+ * hueco. Se reanuda al reconectar la cuenta (restoreAccountToRules) o a mano.
+ */
+async function pauseForNoAccounts(db: Db, rule: AutopilotRuleRow, language: 'es' | 'en', reason: string, now: Date): Promise<boolean> {
+  const { data } = await db
+    .from('kefy_autopilot_rules')
+    .update({ status: 'paused', paused_reason: 'no_accounts', paused_at: now.toISOString() })
+    .eq('id', rule.id)
+    .eq('status', 'active')
+    .select('id');
+  if (!(data ?? []).length) return false;
+  await sendAutopilotAlert({
+    kind: 'paused_no_accounts', orgId: rule.org_id, ruleId: rule.id, ruleName: rule.name, userId: rule.created_by,
+    language, detail: reason,
+  });
+  return true;
+}
+
+/**
  * Reglas pausadas por créditos en un mes anterior: el saldo ya se renovó, así
  * que vuelven a estar activas con su calendario. Lo llama el cron.
  */
@@ -964,6 +983,7 @@ export async function executeAutopilotRule(
   if (blocked) {
     const result = await fail(blocked.message, { format, credits });
     if (cron && blocked.code === 'credits_exhausted') result.paused = await pauseForCredits(db, rule, ctx.language, blocked.message, now);
+    if (cron && accounts.length === 0) result.paused = await pauseForNoAccounts(db, rule, ctx.language, blocked.message, now);
     return result;
   }
 

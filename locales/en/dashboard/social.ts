@@ -23,6 +23,10 @@ const en: SocialCopy = {
     expired: 'Expired',
     revoked: 'Revoked',
   },
+  accountProblem: {
+    missing_in_zernio: 'This account is no longer connected and can’t be posted to. Disconnect it and connect it again.',
+    account_mismatch: 'This connection points to a different account, so it won’t be used for posting. Disconnect it and connect it again while signed in to this account.',
+  } as Record<string, string>,
   connectTitle: 'Connect your social networks',
   connectDesc: 'Connect at least one account to start publishing from Kefy.',
   ctaTitle: 'Great, now create your first content',

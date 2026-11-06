@@ -375,6 +375,21 @@ describe('cron', () => {
     expect(sendAutopilotAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paused_credits', ruleId: rule.id }));
   });
 
+  it('sin cuentas activas no genera nada: se pausa y avisa en vez de fallar en cada hueco', async () => {
+    const rule = await createAutopilotRule(ctx(), RULE);
+    makeDue(rule.id);
+    db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!.social_account_ids = [];
+
+    const summary = await runScheduledAutopilot(null);
+
+    expect(summary).toMatchObject({ executed: 0, failed: 1, results: [{ paused: true }] });
+    expect(generateContentText).not.toHaveBeenCalled();
+    expect(db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)).toMatchObject({
+      status: 'paused', paused_reason: 'no_accounts',
+    });
+    expect(sendAutopilotAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paused_no_accounts', ruleId: rule.id }));
+  });
+
   it('una regla pausada por créditos se reanuda sola al empezar el mes siguiente; una pausada a mano, no', async () => {
     const byCredits = await createAutopilotRule(ctx(), RULE);
     const byHand = await createAutopilotRule(ctx(), { ...RULE, name: 'A mano' });
