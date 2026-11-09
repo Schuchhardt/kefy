@@ -8,6 +8,17 @@ const db = createFakeDb();
 vi.mock('@/lib/supabase', () => ({ createSupabaseServer: () => db.client }));
 vi.mock('@/lib/engagement-executor', () => ({ executeEngagementRules: vi.fn() }));
 
+// `after()` necesita el contexto de una petición de Next: aquí se guardan las
+// tareas y el test decide cuándo correrlas, igual que tras enviar la respuesta.
+const pendingAfter: Array<() => unknown> = [];
+vi.mock('next/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/server')>()),
+  after: (task: () => unknown) => { pendingAfter.push(task); },
+}));
+async function flushAfter() {
+  while (pendingAfter.length) await pendingAfter.shift()!();
+}
+
 import { POST } from '@/app/api/webhooks/zernio/route';
 import { executeEngagementRules } from '@/lib/engagement-executor';
 
@@ -76,6 +87,26 @@ describe('POST /api/webhooks/zernio — URL pública del post', () => {
     expect(post()).toMatchObject({
       status: 'published', platform_post_id: '1789', platform_post_url: 'https://www.instagram.com/p/AbC/',
     });
+  });
+
+  it('sin publishedAt, la fecha de publicación es el timestamp del evento (no la hora de una reentrega)', async () => {
+    // Forma real de un post.published de Zernio: ni el post ni el target traen publishedAt.
+    await send({
+      id: 'evt3', event: 'post.published', timestamp: '2026-11-05T22:02:55.000Z',
+      post: {
+        id: 'zp1', status: 'published', scheduledFor: '2026-11-05T22:00:00.000Z',
+        platforms: [{ platform: 'instagram', status: 'published', platformPostId: '1789', publishedUrl: 'https://www.instagram.com/p/AbC/' }],
+      },
+    });
+    expect(post().published_at).toBe('2026-11-05T22:02:55.000Z');
+  });
+
+  it('prefiere el publishedAt del target al timestamp del evento', async () => {
+    await send({
+      id: 'evt4', event: 'post.published', timestamp: '2026-11-08T22:05:00.000Z',
+      post: { id: 'zp1', status: 'published', platforms: [{ platform: 'instagram', status: 'published', publishedAt: '2026-11-08T22:01:55.829Z' }] },
+    });
+    expect(post().published_at).toBe('2026-11-08T22:01:55.829Z');
   });
 
   it('post.platform.published usa el bloque `platform`', async () => {
@@ -166,6 +197,7 @@ describe('POST /api/webhooks/zernio — fecha programada', () => {
 describe('POST /api/webhooks/zernio — respuestas automáticas', () => {
   beforeEach(() => {
     vi.mocked(executeEngagementRules).mockClear();
+    pendingAfter.length = 0;
     db.seed('kefy_social_accounts', [{ id: 'sa1', org_id: 'o1', brand_id: 'b1', zernio_account_id: 'acc' }]);
   });
 
@@ -175,9 +207,25 @@ describe('POST /api/webhooks/zernio — respuestas automáticas', () => {
     comment: { id: 'c1', postId: 'zp1', platformPostId: '1789', platform: 'instagram', text: '¿Precio?', author: { id: 'u1', username: 'ana', avatar: 'https://x/a.png' } },
   };
 
+  it('responde antes de correr las reglas (Zernio da 5 s y si no pausa el endpoint)', async () => {
+    const res = await send(comment);
+    expect(res.status).toBe(200);
+    expect(db.rows('kefy_comments')).toHaveLength(1);
+    expect(executeEngagementRules).not.toHaveBeenCalled();
+    await flushAfter();
+    expect(executeEngagementRules).toHaveBeenCalledTimes(1);
+  });
+
+  it('si las reglas fallan después de responder, el webhook ya respondió 200', async () => {
+    vi.mocked(executeEngagementRules).mockRejectedValueOnce(new Error('IA caída'));
+    expect((await send(comment)).status).toBe(200);
+    await expect(flushAfter()).resolves.toBeUndefined();
+  });
+
   it('un comentario dispara las reglas una sola vez aunque Zernio reintente el webhook', async () => {
     await send(comment);
     await send(comment);
+    await flushAfter();
     expect(db.rows('kefy_comments')).toHaveLength(1);
     expect(executeEngagementRules).toHaveBeenCalledTimes(1);
     expect(executeEngagementRules).toHaveBeenCalledWith(expect.anything(), 'o1', expect.objectContaining({
@@ -193,6 +241,7 @@ describe('POST /api/webhooks/zernio — respuestas automáticas', () => {
     };
     await send(dm);
     await send(dm);
+    await flushAfter();
     expect(executeEngagementRules).toHaveBeenCalledTimes(1);
     expect(executeEngagementRules).toHaveBeenCalledWith(expect.anything(), 'o1', expect.objectContaining({
       type: 'new_dm', messageId: 'm1', senderId: 'u2', senderName: 'Beto',

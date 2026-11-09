@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { executeEngagementRules } from '@/lib/engagement-executor';
 import { safePostUrl } from '@/lib/zernio';
@@ -57,7 +57,12 @@ function normalizePayload(raw: Record<string, unknown>): Data {
     d.platform_post_id = changed.platformPostId ?? target.platformPostId ?? p.id;
     if (p.platform)   d.platform   = p.platform;
     if (p.accountId)  d.account_id = p.accountId;
-    if (p.publishedAt) d.published_at = p.publishedAt;
+    // Los webhooks de posts no suelen traer `publishedAt` (ni en el post ni en
+    // el target): la hora real del evento es `timestamp`, que se conserva en
+    // los reintentos y en las reentregas. Sin esto, una reentrega guardaba como
+    // fecha de publicación la hora en que llegó.
+    const publishedAt = changed.publishedAt ?? target.publishedAt ?? p.publishedAt ?? raw.timestamp;
+    if (publishedAt) d.published_at = publishedAt;
     // La fecha programada viene como `scheduledFor`. Sin este mapeo
     // post.scheduled dejaba scheduled_at en NULL y la publicación desaparecía
     // del calendario.
@@ -135,6 +140,21 @@ function str(v: unknown): string | undefined {
 }
 function strOrNull(v: unknown): string | null {
   return typeof v === 'string' ? v : null;
+}
+
+// Zernio exige un 2xx en menos de 5 s y, si no, reintenta y termina pausando el
+// endpoint. Las reglas de engagement llaman a la IA y a Zernio y pueden pasar
+// de eso, así que corren después de responder. El mensaje o comentario ya quedó
+// guardado antes (y su upsert es lo que evita responder dos veces), así que un
+// fallo aquí se reporta pero no se reintenta.
+function runAfterResponse(task: () => Promise<unknown>, extra: Record<string, unknown>) {
+  after(async () => {
+    try {
+      await task();
+    } catch (err) {
+      reportError(err, { route: 'POST /api/webhooks/zernio', extra });
+    }
+  });
 }
 
 // Resolve internal social account by zernio_account_id
@@ -388,7 +408,7 @@ async function handleMessageReceived(db: DB, data: Data) {
   }
   if (!inserted?.length) return;
 
-  await executeEngagementRules(db, account.org_id, {
+  runAfterResponse(() => executeEngagementRules(db, account.org_id, {
     type:            'new_dm',
     socialAccountId: account.id,
     brandId:         account.brand_id ?? null,
@@ -400,7 +420,7 @@ async function handleMessageReceived(db: DB, data: Data) {
     senderId,
     senderName:      strOrNull(data.sender_name),
     senderAvatar:    strOrNull(data.sender_avatar),
-  });
+  }), { event: 'message.received', messageId });
 }
 
 // message.sent: an outbound message was sent (possibly from another tool or the platform itself)
@@ -540,7 +560,7 @@ async function handleCommentReceived(db: DB, data: Data) {
   }
   if (!inserted?.length) return;
 
-  await executeEngagementRules(db, account.org_id, {
+  runAfterResponse(() => executeEngagementRules(db, account.org_id, {
     type:            'new_comment',
     socialAccountId: account.id,
     brandId:         account.brand_id ?? null,
@@ -552,7 +572,7 @@ async function handleCommentReceived(db: DB, data: Data) {
     authorId,
     authorName:      strOrNull(data.author_name),
     authorAvatar:    strOrNull(data.author_avatar),
-  });
+  }), { event: 'comment.received', commentId });
 }
 
 // ─── Ads handler ───────────────────────────────────────────────────────────────
