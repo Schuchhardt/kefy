@@ -523,6 +523,16 @@ desaparecía del calendario. Sin fecha en el evento se conserva la de Kefy, y un
 `post.scheduled` que llega después de `post.published` no vuelve a marcar como
 programado un post que ya salió.
 
+### Fecha de publicación en los webhooks
+
+`post.published` y `post.platform.published` **no traen `publishedAt`**: ni en
+`post` ni en `post.platforms[]` (comprobado en los logs de entregas de
+noviembre de 2026). `published_at` se toma, en este orden, de
+`platform.publishedAt`, `post.platforms[0].publishedAt`, `post.publishedAt` y el
+`timestamp` del evento. El `timestamp` se mantiene en los reintentos y en las
+reentregas (`POST /v1/webhooks/logs/redeliver`). Antes el handler usaba la
+hora de llegada, y una reentrega días después dejaba mal la fecha.
+
 ### Listar posts
 
 ```
@@ -896,3 +906,35 @@ Envía un mensaje en una conversación de inbox. Es el endpoint correcto para re
 (HMAC-SHA256 del cuerpo crudo con `ZERNIO_WEBHOOK_SECRET`). Sin firma válida, o
 sin el secreto configurado, responde 401. Cubierto en
 `tests/unit/api/webhooks-zernio.test.ts`.
+
+### Configuración del endpoint en Zernio
+
+La configuración del webhook «kefy» se ve con `GET /v1/webhooks/settings` y los
+intentos de entrega con `GET /v1/webhooks/logs?webhookId=…`.
+
+- **URL:** `https://www.kefy.app/api/webhooks/zernio`, **con `www`**. Vercel
+  redirige `kefy.app` a `www.kefy.app` con un 308. Las entregas normales siguen
+  la redirección, pero el `webhook.test` no: devuelve 308 y parece un error.
+- **Secreto:** tiene que ser el mismo en el webhook de Zernio (`secret`) y en
+  `ZERNIO_WEBHOOK_SECRET` de Vercel en producción. Si en Zernio queda vacío,
+  Zernio manda los eventos sin una firma válida y el endpoint responde 401 a todo.
+- **Por qué importa:** Zernio no reintenta los 4xx (salvo 408 y 429). Cada 401
+  cuenta como falla definitiva y, tras tres días sin una entrega correcta,
+  **pausa el endpoint** (`disabledReason: auto:consecutive_failures`) y avisa
+  por correo. Mientras está pausado no se generan entregas, así que no hay nada
+  que reenviar después.
+- **Incidente de noviembre de 2026:** la verificación de firma llegó a
+  producción el 4 de noviembre, con el webhook todavía sin secreto en Zernio.
+  Desde el 5 de noviembre todo dio 401 y el 8 de noviembre Zernio lo pausó. Se
+  perdieron comentarios, DMs y estados de posts. Los posts se recuperaron
+  reenviando sus `post.published`; los comentarios y DMs no, para que las
+  reglas no respondieran días tarde.
+- **Plazo de respuesta:** Zernio exige un 2xx en menos de **5 s**. Por eso las
+  reglas de engagement, que llaman a la IA, corren con `after()` de
+  `next/server`, después de responder. El mensaje o comentario se guarda antes
+  de responder; si las reglas fallan, se reporta con `reportError` y no se
+  reintenta.
+- **Reactivar:** cuando el endpoint ya responde, activar el webhook en el
+  dashboard de Zernio (o `isActive: true`) y probarlo con `POST /v1/webhooks/test`.
+  Un evento que quedó sin entregar se vuelve a mandar con
+  `POST /v1/webhooks/logs/redeliver { webhookId, eventId }`.
