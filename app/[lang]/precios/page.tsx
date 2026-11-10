@@ -5,6 +5,7 @@ import PricingSection from '@/components/landing/PricingSection';
 import Footer from '@/components/landing/Footer';
 import { pricingPath } from '@/lib/localized-paths';
 import type { Metadata } from 'next';
+import { shareMetadata } from '@/lib/share-metadata';
 
 // Página completa de precios. Un slug por idioma: /es/precios y /en/pricing
 // (app/[lang]/pricing reexporta esta página; next.config.ts redirige el slug
@@ -39,7 +40,7 @@ export async function generateMetadata({
         'x-default': `${BASE_URL}${pricingPath('es')}`,
       },
     },
-    openGraph: { title, description, url: `${BASE_URL}${pricingPath(lang)}` },
+    ...shareMetadata(lang, { title, description, path: pricingPath(lang) }),
   };
 }
 

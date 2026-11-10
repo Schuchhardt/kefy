@@ -3,6 +3,7 @@ import { KEFY_COPY } from '@/lib/content';
 import { SignupProvider } from '@/components/ui/SignupContext';
 import { PLAN_ORDER, PLAN_PRICES_USD, TRIAL_DAYS } from '@/lib/plans';
 import { pricingPath } from '@/lib/localized-paths';
+import { shareMetadata } from '@/lib/share-metadata';
 import Nav from '@/components/landing/Nav';
 import Hero from '@/components/landing/Hero';
 import ProblemSection from '@/components/landing/ProblemSection';
@@ -31,6 +32,7 @@ export async function generateMetadata({
         'x-default': `${BASE_URL}/es`,
       },
     },
+    ...shareMetadata(lang, { path: `/${lang}` }),
   };
 }
 

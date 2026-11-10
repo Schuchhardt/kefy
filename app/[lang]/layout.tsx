@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Syne, DM_Sans } from 'next/font/google';
 import '../globals.css';
 import { locales } from '@/lib/i18n';
+import { shareMetadata } from '@/lib/share-metadata';
 import SetLang from './SetLang';
 import { ThemeProvider } from '@/lib/theme-context';
 import esCommon from '@/locales/es/common';
@@ -38,8 +39,7 @@ export async function generateMetadata({
   const { lang } = await params;
 
   const c = commonCopy[(lang as 'es' | 'en')] ?? commonCopy.es;
-  const { title, description, keywords, ogLocale } = c.metadata;
-  const ogImage = `${BASE_URL}/og-image.png`;
+  const { title, description, keywords } = c.metadata;
 
   return {
     title,
@@ -49,30 +49,11 @@ export async function generateMetadata({
     creator: 'Kefy',
     publisher: 'Kefy',
     metadataBase: new URL(BASE_URL),
-    openGraph: {
-      type: 'website',
-      locale: ogLocale,
-      siteName: 'Kefy',
-      title,
-      description,
-      url: `${BASE_URL}/${lang}`,
-      images: [
-        {
-          url: ogImage,
-          width: 1200,
-          height: 630,
-          alt: title,
-        },
-      ],
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title,
-      description,
-      images: [ogImage],
-      creator: '@kefyapp',
-      site: '@kefyapp',
-    },
+    // Sin og:url aquí: lo heredaban todas las páginas y Facebook atribuía
+    // cualquier link compartido a la home. La imagen la genera
+    // app/[lang]/opengraph-image.tsx (antes apuntaba a /og-image.png, que no
+    // existía, y Meta mostraba los links sin imagen).
+    ...shareMetadata(lang, { title, description }),
     // Sin `alternates` aquí: el layout lo heredaban todas las páginas, así que
     // precios, blog y legales declaraban la home como canónica. Cada página
     // que se indexa define la suya (la home en app/[lang]/page.tsx).
