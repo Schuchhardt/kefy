@@ -21,9 +21,14 @@ const PUBLIC_API_PATHS = [
   '/api/webhooks/',
   // Vercel Cron endpoints: no llevan cookie de sesión, se autentican solos
   // contra CRON_SECRET / AUTOPILOT_CRON_SECRET dentro del route handler.
+  // Todo cron de vercel.json tiene que estar aquí: si no, el proxy lo corta con
+  // 401 antes de llegar al handler y nadie se entera (lo vigila
+  // tests/unit/proxy.test.ts).
   '/api/autopilot/run',
   '/api/content-library/generate',
   '/api/content/reel/reconcile',
+  '/api/social/accounts/reconcile',
+  '/api/automations/engagement/run',
   // API pública y servidor MCP: se autentican con API key dentro del handler
   // (lib/assistant/api-keys.ts). No aceptan la cookie de sesión.
   '/api/v1/',

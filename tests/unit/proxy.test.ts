@@ -1,5 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { proxy } from '@/proxy';
 import { signAccessToken } from '@/lib/auth';
@@ -134,5 +136,24 @@ describe('proxy — sesión por cookie', () => {
       const res = await proxy(req(path));
       expect(passedThrough(res), path).toBe(true);
     }
+  });
+});
+
+describe('proxy — crons de Vercel', () => {
+  // Vercel Cron llama sin cookie, con `Authorization: Bearer ${CRON_SECRET}`.
+  // Si la ruta no está en la lista pública, el proxy responde 401 y el cron no
+  // corre nunca: pasó con la comparación diaria de cuentas con Zernio y con las
+  // respuestas automáticas con espera.
+  const crons = (JSON.parse(readFileSync(join(process.cwd(), 'vercel.json'), 'utf8')) as {
+    crons: Array<{ path: string }>;
+  }).crons.map((c) => c.path.split('?')[0]);
+
+  it('vercel.json declara crons', () => {
+    expect(crons.length).toBeGreaterThan(0);
+  });
+
+  it.each(crons)('%s llega al handler sin cookie', async (path) => {
+    const res = await proxy(req(path, { method: 'GET', headers: { authorization: 'Bearer secreto-del-cron' } }));
+    expect(passedThrough(res)).toBe(true);
   });
 });
