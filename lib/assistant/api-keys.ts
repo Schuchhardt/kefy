@@ -32,6 +32,12 @@ export const API_KEY_RE = /^kefy_sk_[A-Za-z0-9_-]{43}$/;
 export const OAUTH_ACCESS_TOKEN_PREFIX = 'kefy_at_';
 export const OAUTH_ACCESS_TOKEN_RE = /^kefy_at_[A-Za-z0-9_-]{43}$/;
 export const API_KEY_SCOPES: readonly Scope[] = ['read', 'write', 'publish'];
+/**
+ * Scope de las conexiones OAuth al MCP de administración (/api/admin/mcp). No
+ * es un Scope de organización: nunca se mezcla con los otros (lo impide la
+ * base) y solo lo emite el consentimiento a quien está en KEFY_ADMIN_EMAILS.
+ */
+export const ADMIN_SCOPE = 'admin';
 /** Keys activas (no revocadas ni caducadas) por organización. */
 export const MAX_ACTIVE_API_KEYS = 10;
 
@@ -50,6 +56,11 @@ export interface ApiKeyAuth {
     brand_id: string | null;
     scopes: Scope[];
     key_prefix: string;
+    /**
+     * Conexión del MCP de administración (scope 'admin', ver lib/admin/auth.ts).
+     * No lleva scopes de organización: en /api/mcp y /api/v1 no puede nada.
+     */
+    admin: boolean;
   };
   /** Sesión equivalente: la de quien creó la key, con su rol actual. */
   auth: JWTPayload;
@@ -237,6 +248,7 @@ export async function authenticateApiKey(req: Request, now = new Date()): Promis
         brand_id: key.brand_id,
         scopes,
         key_prefix: key.key_prefix,
+        admin: (key.scopes ?? []).includes(ADMIN_SCOPE),
       },
       auth,
       role,

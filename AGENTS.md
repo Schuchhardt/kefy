@@ -27,6 +27,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 | Landing, auth y UX mobile del dashboard | [`docs/auditoria-ux.md`](docs/auditoria-ux.md) | Antes de tocar `components/landing/**`, `locales/*/landing.ts`, las páginas de auth, el onboarding o el layout/mobile del dashboard: lista lo que la landing no puede prometer, qué se implementó de la auditoría y las métricas que vigilan los tests |
 | Idiomas | [`docs/i18n.md`](docs/i18n.md) | Antes de añadir textos de interfaz o tocar `locales/**` |
 | Asistente / API pública / MCP | [`docs/assistant.md`](docs/assistant.md) | Antes de tocar `lib/assistant/**`, `lib/services/**`, `app/api/assistant/**`, `app/api/v1/**`, `app/api/mcp/**`, `app/api/oauth/**`, `app/.well-known/**` o `app/api/api-keys/**` |
+| MCP de administración (plataforma, logs, ventas) | [`docs/admin-mcp.md`](docs/admin-mcp.md) | Antes de tocar `lib/admin/**`, `lib/services/admin/**`, `app/api/admin/**`, el consentimiento OAuth (`app/api/oauth/consent`, `OAuthConsentView`) o el scope `admin`. Ve todas las organizaciones: nunca se expone sin `authenticateAdmin` |
 | MCP Apps (vistas en el chat) | [`docs/mcp-apps.md`](docs/mcp-apps.md) | Antes de tocar `lib/mcp-app/**`, `mcp-app/**`, `lib/services/content-view.ts`, `lib/services/video-view.ts`, `lib/assistant/app-views.ts`, `lib/assistant/tools/apps.ts` o el campo `app` de una herramienta. El `content[].text` de una herramienta no cambia nunca; la vista va en `structuredContent.view` |
 
 ## Regla: Zernio

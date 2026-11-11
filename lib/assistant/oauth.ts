@@ -26,7 +26,7 @@ import { hashToken } from '@/lib/auth';
 import { appUrl } from '@/lib/app-url';
 import { createSupabaseServer } from '@/lib/supabase';
 import { reportError } from '@/lib/observability';
-import { API_KEY_SCOPES, OAUTH_ACCESS_TOKEN_PREFIX as ACCESS_TOKEN_PREFIX } from '@/lib/assistant/api-keys';
+import { ADMIN_SCOPE, API_KEY_SCOPES, OAUTH_ACCESS_TOKEN_PREFIX as ACCESS_TOKEN_PREFIX } from '@/lib/assistant/api-keys';
 import type { Scope } from '@/lib/assistant/types';
 
 const REFRESH_TOKEN_PREFIX = 'kefy_rt_';
@@ -47,6 +47,13 @@ export const CONNECTION_TTL_DAYS = 90;
 const CODE_TTL_SECONDS = 10 * 60;
 
 export const MCP_PATH = '/api/mcp';
+/**
+ * MCP de administración de la plataforma (docs/admin-mcp.md). Usa este mismo
+ * OAuth: si el `resource` pedido es esta ruta, el consentimiento emite una
+ * conexión con el scope 'admin' y nada más, y solo a quien está en
+ * KEFY_ADMIN_EMAILS.
+ */
+export const ADMIN_MCP_PATH = '/api/admin/mcp';
 /** Permisos que se marcan por defecto en el consentimiento: publicar es opt-in. */
 export const DEFAULT_OAUTH_SCOPES: readonly Scope[] = ['read', 'write'];
 
@@ -74,17 +81,18 @@ export function mcpResourceUrl(origin: string): string {
 }
 
 /** URL de los metadatos del recurso (RFC 9728), con la ruta del recurso detrás. */
-export function resourceMetadataUrl(origin: string): string {
-  return `${origin}/.well-known/oauth-protected-resource${MCP_PATH}`;
+export function resourceMetadataUrl(origin: string, path: string = MCP_PATH): string {
+  return `${origin}/.well-known/oauth-protected-resource${path}`;
 }
 
-export function protectedResourceMetadata(origin: string) {
+export function protectedResourceMetadata(origin: string, path: string = MCP_PATH) {
+  const admin = path === ADMIN_MCP_PATH;
   return {
-    resource: mcpResourceUrl(origin),
+    resource: `${origin}${admin ? ADMIN_MCP_PATH : MCP_PATH}`,
     authorization_servers: [origin],
-    scopes_supported: [...API_KEY_SCOPES],
+    scopes_supported: admin ? [ADMIN_SCOPE] : [...API_KEY_SCOPES],
     bearer_methods_supported: ['header'],
-    resource_name: 'Kefy',
+    resource_name: admin ? 'Kefy Admin' : 'Kefy',
   };
 }
 
@@ -94,7 +102,7 @@ export function authorizationServerMetadata(origin: string) {
     authorization_endpoint: `${origin}/oauth/authorize`,
     token_endpoint: `${origin}/api/oauth/token`,
     registration_endpoint: `${origin}/api/oauth/register`,
-    scopes_supported: [...API_KEY_SCOPES],
+    scopes_supported: [...API_KEY_SCOPES, ADMIN_SCOPE],
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token'],
     token_endpoint_auth_methods_supported: ['none'],
@@ -103,23 +111,35 @@ export function authorizationServerMetadata(origin: string) {
   };
 }
 
-/**
- * `resource` (RFC 8707) tiene que ser el servidor MCP de esta app: el origen
- * de la petición o el canónico, con o sin la ruta. Sin `resource` vale.
- */
-export function isAllowedResource(resource: string | null | undefined, origin: string): boolean {
-  if (!resource) return true;
+/** Ruta del recurso si es de esta app (origen de la petición o canónico), o null. */
+function resourcePath(resource: string, origin: string): string | null {
   let url: URL;
   try {
     url = new URL(resource);
   } catch {
-    return false;
+    return null;
   }
-  if (url.search || url.hash) return false;
+  if (url.search || url.hash) return null;
   const origins = new Set([origin]);
   try { origins.add(new URL(appUrl()).origin); } catch { /* appUrl siempre es absoluta */ }
-  const path = url.pathname.replace(/\/+$/, '');
-  return origins.has(url.origin) && (path === '' || path === MCP_PATH);
+  if (!origins.has(url.origin)) return null;
+  return url.pathname.replace(/\/+$/, '');
+}
+
+/**
+ * `resource` (RFC 8707) tiene que ser un servidor MCP de esta app: el origen
+ * de la petición o el canónico, con o sin la ruta (/api/mcp o
+ * /api/admin/mcp). Sin `resource` vale (y es el MCP normal).
+ */
+export function isAllowedResource(resource: string | null | undefined, origin: string): boolean {
+  if (!resource) return true;
+  const path = resourcePath(resource, origin);
+  return path === '' || path === MCP_PATH || path === ADMIN_MCP_PATH;
+}
+
+/** ¿Pide la autorización el MCP de administración? */
+export function isAdminResource(resource: string | null | undefined, origin: string): boolean {
+  return !!resource && resourcePath(resource, origin) === ADMIN_MCP_PATH;
 }
 
 // ─── Errores ─────────────────────────────────────────────────────────────────
@@ -355,7 +375,7 @@ export async function validateAuthorizeRequest(
 /** Crea el código de autorización y devuelve la URL de vuelta al cliente. */
 export async function issueAuthorizationCode(
   request: AuthorizeRequest,
-  grant: { orgId: string; userId: string; brandId: string | null; scopes: Scope[] },
+  grant: { orgId: string; userId: string; brandId: string | null; scopes: Array<Scope | typeof ADMIN_SCOPE> },
   origin: string,
   now = new Date(),
 ): Promise<string | null> {
@@ -498,6 +518,11 @@ export async function exchangeAuthorizationCode(
   const resource = params.get('resource');
   if (resource && (!isAllowedResource(resource, origin) || (row.resource && row.resource !== resource))) {
     return { ok: false, status: 400, error: oauthError('invalid_target', 'resource does not match the authorization') };
+  }
+  // Defensa en profundidad: el scope admin solo sale de una autorización del
+  // MCP de administración (el consentimiento ya lo garantiza).
+  if (row.scopes.includes(ADMIN_SCOPE) && !isAdminResource(row.resource, origin)) {
+    return invalidGrant('Invalid authorization code');
   }
 
   const { data: client } = await db

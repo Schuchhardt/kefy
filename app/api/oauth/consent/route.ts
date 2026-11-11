@@ -5,11 +5,12 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { canManageTeam } from '@/lib/team';
 import { getActiveBrandById, listActiveBrands } from '@/lib/brands';
 import { requireActiveSubscription } from '@/lib/subscription';
-import { API_KEY_SCOPES } from '@/lib/assistant/api-keys';
+import { ADMIN_SCOPE, API_KEY_SCOPES } from '@/lib/assistant/api-keys';
 import {
-  DEFAULT_OAUTH_SCOPES, issueAuthorizationCode, validateAuthorizeRequest, withParams,
+  DEFAULT_OAUTH_SCOPES, isAdminResource, issueAuthorizationCode, validateAuthorizeRequest, withParams,
   type AuthorizeValidation,
 } from '@/lib/assistant/oauth';
+import { isPlatformAdminEmail, userEmail } from '@/lib/admin/auth';
 import type { Scope } from '@/lib/assistant/types';
 
 // ─── /api/oauth/consent ──────────────────────────────────────────────────────
@@ -22,6 +23,11 @@ import type { Scope } from '@/lib/assistant/types';
 // Autorizar emite una conexión que actúa como una API key, así que exige lo
 // mismo que crearla en Ajustes: dueño o administrador y suscripción activa.
 // Ver lib/assistant/oauth.ts y docs/assistant.md §7.
+//
+// Si el `resource` es el MCP de administración (/api/admin/mcp), la conexión
+// lleva solo el scope 'admin', sin marca, y solo se emite a quien está en
+// KEFY_ADMIN_EMAILS (docs/admin-mcp.md). No depende del rol en su equipo ni
+// de la suscripción de su organización.
 
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
@@ -53,13 +59,17 @@ export async function GET(req: NextRequest) {
     listActiveBrands(auth.orgId),
   ]);
 
+  const email = (user?.email as string | undefined) ?? null;
+  const admin = isAdminResource(v.request.resource, req.nextUrl.origin);
+
   return json({
     client: { name: v.request.clientName, redirect_host: new URL(v.request.redirectUri).host },
     org_name: (org?.name as string | undefined) ?? null,
-    user_email: (user?.email as string | undefined) ?? null,
-    brands: brands.map((b) => ({ id: b.id, name: b.name })),
-    can_authorize: canManageTeam(auth.role),
-    default_scopes: DEFAULT_OAUTH_SCOPES,
+    user_email: email,
+    admin,
+    brands: admin ? [] : brands.map((b) => ({ id: b.id, name: b.name })),
+    can_authorize: admin ? isPlatformAdminEmail(email) : canManageTeam(auth.role),
+    default_scopes: admin ? [] : DEFAULT_OAUTH_SCOPES,
   });
 }
 
@@ -103,6 +113,19 @@ export async function POST(req: NextRequest) {
         error: 'access_denied', state: request.state, iss: req.nextUrl.origin,
       }),
     });
+  }
+
+  if (isAdminResource(request.resource, req.nextUrl.origin)) {
+    let email: string | null = null;
+    try { email = await userEmail(auth.userId); } catch { return json({ code: 'unavailable' }, 503); }
+    if (!isPlatformAdminEmail(email)) return json({ code: 'admin_forbidden' }, 403);
+    const redirect = await issueAuthorizationCode(
+      request,
+      { orgId: auth.orgId, userId: auth.userId, brandId: null, scopes: [ADMIN_SCOPE] },
+      req.nextUrl.origin,
+    );
+    if (!redirect) return json({ code: 'unavailable' }, 503);
+    return json({ redirect });
   }
 
   if (!canManageTeam(auth.role)) return json({ code: 'forbidden' }, 403);
