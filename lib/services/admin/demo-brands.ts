@@ -96,7 +96,9 @@ export async function createDemoBrand(ctx: AdminContext, input: {
   } else {
     const name = (input.brand_name?.trim() || lead.company || lead.name || normalizeDomain(url) || 'Demo').slice(0, 100);
     brand = (await createBrand(await demoContext('', input.language), { name })).brand as Row;
-    await db().from('kefy_sales_leads').update({ demo_brand_id: brand.id, updated_at: ctx.now.toISOString() }).eq('id', lead.id);
+    // Sin este enlace, el próximo intento crearía otra marca y gastaría otro cupo.
+    rowsOrThrow(await db().from('kefy_sales_leads').update({ demo_brand_id: brand.id, updated_at: ctx.now.toISOString() })
+      .eq('id', lead.id).select('id'), 'link demo brand');
   }
 
   const out = await createStarterPosts(await demoContext(brand.id, input.language), {
