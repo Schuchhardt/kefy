@@ -24,6 +24,7 @@ import { POST as token } from '@/app/api/oauth/token/route';
 import { POST as mcpPost } from '@/app/api/mcp/route';
 import { POST as adminPost } from '@/app/api/admin/mcp/route';
 import { GET as adminMetadata } from '@/app/.well-known/oauth-protected-resource/api/admin/mcp/route';
+import { GET as adminAsMetadata } from '@/app/.well-known/oauth-authorization-server/admin/route';
 import { getAuthFromRequest } from '@/lib/auth';
 import { adminEmails } from '@/lib/admin/auth';
 import type { JWTPayload } from '@/types/auth';
@@ -119,7 +120,46 @@ describe('adminEmails', () => {
 describe('OAuth del MCP de administración', () => {
   it('los metadatos del recurso admin anuncian solo el scope admin', async () => {
     const body = await adminMetadata(new NextRequest(`${BASE}/.well-known/oauth-protected-resource/api/admin/mcp`)).json();
-    expect(body).toMatchObject({ resource: ADMIN_RESOURCE, scopes_supported: ['admin'], authorization_servers: [BASE] });
+    expect(body).toMatchObject({ resource: ADMIN_RESOURCE, scopes_supported: ['admin'], authorization_servers: [`${BASE}/admin`] });
+  });
+
+  it('sin `resource` (como Claude): el emisor /admin igual emite la conexión admin', async () => {
+    const as_ = await adminAsMetadata(new NextRequest(`${BASE}/.well-known/oauth-authorization-server/admin`)).json();
+    expect(as_.issuer).toBe(`${BASE}/admin`);
+    const client = await (await register(postJson('/api/oauth/register', { redirect_uris: [REDIRECT] }))).json();
+    // El cliente añade sus parámetros al authorization_endpoint, sin `resource`.
+    const url = new URL(as_.authorization_endpoint);
+    for (const [k, v] of Object.entries({
+      response_type: 'code', client_id: client.client_id, redirect_uri: REDIRECT,
+      code_challenge: CHALLENGE, code_challenge_method: 'S256', state: 's',
+    })) url.searchParams.set(k, v);
+    const decision = await (await consentPost(postJson('/api/oauth/consent', {
+      query: url.searchParams.toString(), decision: 'approve', scopes: [],
+    }, { origin: BASE }))).json();
+    const back = new URL(decision.redirect);
+    expect(back.searchParams.get('iss')).toBe(`${BASE}/admin`);
+    const res = await token(new NextRequest(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code', code: back.searchParams.get('code')!, client_id: client.client_id,
+        redirect_uri: REDIRECT, code_verifier: VERIFIER,
+      }).toString(),
+    }));
+    const tokens = await res.json();
+    expect(tokens.scope).toBe('admin');
+    const { body } = await call(adminPost, tokens.access_token, 'tools/list');
+    expect(body.result.tools.length).toBeGreaterThan(0);
+  });
+
+  it('sin `resource` pero con scope=admin también es la conexión admin', async () => {
+    const client = await (await register(postJson('/api/oauth/register', { redirect_uris: [REDIRECT] }))).json();
+    const q = new URLSearchParams({
+      response_type: 'code', client_id: client.client_id, redirect_uri: REDIRECT, code_challenge: CHALLENGE,
+      code_challenge_method: 'S256', state: 's', scope: 'admin',
+    }).toString();
+    const res = await consentGet(new NextRequest(`${BASE}/api/oauth/consent?${q}`));
+    expect(await res.json()).toMatchObject({ admin: true, can_authorize: true });
   });
 
   it('el 401 lleva a los metadatos del recurso admin', async () => {

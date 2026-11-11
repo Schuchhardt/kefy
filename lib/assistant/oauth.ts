@@ -54,6 +54,14 @@ export const MCP_PATH = '/api/mcp';
  * KEFY_ADMIN_EMAILS.
  */
 export const ADMIN_MCP_PATH = '/api/admin/mcp';
+/**
+ * El MCP de administración tiene su propio emisor (`<origen>/admin`, RFC 8414
+ * con ruta): sus metadatos están en /.well-known/oauth-authorization-server/admin
+ * y su `authorization_endpoint` ya lleva `resource=<origen>/api/admin/mcp`.
+ * Claude no siempre manda `resource` al autorizar; sin esto el consentimiento
+ * no sabría que la conexión es la de admin y emitiría una normal.
+ */
+export const ADMIN_ISSUER_PATH = '/admin';
 /** Permisos que se marcan por defecto en el consentimiento: publicar es opt-in. */
 export const DEFAULT_OAUTH_SCOPES: readonly Scope[] = ['read', 'write'];
 
@@ -89,17 +97,29 @@ export function protectedResourceMetadata(origin: string, path: string = MCP_PAT
   const admin = path === ADMIN_MCP_PATH;
   return {
     resource: `${origin}${admin ? ADMIN_MCP_PATH : MCP_PATH}`,
-    authorization_servers: [origin],
+    authorization_servers: [admin ? adminIssuer(origin) : origin],
     scopes_supported: admin ? [ADMIN_SCOPE] : [...API_KEY_SCOPES],
     bearer_methods_supported: ['header'],
     resource_name: admin ? 'Kefy Admin' : 'Kefy',
   };
 }
 
-export function authorizationServerMetadata(origin: string) {
+export function adminIssuer(origin: string): string {
+  return `${origin}${ADMIN_ISSUER_PATH}`;
+}
+
+/** Emisor que el cliente espera en `iss` (RFC 9207) según el recurso pedido. */
+export function issuerFor(origin: string, resource: string | null | undefined): string {
+  return isAdminResource(resource, origin) ? adminIssuer(origin) : origin;
+}
+
+export function authorizationServerMetadata(origin: string, opts: { admin?: boolean } = {}) {
+  const authorize = opts.admin
+    ? `${origin}/oauth/authorize?${new URLSearchParams({ resource: `${origin}${ADMIN_MCP_PATH}` })}`
+    : `${origin}/oauth/authorize`;
   return {
-    issuer: origin,
-    authorization_endpoint: `${origin}/oauth/authorize`,
+    issuer: opts.admin ? adminIssuer(origin) : origin,
+    authorization_endpoint: authorize,
     token_endpoint: `${origin}/api/oauth/token`,
     registration_endpoint: `${origin}/api/oauth/register`,
     scopes_supported: [...API_KEY_SCOPES, ADMIN_SCOPE],
@@ -337,13 +357,19 @@ export async function validateAuthorizeRequest(
   }
 
   const state = params.get('state');
+  // Sin `resource` pero pidiendo el scope 'admin': es el MCP de administración.
+  let resource = params.get('resource');
+  if (!resource && (params.get('scope') ?? '').split(/\s+/).includes(ADMIN_SCOPE)) {
+    resource = `${origin}${ADMIN_MCP_PATH}`;
+  }
+  const iss = issuerFor(origin, isAllowedResource(resource, origin) ? resource : null);
   const fail = (code: OAuthErrorCode, description: string): AuthorizeValidation => {
     const err = oauthError(code, description);
     return {
       ok: false,
       kind: 'redirect',
       error: err,
-      redirect: withParams(redirectUri, { error: err.error, error_description: description, state, iss: origin }),
+      redirect: withParams(redirectUri, { error: err.error, error_description: description, state, iss }),
     };
   };
 
@@ -354,7 +380,6 @@ export async function validateAuthorizeRequest(
   if (params.get('code_challenge_method') !== 'S256' || !PKCE_CHALLENGE_RE.test(challenge)) {
     return fail('invalid_request', 'PKCE with code_challenge_method=S256 is required');
   }
-  const resource = params.get('resource');
   if (!isAllowedResource(resource, origin)) {
     return fail('invalid_target', 'resource must be this MCP server');
   }
@@ -399,7 +424,7 @@ export async function issueAuthorizationCode(
     });
     return null;
   }
-  return withParams(request.redirectUri, { code, state: request.state, iss: origin });
+  return withParams(request.redirectUri, { code, state: request.state, iss: issuerFor(origin, request.resource) });
 }
 
 // ─── Token endpoint ──────────────────────────────────────────────────────────

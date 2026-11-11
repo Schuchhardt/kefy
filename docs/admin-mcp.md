@@ -18,6 +18,12 @@ claude.ai / Claude Code ──► /api/admin/mcp ──401──► /.well-known
   `/api/admin/mcp`, el consentimiento (`app/api/oauth/consent`) muestra la
   pantalla de admin y emite una conexión con **solo** el scope `admin`, sin
   marca. La base impide mezclar `admin` con `read`/`write`/`publish`.
+- **Claude no siempre manda `resource` al autorizar** (el 2026-11-11 Claude
+  Desktop no lo mandó y salió una conexión normal sin herramientas). Por eso el
+  recurso admin anuncia su propio emisor, `<origen>/admin`, con metadatos en
+  `/.well-known/oauth-authorization-server/admin` cuyo `authorization_endpoint`
+  ya trae `resource=<origen>/api/admin/mcp`; el `iss` de la vuelta es ese
+  emisor (`issuerFor`). Además, `scope=admin` sin `resource` cuenta como admin.
 - Solo se emite si el email de la sesión está en `KEFY_ADMIN_EMAILS`. En cada
   petición `authenticateAdmin` (`lib/admin/auth.ts`) vuelve a comprobar el
   scope **y** la variable: quitar el email corta el acceso al instante.

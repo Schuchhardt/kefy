@@ -35,7 +35,7 @@ function isAllowedOrigin(origin: string | null): boolean {
 function wwwAuthenticate(req: NextRequest, status: 401 | 403): string {
   const params = [`realm="kefy-admin"`];
   if (status === 403) params.push('error="insufficient_scope"', 'scope="admin"');
-  else if (req.headers.get('authorization')) params.push('error="invalid_token"');
+  else { params.push('scope="admin"'); if (req.headers.get('authorization')) params.push('error="invalid_token"'); }
   params.push(`resource_metadata="${resourceMetadataUrl(req.nextUrl.origin, ADMIN_MCP_PATH)}"`);
   return `Bearer ${params.join(', ')}`;
 }
