@@ -5,6 +5,12 @@ import {
   addSuppression, exportSalesLeads, findAccountLeadCandidates, getSalesLead, getSalesPipeline, importAccountLeads,
   listSalesLeads, logSalesActivity, updateSalesLead, upsertOutreachLeads,
 } from '@/lib/services/admin/sales-leads';
+import {
+  DEMO_PREVIEW_DEFAULT_DAYS, DEMO_PREVIEW_MAX_DAYS, createDemoBrand, createDemoPreviewLink, demoOrgId, demoSummary,
+  revokeDemoPreviewLink,
+} from '@/lib/services/admin/demo-brands';
+import { CREDIT_COSTS } from '@/lib/usage';
+import { STARTER_ANGLES } from '@/lib/services/onboarding';
 
 const stage = z.enum(LEAD_STAGES);
 const offer = z.enum(LEAD_OFFERS);
@@ -88,9 +94,13 @@ export const leadTools = [
     name: 'get_sales_lead',
     title: 'Sales lead detail',
     kind: 'read',
-    description: 'One lead with its activity history and, for Kefy users, the account and subscription state.',
+    description: 'One lead with its activity history, its demo brand and preview links (status and views, never the URL), and, '
+      + 'for Kefy users, the account and subscription state.',
     input: z.object({ lead_id: z.uuid() }),
-    handler: async (ctx, input) => ({ data: await getSalesLead(ctx, input) }),
+    handler: async (ctx, input) => {
+      const out = await getSalesLead(ctx, input);
+      return { data: { ...out, demo: await demoSummary(ctx, out.lead) } };
+    },
   }),
   defineAdminTool({
     name: 'find_account_lead_candidates',
@@ -189,6 +199,53 @@ export const leadTools = [
       next_action_at: when.nullish(),
     }),
     handler: async (ctx, input) => ({ data: await logSalesActivity(ctx, input) }),
+  }),
+  defineAdminTool({
+    name: 'create_demo_brand',
+    title: 'Create demo brand for a lead',
+    kind: 'write',
+    description: 'Builds a demo brand for a prospect in the Kefy demo organization: reads their website (or uses a one-sentence '
+      + 'description), fills the brand profile (name, tone, colors, logo) and writes 3 draft posts (text only), then links it '
+      + 'to the lead. Uses the lead website when url is omitted. Spends AI credits of the DEMO organization '
+      + `(about ${STARTER_ANGLES.length * CREDIT_COSTS.text + CREDIT_COSTS.text}). A lead gets one demo brand; if a previous `
+      + 'attempt left it empty it is retried on the same brand. Nothing is sent to the prospect: share it with '
+      + 'create_demo_preview_link.',
+    input: z.object({
+      lead_id: z.uuid(),
+      url: z.string().trim().min(4).max(500).optional().describe('Business website; defaults to the lead website.'),
+      description: z.string().trim().min(3).max(300).optional().describe('What the business does, in one sentence.'),
+      brand_name: z.string().trim().min(1).max(100).optional().describe('Defaults to the lead company or name.'),
+      channel: z.enum(['instagram', 'facebook', 'linkedin', 'tiktok', 'twitter', 'threads', 'generic']).default('instagram'),
+      language: z.enum(['es', 'en']).default('es').describe('Language of the posts.'),
+    }),
+    confirm: true,
+    describe: async (_ctx, input) => `Create a demo brand for lead ${input.lead_id} in the demo organization `
+      + `(${demoOrgId() ?? 'NOT CONFIGURED'}) from ${input.url ?? 'the lead website'}${input.description ? ` + "${input.description}"` : ''}, `
+      + `with 3 ${input.channel} posts in ${input.language}. Spends AI credits of the demo organization.`,
+    targetOrg: () => demoOrgId(),
+    handler: async (ctx, input) => ({ data: await createDemoBrand(ctx, input) }),
+  }),
+  defineAdminTool({
+    name: 'create_demo_preview_link',
+    title: 'Public preview link of a demo brand',
+    kind: 'write',
+    description: 'Creates a public, read-only, non-indexed link where the prospect sees their demo brand and its posts. '
+      + `Expires in expires_in_days (default ${DEMO_PREVIEW_DEFAULT_DAYS}, max ${DEMO_PREVIEW_MAX_DAYS}). The URL is returned ONLY `
+      + 'this once: give it to the owner, who sends it by hand. get_sales_lead shows each link status and views.',
+    input: z.object({
+      lead_id: z.uuid(),
+      expires_in_days: z.number().int().min(1).max(DEMO_PREVIEW_MAX_DAYS).default(DEMO_PREVIEW_DEFAULT_DAYS),
+      language: z.enum(['es', 'en']).default('es').describe('Language of the page around the posts.'),
+    }),
+    handler: async (ctx, input) => ({ data: await createDemoPreviewLink(ctx, input) }),
+  }),
+  defineAdminTool({
+    name: 'revoke_demo_preview_link',
+    title: 'Revoke a demo preview link',
+    kind: 'write',
+    description: 'Disables a demo preview link right away (id from get_sales_lead → demo.preview_links).',
+    input: z.object({ preview_id: z.uuid() }),
+    handler: async (ctx, input) => ({ data: await revokeDemoPreviewLink(ctx, input) }),
   }),
   defineAdminTool({
     name: 'add_sales_suppression',

@@ -224,11 +224,16 @@ const TABLE_CONFIG: Record<string, TableConfig> = {
     defaults: () => ({
       org_id: null, name: null, company: null, email: null, phone: null, website: null, instagram: null,
       domain: null, source_url: null, contacts: [], signals: [], sequence_step: 0,
+      demo_brand_id: null,
       social_links: {}, city: null, country: null, industry: null, followers: null, segment: null, offer: null,
       stage: 'new', priority: 'medium', estimated_value_usd: null, next_action: null, next_action_at: null,
       last_contacted_at: null, lost_reason: null, tags: [], notes: null, created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }),
+  },
+  kefy_demo_previews: {
+    unique: [['token_hash']],
+    defaults: () => ({ lang: 'es', revoked_at: null, views: 0, last_viewed_at: null, created_at: new Date().toISOString() }),
   },
   kefy_sales_suppressions: {
     unique: [['kind', 'value']],

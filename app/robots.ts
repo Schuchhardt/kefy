@@ -6,7 +6,8 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: '*',
         allow: '/',
-        disallow: ['/api/'],
+        // Las vistas previas de marcas demo son privadas (link con token).
+        disallow: ['/api/', '/es/demo/', '/en/demo/'],
       },
     ],
     sitemap: 'https://www.kefy.app/sitemap.xml',

@@ -48,7 +48,7 @@ export type AccountSegment = (typeof ACCOUNT_SEGMENTS)[number];
 const LEAD_COLUMNS = 'id, kind, org_id, name, company, email, phone, website, instagram, social_links, city, country, '
   + 'industry, followers, source, segment, offer, stage, priority, estimated_value_usd, next_action, next_action_at, '
   + 'last_contacted_at, lost_reason, tags, notes, created_by, created_at, updated_at, domain, source_url, contacts, signals, '
-  + 'sequence_step';
+  + 'sequence_step, demo_brand_id';
 
 export const MAX_CONTACTS = 20;
 export const MAX_SIGNALS = 50;
