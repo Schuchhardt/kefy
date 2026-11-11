@@ -33,6 +33,9 @@ const PUBLIC_API_PATHS = [
   // (lib/assistant/api-keys.ts). No aceptan la cookie de sesión.
   '/api/v1/',
   '/api/mcp',
+  // MCP de administración: conexión OAuth de scope 'admin' + KEFY_ADMIN_EMAILS
+  // (lib/admin/auth.ts), validada dentro del handler.
+  '/api/admin/mcp',
   // OAuth del servidor MCP (lib/assistant/oauth.ts): el registro de clientes
   // y el token endpoint los llama el cliente MCP, sin cookie. El
   // consentimiento (/api/oauth/consent) sí exige sesión y no va aquí.

@@ -24,6 +24,8 @@ interface ConsentInfo {
   client: { name: string; redirect_host: string };
   org_name: string | null;
   user_email: string | null;
+  /** El MCP de administración de la plataforma (docs/admin-mcp.md). */
+  admin?: boolean;
   brands: { id: string; name: string }[];
   can_authorize: boolean;
   default_scopes: Scope[];
@@ -153,9 +155,28 @@ export default function OAuthConsentView({ lang, query }: { lang: string; query:
         </p>
       )}
 
-      {!info.can_authorize ? (
+      {info.admin && info.can_authorize ? (
         <>
-          <Notice tone="warning" icon={<Icon name="alert" size={16} />}>{t.notAllowed}</Notice>
+          <Notice tone="warning" icon={<Icon name="alert" size={16} />}>{t.adminNote}</Notice>
+          {error && <p role="alert" className="auth-error">{error}</p>}
+          <div className="auth-actions">
+            <Button
+              variant="primary" size="lg" block
+              loading={submitting === 'approve'}
+              disabled={busy}
+              onClick={() => decide('approve')}
+            >
+              {submitting === 'approve' ? t.approving : t.approve}
+            </Button>
+            <Button variant="ghost" size="lg" block loading={submitting === 'deny'} disabled={busy} onClick={() => decide('deny')}>
+              {t.deny}
+            </Button>
+          </div>
+          <p className="auth-legal">{t.returnsTo(info.client.redirect_host)}</p>
+        </>
+      ) : !info.can_authorize ? (
+        <>
+          <Notice tone="warning" icon={<Icon name="alert" size={16} />}>{info.admin ? t.adminNotAllowed : t.notAllowed}</Notice>
           <Button variant="secondary" size="lg" block loading={submitting === 'deny'} onClick={() => decide('deny')}>
             {t.deny}
           </Button>

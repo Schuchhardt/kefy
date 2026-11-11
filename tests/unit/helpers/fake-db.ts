@@ -87,7 +87,15 @@ function opFilter(col: string, op: string, value: unknown): Filter {
       const v = getPath(r, col);
       return value === null ? v === null || v === undefined : v === value;
     };
-    case 'in': return (r) => (value as unknown[]).some((x) => String(x) === String(getPath(r, col)));
+    case 'in': {
+      // `.not('col', 'in', '(a,b)')` llega como texto, igual que en PostgREST.
+      const list = Array.isArray(value) ? value : String(value).replace(/^\(|\)$/g, '').split(',').map(coerce);
+      return (r) => list.some((x) => String(x) === String(getPath(r, col)));
+    }
+    case 'cs': return (r) => {
+      const v = getPath(r, col);
+      return Array.isArray(v) && (value as unknown[]).every((x) => v.includes(x));
+    };
     case 'gt': return (r) => getPath(r, col) != null && cmp(getPath(r, col), value) > 0;
     case 'gte': return (r) => getPath(r, col) != null && cmp(getPath(r, col), value) >= 0;
     case 'lt': return (r) => getPath(r, col) != null && cmp(getPath(r, col), value) < 0;
@@ -206,6 +214,23 @@ const TABLE_CONFIG: Record<string, TableConfig> = {
   kefy_engagement_jobs: {
     unique: [['rule_id', 'event_key']],
     defaults: () => ({ status: 'pending', attempts: 0, last_error: null, updated_at: new Date().toISOString() }),
+  },
+  kefy_admin_audit_log: {
+    unique: [['confirmation_hash']],
+    defaults: () => ({ reason: null, target_org_id: null, error: null, confirmation_hash: null, created_at: new Date().toISOString() }),
+  },
+  kefy_sales_leads: {
+    unique: [['org_id'], ['email'], ['instagram']],
+    defaults: () => ({
+      org_id: null, name: null, company: null, email: null, phone: null, website: null, instagram: null,
+      social_links: {}, city: null, country: null, industry: null, followers: null, segment: null, offer: null,
+      stage: 'new', priority: 'medium', estimated_value_usd: null, next_action: null, next_action_at: null,
+      last_contacted_at: null, lost_reason: null, tags: [], notes: null, created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }),
+  },
+  kefy_sales_suppressions: {
+    unique: [['kind', 'value']],
   },
   kefy_leads: {
     unique: [['brand_id', 'channel', 'username']],
@@ -397,6 +422,7 @@ export class QueryBuilder implements PromiseLike<Result> {
     const parts = splitTop(expr).map(parseCondition);
     return this.add(`or=(${expr})`, (r) => parts.some((f) => f(r)));
   }
+  contains(col: string, v: unknown[]) { return this.add(`${col}=cs.{${v.join(',')}}`, opFilter(col, 'cs', v)); }
   filter(col: string, op: string, v: unknown) { return this.add(`${col}=${op}.${String(v)}`, opFilter(col, op, v)); }
   match(obj: Row) { for (const [k, v] of Object.entries(obj)) this.eq(k, v); return this; }
   order(col: string, opts?: { ascending?: boolean }) { this.orders.push({ col, ascending: opts?.ascending ?? true }); return this; }
