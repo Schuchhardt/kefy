@@ -8,7 +8,9 @@
 //     cancelada, estancada, cerca del tope de créditos) y sugiere la oferta;
 //     importAccountLeads las pasa al pipeline.
 //   * outreach: prospección en frío que el admin (o su agente) carga por MCP
-//     con upsertOutreachLeads, deduplicando por email e Instagram.
+//     con upsertOutreachLeads, deduplicando por email, Instagram y dominio
+//     del sitio. Cada prospecto lleva su ficha: contactos con la URL de donde
+//     salió el dato, señales (por qué es buen prospecto) y la URL de origen.
 //
 // NADA se envía desde aquí: el dueño escribe a mano y registra el contacto con
 // logSalesActivity. Las supresiones («no me escriban más») marcan el lead como
@@ -45,7 +47,12 @@ export type AccountSegment = (typeof ACCOUNT_SEGMENTS)[number];
 
 const LEAD_COLUMNS = 'id, kind, org_id, name, company, email, phone, website, instagram, social_links, city, country, '
   + 'industry, followers, source, segment, offer, stage, priority, estimated_value_usd, next_action, next_action_at, '
-  + 'last_contacted_at, lost_reason, tags, notes, created_by, created_at, updated_at';
+  + 'last_contacted_at, lost_reason, tags, notes, created_by, created_at, updated_at, domain, source_url, contacts, signals, '
+  + 'sequence_step';
+
+export const MAX_CONTACTS = 20;
+export const MAX_SIGNALS = 50;
+export const MAX_SEQUENCE_STEP = 20;
 
 // ─── Normalización ───────────────────────────────────────────────────────────
 
@@ -78,6 +85,114 @@ export function normalizeWebsite(v: string | null | undefined): string | null {
   }
 }
 
+// Hosts que comparten muchos negocios: no sirven para identificar a uno.
+const SHARED_HOSTS = [
+  'instagram.com', 'facebook.com', 'fb.com', 'tiktok.com', 'youtube.com', 'youtu.be', 'x.com', 'twitter.com',
+  'linkedin.com', 'linktr.ee', 'beacons.ai', 'bio.link', 'linkin.bio', 'wa.me', 'whatsapp.com',
+  'google.com', 'goo.gl', 'g.page', 'business.site', 'canva.site', 'taplink.cc', 'bit.ly',
+  'pedidosya.com', 'rappi.com', 'ubereats.com', 'mercadolibre.cl', 'mercadolibre.com',
+];
+
+/** «https://www.Marca.cl/contacto» → «marca.cl». Null para hosts compartidos (linktr.ee, instagram.com…). */
+export function normalizeDomain(v: string | null | undefined): string | null {
+  const raw = (v ?? '').trim();
+  if (!raw) return null;
+  let host: string;
+  try {
+    host = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  host = host.replace(/^www\./, '').replace(/\.$/, '');
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) return null;
+  if (SHARED_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return null;
+  return host;
+}
+
+// ─── Ficha: contactos y señales ──────────────────────────────────────────────
+
+export interface ProspectContactInput {
+  name?: string | null;
+  role?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  instagram?: string | null;
+  linkedin?: string | null;
+  source_url?: string | null;
+  note?: string | null;
+}
+
+export interface ProspectSignalInput {
+  type: string;
+  detail?: string | null;
+  source_url?: string | null;
+  observed_at?: string | null;
+}
+
+function clean(v: string | null | undefined): string | null {
+  const t = (v ?? '').trim();
+  return t || null;
+}
+
+/** Contacto normalizado, o null si no trae ni nombre ni forma de contacto. */
+export function normalizeContact(c: ProspectContactInput): Row | null {
+  const out: Row = {
+    name: clean(c.name),
+    role: clean(c.role),
+    email: normalizeEmail(c.email),
+    phone: normalizePhone(c.phone),
+    instagram: normalizeInstagram(c.instagram),
+    linkedin: clean(c.linkedin),
+    source_url: clean(c.source_url),
+    note: clean(c.note),
+  };
+  if (!out.name && !out.email && !out.phone && !out.instagram && !out.linkedin) return null;
+  for (const k of Object.keys(out)) if (out[k] === null) delete out[k];
+  return out;
+}
+
+function contactKey(c: Row): string {
+  if (c.email) return `e:${c.email}`;
+  if (c.phone) return `p:${c.phone}`;
+  if (c.instagram) return `i:${c.instagram}`;
+  if (c.linkedin) return `l:${String(c.linkedin).toLowerCase()}`;
+  return `n:${String(c.name ?? '').toLowerCase()}`;
+}
+
+/** Suma contactos nuevos a los existentes; uno repetido solo completa sus campos vacíos. */
+export function mergeContacts(existing: Row[] | null | undefined, incoming: ProspectContactInput[] | undefined): Row[] {
+  const out = (existing ?? []).map((c) => ({ ...c }));
+  for (const raw of incoming ?? []) {
+    const c = normalizeContact(raw);
+    if (!c) continue;
+    const prev = out.find((o) => contactKey(o) === contactKey(c));
+    if (prev) {
+      for (const [k, v] of Object.entries(c)) if (prev[k] === undefined || prev[k] === null) prev[k] = v;
+    } else if (out.length < MAX_CONTACTS) {
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+/** Suma señales nuevas (mismo type + detail = repetida), con fecha de observación. */
+export function mergeSignals(existing: Row[] | null | undefined, incoming: ProspectSignalInput[] | undefined, now: Date): Row[] {
+  const out = (existing ?? []).map((sg) => ({ ...sg }));
+  const key = (sg: Row) => `${String(sg.type).toLowerCase()}|${String(sg.detail ?? '').toLowerCase()}`;
+  for (const raw of incoming ?? []) {
+    const type = clean(raw.type);
+    if (!type) continue;
+    const sig: Row = { type, observed_at: raw.observed_at ?? now.toISOString() };
+    const detail = clean(raw.detail);
+    const sourceUrl = clean(raw.source_url);
+    if (detail) sig.detail = detail;
+    if (sourceUrl) sig.source_url = sourceUrl;
+    if (out.some((o) => key(o) === key(sig))) continue;
+    if (out.length < MAX_SIGNALS) out.push(sig);
+  }
+  return out;
+}
+
 // ─── Supresiones ─────────────────────────────────────────────────────────────
 
 export interface Suppressions {
@@ -108,12 +223,21 @@ export function suppressionReason(lead: Row, s: Suppressions): string | null {
   if (phone && s.phones.has(phone)) return 'phone_suppressed';
   const ig = normalizeInstagram(lead.instagram);
   if (ig && s.instagrams.has(ig)) return 'instagram_suppressed';
+  const domain = lead.domain ?? normalizeDomain(lead.website);
+  if (domain && s.domains.has(domain)) return 'domain_suppressed';
   return null;
 }
 
 function withContactable(lead: Row, s: Suppressions) {
   const blocked = suppressionReason(lead, s);
-  return { ...lead, contactable: !blocked && lead.stage !== 'won' && lead.stage !== 'lost', blocked_reason: blocked };
+  // Un contacto suprimido por su propio email/teléfono/Instagram no bloquea al resto de la empresa.
+  const contacts = Array.isArray(lead.contacts)
+    ? lead.contacts.map((c: Row) => {
+      const reason = blocked ?? suppressionReason({ email: c.email, phone: c.phone, instagram: c.instagram }, s);
+      return reason ? { ...c, blocked_reason: reason } : c;
+    })
+    : lead.contacts;
+  return { ...lead, contacts, contactable: !blocked && lead.stage !== 'won' && lead.stage !== 'lost', blocked_reason: blocked };
 }
 
 // ─── Listar y ver ────────────────────────────────────────────────────────────
@@ -132,7 +256,7 @@ export async function listSalesLeads(ctx: AdminContext, input: {
   }
   const text = input.query ? safeQuery(input.query) : '';
   if (text) {
-    q = q.or(['name', 'company', 'email', 'instagram', 'website', 'city', 'industry'].map((c) => `${c}.ilike.%${text}%`).join(','));
+    q = q.or(['name', 'company', 'email', 'instagram', 'website', 'domain', 'city', 'industry'].map((c) => `${c}.ilike.%${text}%`).join(','));
   }
   q = input.due_only
     ? q.order('next_action_at', { ascending: true })
@@ -149,7 +273,7 @@ export async function getSalesLead(ctx: AdminContext, input: { lead_id: string }
   const lead = rowsOrThrow(await db().from('kefy_sales_leads').select(LEAD_COLUMNS).eq('id', input.lead_id).limit(1), 'lead')[0];
   if (!lead) throw new ServiceError('not_found', 404, 'Lead not found');
   const [activities, s] = await Promise.all([
-    db().from('kefy_sales_lead_activities').select('id, type, direction, body, created_by, created_at')
+    db().from('kefy_sales_lead_activities').select('id, type, direction, sequence_step, contact_name, body, created_by, created_at')
       .eq('lead_id', input.lead_id).order('created_at', { ascending: false }).limit(50),
     loadSuppressions(),
   ]);
@@ -220,11 +344,14 @@ export interface OutreachLeadInput {
   next_action_at?: string | null;
   tags?: string[];
   notes?: string | null;
+  source_url?: string | null;
+  contacts?: ProspectContactInput[];
+  signals?: ProspectSignalInput[];
 }
 
 /**
- * Crea o completa leads de prospección. Deduplica por email e Instagram contra
- * la base y dentro del mismo lote; un duplicado se completa (solo campos
+ * Crea o completa leads de prospección. Deduplica por email, Instagram y
+ * dominio del sitio contra la base y dentro del mismo lote; un duplicado se completa (solo campos
  * vacíos y tags nuevas), nunca se pisa lo que ya había. Lo suprimido no entra.
  */
 export async function upsertOutreachLeads(ctx: AdminContext, input: { leads: OutreachLeadInput[] }) {
@@ -235,25 +362,30 @@ export async function upsertOutreachLeads(ctx: AdminContext, input: { leads: Out
   const seen = new Set<string>();
 
   for (const [index, raw] of input.leads.entries()) {
-    const email = normalizeEmail(raw.email);
+    const contacts = mergeContacts([], raw.contacts);
+    // Sin email o teléfono propios, el lead toma los del primer contacto que los tenga.
+    const email = normalizeEmail(raw.email) ?? contacts.find((c) => c.email)?.email ?? null;
     const instagram = normalizeInstagram(raw.instagram);
-    const phone = normalizePhone(raw.phone);
+    const phone = normalizePhone(raw.phone) ?? contacts.find((c) => c.phone)?.phone ?? null;
     const website = normalizeWebsite(raw.website);
-    if (!email && !instagram && !phone && !website) {
-      skipped.push({ index, reason: 'no_contact: needs email, instagram, phone or website' });
+    const domain = normalizeDomain(raw.website);
+    if (!email && !instagram && !phone && !website && contacts.length === 0) {
+      skipped.push({ index, reason: 'no_contact: needs email, instagram, phone, website or a contact' });
       continue;
     }
-    const keyParts = [email && `e:${email}`, instagram && `i:${instagram}`].filter(Boolean) as string[];
+    const keyParts = [email && `e:${email}`, instagram && `i:${instagram}`, domain && `d:${domain}`].filter(Boolean) as string[];
     if (keyParts.some((k) => seen.has(k))) { skipped.push({ index, reason: 'duplicate_in_batch' }); continue; }
     keyParts.forEach((k) => seen.add(k));
 
-    const blocked = suppressionReason({ email, instagram, phone }, s);
+    const blocked = suppressionReason({ email, instagram, phone, domain }, s);
     if (blocked) { skipped.push({ index, reason: blocked }); continue; }
+    const signals = mergeSignals([], raw.signals, ctx.now);
 
     const fields: Row = {
       name: raw.name?.trim() || null,
       company: raw.company?.trim() || null,
-      email, phone, website, instagram,
+      email, phone, website, instagram, domain,
+      source_url: raw.source_url?.trim() || null,
       social_links: raw.social_links ?? {},
       city: raw.city?.trim() || null,
       country: raw.country?.trim() || null,
@@ -266,7 +398,9 @@ export async function upsertOutreachLeads(ctx: AdminContext, input: { leads: Out
       notes: raw.notes ?? null,
     };
 
-    const clauses = [email && `email.eq.${email}`, instagram && `instagram.eq.${instagram}`].filter(Boolean) as string[];
+    const clauses = [
+      email && `email.eq.${email}`, instagram && `instagram.eq.${instagram}`, domain && `domain.eq.${domain}`,
+    ].filter(Boolean) as string[];
     const existing = clauses.length
       ? rowsOrThrow(await db().from('kefy_sales_leads').select(LEAD_COLUMNS).or(clauses.join(',')).limit(1), 'dedupe')[0]
       : undefined;
@@ -284,9 +418,15 @@ export async function upsertOutreachLeads(ctx: AdminContext, input: { leads: Out
       }
       const newTags = (raw.tags ?? []).filter((t) => !(existing.tags ?? []).includes(t));
       if (newTags.length) patch.tags = [...(existing.tags ?? []), ...newTags];
+      const mergedContacts = mergeContacts(existing.contacts, raw.contacts);
+      if (JSON.stringify(mergedContacts) !== JSON.stringify(existing.contacts ?? [])) patch.contacts = mergedContacts;
+      const mergedSignals = mergeSignals(existing.signals, raw.signals, ctx.now);
+      if (mergedSignals.length !== (existing.signals ?? []).length) patch.signals = mergedSignals;
       if (Object.keys(patch).length === 0) { skipped.push({ index, reason: `already_exists:${existing.id}` }); continue; }
       patch.updated_at = ctx.now.toISOString();
       const res = await db().from('kefy_sales_leads').update(patch).eq('id', existing.id).select('id, name, company, email, instagram, stage');
+      // Completar el dominio o el email puede chocar con otro lead que ya los tiene.
+      if (res.error?.code === '23505') { skipped.push({ index, reason: `conflicts_with_other_lead:${existing.id}` }); continue; }
       updated.push({ index, ...rowsOrThrow(res, 'update lead')[0], filled: Object.keys(patch).filter((k) => k !== 'updated_at') });
       continue;
     }
@@ -297,6 +437,8 @@ export async function upsertOutreachLeads(ctx: AdminContext, input: { leads: Out
       source: raw.source?.trim() || 'cold_outreach',
       priority: raw.priority ?? 'medium',
       tags: raw.tags ?? [],
+      contacts,
+      signals,
       created_by: ctx.adminEmail,
     }).select('id, name, company, email, instagram, stage');
     if (res.error?.code === '23505') { skipped.push({ index, reason: 'duplicate' }); continue; }
@@ -460,18 +602,32 @@ export async function updateSalesLead(ctx: AdminContext, input: {
   estimated_value_usd?: number | null; next_action?: string | null; next_action_at?: string | null;
   lost_reason?: string | null; tags?: string[]; notes?: string | null;
   name?: string | null; company?: string | null; email?: string | null; phone?: string | null;
-  website?: string | null; instagram?: string | null;
+  website?: string | null; instagram?: string | null; city?: string | null; country?: string | null;
+  industry?: string | null; source_url?: string | null;
+  add_contacts?: ProspectContactInput[]; remove_contacts?: string[]; add_signals?: ProspectSignalInput[];
 }) {
-  const current = rowsOrThrow(await db().from('kefy_sales_leads').select('id, stage').eq('id', input.lead_id).limit(1), 'lead')[0];
+  const current = rowsOrThrow(await db().from('kefy_sales_leads').select('id, stage, contacts, signals')
+    .eq('id', input.lead_id).limit(1), 'lead')[0];
   if (!current) throw new ServiceError('not_found', 404, 'Lead not found');
 
-  const { lead_id: _id, ...rest } = input;
+  const { lead_id: _id, add_contacts, remove_contacts, add_signals, ...rest } = input;
   const patch: Row = {};
   for (const [k, v] of Object.entries(rest)) if (v !== undefined) patch[k] = v;
   if ('email' in patch) patch.email = normalizeEmail(patch.email);
   if ('instagram' in patch) patch.instagram = normalizeInstagram(patch.instagram);
   if ('phone' in patch) patch.phone = normalizePhone(patch.phone);
-  if ('website' in patch) patch.website = normalizeWebsite(patch.website);
+  if ('website' in patch) {
+    patch.domain = normalizeDomain(patch.website);
+    patch.website = normalizeWebsite(patch.website);
+  }
+  if (add_contacts?.length || remove_contacts?.length) {
+    // Se quita por email, teléfono, Instagram o nombre exacto.
+    const drop = new Set((remove_contacts ?? []).map((v) => v.trim().toLowerCase().replace(/^@/, '')));
+    const kept = (current.contacts ?? []).filter((c: Row) => ![c.email, c.phone, c.instagram, c.name]
+      .some((v) => v && drop.has(String(v).toLowerCase())));
+    patch.contacts = mergeContacts(kept, add_contacts);
+  }
+  if (add_signals?.length) patch.signals = mergeSignals(current.signals, add_signals, ctx.now);
   if (input.stage === 'lost' && !input.lost_reason) {
     throw new ServiceError('invalid_input', 422, 'lost_reason is required when the stage is lost');
   }
@@ -479,7 +635,7 @@ export async function updateSalesLead(ctx: AdminContext, input: {
   patch.updated_at = ctx.now.toISOString();
 
   const res = await db().from('kefy_sales_leads').update(patch).eq('id', input.lead_id).select(LEAD_COLUMNS);
-  if (res.error?.code === '23505') throw new ServiceError('conflict', 409, 'Another lead already has that email or Instagram');
+  if (res.error?.code === '23505') throw new ServiceError('conflict', 409, 'Another lead already has that email, Instagram or domain');
   const lead = rowsOrThrow(res, 'update lead')[0];
 
   if (input.stage && input.stage !== current.stage) {
@@ -494,8 +650,10 @@ export async function updateSalesLead(ctx: AdminContext, input: {
 export async function logSalesActivity(ctx: AdminContext, input: {
   lead_id: string; type: (typeof ACTIVITY_TYPES)[number]; direction?: 'outbound' | 'inbound'; body?: string;
   stage?: LeadStage; next_action?: string | null; next_action_at?: string | null;
+  sequence_step?: number; contact_name?: string;
 }) {
-  const lead = rowsOrThrow(await db().from('kefy_sales_leads').select('id, stage, email, phone, instagram').eq('id', input.lead_id).limit(1), 'lead')[0];
+  const lead = rowsOrThrow(await db().from('kefy_sales_leads')
+    .select('id, stage, email, phone, instagram, website, domain, sequence_step').eq('id', input.lead_id).limit(1), 'lead')[0];
   if (!lead) throw new ServiceError('not_found', 404, 'Lead not found');
 
   const contact = input.type !== 'note';
@@ -505,11 +663,16 @@ export async function logSalesActivity(ctx: AdminContext, input: {
   }
 
   const act = rowsOrThrow(await db().from('kefy_sales_lead_activities').insert({
-    lead_id: input.lead_id, type: input.type, direction: input.direction ?? null, body: input.body ?? null, created_by: ctx.adminEmail,
-  }).select('id, type, direction, body, created_at'), 'activity')[0];
+    lead_id: input.lead_id, type: input.type, direction: input.direction ?? null, body: input.body ?? null,
+    sequence_step: input.sequence_step ?? null, contact_name: input.contact_name?.trim() || null, created_by: ctx.adminEmail,
+  }).select('id, type, direction, sequence_step, contact_name, body, created_at'), 'activity')[0];
 
   const patch: Row = { updated_at: ctx.now.toISOString() };
   if (contact) patch.last_contacted_at = ctx.now.toISOString();
+  // El lead guarda el paso más avanzado de la secuencia, aunque uno anterior se registre tarde.
+  const prevStep = Number(lead.sequence_step) || 0;
+  const step = Math.max(prevStep, input.sequence_step ?? 0);
+  if (step !== prevStep) patch.sequence_step = step;
   // Primer contacto saliente: el lead pasa solo de «new» a «contacted»;
   // una respuesta entrante lo lleva a «replied».
   let stage = input.stage;
@@ -524,7 +687,7 @@ export async function logSalesActivity(ctx: AdminContext, input: {
       lead_id: input.lead_id, type: 'stage_change', body: `${lead.stage} → ${stage}`, created_by: ctx.adminEmail,
     });
   }
-  return { activity: act, stage: stage ?? lead.stage };
+  return { activity: act, stage: stage ?? lead.stage, sequence_step: step };
 }
 
 export function normalizeSuppression(kind: 'email' | 'domain' | 'phone' | 'instagram', raw: string): string | null {
@@ -532,7 +695,7 @@ export function normalizeSuppression(kind: 'email' | 'domain' | 'phone' | 'insta
   if (kind === 'email') return normalizeEmail(v);
   if (kind === 'phone') return normalizePhone(v);
   if (kind === 'instagram') return normalizeInstagram(v);
-  const d = v.replace(/^@/, '').replace(/^https?:\/\//, '').split('/')[0].toLowerCase();
+  const d = v.replace(/^@/, '').replace(/^https?:\/\//i, '').split(/[/?#:]/)[0].toLowerCase().replace(/^www\./, '');
   return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d) ? d : null;
 }
 
@@ -556,9 +719,10 @@ export async function addSuppression(ctx: AdminContext, input: {
       .update({ stage: 'lost', lost_reason: 'do_not_contact', next_action: null, next_action_at: null, updated_at: ctx.now.toISOString() })
       .eq(column, value).not('stage', 'in', '(won,lost)').select('id'), 'suppress leads');
   } else {
+    // El dominio cierra los emails @dominio y también la empresa con ese sitio web.
     affected = rowsOrThrow(await db().from('kefy_sales_leads')
       .update({ stage: 'lost', lost_reason: 'do_not_contact', next_action: null, next_action_at: null, updated_at: ctx.now.toISOString() })
-      .ilike('email', `%@${value}`).not('stage', 'in', '(won,lost)').select('id'), 'suppress leads');
+      .or(`email.ilike.%@${value},domain.eq.${value}`).not('stage', 'in', '(won,lost)').select('id'), 'suppress leads');
   }
   return { suppressed: { kind, value }, leads_closed: affected.map((r) => r.id) };
 }
@@ -566,14 +730,24 @@ export async function addSuppression(ctx: AdminContext, input: {
 /** CSV de los leads (RFC 4180), con las columnas que sirven para escribirles. */
 export async function exportSalesLeads(ctx: AdminContext, input: { stage?: LeadStage[]; offer?: LeadOffer; contactable_only: boolean }) {
   const { leads } = await listSalesLeads(ctx, { stage: input.stage, offer: input.offer, contactable_only: input.contactable_only, limit: 5000, offset: 0 });
-  const cols = ['id', 'kind', 'stage', 'offer', 'priority', 'name', 'company', 'email', 'phone', 'website', 'instagram',
-    'city', 'country', 'industry', 'segment', 'source', 'next_action', 'next_action_at', 'last_contacted_at', 'tags', 'contactable'];
+  const cols = ['id', 'kind', 'stage', 'offer', 'priority', 'name', 'company', 'email', 'phone', 'website', 'domain', 'instagram',
+    'city', 'country', 'industry', 'segment', 'source', 'source_url', 'contacts', 'signals', 'sequence_step', 'next_action',
+    'next_action_at', 'last_contacted_at', 'tags', 'contactable'];
+  // Contactos y señales legibles en una celda: «Ana (Gerente) <ana@x.cl> [https://…]».
+  const flat = (l: Row): Row => ({
+    ...l,
+    contacts: (l.contacts ?? []).map((c: Row) => [
+      c.name, c.role && `(${c.role})`, c.email && `<${c.email}>`, c.phone, c.instagram && `@${c.instagram}`,
+      c.blocked_reason && `{${c.blocked_reason}}`, c.source_url && `[${c.source_url}]`,
+    ].filter(Boolean).join(' ')),
+    signals: (l.signals ?? []).map((sg: Row) => (sg.detail ? `${sg.type}: ${sg.detail}` : sg.type)),
+  });
   const cell = (v: unknown) => {
     const s = Array.isArray(v) ? v.join('|') : v === null || v === undefined ? '' : String(v);
     // Evita inyección de fórmulas al abrirlo en una planilla.
     const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
     return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
-  const csv = [cols.join(','), ...leads.map((l) => cols.map((c) => cell((l as Row)[c])).join(','))].join('\n');
+  const csv = [cols.join(','), ...leads.map((l) => flat(l as Row)).map((l) => cols.map((c) => cell(l[c])).join(','))].join('\n');
   return { rows: leads.length, csv };
 }

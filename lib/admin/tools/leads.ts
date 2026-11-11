@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { defineAdminTool } from '@/lib/admin/registry';
 import {
-  ACCOUNT_SEGMENTS, ACTIVITY_TYPES, LEAD_OFFERS, LEAD_PRIORITIES, LEAD_STAGES,
+  ACCOUNT_SEGMENTS, ACTIVITY_TYPES, LEAD_OFFERS, LEAD_PRIORITIES, LEAD_STAGES, MAX_CONTACTS, MAX_SEQUENCE_STEP, MAX_SIGNALS,
   addSuppression, exportSalesLeads, findAccountLeadCandidates, getSalesLead, getSalesPipeline, importAccountLeads,
   listSalesLeads, logSalesActivity, updateSalesLead, upsertOutreachLeads,
 } from '@/lib/services/admin/sales-leads';
@@ -9,23 +9,45 @@ import {
 const stage = z.enum(LEAD_STAGES);
 const offer = z.enum(LEAD_OFFERS);
 const when = z.iso.datetime({ offset: true });
+const url = z.string().max(1000);
+
+const contact = z.object({
+  name: z.string().max(200).nullish(),
+  role: z.string().max(100).nullish().describe('e.g. "Dueña", "Marketing manager".'),
+  email: z.string().max(320).nullish(),
+  phone: z.string().max(50).nullish(),
+  instagram: z.string().max(200).nullish(),
+  linkedin: z.string().max(500).nullish(),
+  source_url: url.nullish().describe('Page where this contact data was found (required to trust it later).'),
+  note: z.string().max(500).nullish(),
+});
+
+const signal = z.object({
+  type: z.string().min(1).max(50).describe('Short slug: "low_posting", "new_location", "hiring_marketing", "runs_ads", "bad_reviews_on_ig"…'),
+  detail: z.string().max(500).nullish().describe('What was seen, e.g. "Last post 3 months ago".'),
+  source_url: url.nullish().describe('Where it was seen.'),
+  observed_at: when.nullish().describe('Defaults to now.'),
+});
 
 const outreachLead = z.object({
   name: z.string().max(200).nullish(),
   company: z.string().max(200).nullish(),
   email: z.string().max(320).nullish(),
   phone: z.string().max(50).nullish(),
-  website: z.string().max(500).nullish(),
+  website: z.string().max(500).nullish().describe('Company site. Its domain dedupes the company (shared hosts like linktr.ee or instagram.com are ignored).'),
   instagram: z.string().max(200).nullish().describe('Handle or profile URL.'),
   social_links: z.record(z.string(), z.string().max(500)).optional().describe('e.g. { "tiktok": "https://…", "linkedin": "…" }'),
   city: z.string().max(100).nullish(),
   country: z.string().max(100).nullish(),
-  industry: z.string().max(100).nullish(),
+  industry: z.string().max(100).nullish().describe('Niche / rubro, e.g. "cafetería", "clínica dental".'),
   followers: z.number().int().min(0).nullish(),
   source: z.string().max(100).optional().describe('Where it came from: "google_maps", "instagram_search", "referral"… Default cold_outreach.'),
+  source_url: url.nullish().describe('Page where the prospect was found (Maps listing, IG profile, directory…).'),
+  contacts: z.array(contact).max(MAX_CONTACTS).optional().describe('People at the company, each with the URL the data came from.'),
+  signals: z.array(signal).max(MAX_SIGNALS).optional().describe('Why it is a good prospect, with evidence.'),
   offer: offer.nullish(),
-  priority: z.enum(LEAD_PRIORITIES).optional(),
-  estimated_value_usd: z.number().min(0).max(100000).nullish().describe('Expected monthly value.'),
+  priority: z.enum(LEAD_PRIORITIES).optional().describe('Potential: high = write first.'),
+  estimated_value_usd: z.number().min(0).max(100000).nullish().describe('Expected monthly value (potential in USD).'),
   next_action: z.string().max(500).nullish(),
   next_action_at: when.nullish(),
   tags: z.array(z.string().max(50)).max(20).optional(),
@@ -104,9 +126,11 @@ export const leadTools = [
     title: 'Load cold outreach leads',
     kind: 'write',
     description: 'Load cold-outreach prospects (businesses, creators, agencies) in bulk, up to 200 per call. Each needs at least an '
-      + 'email, Instagram, phone or website. Deduplicates by email and Instagram (within the batch and against existing leads): a '
-      + 'duplicate only gets its EMPTY fields filled and new tags added. Suppressed contacts are skipped. Returns created/updated/skipped '
-      + 'with reasons. Nothing is sent to anyone.',
+      + 'email, Instagram, phone, website or contact. Each can carry a prospect profile: niche (industry), city, source_url, contacts '
+      + '(people, each with the source_url where the data was found) and signals (why it is a good prospect, with evidence). '
+      + 'Deduplicates by email, Instagram and website domain (within the batch and against existing leads): a duplicate only gets '
+      + 'its EMPTY fields filled and new tags, contacts and signals added. Suppressed contacts and domains are skipped. Returns '
+      + 'created/updated/skipped with reasons. Nothing is sent to anyone.',
     input: z.object({ leads: z.array(outreachLead).min(1).max(200) }),
     handler: async (ctx, input) => ({ data: await upsertOutreachLeads(ctx, input) }),
   }),
@@ -115,7 +139,8 @@ export const leadTools = [
     title: 'Update sales lead',
     kind: 'write',
     description: 'Change a lead: stage (lost requires lost_reason; a stage change is logged), offer, priority, value, next action and '
-      + 'date, tags (replaces the list), notes, or contact fields.',
+      + 'date, tags (replaces the list), notes, profile fields, or contact fields. add_contacts / add_signals append to the profile '
+      + '(a repeated contact only fills its empty fields); remove_contacts drops contacts by email, phone, Instagram or exact name.',
     input: z.object({
       lead_id: z.uuid(),
       stage: stage.optional(),
@@ -133,6 +158,13 @@ export const leadTools = [
       phone: z.string().max(50).nullish(),
       website: z.string().max(500).nullish(),
       instagram: z.string().max(200).nullish(),
+      city: z.string().max(100).nullish(),
+      country: z.string().max(100).nullish(),
+      industry: z.string().max(100).nullish(),
+      source_url: url.nullish(),
+      add_contacts: z.array(contact).max(MAX_CONTACTS).optional(),
+      remove_contacts: z.array(z.string().max(320)).max(MAX_CONTACTS).optional(),
+      add_signals: z.array(signal).max(MAX_SIGNALS).optional(),
     }),
     handler: async (ctx, input) => ({ data: await updateSalesLead(ctx, input) }),
   }),
@@ -142,12 +174,16 @@ export const leadTools = [
     kind: 'write',
     description: 'Record that the owner contacted a lead (or got a reply) by email, call, WhatsApp, DM or meeting, or add a note. '
       + 'This tool does NOT send anything: the owner writes by hand. First outbound contact moves new → contacted; an inbound reply '
-      + 'moves it to replied. Set next_action/next_action_at for the follow-up. Refuses outbound contact to suppressed leads.',
+      + 'moves it to replied. Set next_action/next_action_at for the follow-up. For an outreach sequence pass sequence_step (1 = first '
+      + 'touch, 2 = first follow-up…): the lead keeps the highest step reached. contact_name says which person of the company it was. '
+      + 'Refuses outbound contact to suppressed leads.',
     input: z.object({
       lead_id: z.uuid(),
       type: z.enum(ACTIVITY_TYPES),
       direction: z.enum(['outbound', 'inbound']).optional(),
       body: z.string().max(5000).optional(),
+      sequence_step: z.number().int().min(1).max(MAX_SEQUENCE_STEP).optional(),
+      contact_name: z.string().max(200).optional(),
       stage: stage.optional(),
       next_action: z.string().max(500).nullish(),
       next_action_at: when.nullish(),
@@ -159,7 +195,8 @@ export const leadTools = [
     title: 'Do not contact',
     kind: 'write',
     description: 'Someone asked not to be contacted again: suppress an email, a whole domain, a phone or an Instagram handle. '
-      + 'Matching open leads are closed as lost (do_not_contact) and future loads skip them.',
+      + 'Matching open leads are closed as lost (do_not_contact) and future loads skip them. A domain matches both emails @domain '
+      + 'and companies whose website is on that domain.',
     input: z.object({
       kind: z.enum(['email', 'domain', 'phone', 'instagram']),
       value: z.string().min(2).max(320),
@@ -171,7 +208,8 @@ export const leadTools = [
     name: 'export_sales_leads',
     title: 'Export leads as CSV',
     kind: 'read',
-    description: 'CSV of leads (contact fields, stage, offer, next action), by default only contactable ones.',
+    description: 'CSV of leads (contact fields, contacts with their source URL, signals, sequence step, stage, offer, next action), '
+      + 'by default only contactable ones.',
     input: z.object({
       stage: z.array(stage).optional(),
       offer: offer.optional(),

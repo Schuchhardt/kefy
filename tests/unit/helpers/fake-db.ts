@@ -220,9 +220,10 @@ const TABLE_CONFIG: Record<string, TableConfig> = {
     defaults: () => ({ reason: null, target_org_id: null, error: null, confirmation_hash: null, created_at: new Date().toISOString() }),
   },
   kefy_sales_leads: {
-    unique: [['org_id'], ['email'], ['instagram']],
+    unique: [['org_id'], ['email'], ['instagram'], ['domain']],
     defaults: () => ({
       org_id: null, name: null, company: null, email: null, phone: null, website: null, instagram: null,
+      domain: null, source_url: null, contacts: [], signals: [], sequence_step: 0,
       social_links: {}, city: null, country: null, industry: null, followers: null, segment: null, offer: null,
       stage: 'new', priority: 'medium', estimated_value_usd: null, next_action: null, next_action_at: null,
       last_contacted_at: null, lost_reason: null, tags: [], notes: null, created_at: new Date().toISOString(),

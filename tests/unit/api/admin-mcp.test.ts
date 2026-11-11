@@ -322,6 +322,97 @@ describe('pipeline comercial', () => {
     expect(list.structuredContent.data.leads.map((l: { id: string }) => l.id)).toEqual([lead.id]);
   });
 
+  it('guarda la ficha del prospecto y deduplica empresas por dominio del sitio', async () => {
+    const c = await connect();
+    const r = await tool(c.access!, 'upsert_outreach_leads', {
+      leads: [
+        {
+          company: 'Clínica Sonrisa', website: 'https://www.ClinicaSonrisa.cl/contacto', industry: 'clínica dental', city: 'Viña del Mar',
+          source_url: 'https://maps.google.com/?cid=1', priority: 'high',
+          contacts: [
+            { name: 'Ana Pérez', role: 'Dueña', email: 'Ana@ClinicaSonrisa.cl', source_url: 'https://clinicasonrisa.cl/equipo' },
+            { name: 'Sin datos' },
+          ],
+          signals: [{ type: 'low_posting', detail: 'Último post hace 3 meses', source_url: 'https://instagram.com/clinicasonrisa' }],
+        },
+        // Mismo dominio en el mismo lote.
+        { company: 'Clínica Sonrisa sucursal', website: 'clinicasonrisa.cl/vina' },
+        // Hosts compartidos no deduplican: dos negocios distintos en linktr.ee.
+        { company: 'Uno', website: 'https://linktr.ee/uno' },
+        { company: 'Dos', website: 'https://linktr.ee/dos' },
+      ],
+    });
+    expect(r.structuredContent.data).toMatchObject({ created: 3, skipped: 1 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const clinic = db.rows('kefy_sales_leads').find((l) => l.company === 'Clínica Sonrisa') as any;
+    expect(clinic).toMatchObject({
+      domain: 'clinicasonrisa.cl', email: 'ana@clinicasonrisa.cl', industry: 'clínica dental', source_url: 'https://maps.google.com/?cid=1',
+    });
+    expect(clinic.contacts).toEqual([
+      { name: 'Ana Pérez', role: 'Dueña', email: 'ana@clinicasonrisa.cl', source_url: 'https://clinicasonrisa.cl/equipo' },
+      { name: 'Sin datos' },
+    ]);
+    expect(clinic.signals[0]).toMatchObject({ type: 'low_posting', detail: 'Último post hace 3 meses' });
+    expect(db.rows('kefy_sales_leads').filter((l) => String(l.website ?? '').includes('linktr.ee')).map((l) => l.domain)).toEqual([null, null]);
+
+    // Otra carga de la misma empresa por dominio suma contactos y señales nuevas sin duplicar las que ya estaban.
+    const r2 = await tool(c.access!, 'upsert_outreach_leads', {
+      leads: [{
+        website: 'http://clinicasonrisa.cl',
+        contacts: [{ email: 'ana@clinicasonrisa.cl', phone: '+56 9 8765 4321' }, { name: 'Luis', role: 'Marketing', instagram: '@luis.mkt' }],
+        signals: [{ type: 'low_posting', detail: 'Último post hace 3 meses' }, { type: 'new_location', detail: 'Abrió en Concón' }],
+      }],
+    });
+    expect(r2.structuredContent.data).toMatchObject({ created: 0, updated: 1 });
+    expect(clinic.contacts).toHaveLength(3);
+    expect(clinic.contacts[0]).toMatchObject({ name: 'Ana Pérez', phone: '+56987654321' });
+    expect(clinic.signals.map((s: { type: string }) => s.type)).toEqual(['low_posting', 'new_location']);
+
+    // update_sales_lead: agregar y quitar contactos, sumar señales; cambiar el sitio recalcula el dominio.
+    const u = await tool(c.access!, 'update_sales_lead', {
+      lead_id: clinic.id, remove_contacts: ['Sin datos'], add_signals: [{ type: 'runs_ads' }], website: 'clinica-sonrisa.cl',
+    });
+    expect(u.structuredContent.data.lead.contacts.map((x: { name?: string }) => x.name)).toEqual(['Ana Pérez', 'Luis']);
+    expect(clinic).toMatchObject({ domain: 'clinica-sonrisa.cl' });
+    expect(clinic.signals).toHaveLength(3);
+
+    // Pasos de la secuencia: el lead guarda el más avanzado.
+    await tool(c.access!, 'log_sales_activity', { lead_id: clinic.id, type: 'email', sequence_step: 2, contact_name: 'Ana Pérez' });
+    const late = await tool(c.access!, 'log_sales_activity', { lead_id: clinic.id, type: 'dm', sequence_step: 1 });
+    expect(late.structuredContent.data.sequence_step).toBe(2);
+    expect(clinic.sequence_step).toBe(2);
+    const detail = await tool(c.access!, 'get_sales_lead', { lead_id: clinic.id });
+    expect(detail.structuredContent.data.activities.find((a: { type: string }) => a.type === 'email'))
+      .toMatchObject({ sequence_step: 2, contact_name: 'Ana Pérez' });
+
+    const csv = (await tool(c.access!, 'export_sales_leads', {})).structuredContent.data.csv as string;
+    expect(csv.split('\n')[0]).toContain('domain');
+    expect(csv).toContain('Ana Pérez (Dueña) <ana@clinicasonrisa.cl> +56987654321 [https://clinicasonrisa.cl/equipo]');
+    expect(csv).toContain('low_posting: Último post hace 3 meses');
+  });
+
+  it('suprimir un dominio cierra la empresa con ese sitio y bloquea cargarla de nuevo', async () => {
+    const c = await connect();
+    await tool(c.access!, 'upsert_outreach_leads', { leads: [{ company: 'Bar X', website: 'https://barx.cl', phone: '+56 2 2222 2222' }] });
+    const closed = await tool(c.access!, 'add_sales_suppression', { kind: 'domain', value: 'www.barx.cl' });
+    expect(closed.structuredContent.data.leads_closed).toHaveLength(1);
+    expect(db.rows('kefy_sales_leads')[0]).toMatchObject({ stage: 'lost', lost_reason: 'do_not_contact' });
+
+    const again = await tool(c.access!, 'upsert_outreach_leads', { leads: [{ company: 'Bar X 2', website: 'barx.cl/carta' }] });
+    expect(again.structuredContent.data.details.skipped[0].reason).toBe('domain_suppressed');
+  });
+
+  it('marca como bloqueado solo al contacto suprimido, no a la empresa', async () => {
+    const c = await connect();
+    await tool(c.access!, 'upsert_outreach_leads', {
+      leads: [{ company: 'Tienda', website: 'tienda.cl', contacts: [{ name: 'A', email: 'a@gmail.com' }, { name: 'B', email: 'b@gmail.com' }] }],
+    });
+    await tool(c.access!, 'add_sales_suppression', { kind: 'email', value: 'b@gmail.com' });
+    const lead = (await tool(c.access!, 'list_sales_leads', {})).structuredContent.data.leads[0];
+    expect(lead).toMatchObject({ contactable: true, blocked_reason: null });
+    expect(lead.contacts.map((x: { blocked_reason?: string }) => x.blocked_reason ?? null)).toEqual([null, 'email_suppressed']);
+  });
+
   it('segmenta usuarios de Kefy y los importa como leads con su dueño', async () => {
     const c = await connect();
     db.find('kefy_org_memberships', (r) => r.user_id === IDS.USER)!.kefy_users = { email: 'boss@kefy.app', name: 'Boss' };
