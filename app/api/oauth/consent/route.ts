@@ -7,6 +7,7 @@ import { getActiveBrandById, listActiveBrands } from '@/lib/brands';
 import { requireActiveSubscription } from '@/lib/subscription';
 import { ADMIN_SCOPE, API_KEY_SCOPES } from '@/lib/assistant/api-keys';
 import {
+  issuerFor,
   DEFAULT_OAUTH_SCOPES, isAdminResource, issueAuthorizationCode, validateAuthorizeRequest, withParams,
   type AuthorizeValidation,
 } from '@/lib/assistant/oauth';
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
   if (input.decision === 'deny') {
     return json({
       redirect: withParams(request.redirectUri, {
-        error: 'access_denied', state: request.state, iss: req.nextUrl.origin,
+        error: 'access_denied', state: request.state, iss: issuerFor(req.nextUrl.origin, request.resource),
       }),
     });
   }
