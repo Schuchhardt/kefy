@@ -79,7 +79,7 @@ herramienta, entrada, `reason`, organización, estado). `extend_trial`,
 ## 4. Pipeline comercial
 
 Tablas `kefy_sales_leads`, `kefy_sales_lead_activities` y
-`kefy_sales_suppressions` (migración `20261110000001`). No confundir con
+`kefy_sales_suppressions` (migraciones `20261110000001` y `20261111000001`). No confundir con
 `kefy_leads`, que son los leads de la marca de cada cliente.
 
 - **Usuarios de Kefy** (`kind = kefy_account`): `find_account_lead_candidates`
@@ -97,14 +97,30 @@ Tablas `kefy_sales_leads`, `kefy_sales_lead_activities` y
   `import_account_leads` los pasa al pipeline con el email del dueño y el
   precio del plan como valor mensual estimado.
 - **Prospección en frío** (`kind = outreach`): `upsert_outreach_leads` (hasta
-  200 por llamada) deduplica por email e Instagram normalizados; un duplicado
-  solo completa campos vacíos y suma tags.
+  200 por llamada) deduplica por email, Instagram y **dominio del sitio**
+  (`domain`, sin `www.`). Los hosts compartidos (`linktr.ee`, `instagram.com`,
+  `wa.me`, `google.com`…; lista en `SHARED_HOSTS`) no cuentan como dominio. Un
+  duplicado solo completa campos vacíos y suma tags, contactos y señales.
+- **Ficha del prospecto**: `industry` (nicho), `city`, `source_url` (dónde se
+  encontró), `priority` y `estimated_value_usd` (potencial), y dos listas JSONB:
+  - `contacts` (máx. 20): personas con `name`, `role`, `email`, `phone`,
+    `instagram`, `linkedin`, `source_url` (de dónde salió el dato) y `note`. Si
+    el lead no trae email o teléfono propio, toma los del primer contacto. Un
+    contacto repetido (mismo email, teléfono, Instagram o nombre) solo completa
+    lo vacío. `update_sales_lead` usa `add_contacts` / `remove_contacts`.
+  - `signals` (máx. 50): por qué es buen prospecto, `{ type, detail,
+    source_url, observed_at }`. Misma `type` + `detail` = repetida.
+    `update_sales_lead` usa `add_signals`.
+- **Secuencia**: `log_sales_activity` acepta `sequence_step` (1 = primer toque)
+  y `contact_name`; el lead guarda en `sequence_step` el paso más alto.
 - **Nada se envía.** El dueño escribe a mano y registra el contacto con
   `log_sales_activity` (el primer contacto saliente pasa `new → contacted`; una
   respuesta, `→ replied`). Cada lead trae `contactable` y `blocked_reason`.
 - **Supresiones**: `add_sales_suppression` (email, dominio, teléfono o
   Instagram) cierra los leads abiertos que coinciden como `lost /
-  do_not_contact`, bloquea registrar contacto saliente y hace que las cargas
+  do_not_contact` (un dominio coincide con los emails `@dominio` y con el sitio
+  web de la empresa); un contacto suprimido dentro de una empresa sale con su
+  propio `blocked_reason` sin bloquear al resto, bloquea registrar contacto saliente y hace que las cargas
   futuras los salten.
 - `export_sales_leads` genera CSV con protección contra inyección de fórmulas.
 
