@@ -43,7 +43,7 @@ async function connect() {
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
-      'Falta DATABASE_URL (en GitHub: secreto SUPABASE_DB_URL del environment production).',
+      'Falta DATABASE_URL (en GitHub: secreto SUPABASE_DB_URL del environment supabase-production).',
     );
   }
   const { default: pg } = await import('pg');

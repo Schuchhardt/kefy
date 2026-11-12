@@ -65,13 +65,16 @@ Antes de abrir el PR: `npm run db:migrate:check` (lo mismo que corre el CI).
 | `Migraciones (validación)` | push y PR | `node scripts/migrate.mjs --check`: nombres, versiones únicas y reglas de la base compartida. No se conecta a la base |
 | `Migraciones (producción)` | push a `main`, después de los dos anteriores | `--status` y luego aplica lo pendiente, con advisory lock y `concurrency` para que no corran dos a la vez |
 
-El job de producción usa el environment **`production`** de GitHub, y solo
-ahí está el secreto: los PRs nunca ven la conexión.
+El job de producción usa el environment **`supabase-production`** de GitHub,
+restringido a la rama `main`. Solo ahí está el secreto: ni los PRs ni otras
+ramas ven la conexión. Es un environment aparte del `Production` que crea
+Vercel: Vercel registra sus deploys con el SHA del commit y una regla de rama
+en ese environment podría bloquearlos.
 
 ### Configuración (una sola vez)
 
-1. GitHub → Settings → Environments → **New environment** `production`.
-   Opcional: *Deployment branches* = solo `main`, y *Required reviewers* si se
+1. GitHub → Settings → Environments → `supabase-production` (ya creado), con
+   *Deployment branches* = solo `main`. Opcional: *Required reviewers* si se
    quiere aprobar cada migración.
 2. En ese environment, secreto **`SUPABASE_DB_URL`** con la cadena del
    **session pooler**, copiada de Supabase → Connect → *Session pooler*
