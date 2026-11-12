@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   REEL_SCENES_MAX, REEL_SCENES_MIN, STORY_CONVERSION_CREDITS, STORY_PLATFORMS, autopilotRuleCost, computeNextRun,
   estimateFormatCredits, estimateRunCredits, nextRunForRule, parseAutopilotTopic, resolveRunFormat, usesStory,
-  zonedParts,
+  zonedParts, missingAutopilotMedia,
 } from '@/lib/autopilot-formats';
 import { STORY_CAPABLE_PLATFORMS } from '@/lib/zernio';
 import { REEL_SCENE_COUNT_MAX, REEL_SCENE_COUNT_MIN } from '@/lib/services/reel';
@@ -117,5 +117,29 @@ describe('constantes que tienen que coincidir con los servicios', () => {
   it('redes con Stories = las de Zernio; planos del reel = los del servicio', () => {
     expect([...STORY_PLATFORMS].sort()).toEqual([...STORY_CAPABLE_PLATFORMS].sort());
     expect([REEL_SCENES_MIN, REEL_SCENES_MAX]).toEqual([REEL_SCENE_COUNT_MIN, REEL_SCENE_COUNT_MAX]);
+  });
+});
+
+describe('media antes de publicar', () => {
+  const img = 'https://kefy.test/a.jpeg';
+
+  it('un post o una story sin imagen no se publican', () => {
+    for (const format of ['post', 'story'] as const) {
+      expect(missingAutopilotMedia(format, { image_url: img, slides: null })).toBeNull();
+      expect(missingAutopilotMedia(format, { image_url: null, slides: null })).toBe('no_image');
+      expect(missingAutopilotMedia(format, { image_url: '  ', slides: null })).toBe('no_image');
+    }
+  });
+
+  it('un carrusel necesita imagen en todos sus slides', () => {
+    expect(missingAutopilotMedia('carousel', { image_url: null, slides: [{ image_url: img }, { image_url: img }] })).toBeNull();
+    expect(missingAutopilotMedia('carousel', { image_url: img, slides: [{ image_url: img }, { image_url: null }] }))
+      .toBe('slide_without_image');
+    expect(missingAutopilotMedia('carousel', { image_url: img, slides: [] })).toBe('no_slides');
+  });
+
+  it('sin fila no hay nada que publicar; el reel se comprueba al publicar su video', () => {
+    expect(missingAutopilotMedia('post', null)).toBe('missing_item');
+    expect(missingAutopilotMedia('reel', { image_url: null, slides: null })).toBeNull();
   });
 });

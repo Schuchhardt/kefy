@@ -242,6 +242,47 @@ describe('ejecutar ahora', () => {
     expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'failed', content_item_id: item.id });
   });
 
+  it('si la imagen se genera pero no queda en el contenido, no se publica texto solo', async () => {
+    // Regresión: entre junio y septiembre de 2026 el autopilot publicó posts sin
+    // imagen. Aunque el generador devuelva la imagen, se mira la fila guardada.
+    const rule = await createAutopilotRule(ctx(), RULE);
+    vi.mocked(generateContentImage).mockImplementationOnce(async () => {
+      db.failNext('kefy_content_items', 'update'); // el enlace imagen → contenido
+      return { b64: 'aW1n', revisedPrompt: null } as never;
+    });
+    const summary = await runAutopilotNow(ctx(), [rule.id], 'test');
+
+    expect(summary).toMatchObject({ executed: 0, failed: 1 });
+    expect(publishPost).not.toHaveBeenCalled();
+    expect(db.rows('kefy_scheduled_posts')).toHaveLength(0);
+    const item = db.rows('kefy_content_items')[0];
+    expect(item.image_url ?? null).toBeNull();
+    expect(item.status).not.toMatch(/approved|scheduled|published/);
+    expect(db.rows('kefy_autopilot_runs')[0]).toMatchObject({ status: 'failed', content_item_id: item.id });
+  });
+
+  it('un carrusel con algún slide sin imagen no se publica', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, format: 'carousel' });
+    vi.mocked(generateContentImage).mockResolvedValueOnce({ b64: 'aW1n', revisedPrompt: null } as never);
+    vi.mocked(generateContentImage).mockRejectedValueOnce(new Error('proveedor caído'));
+    const summary = await runAutopilotNow(ctx(), [rule.id], 'test');
+
+    expect(summary).toMatchObject({ executed: 0, failed: 1 });
+    expect(publishPost).not.toHaveBeenCalled();
+  });
+
+  it.each(['post', 'carousel', 'story'] as const)('todo %s del autopilot llega a la red con imagen', async (format) => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, format });
+    await runAutopilotNow(ctx(), [rule.id], 'test');
+
+    expect(publishPost).toHaveBeenCalled();
+    for (const [payload] of vi.mocked(publishPost).mock.calls) {
+      const media = payload.media_urls?.length ? payload.media_urls : [payload.image_url];
+      expect(media.length).toBeGreaterThan(0);
+      for (const url of media) expect(url).toMatch(/^https:\/\//);
+    }
+  });
+
   it('si la generación falla devuelve el crédito', async () => {
     const rule = await createAutopilotRule(ctx(), RULE);
     vi.mocked(generateContentText).mockRejectedValueOnce(new Error('proveedor caído'));

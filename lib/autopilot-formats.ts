@@ -338,3 +338,29 @@ export function nextRunForRule(
   }
   return next;
 }
+
+// ─── Media antes de publicar ─────────────────────────────────────────────────
+
+/** Lo que se lee del contenido justo antes de publicarlo. */
+export interface AutopilotMediaRow {
+  image_url: string | null;
+  slides: unknown;
+}
+
+/**
+ * ¿Le falta media a la pieza para publicarse en su formato? Se mira en la fila
+ * guardada, no en lo que devolvió el generador: entre junio y septiembre de
+ * 2026 el autopilot publicó posts de puro texto (sin imagen) y la imagen puede
+ * generarse bien y aun así no quedar enlazada al contenido. Devuelve el motivo,
+ * o null si está completa. Un reel se publica aparte, cuando su video está listo.
+ */
+export function missingAutopilotMedia(format: AutopilotFormat, row: AutopilotMediaRow | null): string | null {
+  if (format === 'reel') return null;
+  if (!row) return 'missing_item';
+  if (format === 'carousel') {
+    const slides = Array.isArray(row.slides) ? (row.slides as Array<{ image_url?: string | null }>) : [];
+    if (slides.length === 0) return 'no_slides';
+    return slides.every((s) => typeof s?.image_url === 'string' && s.image_url.trim() !== '') ? null : 'slide_without_image';
+  }
+  return typeof row.image_url === 'string' && row.image_url.trim() !== '' ? null : 'no_image';
+}

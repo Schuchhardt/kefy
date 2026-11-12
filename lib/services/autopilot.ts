@@ -32,9 +32,9 @@ import { getUsage } from '@/lib/usage';
 import { sendAutopilotAlert } from '@/lib/autopilot-alerts';
 import {
   AUTOPILOT_FORMATS, STORY_DELAY_DEFAULT_MINUTES, STORY_DELAY_MAX_MINUTES, STORY_PLATFORMS, WEEKDAY_SKIP,
-  WEEKLY_FORMAT_VALUES, autopilotRuleCost, estimateFormatCredits, estimateRunCredits, nextRunForRule,
-  parseAutopilotTopic, resolveRunFormat, usesStory,
-  type AutopilotFormat, type RuleCost, type RuleCostInput, type WeeklyFormats,
+  WEEKLY_FORMAT_VALUES, autopilotRuleCost, estimateFormatCredits, estimateRunCredits, missingAutopilotMedia,
+  nextRunForRule, parseAutopilotTopic, resolveRunFormat, usesStory,
+  type AutopilotFormat, type AutopilotMediaRow, type RuleCost, type RuleCostInput, type WeeklyFormats,
 } from '@/lib/autopilot-formats';
 import { serviceContext, type ServiceContext } from '@/lib/services/context';
 import { ServiceError, msg } from '@/lib/services/errors';
@@ -832,6 +832,22 @@ async function produceItem(
   return itemId;
 }
 
+/**
+ * Relee la pieza y falla si no tiene la media de su formato (imagen del post o
+ * de la story, imagen de cada slide). No confía en lo que devolvió el
+ * generador: la imagen puede generarse y no quedar enlazada al contenido.
+ */
+async function assertItemMedia(db: Db, ctx: ServiceContext, itemId: string, format: AutopilotFormat): Promise<void> {
+  const { data } = await db.from('kefy_content_items').select('image_url, slides').eq('id', itemId).maybeSingle();
+  const missing = missingAutopilotMedia(format, data as AutopilotMediaRow | null);
+  if (!missing) return;
+  const err = new Error(msg(ctx.language,
+    'La pieza quedó sin imagen; no se publica texto solo y queda como borrador.',
+    'The piece has no image; text alone is never published, it stays as a draft.'));
+  reportError(err, { route: ROUTE, service: 'autopilot', auth: ctx.auth, extra: { itemId, format, missing } });
+  throw withItem(new ServiceError('provider_error', 502, err.message).markReported(), itemId);
+}
+
 /** Un fallo que deja una pieza a medias: se anota en la ejecución para encontrarla. */
 function withItem(err: unknown, itemId: string): Error {
   const e = err instanceof Error ? err : new Error(String(err));
@@ -1015,6 +1031,10 @@ export async function executeAutopilotRule(
         credits_estimated: credits,
       };
     }
+
+    // Última barrera: la pieza guardada tiene que llevar su media. Un post de
+    // puro texto no se publica nunca (queda como borrador y la ejecución falla).
+    await assertItemMedia(db, ctx, itemId, format);
 
     await mergeItemMetadata(db, itemId, autopilotMeta, { status: 'approved', content_type: format });
     const { ids: scheduledPostIds } = await publishToAccounts(ctx, itemId, format, targets.map((a) => a.id), slot);

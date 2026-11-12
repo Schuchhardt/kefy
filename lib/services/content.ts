@@ -1008,8 +1008,11 @@ export async function generateImageForItem(
       .eq('org_id', ctx.auth.orgId);
 
     if (error) {
-      // Non-fatal: return result anyway
-      console.error('image link to item error:', error.message);
+      // No es fatal para la UI (recibe la URL), pero el contenido queda sin
+      // imagen: quien publique desde la fila (el autopilot) tiene que enterarse.
+      reportError(new Error(error.message), {
+        route: IMAGE_ROUTE, auth: ctx.auth, service: 'supabase', extra: { fase: 'enlazar-imagen', itemId },
+      });
     }
   }
 
