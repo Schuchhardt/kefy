@@ -129,7 +129,7 @@ locales/
   es/                   # Traducciones español
   en/                   # Traducciones inglés
 db/
-  migrations/           # SQL con prefijo YYYYMMDDNNNNNN_descripcion.sql
+  migrations/           # SQL con prefijo YYYYMMDDNNNNNN_descripcion.sql (las aplica el CI: docs/migraciones.md)
   seeds/                # Datos iniciales
 tests/
   unit/                 # Vitest + Testing Library
