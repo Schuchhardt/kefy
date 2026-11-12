@@ -43,6 +43,7 @@ con `https://<host>/api/admin/mcp`. En Claude Code:
 | `KEFY_ADMIN_EMAILS` | Emails admin, separados por comas. Sin ella nadie es admin |
 | `KEFY_ADMIN_CONFIRM_SECRET` | Firma de los `confirmation_token` (si falta, `JWT_SECRET`) |
 | `SENTRY_API_TOKEN` | Token con `event:read` y `project:read` (el `SENTRY_AUTH_TOKEN` de source maps no suele bastar; se usa de respaldo). Más `SENTRY_ORG`, `SENTRY_PROJECT` y, si la región no es US, `SENTRY_API_URL` (p. ej. `https://de.sentry.io`) |
+| `KEFY_DEMO_ORG_ID` | Organización donde se crean las marcas demo de los prospectos (hoy Depando, en plan business). Sin ella `create_demo_brand` responde `unavailable` |
 | `VERCEL_API_TOKEN` | Token de Vercel con lectura del proyecto, más `VERCEL_PROJECT_ID` (o `VERCEL_ADMIN_PROJECT_ID`) y `VERCEL_TEAM_ID` si el proyecto es de un equipo |
 
 Sin Sentry o Vercel configurados, esas herramientas responden `unavailable`
@@ -56,6 +57,7 @@ con lo que falta; el resto funciona.
 | Soporte (escriben, con confirmación) | `extend_trial`, `grant_credits`, `set_autopilot_rule_status`, `revoke_api_key` |
 | Soporte (escriben, sin confirmación) | `add_organization_note` |
 | Logs | `list_recent_failures` (base), `list_audit_log` (`assistant` o `admin`), `list_sentry_issues`, `get_sentry_issue`, `get_runtime_logs` (Vercel) |
+| Demos | `create_demo_brand` (con confirmación, gasta créditos de la organización de demos), `create_demo_preview_link`, `revoke_demo_preview_link` |
 | Ventas | `get_sales_pipeline`, `list_sales_leads` (`due_only` = seguimientos vencidos), `get_sales_lead`, `find_account_lead_candidates`, `import_account_leads`, `upsert_outreach_leads`, `update_sales_lead`, `log_sales_activity`, `add_sales_suppression`, `export_sales_leads` |
 
 **Confirmación en el servidor.** Las de soporte marcadas responden primero
@@ -78,8 +80,9 @@ herramienta, entrada, `reason`, organización, estado). `extend_trial`,
 
 ## 4. Pipeline comercial
 
-Tablas `kefy_sales_leads`, `kefy_sales_lead_activities` y
-`kefy_sales_suppressions` (migraciones `20261110000001` y `20261111000001`). No confundir con
+Tablas `kefy_sales_leads`, `kefy_sales_lead_activities`,
+`kefy_sales_suppressions` y `kefy_demo_previews` (migraciones `20261110000001`,
+`20261111000001` y `20261111000002`). No confundir con
 `kefy_leads`, que son los leads de la marca de cada cliente.
 
 - **Usuarios de Kefy** (`kind = kefy_account`): `find_account_lead_candidates`
@@ -123,6 +126,35 @@ Tablas `kefy_sales_leads`, `kefy_sales_lead_activities` y
   propio `blocked_reason` sin bloquear al resto, bloquea registrar contacto saliente y hace que las cargas
   futuras los salten.
 - `export_sales_leads` genera CSV con protección contra inyección de fórmulas.
+
+### Marca demo y vista previa pública
+
+Lo propio de Kefy al vender: mostrarle al prospecto su negocio ya hecho.
+
+- `create_demo_brand` (`lib/services/admin/demo-brands.ts`) crea una marca en
+  la organización `KEFY_DEMO_ORG_ID` actuando como su dueño, y llama a
+  `createStarterPosts` (lee la web, completa el Brand Kit y escribe 3 posts de
+  texto). Usa los mismos servicios que el onboarding, así que respeta el tope
+  de marcas del plan y cobra los créditos a esa organización. Guarda la marca
+  en `kefy_sales_leads.demo_brand_id` y deja una nota en las actividades. Un
+  lead tiene una sola demo; si quedó sin posts, se reintenta sobre la misma.
+- `create_demo_preview_link` crea un link `/{lang}/demo/{token}`:
+  - De la base solo se guarda el sha256 del token y sus 6 primeros caracteres.
+    La URL se ve **una sola vez**.
+  - Vence según `expires_in_days` (14 por defecto, máximo 90) y cuenta las
+    visitas.
+  - `get_sales_lead` → `demo.preview_links` muestra su estado.
+  - `revoke_demo_preview_link` lo corta al instante.
+- La página (`app/[lang]/demo/[token]`, servicio `lib/services/demo-preview.ts`)
+  es pública y no se indexa (`noindex` y `robots.ts`):
+  - Muestra solo el nombre, el tagline, el logo y los colores (solo `#hex`) de
+    la marca, sus posts (imágenes solo `https://`) y un llamado a contactar.
+    Nada de la organización ni del lead.
+  - El título no lleva el nombre de la marca, para que no se vea en la vista
+    previa del link en un chat.
+- Las demos son marcas normales de la organización de demos: se ven y se editan
+  entrando a Kefy con su dueño (p. ej. para generarles imágenes). Al archivar
+  la marca, sus links dejan de funcionar.
 
 ## 5. Arquitectura
 

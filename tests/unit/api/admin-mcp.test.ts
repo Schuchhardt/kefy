@@ -13,6 +13,16 @@ import { IDS, AUTH, seedWorkspace } from '../helpers/assistant';
 const db = createFakeDb();
 vi.mock('@/lib/supabase', () => ({ createSupabaseServer: () => db.client }));
 vi.mock('@/lib/observability', () => ({ reportError: vi.fn() }));
+// Marca demo: los servicios que gastan créditos (web + IA) se simulan; lo que
+// se prueba es el enlace con el lead, la organización de demos y el link.
+vi.mock('@/lib/services/brands', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/services/brands')>()),
+  createBrand: vi.fn(),
+}));
+vi.mock('@/lib/services/onboarding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/services/onboarding')>()),
+  createStarterPosts: vi.fn(),
+}));
 vi.mock('@/lib/auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/auth')>();
   return { ...actual, getAuthFromRequest: vi.fn() };
@@ -27,6 +37,9 @@ import { GET as adminMetadata } from '@/app/.well-known/oauth-protected-resource
 import { GET as adminAsMetadata } from '@/app/.well-known/oauth-authorization-server/admin/route';
 import { getAuthFromRequest } from '@/lib/auth';
 import { adminEmails } from '@/lib/admin/auth';
+import { createBrand } from '@/lib/services/brands';
+import { createStarterPosts } from '@/lib/services/onboarding';
+import { getDemoPreview, hashPreviewToken } from '@/lib/services/demo-preview';
 import type { JWTPayload } from '@/types/auth';
 
 const BASE = 'http://localhost:3099';
@@ -107,6 +120,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.mocked(createBrand).mockReset();
+  vi.mocked(createStarterPosts).mockReset();
 });
 
 describe('adminEmails', () => {
@@ -411,6 +426,92 @@ describe('pipeline comercial', () => {
     const lead = (await tool(c.access!, 'list_sales_leads', {})).structuredContent.data.leads[0];
     expect(lead).toMatchObject({ contactable: true, blocked_reason: null });
     expect(lead.contacts.map((x: { blocked_reason?: string }) => x.blocked_reason ?? null)).toEqual([null, 'email_suppressed']);
+  });
+
+  it('crea la marca demo de un prospecto en la organización de demos y un link público que vence y se revoca', async () => {
+    const c = await connect();
+    const DEMO_BRAND = IDS.uuid(40);
+    vi.stubEnv('KEFY_DEMO_ORG_ID', IDS.OTHER_ORG);
+    vi.mocked(createBrand).mockImplementation(async (ctx, input) => {
+      const [brand] = db.seed('kefy_brands', [{ id: DEMO_BRAND, org_id: ctx.auth.orgId, name: input.name, archived: false, avatar_url: null }]);
+      return { brand } as never;
+    });
+    vi.mocked(createStarterPosts).mockImplementation(async (ctx) => {
+      db.seed('kefy_brand_kits', [{
+        brand_id: ctx.brandId, org_id: ctx.auth.orgId, name: 'Clínica Sonrisa', tagline: 'Sonríe sin miedo',
+        logo_url: 'https://cdn.example/logo.png', primary_color: '#0055ff', accent_color: 'javascript:alert(1)',
+      }]);
+      const posts = ['intro', 'tip', 'benefit'].map((angle, i) => ({
+        id: IDS.uuid(50 + i), angle, body: `Post ${angle}`, hashtags: ['#dental'], imagePrompt: '',
+      }));
+      db.seed('kefy_content_items', posts.map((p) => ({
+        id: p.id, org_id: ctx.auth.orgId, brand_id: ctx.brandId, channel: 'instagram', body: p.body, hashtags: p.hashtags,
+        image_url: null, created_at: new Date().toISOString(),
+      })));
+      return { brandName: 'Clínica Sonrisa', filled: ['name', 'tagline'], posts, failed: 0 } as never;
+    });
+
+    await tool(c.access!, 'upsert_outreach_leads', { leads: [{ company: 'Clínica Sonrisa', website: 'clinicasonrisa.cl' }] });
+    const lead = db.rows('kefy_sales_leads')[0];
+
+    const first = await tool(c.access!, 'create_demo_brand', { lead_id: lead.id });
+    expect(first.structuredContent).toMatchObject({ status: 'confirmation_required' });
+    expect(createBrand).not.toHaveBeenCalled();
+    const done = await tool(c.access!, 'create_demo_brand', { lead_id: lead.id, confirmation_token: first.structuredContent.confirmation_token });
+    expect(done.structuredContent.data).toMatchObject({ brand: { id: DEMO_BRAND, org_id: IDS.OTHER_ORG }, posts: expect.any(Array) });
+
+    // Actúa como el dueño de la organización de demos, sobre la marca nueva, leyendo la web del lead.
+    const [brandCtx] = vi.mocked(createBrand).mock.calls[0];
+    expect(brandCtx.auth).toMatchObject({ orgId: IDS.OTHER_ORG, userId: IDS.OTHER_USER, role: 'owner', plan: 'pro' });
+    const [postsCtx, postsInput] = vi.mocked(createStarterPosts).mock.calls[0];
+    expect(postsCtx).toMatchObject({ brandId: DEMO_BRAND, brandScope: 'strict' });
+    expect(postsInput).toMatchObject({ url: 'https://clinicasonrisa.cl', channel: 'instagram' });
+    expect(lead.demo_brand_id).toBe(DEMO_BRAND);
+
+    // Una segunda demo con contenido no se crea.
+    const retryArgs = { lead_id: lead.id, channel: 'facebook' };
+    const again = await tool(c.access!, 'create_demo_brand', retryArgs);
+    const againDone = await tool(c.access!, 'create_demo_brand', { ...retryArgs, confirmation_token: again.structuredContent.confirmation_token });
+    expect(againDone.content[0].text).toMatch(/^conflict/);
+
+    // Link público: la URL sale una vez y en la base solo queda su hash.
+    const link = await tool(c.access!, 'create_demo_preview_link', { lead_id: lead.id, expires_in_days: 7 });
+    const url = link.structuredContent.data.preview.url as string;
+    const token = url.split('/demo/')[1];
+    expect(url).toMatch(/\/es\/demo\/[A-Za-z0-9_-]{32}$/);
+    const row = db.rows('kefy_demo_previews')[0];
+    expect(row.token_hash).toBe(hashPreviewToken(token));
+    expect(JSON.stringify(row)).not.toContain(token);
+
+    const preview = await getDemoPreview(token);
+    expect(preview).toMatchObject({
+      brand: { name: 'Clínica Sonrisa', logoUrl: 'https://cdn.example/logo.png', primaryColor: '#0055ff', accentColor: null },
+    });
+    expect(preview!.posts.map((p) => p.body)).toEqual(['Post intro', 'Post tip', 'Post benefit']);
+    expect(row.views).toBe(1);
+    expect(await getDemoPreview(token, new Date(Date.now() + 8 * 24 * 60 * 60 * 1000))).toBeNull();
+    expect(await getDemoPreview('x'.repeat(32))).toBeNull();
+
+    // get_sales_lead muestra el estado del link, nunca la URL.
+    const detail = await tool(c.access!, 'get_sales_lead', { lead_id: lead.id });
+    expect(detail.structuredContent.data.demo).toMatchObject({
+      brand: { id: DEMO_BRAND }, content_items: 3, preview_links: [{ id: row.id, active: true, views: 1 }],
+    });
+    expect(JSON.stringify(detail.structuredContent)).not.toContain(token);
+
+    await tool(c.access!, 'revoke_demo_preview_link', { preview_id: row.id });
+    expect(await getDemoPreview(token)).toBeNull();
+  });
+
+  it('sin KEFY_DEMO_ORG_ID la marca demo no se crea', async () => {
+    const c = await connect();
+    vi.stubEnv('KEFY_DEMO_ORG_ID', '');
+    await tool(c.access!, 'upsert_outreach_leads', { leads: [{ company: 'X', website: 'x.cl' }] });
+    const lead = db.rows('kefy_sales_leads')[0];
+    const first = await tool(c.access!, 'create_demo_brand', { lead_id: lead.id });
+    const r = await tool(c.access!, 'create_demo_brand', { lead_id: lead.id, confirmation_token: first.structuredContent.confirmation_token });
+    expect(r.content[0].text).toMatch(/KEFY_DEMO_ORG_ID/);
+    expect(createBrand).not.toHaveBeenCalled();
   });
 
   it('segmenta usuarios de Kefy y los importa como leads con su dueño', async () => {
