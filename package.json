@@ -16,7 +16,10 @@
     "test:e2e": "playwright test",
     "test:prompts": "promptfoo eval",
     "fonts:fetch": "node scripts/fetch-brand-fonts.mjs",
-    "postinstall": "node scripts/generate-build-id.mjs"
+    "postinstall": "node scripts/generate-build-id.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:migrate:status": "node scripts/migrate.mjs --status",
+    "db:migrate:check": "node scripts/migrate.mjs --check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
@@ -72,6 +75,7 @@
     "eslint-config-next": "16.2.6",
     "happy-dom": "^20.9.0",
     "jsdom": "^27.0.1",
+    "pg": "^8.21.0",
     "preact": "^10.27.2",
     "promptfoo": "^0.120.19",
     "tailwindcss": "^4",

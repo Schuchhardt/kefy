@@ -25,6 +25,7 @@ Este archivo describe las convenciones del proyecto y los documentos de referenc
 | Formato de imagen por red | [`docs/zernio.md`](docs/zernio.md) (sección *Formato de imagen por red*) | Antes de tocar `lib/image-fit.ts`, `lib/image-processor.ts` o el recorte de imágenes en las previews |
 | Beta abierta: créditos, trial, rate limiting y Sentry | [`docs/beta-abierta.md`](docs/beta-abierta.md) | Antes de tocar `lib/rate-limit.ts`, `lib/usage.ts`, `lib/ai-guard.ts`, `lib/subscription.ts`, `lib/observability.ts`, `lib/sentry-scrub.ts`, los planes, o **al añadir cualquier ruta que gaste dinero** (IA, render, envío de correo) |
 | Landing, auth y UX mobile del dashboard | [`docs/auditoria-ux.md`](docs/auditoria-ux.md) | Antes de tocar `components/landing/**`, `locales/*/landing.ts`, las páginas de auth, el onboarding o el layout/mobile del dashboard: lista lo que la landing no puede prometer, qué se implementó de la auditoría y las métricas que vigilan los tests |
+| Migraciones y CI/CD (base compartida con AI Tickets) | [`docs/migraciones.md`](docs/migraciones.md) | Antes de crear o editar cualquier archivo en `db/migrations/`, o de tocar `scripts/migrate*.mjs` o `.github/workflows/ci.yml`. La base es compartida: solo objetos `kefy_*`, nada de `supabase db push` ni migraciones aplicadas a mano |
 | Idiomas | [`docs/i18n.md`](docs/i18n.md) | Antes de añadir textos de interfaz o tocar `locales/**` |
 | Asistente / API pública / MCP | [`docs/assistant.md`](docs/assistant.md) | Antes de tocar `lib/assistant/**`, `lib/services/**`, `app/api/assistant/**`, `app/api/v1/**`, `app/api/mcp/**`, `app/api/oauth/**`, `app/.well-known/**` o `app/api/api-keys/**` |
 | MCP de administración (plataforma, logs, ventas) | [`docs/admin-mcp.md`](docs/admin-mcp.md) | Antes de tocar `lib/admin/**`, `lib/services/admin/**`, `app/api/admin/**`, el consentimiento OAuth (`app/api/oauth/consent`, `OAuthConsentView`) o el scope `admin`. Ve todas las organizaciones: nunca se expone sin `authenticateAdmin` |
@@ -90,7 +91,8 @@ suscripción, créditos y auditoría. Ver [`docs/assistant.md`](docs/assistant.m
 - Auth: llamar `getAuthFromRequest(req)` de `lib/auth.ts` al inicio de cada handler protegido
 - DB: siempre usar `createSupabaseServer()` de `lib/supabase.ts`, nunca el cliente global
 - No exponer tokens ni secrets en respuestas de la API
-- Migraciones SQL en `db/migrations/` con prefijo `YYYYMMDDNNNNNN_descripcion.sql`
+- Migraciones SQL en `db/migrations/` con prefijo `YYYYMMDDNNNNNN_descripcion.sql`;
+  las aplica el CI al mergear a `main` (ver [`docs/migraciones.md`](docs/migraciones.md))
 - Errores atrapados en un `try/catch` que devuelven 4xx/5xx: reportar con
   `reportError` de `lib/observability.ts`, no solo `console.error` — en
   producción nadie lee los logs
