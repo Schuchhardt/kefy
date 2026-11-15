@@ -14,6 +14,28 @@ function planFromMetadata(metadata: Stripe.Metadata | null): BillingPlan {
   return 'starter';
 }
 
+/**
+ * El plan que de verdad se cobra: el del precio de la suscripción. La
+ * metadata `plan` se escribe solo al crear el checkout y Stripe no la cambia
+ * cuando el cliente pasa a otro precio desde el portal; con ella, quien bajaba
+ * de Business a Starter seguía con los créditos y marcas de Business (y quien
+ * subía, sin ellos). La metadata queda como respaldo si el precio no es uno de
+ * los STRIPE_PRICE_* configurados.
+ */
+function planFromSubscription(subscription: Stripe.Subscription): BillingPlan {
+  const priceId = subscription.items?.data?.[0]?.price?.id;
+  if (priceId) {
+    const byPrice: Array<[BillingPlan, string | undefined]> = [
+      ['starter', process.env.STRIPE_PRICE_STARTER],
+      ['pro', process.env.STRIPE_PRICE_PRO],
+      ['business', process.env.STRIPE_PRICE_BUSINESS],
+    ];
+    const match = byPrice.find(([, id]) => id && id === priceId);
+    if (match) return match[0];
+  }
+  return planFromMetadata(subscription.metadata);
+}
+
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   // This Stripe account is shared with other products (e.g. Depando) whose
   // events can land on this same endpoint — only touch sessions Kefy created.
@@ -80,7 +102,7 @@ async function handleSubscriptionChange(subscription: Stripe.Subscription) {
 }
 
 async function syncSubscription(orgId: string, subscription: Stripe.Subscription) {
-  const plan   = planFromMetadata(subscription.metadata);
+  const plan   = planFromSubscription(subscription);
   const status = subscription.status as 'active' | 'trialing' | 'past_due' | 'canceled' | 'unpaid';
 
   const periodStart = subscription.items.data[0]?.current_period_start
