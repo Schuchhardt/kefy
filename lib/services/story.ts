@@ -104,8 +104,15 @@ export async function generateStory(ctx: ServiceContext, input: GenerateStoryInp
   let imageUrl: string | null = null;
   let imageError: GenerateStoryResult['imageError'];
   if (input.withImage !== false) {
-    const imageCredits = await consumeCredits(ctx.auth.orgId, ctx.auth.plan, 'image').catch(() => null);
-    if (!imageCredits?.allowed) {
+    // Si el cobro lanza (la base no respondió) no es «sin créditos»: el
+    // autopilot pausaría la regla hasta el mes siguiente por un fallo puntual.
+    const imageCredits = await consumeCredits(ctx.auth.orgId, ctx.auth.plan, 'image').catch((err) => {
+      reportError(err, { route: POST_ROUTE, auth: ctx.auth, service: 'supabase', extra: { source: ctx.source } });
+      return 'error' as const;
+    });
+    if (imageCredits === 'error') {
+      imageError = 'failed';
+    } else if (!imageCredits.allowed) {
       imageError = 'credits_exhausted';
     } else {
       try {
