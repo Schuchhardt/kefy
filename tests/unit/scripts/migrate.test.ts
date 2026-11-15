@@ -32,7 +32,7 @@ describe('db/migrations', () => {
     const { migrations } = loadMigrations(MIGRATIONS_DIR);
     const rows = baselineRows(migrations);
     expect(rows.length).toBeGreaterThan(40);
-    expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
+    expect(new Set(rows.map((r: { id: string }) => r.id)).size).toBe(rows.length);
     expect(plan(migrations, rows).pending.every((m) => m.version > BASELINE_VERSION)).toBe(true);
     expect(BASELINE_VERSION).toMatch(/^\d{14}$/);
   });
@@ -164,6 +164,6 @@ describe('plan', () => {
 describe('baselineRows', () => {
   it('incluye solo hasta la versión del baseline', () => {
     const rows = baselineRows([mig('20260101000001'), mig('20260101000002'), mig('20260101000003')], '20260101000002');
-    expect(rows.map((r) => r.version)).toEqual(['20260101000001', '20260101000002']);
+    expect(rows.map((r: { version: string }) => r.version)).toEqual(['20260101000001', '20260101000002']);
   });
 });
