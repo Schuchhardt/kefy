@@ -185,6 +185,24 @@ describe('reglas', () => {
   });
 });
 
+describe('ejecución a mano antes del hueco', () => {
+  it('consume el hueco futuro: next_run_at avanza y el cron no vuelve a publicar para él', async () => {
+    const rule = await createAutopilotRule(ctx(), RULE);
+    const slot = rule.next_run_at!;
+    expect(new Date(slot).getTime()).toBeGreaterThan(Date.now());
+
+    await runAutopilotNow(ctx(), [rule.id], 'test');
+    const after = db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!;
+    // Semanal: el siguiente hueco es una semana después del que se acaba de usar.
+    expect(new Date(after.next_run_at as string).getTime() - new Date(slot).getTime())
+      .toBe(7 * 24 * 60 * 60 * 1000);
+
+    // Llegado el hueco, el cron ya no la encuentra vencida.
+    const cron = await runScheduledAutopilot(null, new Date(new Date(slot).getTime() + 60_000));
+    expect(cron.results.filter((r) => r.rule_id === rule.id)).toHaveLength(0);
+  });
+});
+
 describe('formato de cada ejecución', () => {
   it('la etiqueta del tema decide el formato y el tamaño', () => {
     expect(parseAutopilotTopic('[REEL 30s] El primer frame')).toEqual({ format: 'reel', topic: 'El primer frame', sceneCount: 6 });
