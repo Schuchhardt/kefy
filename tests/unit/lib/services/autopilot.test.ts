@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createFakeDb } from '../../helpers/fake-db';
 import {
-  creditsSpent, refundCount, resetQuotaState, resetSubscriptionState,
+  creditsSpent, quotaState, refundCount, resetQuotaState, resetSubscriptionState,
 } from '../../helpers/quota';
 import { IDS, AUTH, seedWorkspace, apiCtx } from '../../helpers/assistant';
 
@@ -182,6 +182,24 @@ describe('reglas', () => {
     await updateAutopilotRule(ctx(), rule.id, { status: 'paused' });
     const resumed = await updateAutopilotRule(ctx(), rule.id, { status: 'active' });
     expect(new Date(resumed.next_run_at!).getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe('ejecución a mano antes del hueco', () => {
+  it('consume el hueco futuro: next_run_at avanza y el cron no vuelve a publicar para él', async () => {
+    const rule = await createAutopilotRule(ctx(), RULE);
+    const slot = rule.next_run_at!;
+    expect(new Date(slot).getTime()).toBeGreaterThan(Date.now());
+
+    await runAutopilotNow(ctx(), [rule.id], 'test');
+    const after = db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!;
+    // Semanal: el siguiente hueco es una semana después del que se acaba de usar.
+    expect(new Date(after.next_run_at as string).getTime() - new Date(slot).getTime())
+      .toBe(7 * 24 * 60 * 60 * 1000);
+
+    // Llegado el hueco, el cron ya no la encuentra vencida.
+    const cron = await runScheduledAutopilot(null, new Date(new Date(slot).getTime() + 60_000));
+    expect(cron.results.filter((r) => r.rule_id === rule.id)).toHaveLength(0);
   });
 });
 
@@ -414,6 +432,21 @@ describe('cron', () => {
       status: 'paused', paused_reason: 'credits_exhausted',
     });
     expect(sendAutopilotAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paused_credits', ruleId: rule.id }));
+  });
+
+  it('un fallo de la base al cobrar la imagen de una story no pausa la regla como «sin créditos»', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, format: 'story' });
+    makeDue(rule.id);
+    // El texto se cobra y se genera; justo después la base deja de responder.
+    vi.mocked(generateContentText).mockImplementationOnce(async () => {
+      quotaState.dbError = true;
+      return { body: 'Story', hashtags: [], model: 'x', tokensUsed: 1 };
+    });
+
+    const summary = await runScheduledAutopilot(null);
+    expect(summary).toMatchObject({ executed: 0, failed: 1 });
+    expect(db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)).toMatchObject({ status: 'active' });
+    expect(sendAutopilotAlert).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'paused_credits' }));
   });
 
   it('sin cuentas activas no genera nada: se pausa y avisa en vez de fallar en cada hueco', async () => {
