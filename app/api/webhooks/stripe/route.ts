@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import stripe from '@/lib/stripe';
 import { createSupabaseServer } from '@/lib/supabase';
+import { reportError } from '@/lib/observability';
 import type Stripe from 'stripe';
 import type { BillingPlan } from '@/types/billing';
 
@@ -36,6 +37,15 @@ function planFromSubscription(subscription: Stripe.Subscription): BillingPlan {
   return planFromMetadata(subscription.metadata);
 }
 
+/**
+ * Un fallo de la base no puede tragarse: si el webhook responde 200, Stripe
+ * no reintenta y la organización se queda sin su pago registrado (bloqueada
+ * con el trial vencido aunque pague, o con el plan anterior).
+ */
+function throwOnDbError(res: { error: { message: string } | null }, step: string): void {
+  if (res.error) throw new Error(`${step}: ${res.error.message}`);
+}
+
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   // This Stripe account is shared with other products (e.g. Depando) whose
   // events can land on this same endpoint — only touch sessions Kefy created.
@@ -57,14 +67,14 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   // Persist customer ID on org
   if (customerId) {
-    await db
+    throwOnDbError(await db
       .from('kefy_organizations')
       .update({ stripe_customer_id: customerId, plan })
-      .eq('id', orgId);
+      .eq('id', orgId), 'kefy_organizations');
   }
 
   // Upsert subscription record
-  await db
+  throwOnDbError(await db
     .from('kefy_subscriptions')
     .upsert(
       {
@@ -74,7 +84,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         status: 'active',
       },
       { onConflict: 'org_id' },
-    );
+    ), 'kefy_subscriptions');
 }
 
 async function handleSubscriptionChange(subscription: Stripe.Subscription) {
@@ -118,7 +128,7 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
   // basta con reactivar el pago para que todo vuelva (ver lib/subscription.ts).
   const db = createSupabaseServer();
 
-  await db
+  throwOnDbError(await db
     .from('kefy_subscriptions')
     .upsert(
       {
@@ -130,12 +140,12 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
         current_period_end:     periodEnd,
       },
       { onConflict: 'org_id' },
-    );
+    ), 'kefy_subscriptions');
 
-  await db
+  throwOnDbError(await db
     .from('kefy_organizations')
     .update({ plan })
-    .eq('id', orgId);
+    .eq('id', orgId), 'kefy_organizations');
 }
 
 export async function POST(req: NextRequest) {
@@ -172,10 +182,10 @@ export async function POST(req: NextRequest) {
         break;
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Webhook handler error';
-    console.error('[stripe webhook] handler error:', msg, 'event:', event.type);
-    // Return 200 to prevent Stripe from retrying non-critical errors
-    return NextResponse.json({ received: true, warning: msg });
+    reportError(err, { route: 'POST /api/webhooks/stripe', service: 'supabase', extra: { event: event.type } });
+    // 500 para que Stripe reintente: los handlers son idempotentes (upsert por
+    // org_id), así que repetir el evento no duplica nada.
+    return NextResponse.json({ error: 'Webhook handler error' }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

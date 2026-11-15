@@ -64,3 +64,24 @@ describe('POST /api/webhooks/stripe — plan de la suscripción', () => {
     expect(db.rows('kefy_organizations')[0].plan).toBe('pro');
   });
 });
+
+describe('POST /api/webhooks/stripe — fallos de la base', () => {
+  beforeEach(() => {
+    db.reset();
+    db.seed('kefy_organizations', [{ id: 'o1', plan: 'starter', stripe_customer_id: 'cus_1' }]);
+    db.seed('kefy_subscriptions', [{ id: 's1', org_id: 'o1', stripe_subscription_id: 'sub_1', plan: 'starter', status: 'trialing' }]);
+  });
+
+  it('responde 500 para que Stripe reintente si no se pudo guardar la suscripción', async () => {
+    db.failNext('kefy_subscriptions', 'upsert');
+    const evt = subscriptionEvent('customer.subscription.updated', {
+      id: 'sub_1', price: 'price_pro', plan: 'pro', status: 'active',
+    });
+    expect((await send(evt)).status).toBe(500);
+    expect(db.rows('kefy_subscriptions')[0].status).toBe('trialing');
+
+    // El reintento de Stripe sí lo guarda.
+    expect((await send(evt)).status).toBe(200);
+    expect(db.rows('kefy_subscriptions')[0]).toMatchObject({ status: 'active', plan: 'pro' });
+  });
+});
