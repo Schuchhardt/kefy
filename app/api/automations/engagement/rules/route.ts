@@ -29,6 +29,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // Las reglas responden en público desde las cuentas de la marca: igual que
+  // /rules/bulk, autopilot y la herramienta save_engagement_rule, solo owner/admin.
+  if (auth.role !== 'owner' && auth.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   let body: unknown;
   try { body = await req.json(); } catch {
