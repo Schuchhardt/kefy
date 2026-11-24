@@ -1,4 +1,6 @@
 import Image from 'next/image';
+import { nichesCopy } from '@/lib/content';
+import { NICHE_IDS, nichePath } from '@/lib/niches';
 import type { KefyCopy } from '@/types/locales';
 
 interface Props {
@@ -18,6 +20,7 @@ function footerHref(lang: string, href: string): string {
 }
 
 export default function Footer({ copy, lang }: Props) {
+  const niches = nichesCopy(lang);
   return (
     <footer className="footer">
       <div className="container">
@@ -42,6 +45,18 @@ export default function Footer({ copy, lang }: Props) {
               </ul>
             </nav>
           ))}
+
+          {/* Landings por rubro (lib/niches.ts): enlaces internos en todo el sitio. */}
+          <nav className="footer-col footer-col--niches" aria-label={niches.index.footer}>
+            <h4>{niches.index.footer}</h4>
+            <ul>
+              {NICHE_IDS.map((id) => (
+                <li key={id}>
+                  <a href={nichePath(id, lang)}>{niches.niches[id].name}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
 
         <div className="footer-bottom">

@@ -1,16 +1,14 @@
 import type { Metadata } from 'next';
-import { KEFY_COPY } from '@/lib/content';
+import { KEFY_COPY, nichesCopy } from '@/lib/content';
 import { SignupProvider } from '@/components/ui/SignupContext';
 import { PLAN_ORDER, PLAN_PRICES_USD, TRIAL_DAYS } from '@/lib/plans';
 import { pricingPath } from '@/lib/localized-paths';
 import { shareMetadata } from '@/lib/share-metadata';
 import Nav from '@/components/landing/Nav';
 import Hero from '@/components/landing/Hero';
-import ProblemSection from '@/components/landing/ProblemSection';
 import HowSection from '@/components/landing/HowSection';
-import BrandSection from '@/components/landing/BrandSection';
-import AutopilotSection from '@/components/landing/AutopilotSection';
-import PricingSimple from '@/components/landing/PricingSimple';
+import OffersSection from '@/components/landing/OffersSection';
+import NicheGrid from '@/components/landing/NicheGrid';
 import Testimonials from '@/components/landing/Testimonials';
 import FinalCTA from '@/components/landing/FinalCTA';
 import Footer from '@/components/landing/Footer';
@@ -36,11 +34,15 @@ export async function generateMetadata({
   };
 }
 
-// Ocho secciones (antes catorce, ~16.000px de alto en móvil): demo → problema
-// → cómo funciona → marca → piloto automático → redes y prueba → precios →
-// CTA final. Fuera quedaron «Sin/Con Kefy», la banda de banderas, «¿Para
-// quién?» y «Métricas/ads» (prometía anuncios con un clic, que no tienen UI).
-// Ver docs/auditoria-ux.md, Sprint 2.
+// Seis secciones: demo → cómo funciona → las dos ofertas (plataforma o «lo
+// hacemos nosotros») → rubros → redes y prueba → CTA final.
+//
+// Antes eran ocho (problema, marca, piloto automático y precios resumidos):
+// la marca y el piloto automático caben en los tres pasos de «Cómo funciona»,
+// el problema se cuenta mejor por rubro (cada landing de rubro trae el suyo) y
+// los planes viven en /precios. Lo que faltaba era el servicio gestionado, que
+// es lo que venden los correos SDR. Ver docs/landings-por-rubro.md y, para la
+// reducción anterior (de catorce a ocho), docs/auditoria-ux.md, Sprint 2.
 
 export default async function LandingPage({
   params,
@@ -49,6 +51,7 @@ export default async function LandingPage({
 }) {
   const { lang } = await params;
   const copy = KEFY_COPY[lang] ?? KEFY_COPY['es'];
+  const niches = nichesCopy(lang);
   const isEs = lang !== 'en';
 
   // Datos estructurados con el precio real. Antes declaraban `price: '0'` y
@@ -128,15 +131,20 @@ export default async function LandingPage({
 
         <main>
           <Hero lang={lang} copy={copy.hero} cta={copy.cta} demoCopy={copy.demo} />
-          <ProblemSection copy={copy.problem} />
           <HowSection copy={copy.how} />
-          <BrandSection copy={copy.brand} />
-          <AutopilotSection copy={copy.autopilot} />
-          <Testimonials copy={copy.testi} channels={copy.channels} />
 
           <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(198,255,75,0.08) 0%, transparent 60%), #08080A' }}>
-            <PricingSimple copy={copy.pricing} cta={copy.cta} lang={lang} />
+            <OffersSection
+              copy={niches}
+              variant="platform-first"
+              whatsapp={niches.offers.whatsapp}
+              lang={lang}
+              more={{ href: pricingPath(lang), label: copy.pricing.compareAll }}
+            />
           </div>
+
+          <NicheGrid copy={niches} lang={lang} />
+          <Testimonials copy={copy.testi} channels={copy.channels} />
 
           <div style={{ position: 'relative', background: 'radial-gradient(ellipse at top, rgba(198,255,75,0.09) 0%, rgba(255,140,66,0.06) 40%, transparent 70%), #08080A' }}>
             <FinalCTA copy={copy.final} cta={copy.cta} />

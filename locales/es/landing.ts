@@ -12,6 +12,7 @@ const es: KefyCopy = {
     ariaLabel: 'Principal',
     links: [
       { id: 'how', label: 'Cómo funciona' },
+      { id: 'niches', label: 'Rubros' },
       { id: 'pricing', label: 'Precios', path: '/precios' },
       { id: 'blog', label: 'Blog', path: '/blog' },
     ],
@@ -28,8 +29,8 @@ const es: KefyCopy = {
   hero: {
     tag: 'Para negocios sin equipo de marketing',
     h1: ['Tus redes, activas todos los días.'],
-    h1em: 'Kefy crea las publicaciones. Tú las apruebas en un toque.',
-    sub: 'Pega tu web y Kefy aprende tu marca: crea posts, carruseles, reels y stories con tus colores y tu tono, y los publica en tus redes. Revisas cada uno antes de que salga, o activas el piloto automático.',
+    h1em: 'Kefy crea las publicaciones. Tú las apruebas.',
+    sub: 'Pega tu web y Kefy aprende tu marca: crea posts, carruseles, reels y stories, y los publica en tus redes. Y si prefieres no tocarlo, lo hacemos nosotros.',
     emailPlaceholder: 'tu@correo.com',
     emailLabel: 'Tu email',
   },
@@ -87,75 +88,15 @@ const es: KefyCopy = {
     linkSentTime: 'Hoy · 18:03',
     linkSentVia: 'Por DM, con una respuesta automática',
   },
-  problem: {
-    tag: 'El problema',
-    h2: 'Hoy probablemente pasa esto:',
-    pains: [
-      { num: '01', t: 'Publicas cuando te acuerdas.' },
-      { num: '02', t: 'Pasan semanas sin subir nada.' },
-      { num: '03', t: 'No sabes qué publicar.' },
-      { num: '04', t: 'No tienes tiempo para crear contenido.' },
-      { num: '05', t: 'Contratar a alguien es caro.' },
-    ],
-    result: 'Mientras tanto, tus clientes ven un negocio que parece abandonado.',
-  },
   how: {
     tag: 'Cómo funciona',
     h2: 'Tres pasos. Tú solo apruebas.',
     steps: [
-      { n: '01', ic: 'brand', t: 'Aprende tu marca', d: 'Pega tu web o cuenta en una frase a qué te dedicas. Kefy toma tus colores, tu tono y lo que vendes.' },
-      { n: '02', ic: 'content', t: 'Crea y tú apruebas', d: 'Posts, carruseles, reels y stories para cada red. Los revisas y apruebas en un toque, o activas el piloto automático.' },
-      { n: '03', ic: 'inbox', t: 'Publica y responde', d: 'Sale a la hora que elijas. Comentarios y mensajes llegan a un solo inbox, y ves quién quiere comprarte.' },
+      { n: '01', ic: 'brand', t: 'Aprende tu marca', d: 'Pega tu web o describe tu negocio en una frase. Kefy toma tus colores, tu tono y lo que vendes.' },
+      { n: '02', ic: 'content', t: 'Crea y tú apruebas', d: 'Posts, carruseles, reels y stories para cada red. Apruebas en un toque o activas el piloto automático.' },
+      { n: '03', ic: 'inbox', t: 'Publica y responde', d: 'Sale a la hora que elijas. Comentarios y mensajes llegan a un solo inbox, con respuestas automáticas.' },
     ],
     closer: ['Del post', 'al cliente', 'que compra.'],
-  },
-  brand: {
-    tag: 'Tu identidad visual',
-    h2: ['Tu estilo aplicado', 'a cada publicación', 'que sale al mundo.'],
-    sub: 'Colores, tipografías, logo y tono se detectan desde tu web y se aplican a todo lo que creas.',
-    bullets: [
-      { ic: '🎨', t: 'Colores, tipografías, logo y tono en un solo perfil de tu negocio' },
-      { ic: '🎯', t: 'Tu cliente ideal y tu sector se tienen en cuenta en cada publicación' },
-      { ic: '✨', t: 'Sugerencias con IA para describir tu estilo de comunicación' },
-      { ic: '🌐', t: 'Detecta tu marca desde tu sitio web' },
-    ],
-    kit: {
-      title: 'Brand Kit',
-      status: 'activo',
-      brandName: 'HiClothes',
-      palette: 'Paleta',
-      type: 'Tipografía',
-      logo: 'Logo',
-      tone: 'Tono',
-      toneV: 'Cercano · directo · sin tecnicismos',
-      typeV: 'Syne · DM Sans',
-      applied: 'Aplicado en',
-      formats: ['post', 'carrusel', 'story'],
-    },
-  },
-  autopilot: {
-    tag: 'Piloto automático',
-    h2: ['Actívalo y olvídate.', 'Publica por ti.'],
-    sub: 'Elige temas, redes, días y horas. Cada publicación se crea con tu marca y sale sola. Si prefieres revisar, vuelve al modo manual cuando quieras.',
-    bullets: [
-      { ic: '🤖', t: 'Crea publicaciones nuevas según tu calendario' },
-      { ic: '📅', t: 'Las publica en los días y horas que elijas' },
-      { ic: '💬', t: 'Responde comentarios y mensajes con tus reglas' },
-    ],
-    closer: 'Tú decides: revisar cada publicación o dejarlo correr solo.',
-    togglePilot: 'Piloto automático',
-    toggleManual: 'Manual',
-    modeLabel: 'Modo de publicación',
-    calendarTitle: 'Calendario de contenido',
-    schedule: [
-      { day: 'Lun', items: [{ ic: '📷', t: 'Post IG · 09:00' }, { ic: '🎬', t: 'Reel TikTok · 19:00' }] },
-      { day: 'Mar', items: [{ ic: 'in', t: 'Post LinkedIn · 08:30' }] },
-      { day: 'Mié', items: [{ ic: '📷', t: 'Carrusel IG · 18:00' }, { ic: 'in', t: 'Post LinkedIn · 11:00' }] },
-      { day: 'Jue', items: [{ ic: '𝕏', t: 'Post X · 14:00' }, { ic: '🎬', t: 'Story IG · 20:00' }] },
-      { day: 'Vie', items: [{ ic: '📷', t: 'Post FB · 10:00' }, { ic: '🎬', t: 'Story IG · 11:00' }] },
-      { day: 'Sáb', items: [{ ic: '🎬', t: 'Reel IG · 12:00' }] },
-      { day: 'Dom', items: [{ ic: '📷', t: 'Post IG · 10:00' }] },
-    ],
   },
   channels: {
     h3: ['Publica en', 'todas tus redes.'],
@@ -164,8 +105,8 @@ const es: KefyCopy = {
   },
   testi: {
     tag: 'Lo que hay hoy',
-    h2: 'Sin promesas: esto es lo que Kefy hace ahora mismo.',
-    sub: 'Todo lo de abajo lo puedes comprobar tú mismo en el primer mes, que es gratis.',
+    h2: 'Esto es lo que Kefy hace hoy.',
+    sub: 'Puedes comprobarlo tú mismo en el primer mes, que es gratis.',
     proof: [
       { k: '11', lbl: 'redes conectables', d: 'Instagram, Facebook, LinkedIn, TikTok, X, YouTube, Threads, Reddit, Pinterest, Google Business y Discord.' },
       { k: '4', lbl: 'formatos que genera', d: 'Post, carrusel, reel y story. El texto, la imagen y el video se crean con IA a partir de tu marca.' },
@@ -255,7 +196,7 @@ const es: KefyCopy = {
   },
   final: {
     tag: 'Empieza hoy',
-    h2: 'Tu negocio trabaja todos los días. Tus redes también deberían hacerlo.',
+    h2: 'Tu negocio trabaja todos los días. Tus redes también deberían.',
     sub: 'Pega tu web y mira tus primeras publicaciones en un minuto.',
   },
   footer: {
@@ -264,7 +205,7 @@ const es: KefyCopy = {
       { h: 'Producto', items: [
         { label: 'Cómo funciona', href: '#how' },
         { label: 'Precios', href: '/precios' },
-        { label: 'Piloto automático', href: '#autopilot' },
+        { label: 'Rubros', href: '#niches' },
       ]},
       { h: 'Empresa', items: [
         { label: 'Sobre Kefy', href: '/sobre-kefy' },

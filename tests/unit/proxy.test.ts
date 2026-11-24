@@ -139,6 +139,40 @@ describe('proxy — sesión por cookie', () => {
   });
 });
 
+describe('proxy — correos SDR a la landing de su rubro', () => {
+  // Los correos enviados antes de las landings por rubro enlazan a la home con
+  // utm_campaign=sdr_<rubro>: tienen que aterrizar en la página de su rubro,
+  // en un solo salto y sin perder los utm (lib/niches.ts).
+  it.each([
+    ['/?utm_source=email&utm_medium=sdr&utm_campaign=sdr_dental&utm_content=t1', '/es/para/clinicas-dentales'],
+    ['/es?utm_campaign=sdr_turismo', '/es/para/alojamientos-turisticos'],
+    ['/es/?utm_campaign=sdr_agencias', '/es/para/agencias-de-marketing'],
+    ['/en?utm_campaign=sdr_fitness', '/en/for/pilates-yoga-and-fitness-studios'],
+  ])('%s → %s', async (path, target) => {
+    const res = await proxy(req(path, { method: 'GET' }));
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get('location')!);
+    expect(location.pathname).toBe(target);
+    expect(location.searchParams.get('utm_campaign')).toBe(new URL(path, 'http://x').searchParams.get('utm_campaign'));
+  });
+
+  it('desde / usa el idioma del navegador', async () => {
+    const res = await proxy(req('/?utm_campaign=sdr_hogar', { method: 'GET', headers: { 'accept-language': 'en-US,en;q=0.9' } }));
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/en/for/home-improvement');
+  });
+
+  it('otras campañas siguen el camino de siempre', async () => {
+    const res = await proxy(req('/?utm_campaign=newsletter', { method: 'GET' }));
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/es');
+    expect(passedThrough(await proxy(req('/es?utm_campaign=sdr_desconocido', { method: 'GET' })))).toBe(true);
+  });
+
+  it('solo desde la home: otra página con la campaña no se redirige', async () => {
+    const res = await proxy(req('/es/precios?utm_campaign=sdr_dental', { method: 'GET' }));
+    expect(passedThrough(res)).toBe(true);
+  });
+});
+
 describe('proxy — crons de Vercel', () => {
   // Vercel Cron llama sin cookie, con `Authorization: Bearer ${CRON_SECRET}`.
   // Si la ruta no está en la lista pública, el proxy responde 401 y el cron no

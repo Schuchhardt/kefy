@@ -46,6 +46,14 @@ export const PLAN_PRICES_USD: Record<BillingPlan, number> = {
   business: 199,
 };
 
+/**
+ * Precio mensual del servicio gestionado («lo hacemos nosotros»): el equipo de
+ * Kefy publica, lleva los anuncios y responde los mensajes del cliente. No es
+ * un plan de Stripe: se cobra fuera de la app. Es el que ofrecen los correos
+ * SDR y las landings por rubro (lib/niches.ts).
+ */
+export const MANAGED_SERVICE_PRICE_USD = 200;
+
 export interface PlanLimits {
   brands: number;
   /** Créditos de IA al mes (texto 1, imagen 3, video 10). */

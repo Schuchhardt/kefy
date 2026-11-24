@@ -31,7 +31,7 @@ real con Playwright (Chromium) contra `next dev`, no estimaciones.
 | Métrica | Antes | Objetivo | Ahora |
 |---|---|---|---|
 | Ancho del documento a 390px (landing) | 687px | 390px | **390px** (también 320 y 360: sin desborde) |
-| Alto de la landing en móvil | ~16.000px | <8.000px | **7.862px** (es) · 7.839px (en) |
+| Alto de la landing en móvil | ~16.000px | <8.000px | **7.152px** (es) · 7.146px (en), con 6 secciones desde noviembre (antes 7.862px); las landings por rubro miden 6.500–6.850px |
 | Interacciones hasta el primer post generado | ≥25 | ≤5 | **2** desde la cuenta creada (web o frase + «Crear mis 3 posts»); 8 contando el registro |
 | Elementos interactivos <44px en landing | 31/34 | <5 | **0** |
 | Inputs <16px | 100% | 0 | **0** (landing, auth y las 16 pantallas del dashboard) |
@@ -101,6 +101,14 @@ Lo vigilan: `tests/e2e/mobile-a11y.spec.ts` (sin scroll horizontal a 390 y
   anuncian pero todavía no se hacen cumplir en el API.
 - **La landing es siempre oscura** (está diseñada sobre negro); el dashboard
   sigue la preferencia guardada o la del sistema.
+
+### Noviembre 2026: home en seis secciones y landings por rubro
+
+La home pasó de ocho a seis secciones: fuera «El problema», «Tu identidad
+visual», «Piloto automático» y los precios resumidos (sus componentes y su copy
+se borraron); entran «Dos formas de tener tus redes al día» (plataforma o
+servicio gestionado) y «Hecho para tu rubro». Cada rubro de los correos SDR
+tiene su landing. Ver `docs/landings-por-rubro.md`.
 
 ### Pendiente
 

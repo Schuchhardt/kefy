@@ -8,6 +8,8 @@
 // /es/precios se perdía la página. Con esto va a la misma página en el otro
 // idioma.
 
+import { translateNicheSegments } from '@/lib/niches';
+
 const LOCALIZED_SLUGS: Array<Record<'es' | 'en', string>> = [
   { es: 'precios', en: 'pricing' },
   { es: 'invitacion', en: 'invitation' },
@@ -33,6 +35,10 @@ export function switchLocalePath(pathname: string, targetLang: 'es' | 'en', suff
   // segments[0] es '' (la ruta empieza por '/'), segments[1] el idioma.
   if (segments.length < 2 || !segments[1]) return `/${targetLang}${suffix}`;
   segments[1] = targetLang;
+  // Páginas por rubro: se traducen el segmento y el slug
+  // (/es/para/clinicas-dentales ↔ /en/for/dental-clinics).
+  const niche = translateNicheSegments(segments.slice(2), targetLang);
+  if (niche) return `${[...segments.slice(0, 2), ...niche].join('/')}${suffix}`;
   if (segments[2]) {
     const entry = LOCALIZED_SLUGS.find((s) => s.es === segments[2] || s.en === segments[2]);
     if (entry) segments[2] = entry[targetLang];
