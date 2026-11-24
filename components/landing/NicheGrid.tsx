@@ -1,6 +1,7 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import Icon from '@/components/ui/icons';
-import { NICHE_IDS, nichePath } from '@/lib/niches';
+import { NICHE_IDS, nicheImage, nichePath } from '@/lib/niches';
 import type { NichesCopy } from '@/locales/es/niches';
 
 /** «Hecho para tu rubro»: una tarjeta por landing de rubro (home). */
@@ -17,6 +18,10 @@ export default function NicheGrid({ copy, lang }: { copy: NichesCopy; lang: stri
           {NICHE_IDS.map((id) => (
             <li key={id}>
               <Link href={nichePath(id, lang)} className="niche-card">
+                {/* Decorativa: el nombre del rubro ya está en el texto. */}
+                <span className="niche-card-media">
+                  <Image src={nicheImage(id).hero} alt="" fill sizes="(max-width: 640px) 72px, 300px" />
+                </span>
                 <span className="niche-card-name">
                   {copy.niches[id].name}
                   <Icon name="arrow-right" size={16} className="niche-card-arrow" />

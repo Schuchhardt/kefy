@@ -7,7 +7,7 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { nichesCopy } from '@/lib/content';
-import { NICHE_IDS, NICHE_SEGMENT, NICHE_SLUGS, nichePath, nicheFromSlug } from '@/lib/niches';
+import { NICHE_IDS, NICHE_SEGMENT, NICHE_SLUGS, nicheImage, nichePath, nicheFromSlug } from '@/lib/niches';
 import { SITE_URL, shareMetadata } from '@/lib/share-metadata';
 import type { Locale } from '@/types/i18n';
 import NicheLanding from './NicheLanding';
@@ -22,7 +22,8 @@ export function nicheStaticParams(lang: Locale): NicheRouteParams[] {
 export function nicheMetadata({ lang, niche }: NicheRouteParams): Metadata {
   const id = nicheFromSlug(niche);
   if (!id) return {};
-  const { title, description } = nichesCopy(lang).niches[id].meta;
+  const copy = nichesCopy(lang).niches[id];
+  const { title, description } = copy.meta;
   const path = nichePath(id, lang);
   return {
     title,
@@ -35,7 +36,8 @@ export function nicheMetadata({ lang, niche }: NicheRouteParams): Metadata {
         'x-default': `${SITE_URL}${nichePath(id, 'es')}`,
       },
     },
-    ...shareMetadata(lang, { title, description, path }),
+    // Al compartir el enlace (WhatsApp, redes) se ve la foto del rubro.
+    ...shareMetadata(lang, { title, description, path, image: { url: nicheImage(id).og, alt: copy.image.alt } }),
   };
 }
 

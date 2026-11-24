@@ -31,7 +31,7 @@ real con Playwright (Chromium) contra `next dev`, no estimaciones.
 | Métrica | Antes | Objetivo | Ahora |
 |---|---|---|---|
 | Ancho del documento a 390px (landing) | 687px | 390px | **390px** (también 320 y 360: sin desborde) |
-| Alto de la landing en móvil | ~16.000px | <8.000px | **7.152px** (es) · 7.146px (en), con 6 secciones desde noviembre (antes 7.862px); las landings por rubro miden 6.500–6.850px |
+| Alto de la landing en móvil | ~16.000px | <8.000px | **7.348px** (es), con 6 secciones y las miniaturas de los rubros desde noviembre (antes 7.862px); las landings por rubro miden 6.800–7.150px |
 | Interacciones hasta el primer post generado | ≥25 | ≤5 | **2** desde la cuenta creada (web o frase + «Crear mis 3 posts»); 8 contando el registro |
 | Elementos interactivos <44px en landing | 31/34 | <5 | **0** |
 | Inputs <16px | 100% | 0 | **0** (landing, auth y las 16 pantallas del dashboard) |

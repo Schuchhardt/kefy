@@ -30,12 +30,26 @@ export function ogImageUrl(lang: string): string {
 
 export function shareMetadata(
   lang: string,
-  { title, description, path }: { title?: string; description?: string; path?: string } = {},
+  { title, description, path, image: customImage }: {
+    title?: string;
+    description?: string;
+    path?: string;
+    /** Imagen propia de 1200×630 (ruta del sitio o URL absoluta), p. ej. la de un rubro. */
+    image?: { url: string; alt: string; type?: string };
+  } = {},
 ): Pick<Metadata, 'openGraph' | 'twitter'> {
   const c = common(lang);
   const t = title ?? c.title;
   const d = description ?? c.description;
-  const image = { url: ogImageUrl(lang), width: 1200, height: 630, alt: c.title, type: 'image/png' };
+  const image = customImage
+    ? {
+      url: customImage.url.startsWith('http') ? customImage.url : `${SITE_URL}${customImage.url}`,
+      width: 1200,
+      height: 630,
+      alt: customImage.alt,
+      type: customImage.type ?? 'image/jpeg',
+    }
+    : { url: ogImageUrl(lang), width: 1200, height: 630, alt: c.title, type: 'image/png' };
 
   return {
     openGraph: {

@@ -89,6 +89,7 @@ const niches = {
       em: 'And every enquiry answered, at night too.',
       sub: 'We post your treatments and promotions, run the ads that lead to your booking page and answer anyone asking about prices, payment plans or the first check-up. You look after patients.',
     },
+    image: { alt: 'A dental clinic reception at night, with a phone receiving a message' },
     pains: {
       h2: 'What we see in many clinics',
       items: [
@@ -137,6 +138,7 @@ const niches = {
       em: 'And every price question answered.',
       sub: 'We post your treatments and seasonal campaigns, run the ads and answer anyone asking about prices or payment plans, so they arrive at the consultation already informed.',
     },
+    image: { alt: 'An aesthetic clinic treatment room and a phone showing treatment posts' },
     pains: {
       h2: 'What we see in many clinics',
       items: [
@@ -185,6 +187,7 @@ const niches = {
       em: 'And every question about the trial class answered.',
       sub: 'We post your classes, workshops and promotions, run the ads and answer anyone who wants to try. You focus on your students.',
     },
+    image: { alt: 'An instructor adjusting a reformer in a pilates studio' },
     pains: {
       h2: 'What we see in many studios',
       items: [
@@ -233,6 +236,7 @@ const niches = {
       em: 'And make sure every enquiry gets an answer.',
       sub: 'We post your courses with their dates and spots, run the enrolment ads and answer anyone asking about prices, schedules or locations.',
     },
+    image: { alt: 'A class at an institute, with a teacher and a group of students' },
     pains: {
       h2: 'What we see in many schools',
       items: [
@@ -281,6 +285,7 @@ const niches = {
       em: 'No commission in between.',
       sub: 'We show your place in every season, run the ads and answer anyone asking about dates, with the link to your booking engine or your WhatsApp.',
     },
+    image: { alt: 'A cabin by a lake in southern Chile, with a wood-fired hot tub on the deck' },
     pains: {
       h2: 'What we see in many properties',
       items: [
@@ -329,6 +334,7 @@ const niches = {
       em: 'And every quote request with what you need to know.',
       sub: 'We post your projects with the photos you already have, run the ads and answer every enquiry asking for location, measurements and project type. You only get people who want the site visit.',
     },
+    image: { alt: 'An installer photographs a newly finished terrace enclosure with his phone' },
     pains: {
       h2: 'What we see in many companies',
       items: [
@@ -377,6 +383,7 @@ const niches = {
       em: 'Kefy drafts the pieces; your team edits and schedules them.',
       sub: 'Each client becomes a brand with its colors, tone and strategy. The month’s calendar comes out of it, and your designer adjusts instead of starting from scratch.',
     },
+    image: { alt: 'Two agency designers reviewing posts for several brands on a monitor' },
     pains: {
       h2: 'What we see in many agencies',
       items: [

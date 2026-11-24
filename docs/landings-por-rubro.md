@@ -55,6 +55,13 @@ El número de WhatsApp es el de la firma de los correos. Se cambia con
   lo que pasa hoy → qué hacemos → ideas de publicaciones → precios → FAQ →
   CTA final. Sin vídeo ni demo animada: se llega desde el móvil. Lleva JSON-LD
   (`BreadcrumbList`, `Service` u `SoftwareApplication`, `FAQPage`).
+- **Imágenes**: una por rubro, generada con Higgsfield (`gpt_image_2_6`, 4:5,
+  calidad alta, 2k; 2 créditos cada una). Fotos ilustrativas, sin texto ni
+  logos: no son clientes ni casos. `scripts/optimize-niche-images.mjs` deja en
+  `public/landing/niches/` el `<id>.webp` (1200×1500, hero y tarjeta de la
+  home) y el `<id>-og.jpg` (1200×630, al compartir el enlace). Los originales
+  PNG no se suben. El texto alternativo está en `niches.<id>.image.alt`; si
+  cambias la imagen, revisa que siga describiéndola.
 - **Correos ya enviados**: `proxy.ts` redirige la home con
   `utm_campaign=sdr_<rubro>` a la página del rubro, en un salto y con los utm
   (`nicheRedirectPath`). Solo desde `/`, `/es` y `/en`.
@@ -82,14 +89,17 @@ El número de WhatsApp es el de la firma de los correos. Se cambia con
    oferta en `lib/niches.ts`.
 2. Añadir su copy en `locales/es/niches.ts` y `locales/en/niches.ts` (el tipo
    `Record<NicheId, NicheCopy>` obliga): 3 dolores, 3 «qué hacemos», 6 ideas,
-   2 preguntas propias, mensaje de WhatsApp.
-3. Enlazar los correos nuevos de ese rubro directo a su página.
-4. `npx vitest run tests/unit/lib/niches.test.ts tests/unit/locales tests/unit/proxy.test.ts`.
+   2 preguntas propias, mensaje de WhatsApp y texto alternativo de la imagen.
+3. Generar su imagen (mismo estilo: foto editorial, tonos bajos que encajen en
+   la landing oscura, un acento verde lima, sin texto ni logos) y pasarla por
+   `node scripts/optimize-niche-images.mjs <carpeta>`.
+4. Enlazar los correos nuevos de ese rubro directo a su página.
+5. `npx vitest run tests/unit/lib/niches.test.ts tests/unit/locales tests/unit/proxy.test.ts`.
 
 ## Tests
 
 - `tests/unit/lib/niches.test.ts`: rutas, campañas, selector de idioma,
-  WhatsApp, copy completa, largo de título y descripción, promesas prohibidas,
+  imágenes en `public/`, WhatsApp, copy completa, largo de título y descripción, promesas prohibidas,
   precios y números de agencias.
 - `tests/unit/proxy.test.ts`: redirección de los correos.
 - `tests/e2e/mobile-a11y.spec.ts`: sin scroll horizontal a 390 y 320px y axe

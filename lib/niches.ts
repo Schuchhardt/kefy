@@ -55,6 +55,16 @@ export const NICHE_SLUGS: Record<NicheId, Record<Locale, string>> = {
   agencias: { es: 'agencias-de-marketing', en: 'marketing-agencies' },
 };
 
+/**
+ * Imágenes de cada rubro (generadas con Higgsfield, ilustrativas: no son
+ * clientes). `hero` es 4:5 para la página y las tarjetas de la home; `og`,
+ * 1200×630 para cuando se comparte el enlace. Las genera y optimiza
+ * scripts/optimize-niche-images.mjs a partir de los originales.
+ */
+export function nicheImage(id: NicheId): { hero: string; og: string; width: number; height: number } {
+  return { hero: `/landing/niches/${id}.webp`, og: `/landing/niches/${id}-og.jpg`, width: 1200, height: 1500 };
+}
+
 export function isNicheId(value: unknown): value is NicheId {
   return typeof value === 'string' && (NICHE_IDS as readonly string[]).includes(value);
 }

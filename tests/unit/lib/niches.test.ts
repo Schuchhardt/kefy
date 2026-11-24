@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import {
-  NICHE_IDS, NICHE_OFFER, NICHE_SLUGS, nicheFromCampaign, nicheFromSlug, nichePath, nicheRedirectPath,
+  NICHE_IDS, NICHE_OFFER, NICHE_SLUGS, nicheFromCampaign, nicheFromSlug, nicheImage, nichePath, nicheRedirectPath,
 } from '@/lib/niches';
 import { switchLocalePath } from '@/lib/localized-paths';
 import { MANAGED_SERVICE_PRICE_USD, PLAN_LIMITS, PLAN_PRICES_USD } from '@/lib/plans';
@@ -54,6 +56,16 @@ describe('lib/niches: rutas', () => {
     expect(nicheRedirectPath('/es', null, 'es')).toBeNull();
   });
 
+  // Las imágenes las deja scripts/optimize-niche-images.mjs en public/. Un
+  // rubro nuevo sin imagen rompería el hero y la tarjeta de la home.
+  it('cada rubro tiene su imagen y su imagen para compartir', () => {
+    for (const id of NICHE_IDS) {
+      const { hero, og } = nicheImage(id);
+      expect(existsSync(join(process.cwd(), 'public', hero)), hero).toBe(true);
+      expect(existsSync(join(process.cwd(), 'public', og)), og).toBe(true);
+    }
+  });
+
   it('el selector de idioma lleva a la misma página de rubro', () => {
     expect(switchLocalePath('/es/para/clinicas-dentales', 'en')).toBe('/en/for/dental-clinics');
     expect(switchLocalePath('/en/for/marketing-agencies', 'es')).toBe('/es/para/agencias-de-marketing');
@@ -87,6 +99,7 @@ describe.each([['es', esNiches, esLanding], ['en', enNiches, enLanding]] as cons
       expect(n.ideas.items, id).toHaveLength(6);
       expect(n.faq.length, id).toBeGreaterThanOrEqual(2);
       expect(n.whatsapp.trim(), id).not.toBe('');
+      expect(n.image.alt.trim(), id).not.toBe('');
     }
   });
 

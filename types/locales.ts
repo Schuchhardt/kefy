@@ -180,6 +180,8 @@ export interface NicheCopy {
   card: string;
   meta: { title: string; description: string };
   hero: { tag: string; h1: string; em: string; sub: string };
+  /** Texto alternativo de la imagen del rubro (lib/niches.ts, `nicheImage`). */
+  image: { alt: string };
   /** Lo que pasa hoy en negocios del rubro (sale de los correos SDR). */
   pains: { h2: string; items: NicheItem[] };
   /** Qué hace Kefy por ellos. */

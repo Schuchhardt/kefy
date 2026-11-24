@@ -1,8 +1,9 @@
+import Image from 'next/image';
 import Icon, { type IconName } from '@/components/ui/icons';
 import { SignupProvider } from '@/components/ui/SignupContext';
 import { KEFY_COPY, nichesCopy } from '@/lib/content';
 import { MANAGED_SERVICE_PRICE_USD, PLAN_PRICES_USD, formatPlanNumber } from '@/lib/plans';
-import { NICHE_OFFER, nichePath, type NicheId } from '@/lib/niches';
+import { NICHE_OFFER, nicheImage, nichePath, type NicheId } from '@/lib/niches';
 import { SITE_URL } from '@/lib/share-metadata';
 import Nav from './Nav';
 import Footer from './Footer';
@@ -57,6 +58,7 @@ export default function NicheLanding({ id, lang }: { id: NicheId; lang: string }
   );
   const note = isService ? copy.ctas.serviceNote(prices[0]) : landing.cta.note;
 
+  const image = nicheImage(id);
   const url = `${SITE_URL}${nichePath(id, lang)}`;
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -118,20 +120,34 @@ export default function NicheLanding({ id, lang }: { id: NicheId; lang: string }
         <main>
           {/* 1. Para quién y qué gana */}
           <section className="niche-hero" aria-labelledby="niche-title">
-            <div className="container">
-              <p className="hero-tag reveal">
-                <span className="dot" aria-hidden="true" />
-                {niche.hero.tag}
-              </p>
-              <h1 id="niche-title" className="h1 niche-h1 reveal">
-                {niche.hero.h1}
-                <br />
-                <em className="em">{niche.hero.em}</em>
-              </h1>
-              <p className="hero-sub reveal">{niche.hero.sub}</p>
-              <div className="reveal">
-                <div className="cta-row">{ctaButtons}</div>
-                <p className="hero-cta-note">{note}</p>
+            <div className="container niche-hero-grid">
+              <div>
+                <p className="hero-tag reveal">
+                  <span className="dot" aria-hidden="true" />
+                  {niche.hero.tag}
+                </p>
+                <h1 id="niche-title" className="h1 niche-h1 reveal">
+                  {niche.hero.h1}
+                  <br />
+                  <em className="em">{niche.hero.em}</em>
+                </h1>
+                <p className="hero-sub reveal">{niche.hero.sub}</p>
+                <div className="reveal">
+                  <div className="cta-row">{ctaButtons}</div>
+                  <p className="hero-cta-note">{note}</p>
+                </div>
+              </div>
+
+              {/* Imagen del rubro (Higgsfield, ilustrativa). En escritorio es el
+                  LCP: se precarga. En móvil va después de los botones. */}
+              <div className="niche-hero-media reveal">
+                <Image
+                  src={image.hero}
+                  alt={niche.image.alt}
+                  fill
+                  priority
+                  sizes="(max-width: 900px) 100vw, 480px"
+                />
               </div>
             </div>
           </section>

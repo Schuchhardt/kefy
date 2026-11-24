@@ -99,6 +99,7 @@ const niches = {
       em: 'Y cada consulta respondida, también de noche.',
       sub: 'Publicamos tus tratamientos y promociones, llevamos los anuncios que llevan a tu agenda y respondemos a quien pregunta por valores, cuotas o la evaluación. Tú atiendes pacientes.',
     },
+    image: { alt: 'Recepción de una clínica dental de noche, con un teléfono que recibe un mensaje' },
     pains: {
       h2: 'Lo que vemos en muchas clínicas',
       items: [
@@ -147,6 +148,7 @@ const niches = {
       em: 'Y cada pregunta por precio, respondida.',
       sub: 'Publicamos tus tratamientos y campañas de temporada, llevamos los anuncios y respondemos a quien pregunta por valores o cuotas, para que llegue a la evaluación ya informada.',
     },
+    image: { alt: 'Sala de tratamiento de una clínica estética y un teléfono con publicaciones de tratamientos' },
     pains: {
       h2: 'Lo que vemos en muchas clínicas',
       items: [
@@ -195,6 +197,7 @@ const niches = {
       em: 'Y cada pregunta por la clase de prueba, respondida.',
       sub: 'Publicamos tus clases, talleres y promociones, llevamos los anuncios y respondemos a quien quiere probar. Tú te dedicas a tus alumnos.',
     },
+    image: { alt: 'Instructora ajustando un reformer en un estudio de pilates' },
     pains: {
       h2: 'Lo que vemos en muchos estudios',
       items: [
@@ -243,6 +246,7 @@ const niches = {
       em: 'Y que cada consulta tenga respuesta.',
       sub: 'Publicamos tus cursos con sus fechas y cupos, llevamos los anuncios para la matrícula y respondemos a quien pregunta por valores, horarios o sedes.',
     },
+    image: { alt: 'Clase en un instituto, con una profesora y un grupo de estudiantes' },
     pains: {
       h2: 'Lo que vemos en muchos institutos',
       items: [
@@ -291,6 +295,7 @@ const niches = {
       em: 'Sin comisión de por medio.',
       sub: 'Mostramos tu lugar en cada temporada, llevamos los anuncios y respondemos a quien pregunta por fechas, con el enlace a tu motor de reservas o a tu WhatsApp.',
     },
+    image: { alt: 'Cabaña junto a un lago en el sur de Chile, con una tinaja en la terraza' },
     pains: {
       h2: 'Lo que vemos en muchos alojamientos',
       items: [
@@ -339,6 +344,7 @@ const niches = {
       em: 'Y cada cotización, con lo que necesitas saber.',
       sub: 'Publicamos tus proyectos con las fotos que ya tienes, llevamos los anuncios y respondemos cada consulta pidiendo comuna, medidas y tipo de proyecto. A ti te llega quien ya quiere la visita.',
     },
+    image: { alt: 'Un instalador fotografía con su teléfono un cierre de terraza recién terminado' },
     pains: {
       h2: 'Lo que vemos en muchas empresas',
       items: [
@@ -387,6 +393,7 @@ const niches = {
       em: 'Kefy arma las piezas; tu equipo las corrige y las programa.',
       sub: 'Cada cliente queda como una marca con sus colores, su tono y su estrategia. El calendario del mes sale armado desde ahí, y tu diseñadora ajusta en vez de partir de cero.',
     },
+    image: { alt: 'Dos diseñadores de una agencia revisan publicaciones de varias marcas en un monitor' },
     pains: {
       h2: 'Lo que vemos en muchas agencias',
       items: [
