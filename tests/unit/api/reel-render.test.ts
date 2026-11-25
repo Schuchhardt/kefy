@@ -188,6 +188,51 @@ describe('POST /api/content/reel/render', () => {
     });
   });
 
+  // El kit es 1:1 con la marca. Leerlo solo por org_id con maybeSingle() da
+  // error con dos o más marcas y el reel salía sin colores, logo ni fuente.
+  it('usa el kit de la marca del contenido aunque la organización tenga varias', async () => {
+    const { POST } = await import('@/app/api/content/reel/render/route');
+    vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);
+    const item = { ...RENDERING_ITEM, brand_id: 'brand-2', metadata: {}, render_status: null };
+    const kits: Record<string, Record<string, unknown>> = {
+      'brand-1': { name: 'Marca Uno', accent_color: '#111111' },
+      'brand-2': { name: 'Marca Dos', accent_color: '#222222', logo_url: 'https://cdn.example.com/dos.png' },
+    };
+    mockSupabaseClient.from.mockImplementation((table: string) => {
+      const filters: Record<string, unknown> = {};
+      const proxy: Record<string, unknown> = new Proxy({}, {
+        get(_t, prop) {
+          if (prop === 'then') {
+            return (onOk: (v: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(onOk);
+          }
+          return (...args: unknown[]) => {
+            if (prop === 'eq') filters[args[0] as string] = args[1];
+            if (prop === 'single' || prop === 'maybeSingle') {
+              if (table === 'kefy_content_items') return Promise.resolve({ data: item, error: null });
+              if (table === 'kefy_brand_kits') {
+                const kit = filters.brand_id ? kits[filters.brand_id as string] : undefined;
+                return Promise.resolve(kit
+                  ? { data: kit, error: null }
+                  : { data: null, error: { message: 'JSON object requested, multiple (or no) rows returned' } });
+              }
+              return Promise.resolve({ data: null, error: null });
+            }
+            return proxy;
+          };
+        },
+      });
+      return proxy;
+    });
+
+    const res = await POST(postReq({ itemId: 'item-1' }));
+
+    expect(res.status).toBe(202);
+    const props = mockRenderMedia.mock.calls[0][0].inputProps;
+    expect(props).toMatchObject({
+      brandName: 'Marca Dos', accentColor: '#222222', logoUrl: 'https://cdn.example.com/dos.png',
+    });
+  });
+
   it('ítem ya renderizado: devuelve el video sin tocar Lambda', async () => {
     const { POST } = await import('@/app/api/content/reel/render/route');
     vi.mocked(getAuthFromRequest).mockResolvedValueOnce(mockAuth as never);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { canManageTeam } from '@/lib/team';
+import { canManageTeam, currentTeamRole } from '@/lib/team';
 import { reportError } from '@/lib/observability';
 
 // ─── DELETE /api/team/members/[userId] ───────────────────────────────────────
@@ -27,6 +27,19 @@ export async function DELETE(
 
   const db = createSupabaseServer();
 
+  // El rol del token puede estar desfasado (a quien sacaron del equipo o le
+  // bajaron el rol conserva su sesión hasta que caduca): se usa el vigente.
+  let rolActual: Awaited<ReturnType<typeof currentTeamRole>>;
+  try {
+    rolActual = await currentTeamRole(db, auth);
+  } catch (err) {
+    reportError(err, { route: 'DELETE /api/team/members/[userId]', auth, service: 'supabase' });
+    return NextResponse.json({ error: 'No se pudo eliminar al miembro' }, { status: 500 });
+  }
+  if (!canManageTeam(rolActual)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   const { data: objetivo } = await db
     .from('kefy_org_memberships')
     .select('role')
@@ -44,7 +57,7 @@ export async function DELETE(
   }
 
   // Un administrador no puede echar a otro administrador; eso lo decide el dueño.
-  if (objetivo.role === 'admin' && auth.role !== 'owner') {
+  if (objetivo.role === 'admin' && rolActual !== 'owner') {
     return NextResponse.json(
       { error: 'Solo el dueño puede eliminar a un administrador' },
       { status: 403 },

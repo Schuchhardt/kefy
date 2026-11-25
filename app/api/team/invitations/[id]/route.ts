@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
 import { getAuthFromRequest } from '@/lib/auth';
-import { canManageTeam } from '@/lib/team';
+import { canManageTeam, currentTeamRole } from '@/lib/team';
 import { reportError } from '@/lib/observability';
 
 // ─── DELETE /api/team/invitations/[id] ───────────────────────────────────────
@@ -19,6 +19,16 @@ export async function DELETE(
 
   const { id } = await params;
   const db = createSupabaseServer();
+
+  // El rol del token puede estar desfasado: se decide con la membresía vigente.
+  try {
+    if (!canManageTeam(await currentTeamRole(db, auth))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+  } catch (err) {
+    reportError(err, { route: 'DELETE /api/team/invitations/[id]', auth, service: 'supabase' });
+    return NextResponse.json({ error: 'No se pudo revocar la invitación' }, { status: 500 });
+  }
 
   // El filtro por org_id es lo que impide revocar invitaciones de otra
   // organización conociendo su id.

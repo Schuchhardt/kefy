@@ -39,8 +39,31 @@ export function memberLimitFor(plan: string): number {
 }
 
 /** Solo el dueño y los administradores gestionan el equipo. */
-export function canManageTeam(role: string): boolean {
+export function canManageTeam(role: string | null | undefined): boolean {
   return role === 'owner' || role === 'admin';
+}
+
+/**
+ * Rol vigente de quien hace la petición, leído de `kefy_org_memberships`.
+ *
+ * El rol del JWT puede tener hasta 24 h de antigüedad: si a alguien lo sacan
+ * del equipo o le bajan el rol, su token sigue diciendo lo de antes. Las rutas
+ * que gestionan el equipo deciden con este valor, no con `auth.role`.
+ * Devuelve `null` si ya no es miembro; lanza si la base falla.
+ */
+export async function currentTeamRole(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  auth: { userId: string; orgId: string },
+): Promise<OrgRole | null> {
+  const { data, error } = await db
+    .from('kefy_org_memberships')
+    .select('role')
+    .eq('org_id', auth.orgId)
+    .eq('user_id', auth.userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data?.role as OrgRole | undefined) ?? null;
 }
 
 export interface NewInvitation {

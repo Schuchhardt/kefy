@@ -128,3 +128,47 @@ describe('GET /api/auth/me', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// ─── Cambio de contraseña ─────────────────────────────────────────────────────
+
+describe('PATCH /api/auth/me — cambio de contraseña', () => {
+  // Antes solo el restablecimiento por correo cerraba las demás sesiones: tras
+  // cambiar la contraseña desde ajustes, un refresh token robado seguía
+  // sirviendo 30 días.
+  it('borra los refresh tokens del usuario y emite uno nuevo para esta sesión', async () => {
+    const bcrypt = (await import('bcryptjs')).default;
+    const hash = await bcrypt.hash('vieja-clave', 4);
+    const deleted: Array<[string, unknown]> = [];
+    const inserted: unknown[] = [];
+
+    mockSupabaseClient.from.mockImplementation((table: string) => {
+      const chain: Record<string, unknown> = {};
+      let op: 'select' | 'update' | 'delete' = 'select';
+      chain.select = vi.fn(() => chain);
+      chain.update = vi.fn(() => { op = 'update'; return chain; });
+      chain.delete = vi.fn(() => { op = 'delete'; return chain; });
+      chain.eq = vi.fn((col: string, val: unknown) => {
+        if (op === 'select') return chain;
+        if (op === 'delete') deleted.push([table, val]);
+        return Promise.resolve({ error: null });
+      });
+      chain.insert = vi.fn((row: unknown) => { inserted.push(row); return Promise.resolve({ error: null }); });
+      chain.maybeSingle = vi.fn().mockResolvedValue({ data: { password_hash: hash }, error: null });
+      return chain;
+    });
+    vi.mocked(getAuthFromRequest).mockResolvedValue(auth() as never);
+    const { PATCH } = await import('@/app/api/auth/me/route');
+
+    const res = await PATCH(new NextRequest('http://localhost:3099/api/auth/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: 'vieja-clave', new_password: 'nueva-clave-123' }),
+    }));
+
+    expect(res.status).toBe(200);
+    expect(deleted).toContainEqual(['kefy_refresh_tokens', 'u1']);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({ user_id: 'u1' });
+    expect(res.cookies.get('kefy_refresh')?.value).toBeTruthy();
+  });
+});

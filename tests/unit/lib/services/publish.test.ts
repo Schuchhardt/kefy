@@ -313,6 +313,32 @@ describe('cancelScheduledPost', () => {
     expect(err.status).toBe(404);
     expect(posts()[0].status).toBe('scheduled');
   });
+
+  // Antes el fallo de Zernio se tragaba: Kefy mostraba «cancelada» y el post
+  // salía igual a su hora.
+  it('si Zernio no cancela, no se marca como cancelada (502)', async () => {
+    seedPost();
+    item().status = 'scheduled';
+    zernio.cancelPost.mockRejectedValueOnce(Object.assign(new Error('Zernio API error 503'), { statusCode: 503 }));
+
+    const err = await cancelScheduledPost(strict, POST).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ServiceError);
+    expect(err.status).toBe(502);
+    expect(posts()[0].status).toBe('scheduled');
+    expect(item().status).toBe('scheduled');
+  });
+
+  it('si Zernio ya no tiene el post (404), se cancela igual en Kefy', async () => {
+    seedPost();
+    item().status = 'scheduled';
+    zernio.cancelPost.mockRejectedValueOnce(Object.assign(new Error('Zernio API error 404'), { statusCode: 404 }));
+
+    const r = await cancelScheduledPost(strict, POST);
+
+    expect(r.itemReverted).toBe(true);
+    expect(posts()[0].status).toBe('cancelled');
+  });
 });
 
 // ─── Editar lo programado ────────────────────────────────────────────────────

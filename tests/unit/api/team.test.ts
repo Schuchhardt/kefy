@@ -23,6 +23,16 @@ const owner  = { userId: 'u-owner', orgId: 'org-1', role: 'owner',  plan: 'busin
 const admin  = { userId: 'u-admin', orgId: 'org-1', role: 'admin',  plan: 'business' };
 const member = { userId: 'u-member', orgId: 'org-1', role: 'member', plan: 'business' };
 
+/**
+ * Rol vigente en `kefy_org_memberships` de quien hace la petición. Por defecto
+ * coincide con el del token; un test puede cambiarlo para simular una sesión
+ * desfasada (alguien a quien sacaron del equipo o bajaron de rol).
+ */
+let rolesVigentes: Record<string, string | null> = {};
+function resetRoles() {
+  rolesVigentes = { 'u-owner': 'owner', 'u-admin': 'admin', 'u-member': 'member' };
+}
+
 function postReq(body: unknown) {
   return new NextRequest('http://localhost:3099/api/team/invitations', {
     method: 'POST',
@@ -55,6 +65,11 @@ function setupInvite(opts: {
     for (const m of ['eq', 'is', 'delete', 'order', 'update', 'insert']) {
       chain[m] = vi.fn(() => chain);
     }
+    let userIdFiltrado: string | null = null;
+    chain.eq = vi.fn((col: string, val: string) => {
+      if (col === 'user_id') userIdFiltrado = val;
+      return chain;
+    });
     chain.select = vi.fn((_cols: string, o?: { head?: boolean }) => {
       if (o?.head) {
         count = table === 'kefy_org_memberships' ? members : pending;
@@ -65,8 +80,12 @@ function setupInvite(opts: {
       Promise.resolve(count === null ? { data: [], error: null } : { count }).then(resolve);
 
     if (table === 'kefy_org_memberships') {
-      chain.maybeSingle = vi.fn().mockResolvedValue({
-        data: alreadyMember ? { user_id: existingUserId } : null,
+      chain.maybeSingle = vi.fn(async () => {
+        if (userIdFiltrado && userIdFiltrado in rolesVigentes) {
+          const role = rolesVigentes[userIdFiltrado];
+          return { data: role ? { role } : null, error: null };
+        }
+        return { data: alreadyMember ? { user_id: existingUserId } : null, error: null };
       });
       chain.insert = vi.fn().mockResolvedValue({ error: null });
     } else if (table === 'kefy_org_invitations') {
@@ -91,6 +110,7 @@ function setupInvite(opts: {
 beforeEach(() => {
   vi.resetAllMocks();
   resetQuotaState();
+  resetRoles();
 });
 
 // ─── Permisos ─────────────────────────────────────────────────────────────────
@@ -117,6 +137,26 @@ describe('POST /api/team/invitations — permisos', () => {
     const { POST } = await import('@/app/api/team/invitations/route');
 
     expect((await POST(postReq({ email: 'nuevo@example.com' }))).status).toBe(201);
+  });
+
+  // El token dura 24 h: sin mirar la membresía, alguien a quien ya sacaron del
+  // equipo podía seguir invitando (incluso a sí mismo, para volver a entrar).
+  it('un administrador al que ya sacaron del equipo no puede invitar', async () => {
+    vi.mocked(getAuthFromRequest).mockResolvedValue(admin as never);
+    rolesVigentes['u-admin'] = null;
+    setupInvite({ members: 1, pending: 0 });
+    const { POST } = await import('@/app/api/team/invitations/route');
+
+    expect((await POST(postReq({ email: 'admin@example.com', role: 'admin' }))).status).toBe(403);
+  });
+
+  it('un administrador al que bajaron a miembro no puede invitar', async () => {
+    vi.mocked(getAuthFromRequest).mockResolvedValue(admin as never);
+    rolesVigentes['u-admin'] = 'member';
+    setupInvite({ members: 1, pending: 0 });
+    const { POST } = await import('@/app/api/team/invitations/route');
+
+    expect((await POST(postReq({ email: 'nuevo@example.com' }))).status).toBe(403);
   });
 });
 
@@ -189,14 +229,23 @@ function deleteReq() {
 function setupMember(role: string | null) {
   mockSupabaseClient.from.mockImplementation(() => {
     const chain: Record<string, unknown> = {};
-    for (const m of ['select', 'eq', 'delete']) chain[m] = vi.fn(() => chain);
-    chain.maybeSingle = vi.fn().mockResolvedValue({ data: role ? { role } : null });
-    // El delete final resuelve al encadenar el segundo .eq()
-    let eqCalls = 0;
-    chain.eq = vi.fn(() => {
-      eqCalls += 1;
-      return eqCalls >= 3 ? Promise.resolve({ error: null }) : chain;
+    let userIdFiltrado: string | null = null;
+    for (const m of ['select', 'delete']) chain[m] = vi.fn(() => chain);
+    chain.eq = vi.fn((col: string, val: string) => {
+      if (col === 'user_id') userIdFiltrado = val;
+      return chain;
     });
+    // Primero se lee el rol vigente de quien pide; después, el del objetivo.
+    chain.maybeSingle = vi.fn(async () => {
+      if (userIdFiltrado && userIdFiltrado in rolesVigentes) {
+        const vigente = rolesVigentes[userIdFiltrado];
+        return { data: vigente ? { role: vigente } : null, error: null };
+      }
+      return { data: role ? { role } : null, error: null };
+    });
+    // El delete final se resuelve al hacer await sobre la cadena.
+    chain.then = (resolve: (v: unknown) => unknown) =>
+      Promise.resolve({ error: null }).then(resolve);
     return chain;
   });
 }
@@ -254,5 +303,58 @@ describe('DELETE /api/team/members/[userId]', () => {
 
     const res = await DELETE(deleteReq(), { params: Promise.resolve({ userId: 'u-ajeno' }) });
     expect(res.status).toBe(404);
+  });
+
+  it('un administrador al que ya sacaron del equipo no puede eliminar a nadie', async () => {
+    vi.mocked(getAuthFromRequest).mockResolvedValue(admin as never);
+    rolesVigentes['u-admin'] = null;
+    setupMember('member');
+    const { DELETE } = await import('@/app/api/team/members/[userId]/route');
+
+    const res = await DELETE(deleteReq(), { params: Promise.resolve({ userId: 'u-otro' }) });
+    expect(res.status).toBe(403);
+  });
+});
+
+// ─── Revocar invitaciones ─────────────────────────────────────────────────────
+
+describe('DELETE /api/team/invitations/[id]', () => {
+  function setupRevoke() {
+    mockSupabaseClient.from.mockImplementation((table: string) => {
+      const chain: Record<string, unknown> = {};
+      let userIdFiltrado: string | null = null;
+      for (const m of ['delete', 'is']) chain[m] = vi.fn(() => chain);
+      chain.eq = vi.fn((col: string, val: string) => {
+        if (col === 'user_id') userIdFiltrado = val;
+        return chain;
+      });
+      chain.select = vi.fn(() =>
+        table === 'kefy_org_invitations'
+          ? Promise.resolve({ data: [{ id: 'inv-1' }], error: null })
+          : chain);
+      chain.maybeSingle = vi.fn(async () => {
+        const vigente = userIdFiltrado ? rolesVigentes[userIdFiltrado] : null;
+        return { data: vigente ? { role: vigente } : null, error: null };
+      });
+      return chain;
+    });
+  }
+  const revokeReq = () => new NextRequest('http://localhost:3099/api/team/invitations/inv-1', { method: 'DELETE' });
+
+  it('el dueño revoca una invitación', async () => {
+    vi.mocked(getAuthFromRequest).mockResolvedValue(owner as never);
+    setupRevoke();
+    const { DELETE } = await import('@/app/api/team/invitations/[id]/route');
+
+    expect((await DELETE(revokeReq(), { params: Promise.resolve({ id: 'inv-1' }) })).status).toBe(200);
+  });
+
+  it('un administrador al que ya sacaron del equipo no puede revocar', async () => {
+    vi.mocked(getAuthFromRequest).mockResolvedValue(admin as never);
+    rolesVigentes['u-admin'] = null;
+    setupRevoke();
+    const { DELETE } = await import('@/app/api/team/invitations/[id]/route');
+
+    expect((await DELETE(revokeReq(), { params: Promise.resolve({ id: 'inv-1' }) })).status).toBe(403);
   });
 });

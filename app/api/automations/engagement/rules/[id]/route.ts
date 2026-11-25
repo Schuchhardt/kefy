@@ -13,6 +13,9 @@ export async function PATCH(
 ) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (auth.role !== 'owner' && auth.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { id } = await params;
   let body: unknown;
@@ -34,6 +37,9 @@ export async function DELETE(
 ) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (auth.role !== 'owner' && auth.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { id } = await params;
   const ctx = serviceContext(auth, '', 'es', { brandScope: 'org', source: 'route' });

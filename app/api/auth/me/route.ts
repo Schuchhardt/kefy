@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { createSupabaseServer } from '@/lib/supabase';
-import { getAuthFromRequest, ACCESS_COOKIE, REFRESH_COOKIE, clearCookieOptions } from '@/lib/auth';
+import {
+  getAuthFromRequest, ACCESS_COOKIE, REFRESH_COOKIE, clearCookieOptions,
+  generateRefreshToken, refreshCookieOptions,
+} from '@/lib/auth';
 import { getUsage } from '@/lib/usage';
 import { getEntitlement } from '@/lib/subscription';
 import { reportError } from '@/lib/observability';
@@ -130,7 +133,41 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Error al actualizar contraseña' }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true });
+    // Igual que al restablecerla: cambiar la contraseña cierra las demás
+    // sesiones. Se borran todos los refresh tokens del usuario y se emite uno
+    // nuevo para esta (la cookie de refresh no llega a esta ruta, así que no
+    // se puede conservar la actual por su hash).
+    const { error: revokeError } = await db
+      .from('kefy_refresh_tokens')
+      .delete()
+      .eq('user_id', auth.userId);
+    if (revokeError) {
+      reportError(new Error(revokeError.message), {
+        route: 'PATCH /api/auth/me', auth, service: 'supabase', extra: { op: 'revoke_refresh_tokens' },
+      });
+      return NextResponse.json(
+        { error: 'La contraseña se cambió, pero no se pudieron cerrar las demás sesiones. Inténtalo de nuevo.' },
+        { status: 500 },
+      );
+    }
+
+    const res = NextResponse.json({ ok: true });
+    const { raw, hash, expiresAt } = generateRefreshToken();
+    const { error: insertError } = await db.from('kefy_refresh_tokens').insert({
+      user_id: auth.userId,
+      token_hash: hash,
+      expires_at: expiresAt.toISOString(),
+    });
+    if (insertError) {
+      // Sin refresh token esta sesión durará lo que le quede al access token;
+      // la contraseña ya cambió, así que no es un fallo de la operación.
+      reportError(new Error(insertError.message), {
+        route: 'PATCH /api/auth/me', auth, service: 'supabase', extra: { op: 'issue_refresh_token' },
+      });
+    } else {
+      res.cookies.set(REFRESH_COOKIE, raw, refreshCookieOptions());
+    }
+    return res;
   }
 
   // ── Name update ──────────────────────────────────────────────────────────

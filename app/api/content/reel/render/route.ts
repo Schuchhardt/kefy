@@ -46,11 +46,11 @@ type RenderableTarget = RenderTarget & {
 };
 
 async function resolveTarget(db: Db, itemId: string, orgId: string, format: string | null): Promise<
-  { target: RenderableTarget; itemContentType: string } | null
+  { target: RenderableTarget; itemContentType: string; brandId: string | null } | null
 > {
   const { data: item } = await db
     .from('kefy_content_items')
-    .select('id, content_type, slides, metadata, mux_playback_id, video_url, render_status')
+    .select('id, brand_id, content_type, slides, metadata, mux_playback_id, video_url, render_status')
     .eq('id', itemId)
     .eq('org_id', orgId)
     .single();
@@ -62,6 +62,7 @@ async function resolveTarget(db: Db, itemId: string, orgId: string, format: stri
   if (effectiveFormat === item.content_type) {
     return {
       itemContentType: item.content_type,
+      brandId:         item.brand_id ?? null,
       target: {
         table:         'kefy_content_items',
         id:            item.id,
@@ -85,6 +86,7 @@ async function resolveTarget(db: Db, itemId: string, orgId: string, format: stri
 
   return {
     itemContentType: item.content_type,
+    brandId:         item.brand_id ?? null,
     target: {
       table:         'kefy_content_renditions',
       id:            rendition.id,
@@ -286,11 +288,17 @@ export async function POST(req: NextRequest) {
   if (guard.blocked) return guard.blocked;
 
   // ── Fetch brand kit for composition props ───────────────────────────────────
-  const { data: brand } = await db
-    .from('kefy_brand_kits')
-    .select('name, accent_color, primary_color, font_heading, logo_url')
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
+  // Por brand_id del contenido: el kit es 1:1 con la marca, y filtrar solo por
+  // org_id con maybeSingle() da error (varias filas) en cuanto la organización
+  // tiene más de una marca, así que el reel salía sin colores, logo ni fuente.
+  const { data: brand } = resolved.brandId
+    ? await db
+      .from('kefy_brand_kits')
+      .select('name, accent_color, primary_color, font_heading, logo_url')
+      .eq('brand_id', resolved.brandId)
+      .eq('org_id', auth.orgId)
+      .maybeSingle()
+    : { data: null };
 
   // ── Mark as rendering ────────────────────────────────────────────────────────
   // The start timestamp goes in *before* triggering Lambda: if this function
