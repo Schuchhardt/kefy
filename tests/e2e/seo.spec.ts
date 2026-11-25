@@ -34,7 +34,7 @@ for (const page of PAGES) {
     expect(html).toMatch(/<link rel="alternate" hrefLang="en"/);
     expect(attr(html, /<meta name="description" content="([^"]+)"/)?.length ?? 0).toBeGreaterThan(50);
 
-    const blocks = [...html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)].map((m) => JSON.parse(m[1]));
+    const blocks = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1]));
     const types = blocks.flatMap((b) => (b['@graph'] ?? [b]).map((n: { '@type': string }) => n['@type']));
     for (const type of page.jsonLd) expect(types, page.path).toContain(type);
   });
