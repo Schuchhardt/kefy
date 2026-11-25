@@ -8,7 +8,7 @@
 // La raíz `/` tiene su propio layout mínimo en app/(root). Ver docs/seo-aeo.md.
 
 import type { Metadata, Viewport } from 'next';
-import { Syne, DM_Sans } from 'next/font/google';
+import localFont from 'next/font/local';
 import '../globals.css';
 import PwaUpdater from '@/components/PwaUpdater';
 import { locales, toLocale } from '@/lib/i18n';
@@ -20,19 +20,25 @@ import enCommon from '@/locales/en/common';
 
 const commonCopy = { es: esCommon, en: enCommon };
 
-const syne = Syne({
-  subsets: ['latin'],
+// Fuentes servidas desde el repo (app/fonts), no desde Google: el build ya no
+// las descarga, así que no depende de la red de Google ni del caché de
+// Turbopack para next/font/google (un deploy de producción falló por eso).
+// Son las variables del subconjunto latino (las mismas letras que antes), de
+// @fontsource-variable, con su licencia OFL al lado. Un archivo por familia
+// cubre todos los pesos. La monoespaciada no se descarga: --font-jetbrains cae
+// en la del sistema (ver globals.css).
+const syne = localFont({
+  src: '../fonts/syne-latin-wght-normal.woff2',
   variable: '--font-syne',
-  weight: ['600', '700', '800'],
+  weight: '400 800',
+  display: 'swap',
 });
 
-// Solo los pesos que se usan (el 300 no aparecía en ningún estilo). La
-// monoespaciada ya no se descarga: JetBrains Mono solo servía para notas de
-// 12px y --font-jetbrains cae en la del sistema (ver globals.css).
-const dmSans = DM_Sans({
-  subsets: ['latin'],
+const dmSans = localFont({
+  src: '../fonts/dm-sans-latin-wght-normal.woff2',
   variable: '--font-dm-sans',
-  weight: ['400', '500', '600'],
+  weight: '100 1000',
+  display: 'swap',
 });
 
 export async function generateStaticParams() {
@@ -125,13 +131,16 @@ export default async function LangLayout({
             veía un destello oscuro en cada carga del dashboard. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
-      <body suppressHydrationWarning>
+      {/* Las variables de las fuentes van en <body>, no en un div interior:
+          globals.css le pone `font-family: var(--font-dm-sans)` al body, que
+          no ve las variables de sus hijos, y Modal se monta con un portal
+          directo en el body. Con el div, el texto corrido salía en la fuente
+          del sistema y los modales sin Syne ni DM Sans. */}
+      <body className={`${syne.variable} ${dmSans.variable}`} suppressHydrationWarning>
         <PwaUpdater />
-        <div className={`${syne.variable} ${dmSans.variable}`}>
-          <ThemeProvider>
-            {children}
-          </ThemeProvider>
-        </div>
+        <ThemeProvider>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
