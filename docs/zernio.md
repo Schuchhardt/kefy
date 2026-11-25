@@ -216,7 +216,11 @@ cuenta y publicar en un perfil distinto del que muestra.
 - **Reglas de autopilot:** al perder una cuenta guardan cuál era en
   `lost_accounts`; sin cuentas se pausan (`paused_reason: 'no_accounts'`) y
   avisan por correo. Al reconectar la misma red y usuario, la recuperan y se
-  reanudan.
+  reanudan. Los webhooks `account.disconnected` y `account.connected` hacen lo
+  mismo que la reconciliación (`detachAccountFromRules` /
+  `restoreAccountToRules`); una regla que el cron pausó por `no_accounts` con la
+  cuenta todavía en su lista también se reanuda al reactivarla. Una cuenta
+  revocada por `account_mismatch` no se devuelve a las reglas.
 - **Al desconectar:** si otra fila usa el mismo id de Zernio, no se llama a
   `DELETE`, porque le cortaría la cuenta a la otra marca.
 
@@ -575,6 +579,12 @@ siempre.
 `deletePublishedPost` (`lib/services/publish.ts`) marca la fila como `deleted`
 y no toca el contenido. El webhook ignora los eventos de una fila `deleted`:
 Zernio la pasa a cancelada y eso no debe pisar el estado.
+
+`post.failed`, `post.partial` y `post.platform.failed` tampoco pisan una fila
+`published`: lo que ya salió no falla después, y un fallo atrasado (de un
+intento anterior o reentregado) la dejaba como fallida estando en la red.
+`post.cancelled` sí la pisa, porque despublicar fuera de Kefy también deja el
+post cancelado.
 
 ### Estado del contenido
 
