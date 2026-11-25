@@ -1,4 +1,10 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import Footer from '@/components/landing/Footer';
+import JsonLd from '@/components/seo/JsonLd';
+import { KEFY_COPY, seoCopy } from '@/lib/content';
+import { SITE_URL } from '@/lib/share-metadata';
+import { breadcrumbJsonLd, graph, pageMetadata, webPageJsonLd } from '@/lib/seo';
 
 const aboutContent: Record<string, {
   title: string;
@@ -74,47 +80,70 @@ const aboutContent: Record<string, {
   },
 };
 
+const PATH = (lang: string) => `/${lang}/sobre-kefy`;
+
+// Título, descripción y canónica propios: antes heredaba los de la home.
+export async function generateMetadata({ params }: { params: Promise<{ lang: string }> }): Promise<Metadata> {
+  const { lang } = await params;
+  const { title, description } = seoCopy(lang).pages.about;
+  return pageMetadata(lang, { title, description, path: PATH });
+}
+
 export default async function SobreKefyPage({ params }: { params: Promise<{ lang: string }> }) {
   const { lang } = await params;
+  const seo = seoCopy(lang);
+  const url = `${SITE_URL}${PATH(lang)}`;
+  const jsonLd = graph(
+    webPageJsonLd({ url, name: seo.pages.about.title, description: seo.pages.about.description, lang, type: 'AboutPage' }),
+    breadcrumbJsonLd([
+      { name: seo.breadcrumb.home, url: `${SITE_URL}/${lang}` },
+      { name: seo.pages.about.title.split(' | ')[0], url },
+    ]),
+  );
+  const footer = (KEFY_COPY[lang] ?? KEFY_COPY.es).footer;
   const content = aboutContent[lang] ?? aboutContent['es'];
 
   return (
-    <div className="page-layout">
-      <div className="container">
-        <Link href={`/${lang}`} className="back-link">
-          ← {lang === 'en' ? 'Back to home' : 'Volver al inicio'}
-        </Link>
+    <>
+      <JsonLd data={jsonLd} />
+      <div className="page-layout">
+        <div className="container">
+          <Link href={`/${lang}`} className="back-link">
+            ← {lang === 'en' ? 'Back to home' : 'Volver al inicio'}
+          </Link>
 
-        <h1>
-          {content.title}{' '}
-          <em style={{ fontStyle: 'italic', color: 'var(--accent)' }}>{content.titleEm}</em>
-        </h1>
-        <p className="page-sub">{content.sub}</p>
+          <h1>
+            {content.title}{' '}
+            <em style={{ fontStyle: 'italic', color: 'var(--accent)' }}>{content.titleEm}</em>
+          </h1>
+          <p className="page-sub">{content.sub}</p>
 
-        <div className="prose">
-          {content.story.map((s, i) => (
-            <div key={i}>
-              <h2>{s.h}</h2>
-              <p>{s.p}</p>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ marginTop: '56px' }}>
-          <h2 style={{ fontFamily: 'var(--font-syne), serif', fontWeight: 700, fontSize: '20px', letterSpacing: '-0.02em', marginBottom: '24px' }}>
-            {content.teamTitle}
-          </h2>
-          <div className="about-team-grid">
-            {content.team.map((member, i) => (
-              <div key={i} className="about-team-card">
-                <div className="about-team-avatar">{member.initials}</div>
-                <div className="about-team-name">{member.name}</div>
-                <div className="about-team-role">{member.role}</div>
+          <div className="prose">
+            {content.story.map((s, i) => (
+              <div key={i}>
+                <h2>{s.h}</h2>
+                <p>{s.p}</p>
               </div>
             ))}
           </div>
+
+          <div style={{ marginTop: '56px' }}>
+            <h2 style={{ fontFamily: 'var(--font-syne), serif', fontWeight: 700, fontSize: '20px', letterSpacing: '-0.02em', marginBottom: '24px' }}>
+              {content.teamTitle}
+            </h2>
+            <div className="about-team-grid">
+              {content.team.map((member, i) => (
+                <div key={i} className="about-team-card">
+                  <div className="about-team-avatar">{member.initials}</div>
+                  <div className="about-team-name">{member.name}</div>
+                  <div className="about-team-role">{member.role}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+      <Footer copy={footer} lang={lang} />
+    </>
   );
 }

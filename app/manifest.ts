@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 
-// Se sirve en /manifest.webmanifest y lo referencia app/layout.tsx.
+// Se sirve en /manifest.webmanifest y lo referencia app/[lang]/layout.tsx.
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: '/',

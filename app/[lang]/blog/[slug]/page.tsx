@@ -1,5 +1,11 @@
+import type { Metadata } from 'next';
+import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import JsonLd from '@/components/seo/JsonLd';
+import { seoCopy } from '@/lib/content';
+import { SITE_URL } from '@/lib/share-metadata';
+import { ORGANIZATION_ID, absolute, breadcrumbJsonLd, graph, pageMetadata } from '@/lib/seo';
 import { createSupabaseServer } from '@/lib/supabase';
 import type { BlogPost } from '@/types/blog';
 import { KEFY_COPY } from '@/lib/content';
@@ -19,7 +25,8 @@ function formatDate(dateStr: string, lang: string): string {
   });
 }
 
-async function getPost(slug: string, lang: string): Promise<BlogPost | null> {
+// cache(): generateMetadata y la página piden el mismo artículo en un solo render.
+const getPost = cache(async (slug: string, lang: string): Promise<BlogPost | null> => {
   try {
     const supabase = createSupabaseServer();
     const { data, error } = await supabase
@@ -34,6 +41,22 @@ async function getPost(slug: string, lang: string): Promise<BlogPost | null> {
   } catch {
     return null;
   }
+});
+
+export async function generateMetadata({ params }: { params: Promise<{ lang: string; slug: string }> }): Promise<Metadata> {
+  const { lang, slug } = await params;
+  const post = await getPost(slug, lang);
+  if (!post) return {};
+  // Cada idioma tiene sus propios artículos (y slugs): sin hreflang, solo canónica.
+  return pageMetadata(lang, {
+    title: `${post.title} | Kefy`,
+    description: post.excerpt,
+    path: (l) => `/${l}/blog/${post.slug}`,
+    alternates: false,
+    type: 'article',
+    publishedTime: post.published_at,
+    ...(post.cover_url ? { image: { url: post.cover_url, alt: post.title } } : {}),
+  });
 }
 
 export async function generateStaticParams() {
@@ -65,8 +88,32 @@ export default async function BlogPostPage({
 
   if (!post) notFound();
 
+  const seo = seoCopy(lang);
+  const url = `${SITE_URL}/${lang}/blog/${post.slug}`;
+  const jsonLd = graph(
+    {
+      '@type': 'BlogPosting',
+      '@id': `${url}#article`,
+      headline: post.title,
+      description: post.excerpt,
+      datePublished: post.published_at,
+      dateModified: post.published_at,
+      inLanguage: lang === 'en' ? 'en' : 'es',
+      author: { '@type': 'Person', name: post.author },
+      publisher: { '@id': ORGANIZATION_ID },
+      mainEntityOfPage: url,
+      ...(post.cover_url ? { image: absolute(post.cover_url) } : {}),
+    },
+    breadcrumbJsonLd([
+      { name: seo.breadcrumb.home, url: `${SITE_URL}/${lang}` },
+      { name: seo.breadcrumb.blog, url: `${SITE_URL}/${lang}/blog` },
+      { name: post.title, url },
+    ]),
+  );
+
   return (
     <>
+      <JsonLd data={jsonLd} />
       <BlogNav lang={lang} nav={copy.nav} cta={copy.cta} />
       <div className="page-layout">
       <div className="container">

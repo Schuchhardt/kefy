@@ -8,6 +8,7 @@ import enSettings from '@/locales/en/dashboard/settings';
 import { ASSISTANT_TOOL_NAMES, summarizeTool } from '@/lib/assistant/summaries';
 import { ensureToolsRegistered } from '@/lib/assistant/tools';
 import { allToolNames } from '@/lib/assistant/registry';
+import { promesasEn, textos } from '../helpers/landing-promises';
 
 // La copy de la landing vive duplicada en dos idiomas. Cuando alguien añade un
 // plan, una fila de la tabla comparativa o una pregunta del FAQ en un idioma y
@@ -125,48 +126,24 @@ describe('paridad es / en de la landing', () => {
 
 // ─── Promesas sin producto detrás ────────────────────────────────────────────
 //
-// La auditoría UX (docs/auditoria-ux.md, 2.1) encontró la landing anunciando
-// facturación anual con 20% de descuento (Stripe solo tiene precios
-// mensuales), anuncios «con un clic» (no hay UI de ads), reportes white-label,
-// migración gratuita, «Multiplicador de contenido», analytics básico/completo,
-// Email como canal, «Meta Ads» como red conectable y un «plan gratuito» en los
-// datos estructurados. Esto impide que vuelvan.
+// La lista de promesas prohibidas vive en tests/unit/helpers/landing-promises.ts
+// (la comparten las landings por rubro).
 //
 // Se revisan las secciones que se montan en la página. Las demás (mult, killer,
 // engage, strategy, features, who, cmp, lang) son copy de componentes que ya
-// no se renderizan y están pendientes de borrar.
+// no se renderizan y están pendientes de borrar. Las dos ofertas y los rubros
+// (locales/*/niches.ts) tienen sus propias reglas en tests/unit/lib/niches.test.ts.
 
 const SECCIONES_MONTADAS = [
-  'nav', 'cta', 'hero', 'demo', 'problem', 'how', 'brand', 'autopilot',
-  'channels', 'testi', 'pricing', 'final', 'footer',
+  'nav', 'cta', 'hero', 'demo', 'how', 'channels', 'testi', 'pricing', 'final', 'footer',
 ] as const;
-
-function textos(valor: unknown): string[] {
-  if (typeof valor === 'string') return [valor];
-  if (Array.isArray(valor)) return valor.flatMap(textos);
-  if (valor !== null && typeof valor === 'object') return Object.values(valor).flatMap(textos);
-  return [];
-}
-
-const PROMESAS_PROHIBIDAS: Array<[RegExp, string]> = [
-  [/\d+\s*%\s*(off|dto|descuento)/i, 'descuento por pago anual'],
-  [/white[- ]?label/i, 'reportes white-label'],
-  [/multiplicador|multiplier/i, 'multiplicador de contenido'],
-  [/migraci[oó]n|migration/i, 'migración desde otras plataformas'],
-  [/analytics (b[aá]sico|completo)|(basic|full) analytics/i, 'niveles de analytics'],
-  [/\bads\b|anuncio|\bboost\b|promocionar/i, 'anuncios pagados'],
-  [/plan gratuito|free plan|gratis para siempre|free forever/i, 'plan gratuito'],
-];
 
 describe('la landing solo promete lo que existe', () => {
   for (const [idioma, copy] of [['es', es], ['en', en]] as const) {
     const montado = SECCIONES_MONTADAS.flatMap((k) => textos(copy[k]));
 
     it(`[${idioma}] no anuncia funciones que no existen`, () => {
-      const hallazgos = PROMESAS_PROHIBIDAS.flatMap(([patron, que]) =>
-        montado.filter((t) => patron.test(t)).map((t) => `${que}: «${t}»`),
-      );
-      expect(hallazgos).toEqual([]);
+      expect(promesasEn(montado)).toEqual([]);
     });
 
     it(`[${idioma}] no ofrece facturación anual`, () => {

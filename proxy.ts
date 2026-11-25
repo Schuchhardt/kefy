@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 import { defaultLocale, isValidLocale } from '@/lib/i18n';
+import { nicheRedirectPath } from '@/lib/niches';
 
 const ACCESS_COOKIE = 'kefy_access';
 
@@ -136,12 +137,23 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const firstSegment = pathname.split('/')[1];
-  if (isValidLocale(firstSegment)) return NextResponse.next();
-
   const acceptLang = req.headers.get('accept-language') || '';
   const preferred  = acceptLang.split(',')[0].split('-')[0].toLowerCase();
   const locale     = isValidLocale(preferred) ? preferred : defaultLocale;
+
+  // ── Correos SDR → landing de su rubro ───────────────────────────────────────
+  // Los correos enviados antes de las landings por rubro enlazan a la home con
+  // `utm_campaign=sdr_<rubro>`: se llevan a la página de ese rubro (un solo
+  // salto, conservando los utm). Ver lib/niches.ts.
+  const nicheTarget = nicheRedirectPath(pathname, req.nextUrl.searchParams.get('utm_campaign'), locale);
+  if (nicheTarget) {
+    // URL nueva y no un clon de nextUrl: el clon conserva la barra final de
+    // `/es/` y la página quedaría en `/es/para/…/`.
+    return NextResponse.redirect(new URL(`${nicheTarget}${req.nextUrl.search}`, req.url));
+  }
+
+  const firstSegment = pathname.split('/')[1];
+  if (isValidLocale(firstSegment)) return NextResponse.next();
 
   const url      = req.nextUrl.clone();
   url.pathname   = `/${locale}${pathname}`;

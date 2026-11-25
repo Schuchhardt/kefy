@@ -1,4 +1,10 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import Footer from '@/components/landing/Footer';
+import JsonLd from '@/components/seo/JsonLd';
+import { KEFY_COPY, seoCopy } from '@/lib/content';
+import { SITE_URL } from '@/lib/share-metadata';
+import { breadcrumbJsonLd, graph, pageMetadata, webPageJsonLd } from '@/lib/seo';
 
 const legalContent: Record<string, { title: string; sub: string; sections: { h: string; p: string }[] }> = {
   es: {
@@ -31,27 +37,50 @@ const legalContent: Record<string, { title: string; sub: string; sections: { h: 
   },
 };
 
+const PATH = (lang: string) => `/${lang}/terminos`;
+
+// Título, descripción y canónica propios: antes heredaba los de la home.
+export async function generateMetadata({ params }: { params: Promise<{ lang: string }> }): Promise<Metadata> {
+  const { lang } = await params;
+  const { title, description } = seoCopy(lang).pages.terms;
+  return pageMetadata(lang, { title, description, path: PATH });
+}
+
 export default async function TerminosPage({ params }: { params: Promise<{ lang: string }> }) {
   const { lang } = await params;
+  const seo = seoCopy(lang);
+  const url = `${SITE_URL}${PATH(lang)}`;
+  const jsonLd = graph(
+    webPageJsonLd({ url, name: seo.pages.terms.title, description: seo.pages.terms.description, lang, type: 'WebPage' }),
+    breadcrumbJsonLd([
+      { name: seo.breadcrumb.home, url: `${SITE_URL}/${lang}` },
+      { name: seo.pages.terms.title.split(' | ')[0], url },
+    ]),
+  );
+  const footer = (KEFY_COPY[lang] ?? KEFY_COPY.es).footer;
   const content = legalContent[lang] ?? legalContent['es'];
 
   return (
-    <div className="page-layout">
-      <div className="container">
-        <Link href={`/${lang}`} className="back-link">
-          ← {lang === 'en' ? 'Back to home' : 'Volver al inicio'}
-        </Link>
-        <h1>{content.title}</h1>
-        <p className="page-sub">{content.sub}</p>
-        <div className="prose">
-          {content.sections.map((s, i) => (
-            <div key={i}>
-              <h2>{s.h}</h2>
-              <p>{s.p}</p>
-            </div>
-          ))}
+    <>
+      <JsonLd data={jsonLd} />
+      <div className="page-layout">
+        <div className="container">
+          <Link href={`/${lang}`} className="back-link">
+            ← {lang === 'en' ? 'Back to home' : 'Volver al inicio'}
+          </Link>
+          <h1>{content.title}</h1>
+          <p className="page-sub">{content.sub}</p>
+          <div className="prose">
+            {content.sections.map((s, i) => (
+              <div key={i}>
+                <h2>{s.h}</h2>
+                <p>{s.p}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+      <Footer copy={footer} lang={lang} />
+    </>
   );
 }

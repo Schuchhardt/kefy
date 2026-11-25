@@ -5,7 +5,7 @@
 // - El dashboard respeta la preferencia guardada y, si no hay ninguna, la del
 //   sistema (`prefers-color-scheme`). Antes arrancaba siempre en oscuro.
 //
-// THEME_BOOT_SCRIPT corre en <head> antes de pintar (app/layout.tsx) para que
+// THEME_BOOT_SCRIPT corre en <head> antes de pintar (app/[lang]/layout.tsx) para que
 // no haya un destello del tema equivocado; ThemeProvider aplica lo mismo en
 // cada navegación del cliente.
 
