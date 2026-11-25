@@ -420,6 +420,17 @@ describe('cron', () => {
     expect(generateContentText).toHaveBeenCalledTimes(1);
   });
 
+  it('con el hueco ya pasado publica en el momento y registra los ids de la publicación', async () => {
+    const rule = await createAutopilotRule(ctx(), RULE);
+    makeDue(rule.id);
+
+    const summary = await runScheduledAutopilot(null);
+    expect(summary).toMatchObject({ executed: 1, failed: 0 });
+    const published = db.rows('kefy_scheduled_posts').filter((r) => r.status === 'published');
+    expect(published.length).toBeGreaterThan(0);
+    expect(db.rows('kefy_autopilot_runs')[0].scheduled_post_ids).toEqual(published.map((r) => r.id));
+  });
+
   it('sin saldo no genera nada y lo deja registrado', async () => {
     const rule = await createAutopilotRule(ctx(), RULE);
     makeDue(rule.id);
