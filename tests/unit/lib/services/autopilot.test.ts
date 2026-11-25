@@ -48,6 +48,9 @@ import { produceVideo } from '@/lib/services/video';
 import { sendAutopilotAlert } from '@/lib/autopilot-alerts';
 import { normalizeVideoScript } from '@/lib/video/script';
 import { serviceContext } from '@/lib/services/context';
+import { generateCarousel, generateTextPost } from '@/lib/services/content';
+import { generateStory } from '@/lib/services/story';
+import { generateReel } from '@/lib/services/reel';
 import {
   autopilotInputFromUiBody, createAutopilotRule, defaultAutopilotFormat, estimateAutopilotCredits,
   listAutopilotRules, parseAutopilotTopic, runAutopilotNow, runScheduledAutopilot, updateAutopilotRule,
@@ -687,5 +690,40 @@ describe('get_connect_account_link', () => {
   it('una red que no se puede conectar da 422', async () => {
     const r = await executeTool('get_connect_account_link', { platform: 'myspace', brand_id: IDS.BRAND }, apiCtx());
     expect(r).toMatchObject({ ok: false, error: { status: 422 } });
+  });
+});
+
+describe('guardado fallido después de generar', () => {
+  const svc = () => serviceContext(AUTH, IDS.BRAND, 'es', { source: 'route' });
+  const refunded = () => quotaState.calls
+    .filter((c) => c.fn === 'kefy_credits_refund')
+    .reduce((sum, c) => sum + Number(c.args.p_amount ?? 0), 0);
+
+  it('un post que no se guarda devuelve su crédito', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateTextPost(svc(), { topic: 'Café de especialidad' })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBeGreaterThan(0);
+    expect(refunded()).toBe(creditsSpent());
+  });
+
+  it('un carrusel que no se guarda devuelve el texto y cada imagen', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateCarousel(svc(), { topic: 'Métodos de filtrado', slideCount: 3 })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBeGreaterThan(1);
+    expect(refunded()).toBe(creditsSpent());
+  });
+
+  it('una story que no se guarda devuelve el texto y la imagen', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateStory(svc(), { topic: 'Nuevo blend' })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBeGreaterThan(1);
+    expect(refunded()).toBe(creditsSpent());
+  });
+
+  it('un reel que no se guarda devuelve el texto de las variantes sin guardar', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateReel(svc(), { topic: 'Latte art', variant_count: 2 })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBe(2);
+    expect(refunded()).toBe(2);
   });
 });
