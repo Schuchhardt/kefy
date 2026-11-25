@@ -4,6 +4,7 @@ import { executeEngagementRules } from '@/lib/engagement-executor';
 import { safePostUrl } from '@/lib/zernio';
 import { reportError } from '@/lib/observability';
 import { syncContentItemStatus } from '@/lib/services/content-status';
+import { detachAccountFromRules, restoreAccountToRules } from '@/lib/services/social-integrity';
 import { createHmac, timingSafeEqual } from 'crypto';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
@@ -180,6 +181,11 @@ async function syncItemsOf(db: DB, rows: unknown) {
 
 // Los handlers de estado saltan las filas 'deleted': al borrar de la red, Zernio
 // pasa el post a cancelado y ese evento (o uno atrasado) no debe resucitarlas.
+//
+// Los de fallo saltan además las 'published': lo que ya salió no falla después,
+// así que un fallo que llega tarde (de un intento anterior, o reentregado) no
+// puede dejar como fallida una publicación que está en la red. post.cancelled
+// sí la pisa: despublicar fuera de Kefy también deja el post cancelado.
 
 // La URL solo se escribe si el evento la trae: un post.published de TikTok
 // llega sin ella y no debe borrar la que ya hubiera.
@@ -246,6 +252,7 @@ async function handlePostFailed(db: DB, data: Data) {
     .from('kefy_scheduled_posts')
     .update({ status: 'failed', error_message: errorMessage })
     .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'published')
     .neq('status', 'deleted')
     .select('content_item_id');
   await syncItemsOf(db, rows);
@@ -265,6 +272,7 @@ async function handlePostPartial(db: DB, data: Data) {
     .from('kefy_scheduled_posts')
     .update({ status: 'failed', error_message: msg })
     .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'published')
     .neq('status', 'deleted')
     .select('content_item_id');
   await syncItemsOf(db, rows);
@@ -325,6 +333,7 @@ async function handlePostPlatformFailed(db: DB, data: Data) {
     .from('kefy_scheduled_posts')
     .update({ status: 'failed', error_message: errorMessage })
     .eq('zernio_post_id', zernioPostId)
+    .neq('status', 'published')
     .neq('status', 'deleted')
     .select('content_item_id');
   await syncItemsOf(db, rows);
@@ -345,20 +354,50 @@ async function handleAccountConnected(db: DB, data: Data) {
   if (str(data.refresh_token))    updates.refresh_token    = data.refresh_token;
   if (str(data.token_expires_at)) updates.token_expires_at = data.token_expires_at;
 
-  await db
+  const before = await accountsByZernioId(db, zernioAccountId);
+  const { error } = await db
     .from('kefy_social_accounts')
     .update(updates)
     .eq('zernio_account_id', zernioAccountId);
+  if (error) throw new Error(`account.connected: ${error.message}`);
+
+  // Las reglas de autopilot que la perdieron la recuperan y, si se habían
+  // pausado por quedarse sin cuentas, se reanudan. Una cuenta revocada por no
+  // coincidir con la de Zernio no se devuelve: publicaría en otro perfil.
+  for (const row of before) {
+    if (row.status === 'active' || row.status_reason === 'account_mismatch') continue;
+    await restoreAccountToRules(db, { ...row, username: str(data.username) ?? row.username });
+  }
 }
 
 async function handleAccountDisconnected(db: DB, data: Data) {
   const zernioAccountId = str(data.account_id);
   if (!zernioAccountId) return;
 
-  await db
+  const before = await accountsByZernioId(db, zernioAccountId);
+  const { error } = await db
     .from('kefy_social_accounts')
     .update({ status: 'revoked' })
     .eq('zernio_account_id', zernioAccountId);
+  if (error) throw new Error(`account.disconnected: ${error.message}`);
+
+  // Igual que la reconciliación diaria: se quita de sus reglas y se recuerda
+  // en lost_accounts para devolverla al reconectar.
+  for (const row of before) {
+    if (row.status === 'active') await detachAccountFromRules(db, row, 'es');
+  }
+}
+
+async function accountsByZernioId(db: DB, zernioAccountId: string) {
+  const { data, error } = await db
+    .from('kefy_social_accounts')
+    .select('id, org_id, brand_id, platform, username, status, status_reason')
+    .eq('zernio_account_id', zernioAccountId);
+  if (error) throw new Error(`kefy_social_accounts: ${error.message}`);
+  return (data ?? []) as Array<{
+    id: string; org_id: string; brand_id: string | null; platform: string | null;
+    username: string | null; status: string; status_reason: string | null;
+  }>;
 }
 
 // account.ads.initial_sync_completed: no dedicated column — accepted and ignored.

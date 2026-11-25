@@ -7,6 +7,7 @@ import { createFakeDb } from '../helpers/fake-db';
 const db = createFakeDb();
 vi.mock('@/lib/supabase', () => ({ createSupabaseServer: () => db.client }));
 vi.mock('@/lib/engagement-executor', () => ({ executeEngagementRules: vi.fn() }));
+vi.mock('@/lib/autopilot-alerts', () => ({ sendAutopilotAlert: vi.fn(async () => true) }));
 
 // `after()` necesita el contexto de una petición de Next: aquí se guardan las
 // tareas y el test decide cuándo correrlas, igual que tras enviar la respuesta.
@@ -311,5 +312,59 @@ describe('POST /api/webhooks/zernio — estado del contenido', () => {
       expect(row('a').status).toBe('deleted');
     }
     expect(item().status).toBe('approved');
+  });
+});
+
+describe('POST /api/webhooks/zernio — un fallo atrasado', () => {
+  it('no deja como fallida una publicación que ya salió', async () => {
+    db.reset();
+    db.seed('kefy_scheduled_posts', [{ id: 'a', zernio_post_id: 'za', status: 'published' }]);
+    for (const event of ['post.failed', 'post.partial', 'post.platform.failed']) {
+      await send({ event, post: { id: 'za' }, error: 'timeout del intento anterior' });
+      expect(db.rows('kefy_scheduled_posts')[0].status).toBe('published');
+    }
+  });
+});
+
+describe('POST /api/webhooks/zernio — cuentas y reglas de autopilot', () => {
+  const rule = () => db.rows('kefy_autopilot_rules')[0];
+
+  beforeEach(() => {
+    db.reset();
+    db.seed('kefy_social_accounts', [{
+      id: 'acc1', org_id: 'o1', brand_id: 'b1', platform: 'instagram', username: 'cafe',
+      zernio_account_id: 'z1', status: 'active', status_reason: null,
+    }]);
+    db.seed('kefy_autopilot_rules', [{
+      id: 'r1', org_id: 'o1', brand_id: 'b1', name: 'Semanal', status: 'active', paused_reason: null,
+      social_account_ids: ['acc1'], lost_accounts: [], frequency: 'weekly', day_of_week: 5,
+      time_of_day: '10:00', timezone: 'America/Santiago', next_run_at: '2026-11-27T13:00:00.000Z',
+    }]);
+  });
+
+  it('desconectar la cuenta la saca de la regla y reconectarla la devuelve y la reanuda', async () => {
+    await send({ event: 'account.disconnected', account: { id: 'z1', platform: 'instagram', username: 'cafe' } });
+    expect(db.rows('kefy_social_accounts')[0].status).toBe('revoked');
+    expect(rule()).toMatchObject({ status: 'paused', paused_reason: 'no_accounts', social_account_ids: [] });
+
+    await send({ event: 'account.connected', account: { id: 'z1', platform: 'instagram', username: 'cafe' } });
+    expect(db.rows('kefy_social_accounts')[0].status).toBe('active');
+    expect(rule()).toMatchObject({ status: 'active', paused_reason: null, social_account_ids: ['acc1'], lost_accounts: [] });
+  });
+
+  it('reanuda una regla que el cron pausó con la cuenta todavía en la lista', async () => {
+    db.rows('kefy_social_accounts')[0].status = 'revoked';
+    Object.assign(rule(), { status: 'paused', paused_reason: 'no_accounts' });
+
+    await send({ event: 'account.connected', account: { id: 'z1', platform: 'instagram', username: 'cafe' } });
+    expect(rule()).toMatchObject({ status: 'active', paused_reason: null, social_account_ids: ['acc1'] });
+  });
+
+  it('no reanuda reglas pausadas por otro motivo', async () => {
+    db.rows('kefy_social_accounts')[0].status = 'revoked';
+    Object.assign(rule(), { status: 'paused', paused_reason: 'credits_exhausted' });
+
+    await send({ event: 'account.connected', account: { id: 'z1', platform: 'instagram', username: 'cafe' } });
+    expect(rule()).toMatchObject({ status: 'paused', paused_reason: 'credits_exhausted' });
   });
 });

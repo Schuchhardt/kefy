@@ -115,11 +115,14 @@ export async function checkAiSpend(
     };
   }
 
+  // El reembolso vuelve al mes del cobro, aunque llegue pasada la medianoche.
+  const chargedAt = new Date();
+
   // 3a. Cuota de mensajes del asistente: no toca los créditos de IA.
   if (operation === 'assistant_message') {
     let quota;
     try {
-      quota = await consumeAssistantMessage(auth.orgId, auth.plan);
+      quota = await consumeAssistantMessage(auth.orgId, auth.plan, chargedAt);
     } catch (err) {
       // Falla cerrado, igual que los créditos.
       reportError(err, { route, auth, extra: { operation } });
@@ -133,13 +136,13 @@ export async function checkAiSpend(
       return { ok: false, status: 429, body: assistantQuotaExhaustedBody(quota, language) };
     }
 
-    return { ok: true, refund: () => refundAssistantMessage(auth.orgId) };
+    return { ok: true, refund: () => refundAssistantMessage(auth.orgId, chargedAt) };
   }
 
   // 3b. Créditos.
   let credits;
   try {
-    credits = await consumeCredits(auth.orgId, auth.plan, operation);
+    credits = await consumeCredits(auth.orgId, auth.plan, operation, chargedAt);
   } catch (err) {
     // consumeCredits falla cerrado a propósito: sin poder verificar el saldo no
     // se autoriza gasto. Ya reportó el error a Sentry por dentro.
@@ -154,7 +157,7 @@ export async function checkAiSpend(
     return { ok: false, status: 429, body: creditsExhaustedBody(credits, language) };
   }
 
-  return { ok: true, refund: () => refundCredits(auth.orgId, operation) };
+  return { ok: true, refund: () => refundCredits(auth.orgId, operation, chargedAt) };
 }
 
 export async function guardAiRequest(

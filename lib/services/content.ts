@@ -728,6 +728,7 @@ export async function generateTextPost(
       .single();
 
     if (itemError || !newItem) {
+      await refund();
       reportError(new Error(itemError?.message ?? 'insert returned no row'), {
         route: TEXT_ROUTE, service: 'supabase', auth: ctx.auth,
       });
@@ -1089,6 +1090,7 @@ export async function generateCarousel(
   }
 
   // 2. Optionally generate one image per slide in parallel (imagen limpia, sin texto)
+  const imagesChargedAt = new Date();
   const slides = await Promise.all(
     generated.slides.map(async (slide) => {
       if (!genImages || !slide.image_prompt) return { ...slide, image_url: null, text_baked: false };
@@ -1097,7 +1099,7 @@ export async function generateCarousel(
       // unidad de cuota. Si se agota a mitad del carrusel, los slides restantes
       // salen sin imagen en lugar de fallar: el texto ya está generado y es
       // preferible entregarlo a perderlo entero.
-      const slideCredits = await consumeCredits(auth.orgId, auth.plan, 'image').catch(() => null);
+      const slideCredits = await consumeCredits(auth.orgId, auth.plan, 'image', imagesChargedAt).catch(() => null);
       if (!slideCredits?.allowed) return { ...slide, image_url: null, text_baked: false };
 
       try {
@@ -1119,7 +1121,7 @@ export async function generateCarousel(
         return { ...slide, image_url: imageUrl, text_baked: false };
       } catch (imgErr) {
         // La imagen se cobró al empezar: si no salió, se devuelve.
-        await refundCredits(auth.orgId, 'image');
+        await refundCredits(auth.orgId, 'image', imagesChargedAt);
         reportError(imgErr, {
           route: CAROUSEL_ROUTE, auth, service: 'ai',
           extra: { slide: slide.slide_order, fase: 'imagen' },
@@ -1163,6 +1165,11 @@ export async function generateCarousel(
     .single();
 
   if (itemError || !item) {
+    // El usuario no recibe nada: se devuelven el texto y cada imagen generada.
+    await refund();
+    for (const s of slides) {
+      if (s.image_url) await refundCredits(auth.orgId, 'image', imagesChargedAt);
+    }
     reportError(new Error(itemError?.message ?? 'insert returned no row'), {
       route: CAROUSEL_ROUTE, service: 'supabase', auth,
     });

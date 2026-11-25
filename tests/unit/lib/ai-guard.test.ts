@@ -149,6 +149,23 @@ describe('guardAiRequest', () => {
     expect(refund?.args.p_amount).toBe(CREDIT_COSTS.video);
   });
 
+  it('el refund vuelve al mes del cobro aunque llegue en el mes siguiente', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-11-30T23:59:30Z'));
+      const guard = await guardAiRequest(req(), { auth, operation: 'image', route: 'test' });
+      vi.setSystemTime(new Date('2026-12-01T00:01:00Z'));
+      await guard.refund();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const consume = quotaState.calls.find((c) => c.fn === 'kefy_credits_consume');
+    const refund = quotaState.calls.find((c) => c.fn === 'kefy_credits_refund');
+    expect(consume?.args.p_period).toBe('2026-11');
+    expect(refund?.args.p_period).toBe('2026-11');
+  });
+
   it('el refund de una petición bloqueada no devuelve nada', async () => {
     quotaState.quotaAllowed = false;
 

@@ -655,7 +655,13 @@ async function preflight(ctx: ServiceContext, credits: number): Promise<ServiceE
  * ejecución fallida no se reintenta cada 5 minutos gastando otra vez.
  */
 async function claimSlot(db: Db, rule: AutopilotRuleRow, now: Date): Promise<boolean> {
-  const nextRun = nextRunForRule(rule, now, { afterRun: true });
+  // Una ejecución a mano antes de tiempo publica para el hueco que viene
+  // (next_run_at, aún futuro): la siguiente se cuenta desde ese hueco. Desde
+  // `now` salía el mismo hueco, next_run_at no se movía y el cron volvía a
+  // generar y publicar para él (dos posts, doble cobro).
+  const slot = rule.next_run_at ? new Date(rule.next_run_at) : null;
+  const from = slot && slot.getTime() > now.getTime() ? slot : now;
+  const nextRun = nextRunForRule(rule, from, { afterRun: true });
   let q = db
     .from('kefy_autopilot_rules')
     .update({ last_run_at: now.toISOString(), next_run_at: nextRun.toISOString() })

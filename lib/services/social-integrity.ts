@@ -113,9 +113,12 @@ export async function restoreAccountToRules(db: Db, account: AccountRef, now: Da
   let restored = 0;
   for (const rule of (data ?? []) as RuleRow[]) {
     const lost = rule.lost_accounts ?? [];
-    if (!lost.some(isSame)) continue;
-
     const resume = rule.status === 'paused' && rule.paused_reason === 'no_accounts';
+    // El cron también pausa por `no_accounts` sin sacar la cuenta de la regla
+    // (seguía en la lista, pero inactiva): reactivarla tiene que reanudarla.
+    const stillListed = (rule.social_account_ids ?? []).includes(account.id);
+    if (!lost.some(isSame) && !(stillListed && resume)) continue;
+
     const { error } = await db
       .from('kefy_autopilot_rules')
       .update({

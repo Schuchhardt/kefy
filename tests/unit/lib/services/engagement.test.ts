@@ -220,6 +220,15 @@ describe('executor: las respuestas con IA pasan por la guardia de gasto', () => 
     expect(replyToComment).not.toHaveBeenCalled();
   });
 
+  it('si el envío a Zernio falla devuelve el crédito', async () => {
+    vi.mocked(generateContentText).mockResolvedValue({ body: 'Respuesta', hashtags: [], model: 'claude', tokensUsed: 1 } as never);
+    vi.mocked(replyToComment).mockRejectedValueOnce(new Error('zernio 502'));
+    await aiRule();
+    await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));
+    expect(creditsSpent()).toBe(1);
+    expect(refundCount()).toBe(1);
+  });
+
   it('las respuestas con plantilla no gastan créditos', async () => {
     await createEngagementRule(ctx(), RULE);
     await executeEngagementRules(db.client as never, IDS.ORG, commentEvent(IDS.BRAND));

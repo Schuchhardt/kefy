@@ -345,7 +345,7 @@ async function failStep(
     status: 'failed', handle: null, error, charged: false, finished_at: new Date(now).toISOString(),
   }, 'running');
   if (!won) return;
-  if (wasCharged) await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[step.tool]);
+  if (wasCharged) await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[step.tool], chargedAt(step.started_at, now));
   reportError(new Error(error), {
     route: 'lib/video/engine', service: step.tool,
     extra: { jobId: job.id, step: step.key, attempts: step.attempts },
@@ -431,7 +431,7 @@ async function startStep(db: Db, job: JobRow, step: StepRow, steps: StepRow[], n
   }
 
   if (!step.charged) {
-    const credits = await consumeCredits(job.org_id, job.render_context.plan, TOOL_CREDIT_OPERATION[step.tool])
+    const credits = await consumeCredits(job.org_id, job.render_context.plan, TOOL_CREDIT_OPERATION[step.tool], new Date(now))
       .catch(() => null);
     if (!credits?.allowed) {
       // Sin créditos para este paso: el plano usa su respaldo.
@@ -440,7 +440,7 @@ async function startStep(db: Db, job: JobRow, step: StepRow, steps: StepRow[], n
     }
     if (!await updateStep(db, step, { charged: true }, 'running')) {
       // Otra vuelta tomó el paso mientras se cobraba: no se usa este cobro.
-      await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[step.tool]);
+      await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[step.tool], new Date(now));
       return;
     }
   }
@@ -532,6 +532,15 @@ async function finishJob(db: Db, job: JobRow, steps: StepRow[], now: number): Pr
 }
 
 /**
+ * Cuándo se cobró un paso: se cobra al empezarlo. El crédito vuelve a ese mes
+ * aunque el fallo (o la cancelación) llegue en el siguiente.
+ */
+function chargedAt(startedAt: string | null | undefined, fallback: number): Date {
+  const t = startedAt ? Date.parse(startedAt) : NaN;
+  return new Date(Number.isNaN(t) ? fallback : t);
+}
+
+/**
  * Devuelve los créditos de los pasos cobrados en esos estados. El UPDATE
  * condicional (`charged = true` → false) es el reclamo: dos vueltas a la vez
  * reciben filas distintas y cada crédito se devuelve una sola vez.
@@ -542,10 +551,10 @@ async function refundChargedSteps(db: Db, job: Pick<JobRow, 'id' | 'org_id'>, st
     .eq('job_id', job.id)
     .eq('charged', true)
     .in('status', statuses)
-    .select('tool');
-  const rows = (data ?? []) as Array<{ tool: VideoToolName }>;
+    .select('tool, started_at');
+  const rows = (data ?? []) as Array<{ tool: VideoToolName; started_at: string | null }>;
   for (const row of rows) {
-    await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[row.tool]).catch((err) => {
+    await refundCredits(job.org_id, TOOL_CREDIT_OPERATION[row.tool], chargedAt(row.started_at, Date.now())).catch((err) => {
       reportError(err, { route: 'lib/video/engine', service: 'supabase', extra: { jobId: job.id, fase: 'refund' } });
     });
   }

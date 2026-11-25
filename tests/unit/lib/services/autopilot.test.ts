@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createFakeDb } from '../../helpers/fake-db';
 import {
-  creditsSpent, refundCount, resetQuotaState, resetSubscriptionState,
+  creditsSpent, quotaState, refundCount, resetQuotaState, resetSubscriptionState,
 } from '../../helpers/quota';
 import { IDS, AUTH, seedWorkspace, apiCtx } from '../../helpers/assistant';
 
@@ -48,6 +48,9 @@ import { produceVideo } from '@/lib/services/video';
 import { sendAutopilotAlert } from '@/lib/autopilot-alerts';
 import { normalizeVideoScript } from '@/lib/video/script';
 import { serviceContext } from '@/lib/services/context';
+import { generateCarousel, generateTextPost } from '@/lib/services/content';
+import { generateStory } from '@/lib/services/story';
+import { generateReel } from '@/lib/services/reel';
 import {
   autopilotInputFromUiBody, createAutopilotRule, defaultAutopilotFormat, estimateAutopilotCredits,
   listAutopilotRules, parseAutopilotTopic, runAutopilotNow, runScheduledAutopilot, updateAutopilotRule,
@@ -182,6 +185,24 @@ describe('reglas', () => {
     await updateAutopilotRule(ctx(), rule.id, { status: 'paused' });
     const resumed = await updateAutopilotRule(ctx(), rule.id, { status: 'active' });
     expect(new Date(resumed.next_run_at!).getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe('ejecución a mano antes del hueco', () => {
+  it('consume el hueco futuro: next_run_at avanza y el cron no vuelve a publicar para él', async () => {
+    const rule = await createAutopilotRule(ctx(), RULE);
+    const slot = rule.next_run_at!;
+    expect(new Date(slot).getTime()).toBeGreaterThan(Date.now());
+
+    await runAutopilotNow(ctx(), [rule.id], 'test');
+    const after = db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)!;
+    // Semanal: el siguiente hueco es una semana después del que se acaba de usar.
+    expect(new Date(after.next_run_at as string).getTime() - new Date(slot).getTime())
+      .toBe(7 * 24 * 60 * 60 * 1000);
+
+    // Llegado el hueco, el cron ya no la encuentra vencida.
+    const cron = await runScheduledAutopilot(null, new Date(new Date(slot).getTime() + 60_000));
+    expect(cron.results.filter((r) => r.rule_id === rule.id)).toHaveLength(0);
   });
 });
 
@@ -399,6 +420,17 @@ describe('cron', () => {
     expect(generateContentText).toHaveBeenCalledTimes(1);
   });
 
+  it('con el hueco ya pasado publica en el momento y registra los ids de la publicación', async () => {
+    const rule = await createAutopilotRule(ctx(), RULE);
+    makeDue(rule.id);
+
+    const summary = await runScheduledAutopilot(null);
+    expect(summary).toMatchObject({ executed: 1, failed: 0 });
+    const published = db.rows('kefy_scheduled_posts').filter((r) => r.status === 'published');
+    expect(published.length).toBeGreaterThan(0);
+    expect(db.rows('kefy_autopilot_runs')[0].scheduled_post_ids).toEqual(published.map((r) => r.id));
+  });
+
   it('sin saldo no genera nada y lo deja registrado', async () => {
     const rule = await createAutopilotRule(ctx(), RULE);
     makeDue(rule.id);
@@ -414,6 +446,21 @@ describe('cron', () => {
       status: 'paused', paused_reason: 'credits_exhausted',
     });
     expect(sendAutopilotAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paused_credits', ruleId: rule.id }));
+  });
+
+  it('un fallo de la base al cobrar la imagen de una story no pausa la regla como «sin créditos»', async () => {
+    const rule = await createAutopilotRule(ctx(), { ...RULE, format: 'story' });
+    makeDue(rule.id);
+    // El texto se cobra y se genera; justo después la base deja de responder.
+    vi.mocked(generateContentText).mockImplementationOnce(async () => {
+      quotaState.dbError = true;
+      return { body: 'Story', hashtags: [], model: 'x', tokensUsed: 1 };
+    });
+
+    const summary = await runScheduledAutopilot(null);
+    expect(summary).toMatchObject({ executed: 0, failed: 1 });
+    expect(db.rows('kefy_autopilot_rules').find((r) => r.id === rule.id)).toMatchObject({ status: 'active' });
+    expect(sendAutopilotAlert).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'paused_credits' }));
   });
 
   it('sin cuentas activas no genera nada: se pausa y avisa en vez de fallar en cada hueco', async () => {
@@ -654,5 +701,40 @@ describe('get_connect_account_link', () => {
   it('una red que no se puede conectar da 422', async () => {
     const r = await executeTool('get_connect_account_link', { platform: 'myspace', brand_id: IDS.BRAND }, apiCtx());
     expect(r).toMatchObject({ ok: false, error: { status: 422 } });
+  });
+});
+
+describe('guardado fallido después de generar', () => {
+  const svc = () => serviceContext(AUTH, IDS.BRAND, 'es', { source: 'route' });
+  const refunded = () => quotaState.calls
+    .filter((c) => c.fn === 'kefy_credits_refund')
+    .reduce((sum, c) => sum + Number(c.args.p_amount ?? 0), 0);
+
+  it('un post que no se guarda devuelve su crédito', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateTextPost(svc(), { topic: 'Café de especialidad' })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBeGreaterThan(0);
+    expect(refunded()).toBe(creditsSpent());
+  });
+
+  it('un carrusel que no se guarda devuelve el texto y cada imagen', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateCarousel(svc(), { topic: 'Métodos de filtrado', slideCount: 3 })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBeGreaterThan(1);
+    expect(refunded()).toBe(creditsSpent());
+  });
+
+  it('una story que no se guarda devuelve el texto y la imagen', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateStory(svc(), { topic: 'Nuevo blend' })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBeGreaterThan(1);
+    expect(refunded()).toBe(creditsSpent());
+  });
+
+  it('un reel que no se guarda devuelve el texto de las variantes sin guardar', async () => {
+    db.failNext('kefy_content_items', 'insert');
+    await expect(generateReel(svc(), { topic: 'Latte art', variant_count: 2 })).rejects.toThrow('Failed to save');
+    expect(creditsSpent()).toBe(2);
+    expect(refunded()).toBe(2);
   });
 });

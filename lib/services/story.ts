@@ -103,9 +103,17 @@ export async function generateStory(ctx: ServiceContext, input: GenerateStoryInp
   //    queda cuota, la story se guarda solo con texto.
   let imageUrl: string | null = null;
   let imageError: GenerateStoryResult['imageError'];
+  const imageChargedAt = new Date();
   if (input.withImage !== false) {
-    const imageCredits = await consumeCredits(ctx.auth.orgId, ctx.auth.plan, 'image').catch(() => null);
-    if (!imageCredits?.allowed) {
+    // Si el cobro lanza (la base no respondió) no es «sin créditos»: el
+    // autopilot pausaría la regla hasta el mes siguiente por un fallo puntual.
+    const imageCredits = await consumeCredits(ctx.auth.orgId, ctx.auth.plan, 'image', imageChargedAt).catch((err) => {
+      reportError(err, { route: POST_ROUTE, auth: ctx.auth, service: 'supabase', extra: { source: ctx.source } });
+      return 'error' as const;
+    });
+    if (imageCredits === 'error') {
+      imageError = 'failed';
+    } else if (!imageCredits.allowed) {
       imageError = 'credits_exhausted';
     } else {
       try {
@@ -140,7 +148,7 @@ export async function generateStory(ctx: ServiceContext, input: GenerateStoryInp
         imageUrl = await uploadBase64Image(img.b64, ctx.auth.orgId, `story-${Date.now()}.jpeg`);
       } catch (err) {
         // La cuota se consumió: se devuelve, la imagen no llegó.
-        await refundCredits(ctx.auth.orgId, 'image');
+        await refundCredits(ctx.auth.orgId, 'image', imageChargedAt);
         reportError(err, { route: POST_ROUTE, auth: ctx.auth, service: 'ai', extra: { fase: 'imagen' } });
         imageError = 'failed';
       }
@@ -189,6 +197,9 @@ export async function generateStory(ctx: ServiceContext, input: GenerateStoryInp
     .single();
 
   if (error || !item) {
+    // El usuario no recibe nada: no se le cobra el texto ni la imagen.
+    await refund();
+    if (imageUrl) await refundCredits(ctx.auth.orgId, 'image', imageChargedAt);
     reportError(new Error(error?.message ?? 'story insert returned no row'), {
       route: POST_ROUTE, service: 'supabase', auth: ctx.auth,
     });

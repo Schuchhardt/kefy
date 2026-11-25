@@ -123,17 +123,21 @@ export async function consumeCredits(
  *
  * No lanza — es una corrección best-effort dentro de un camino que ya está
  * gestionando otro error.
+ *
+ * `chargedAt` es el momento del cobro: el crédito vuelve al mes en que se
+ * descontó. Con la hora del reembolso, un cobro del 31 a las 23:59 devuelto a
+ * las 00:01 dejaba el mes viejo cobrado y regalaba un crédito en el nuevo.
  */
 export async function refundCredits(
   orgId: string,
   operation: CreditOperation,
-  now = new Date(),
+  chargedAt = new Date(),
 ): Promise<void> {
   try {
     const db = createSupabaseServer();
     const { error } = await db.rpc('kefy_credits_refund', {
       p_org_id: orgId,
-      p_period: usagePeriod(now),
+      p_period: usagePeriod(chargedAt),
       p_amount: costOf(operation),
     });
     if (error) throw new Error(error.message);
@@ -293,17 +297,18 @@ export async function consumeAssistantMessage(
 
 /**
  * Devuelve un mensaje a la cuota del asistente (el turno falló antes de poder
- * responder). No lanza — best-effort, como `refundCredits`.
+ * responder). No lanza — best-effort, como `refundCredits`. `chargedAt` es el
+ * momento en que se descontó: vuelve a ese mes.
  */
 export async function refundAssistantMessage(
   orgId: string,
-  now = new Date(),
+  chargedAt = new Date(),
 ): Promise<void> {
   try {
     const db = createSupabaseServer();
     const { error } = await db.rpc('kefy_assistant_refund', {
       p_org_id: orgId,
-      p_period: usagePeriod(now),
+      p_period: usagePeriod(chargedAt),
     });
     if (error) throw new Error(error.message);
   } catch (err) {

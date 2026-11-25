@@ -128,18 +128,21 @@ async function chargeAIReply(db: DB, orgId: string, rule: EngagementRule): Promi
   throw new SpendBlocked(`spend blocked (${spend.status})`);
 }
 
-async function generateAIReply(
+/**
+ * Cobra, redacta con IA y envía. Si falla la IA o el envío a Zernio la
+ * respuesta no llega a nadie: no se le cobra a la organización.
+ */
+async function replyWithAI(
   db: DB,
-  orgId: string,
-  brandId: string | null,
   rule: EngagementRule,
-  contextBody: string,
-): Promise<string> {
-  const refund = await chargeAIReply(db, orgId, rule);
+  event: EngagementEvent,
+  send: (text: string) => Promise<unknown>,
+): Promise<void> {
+  const refund = await chargeAIReply(db, rule.org_id, rule);
   try {
-    return await writeAIReply(db, brandId, rule, contextBody);
+    const text = await writeAIReply(db, event.brandId, rule, event.body);
+    await send(text);
   } catch (err) {
-    // Un fallo de la IA no se le cobra a la organización.
     await refund();
     throw err;
   }
@@ -190,8 +193,8 @@ async function executeAction(
 
     case 'reply_comment_ai': {
       if (event.type !== 'new_comment') break;
-      const text = await generateAIReply(db, rule.org_id, event.brandId, rule, event.body);
-      await replyToComment(event.zernioAccountId, event.postId, event.commentId, text);
+      await replyWithAI(db, rule, event, (text) =>
+        replyToComment(event.zernioAccountId, event.postId, event.commentId, text));
       break;
     }
 
@@ -204,8 +207,8 @@ async function executeAction(
 
     case 'send_dm_ai_response': {
       if (event.type !== 'new_dm') break;
-      const text = await generateAIReply(db, rule.org_id, event.brandId, rule, event.body);
-      await sendMessage(event.zernioAccountId, event.threadId, text);
+      await replyWithAI(db, rule, event, (text) =>
+        sendMessage(event.zernioAccountId, event.threadId, text));
       break;
     }
 

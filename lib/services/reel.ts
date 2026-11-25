@@ -96,7 +96,7 @@ interface OneVariantOpts {
 async function generateOneVariant(
   ctx: ServiceContext,
   opts: OneVariantOpts,
-): Promise<{ script: VideoScript; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> {
+): Promise<{ script: VideoScript; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number; refund: () => Promise<void> }> {
   const promptCtx = brandPromptContext(opts.kit as Pick<BrandKit, 'name' | 'tagline' | 'tone' | 'industry'> | null);
   // Sin esto, dos variantes del mismo topic suelen salir como el mismo hook
   // reformulado — el pedido explícito de "otro ángulo" es lo que de verdad
@@ -143,6 +143,7 @@ async function generateOneVariant(
     hashtags:   script.hashtags,
     model:      generated.model,
     tokensUsed: generated.tokensUsed,
+    refund,
   };
 }
 
@@ -202,7 +203,7 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
   // originalIndex se conserva para el metadata (variant_index) — con
   // ejecución en paralelo una variante del medio puede fallar mientras las de
   // los costados terminan bien, y no se quiere que eso reordene la numeración.
-  const generatedVariants: Array<{ originalIndex: number; script: VideoScript; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number }> =
+  const generatedVariants: Array<{ originalIndex: number; script: VideoScript; scenes: ReelScene[]; hook: string; hashtags: string[]; model: string; tokensUsed: number; refund: () => Promise<void> }> =
     settled
       .map((r, originalIndex) => (r.status === 'fulfilled' ? { originalIndex, ...r.value } : null))
       .filter((v): v is NonNullable<typeof v> => v !== null);
@@ -210,7 +211,7 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
   const variantGroupId = variantCount > 1 ? randomUUID() : null;
 
   const variants: ReelVariant[] = [];
-  for (const generated of generatedVariants) {
+  for (const [pos, generated] of generatedVariants.entries()) {
     const i = generated.originalIndex;
     const { data: item, error: itemError } = await db
       .from('kefy_content_items')
@@ -241,6 +242,9 @@ export async function generateReel(ctx: ServiceContext, input: GenerateReelInput
       .single();
 
     if (itemError || !item) {
+      // Las variantes que no se guardaron (esta y las que faltan) no le llegan
+      // al usuario: se devuelve su crédito de texto.
+      for (const unsaved of generatedVariants.slice(pos)) await unsaved.refund();
       reportError(new Error(itemError?.message ?? 'insert failed'), {
         route: ROUTE, auth: ctx.auth, service: 'supabase', extra: { variantIndex: i + 1 },
       });

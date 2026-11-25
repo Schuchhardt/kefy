@@ -166,3 +166,18 @@ describe('DELETE /api/brands/[id]/avatar', () => {
     expect((await DELETE(req, params)).status).toBe(401);
   });
 });
+
+describe('/api/brands/[id]/avatar — rol', () => {
+  // Igual que el PATCH de la marca y la herramienta set_brand_avatar.
+  it('un miembro no puede cambiar ni quitar la imagen de la marca', async () => {
+    vi.mocked(getAuthFromRequest).mockResolvedValue({ ...auth, role: 'member' } as never);
+    setupBrand();
+    const { POST, DELETE } = await import('@/app/api/brands/[id]/avatar/route');
+    const del = new NextRequest('http://localhost:3099/api/brands/b1/avatar', { method: 'DELETE' });
+
+    expect((await POST(uploadReq(), params)).status).toBe(403);
+    expect((await DELETE(del, params)).status).toBe(403);
+    expect(uploadBase64Image).not.toHaveBeenCalled();
+    expect(mockSupabaseClient.from).not.toHaveBeenCalled();
+  });
+});

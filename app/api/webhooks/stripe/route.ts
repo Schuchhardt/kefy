@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import stripe from '@/lib/stripe';
 import { createSupabaseServer } from '@/lib/supabase';
+import { reportError } from '@/lib/observability';
 import type Stripe from 'stripe';
 import type { BillingPlan } from '@/types/billing';
+import type { SubscriptionStatus } from '@/lib/subscription';
+
+const LIVE_STATUSES = new Set(['active', 'trialing', 'past_due']);
 
 // ─── POST /api/webhooks/stripe ─────────────────────────────────────────────────────────────────
 // Receives and processes Stripe webhook events.
@@ -14,13 +18,60 @@ function planFromMetadata(metadata: Stripe.Metadata | null): BillingPlan {
   return 'starter';
 }
 
+/**
+ * El plan que de verdad se cobra: el del precio de la suscripción. La
+ * metadata `plan` se escribe solo al crear el checkout y Stripe no la cambia
+ * cuando el cliente pasa a otro precio desde el portal; con ella, quien bajaba
+ * de Business a Starter seguía con los créditos y marcas de Business (y quien
+ * subía, sin ellos). La metadata queda como respaldo si el precio no es uno de
+ * los STRIPE_PRICE_* configurados.
+ */
+function planFromSubscription(subscription: Stripe.Subscription): BillingPlan {
+  const priceId = subscription.items?.data?.[0]?.price?.id;
+  if (priceId) {
+    const byPrice: Array<[BillingPlan, string | undefined]> = [
+      ['starter', process.env.STRIPE_PRICE_STARTER],
+      ['pro', process.env.STRIPE_PRICE_PRO],
+      ['business', process.env.STRIPE_PRICE_BUSINESS],
+    ];
+    const match = byPrice.find(([, id]) => id && id === priceId);
+    if (match) return match[0];
+  }
+  return planFromMetadata(subscription.metadata);
+}
+
+/**
+ * Un fallo de la base no puede tragarse: si el webhook responde 200, Stripe
+ * no reintenta y la organización se queda sin su pago registrado (bloqueada
+ * con el trial vencido aunque pague, o con el plan anterior).
+ */
+function throwOnDbError(res: { error: { message: string } | null }, step: string): void {
+  if (res.error) throw new Error(`${step}: ${res.error.message}`);
+}
+
+/**
+ * Estados de Stripe → los que admite `kefy_subscriptions.status`. `incomplete`
+ * (primer cobro aún sin confirmar, p. ej. un medio de pago asíncrono) e
+ * `incomplete_expired` (ese cobro nunca llegó) no dan ni quitan nada: se
+ * ignoran y manda el siguiente evento. Guardarlos violaba el CHECK de la tabla
+ * y, ahora que el webhook responde 500 ante un fallo, Stripe reintentaría
+ * durante días.
+ */
+const STATUS_FROM_STRIPE: Partial<Record<Stripe.Subscription.Status, SubscriptionStatus>> = {
+  active:   'active',
+  trialing: 'trialing',
+  past_due: 'past_due',
+  canceled: 'canceled',
+  unpaid:   'unpaid',
+  paused:   'unpaid',
+};
+
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   // This Stripe account is shared with other products (e.g. Depando) whose
   // events can land on this same endpoint — only touch sessions Kefy created.
   if (session.metadata?.app !== 'kefy') return;
 
   const orgId = session.metadata?.org_id;
-  const plan  = planFromMetadata(session.metadata);
   if (!orgId) return;
 
   const customerId = typeof session.customer === 'string'
@@ -31,28 +82,21 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     ? session.subscription
     : session.subscription?.id ?? null;
 
-  const db = createSupabaseServer();
-
-  // Persist customer ID on org
   if (customerId) {
-    await db
+    const db = createSupabaseServer();
+    throwOnDbError(await db
       .from('kefy_organizations')
-      .update({ stripe_customer_id: customerId, plan })
-      .eq('id', orgId);
+      .update({ stripe_customer_id: customerId })
+      .eq('id', orgId), 'kefy_organizations');
   }
 
-  // Upsert subscription record
-  await db
-    .from('kefy_subscriptions')
-    .upsert(
-      {
-        org_id:                orgId,
-        stripe_subscription_id: subscriptionId,
-        plan,
-        status: 'active',
-      },
-      { onConflict: 'org_id' },
-    );
+  // Completar el checkout no es haber pagado: con un medio de pago asíncrono
+  // la sesión termina con payment_status 'unpaid' y la suscripción queda
+  // `incomplete`. El estado y el plan salen de la suscripción misma; cuando el
+  // pago se confirme llega customer.subscription.updated con `active`.
+  if (!subscriptionId) return;
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  await syncSubscription(orgId, subscription);
 }
 
 async function handleSubscriptionChange(subscription: Stripe.Subscription) {
@@ -68,11 +112,13 @@ async function handleSubscriptionChange(subscription: Stripe.Subscription) {
     if (!customerId) return;
 
     const db = createSupabaseServer();
-    const { data: org } = await db
+    const orgRes = await db
       .from('kefy_organizations')
       .select('id')
       .eq('stripe_customer_id', customerId)
       .maybeSingle();
+    throwOnDbError(orgRes, 'kefy_organizations');
+    const org = orgRes.data;
     if (!org) return;
     return syncSubscription(org.id, subscription);
   }
@@ -80,8 +126,9 @@ async function handleSubscriptionChange(subscription: Stripe.Subscription) {
 }
 
 async function syncSubscription(orgId: string, subscription: Stripe.Subscription) {
-  const plan   = planFromMetadata(subscription.metadata);
-  const status = subscription.status as 'active' | 'trialing' | 'past_due' | 'canceled' | 'unpaid';
+  const status = STATUS_FROM_STRIPE[subscription.status];
+  if (!status) return;
+  const plan = planFromSubscription(subscription);
 
   const periodStart = subscription.items.data[0]?.current_period_start
     ? new Date(subscription.items.data[0].current_period_start * 1000).toISOString()
@@ -96,7 +143,27 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
   // basta con reactivar el pago para que todo vuelva (ver lib/subscription.ts).
   const db = createSupabaseServer();
 
-  await db
+  // Hay una fila por organización. Si la que manda es otra suscripción viva,
+  // un evento de esta que no la deja activa (la vieja que se cancela tras
+  // haber contratado otra, o un evento atrasado) no puede pisarla: dejaba la
+  // cuenta en `canceled` con la suscripción nueva cobrando.
+  const currentRes = await db
+    .from('kefy_subscriptions')
+    .select('stripe_subscription_id, status')
+    .eq('org_id', orgId)
+    .maybeSingle();
+  throwOnDbError(currentRes, 'kefy_subscriptions');
+  const current = currentRes.data as { stripe_subscription_id: string | null; status: string } | null;
+  if (
+    current?.stripe_subscription_id
+    && current.stripe_subscription_id !== subscription.id
+    && LIVE_STATUSES.has(current.status)
+    && status !== 'active' && status !== 'trialing'
+  ) {
+    return;
+  }
+
+  throwOnDbError(await db
     .from('kefy_subscriptions')
     .upsert(
       {
@@ -108,12 +175,12 @@ async function syncSubscription(orgId: string, subscription: Stripe.Subscription
         current_period_end:     periodEnd,
       },
       { onConflict: 'org_id' },
-    );
+    ), 'kefy_subscriptions');
 
-  await db
+  throwOnDbError(await db
     .from('kefy_organizations')
     .update({ plan })
-    .eq('id', orgId);
+    .eq('id', orgId), 'kefy_organizations');
 }
 
 export async function POST(req: NextRequest) {
@@ -150,10 +217,10 @@ export async function POST(req: NextRequest) {
         break;
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Webhook handler error';
-    console.error('[stripe webhook] handler error:', msg, 'event:', event.type);
-    // Return 200 to prevent Stripe from retrying non-critical errors
-    return NextResponse.json({ received: true, warning: msg });
+    reportError(err, { route: 'POST /api/webhooks/stripe', service: 'stripe', extra: { event: event.type } });
+    // 500 para que Stripe reintente: los handlers son idempotentes (upsert por
+    // org_id), así que repetir el evento no duplica nada.
+    return NextResponse.json({ error: 'Webhook handler error' }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

@@ -310,19 +310,32 @@ export async function publishContent(
           ` status=${zernioResult.status} platform_post_id=${zernioResult.platform_post_id}`,
         );
 
-        await db.from('kefy_scheduled_posts').insert({
-          org_id:            orgId,
-          brand_id:          brandId,
-          content_item_id:   item.id,
-          social_account_id: account.id,
-          zernio_post_id:    zernioResult.post_id,
-          platform_post_id:  zernioResult.platform_post_id ?? null,
-          platform_post_url: zernioResult.platform_post_url ?? null,
-          published_at:      new Date().toISOString(),
-          status:            'published',
-          format,
-          created_by:        ctx.auth.userId,
-        });
+        const { data: post, error: dbError } = await db
+          .from('kefy_scheduled_posts')
+          .insert({
+            org_id:            orgId,
+            brand_id:          brandId,
+            content_item_id:   item.id,
+            social_account_id: account.id,
+            zernio_post_id:    zernioResult.post_id,
+            platform_post_id:  zernioResult.platform_post_id ?? null,
+            platform_post_url: zernioResult.platform_post_url ?? null,
+            published_at:      new Date().toISOString(),
+            status:            'published',
+            format,
+            created_by:        ctx.auth.userId,
+          })
+          .select('id')
+          .single();
+
+        // Ya está publicado en la red: no es un fallo, pero sin la fila no hay
+        // métricas ni rastro en el autopilot, y eso tiene que verse.
+        if (dbError) {
+          reportError(new Error(`publish insert error: ${dbError.message}`), {
+            route, auth: ctx.auth, service: 'supabase',
+            extra: { itemId: item.id, accountId: account.id, zernioPostId: zernioResult.post_id },
+          });
+        }
 
         results.push({
           social_account_id: account.id,
@@ -330,6 +343,7 @@ export async function publishContent(
           status:            'published',
           zernio_post_id:    zernioResult.post_id,
           post_url:          zernioResult.platform_post_url ?? null,
+          scheduled_post_id: (post as { id?: string } | null)?.id,
         });
       } else {
         console.log(
