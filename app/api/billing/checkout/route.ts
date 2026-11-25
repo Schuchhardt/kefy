@@ -3,6 +3,8 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { createSupabaseServer } from '@/lib/supabase';
 import stripe, { getPriceId } from '@/lib/stripe';
 import { appUrl } from '@/lib/app-url';
+import { reportError } from '@/lib/observability';
+import type Stripe from 'stripe';
 import type { BillingPlan } from '@/types/billing';
 import { z } from 'zod';
 
@@ -11,6 +13,49 @@ const BodySchema = z.object({
   /** Idioma al que vuelve Stripe. Antes era siempre /es/. */
   lang: z.enum(['es', 'en']).optional(),
 });
+
+/** Estados en que la suscripción sigue viva y un checkout nuevo la duplicaría. */
+const LIVE = new Set<Stripe.Subscription.Status>(['active', 'trialing', 'past_due', 'unpaid', 'paused']);
+
+async function findLiveSubscription(customerId: string): Promise<Stripe.Subscription | null> {
+  const subs = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 20 });
+  // La cuenta de Stripe se comparte con otros productos: solo las de Kefy.
+  return subs.data.find((s) => s.metadata?.app === 'kefy' && LIVE.has(s.status)) ?? null;
+}
+
+async function planChangeUrl(
+  sub: Stripe.Subscription,
+  priceId: string,
+  customerId: string,
+  successUrl: string,
+  returnUrl: string,
+  orgId: string,
+): Promise<string> {
+  const item = sub.items.data[0];
+  if (item && item.price.id !== priceId && sub.status !== 'paused') {
+    try {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: returnUrl,
+        flow_data: {
+          type: 'subscription_update_confirm',
+          subscription_update_confirm: {
+            subscription: sub.id,
+            items: [{ id: item.id, price: priceId, quantity: 1 }],
+          },
+          after_completion: { type: 'redirect', redirect: { return_url: successUrl } },
+        },
+      });
+      return session.url;
+    } catch (err) {
+      // Si la configuración del portal no deja cambiar de plan, al menos el
+      // portal normal: ahí se puede gestionar la suscripción sin duplicarla.
+      reportError(err, { route: 'POST /api/billing/checkout', service: 'stripe', extra: { orgId, step: 'portal_flow' } });
+    }
+  }
+  const session = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: returnUrl });
+  return session.url;
+}
 
 // ─── POST /api/billing/checkout ───────────────────────────────────────────────
 // Creates a Stripe Checkout Session for a plan upgrade.
@@ -84,6 +129,18 @@ export async function POST(req: NextRequest) {
       .from('kefy_organizations')
       .update({ stripe_customer_id: customerId })
       .eq('id', auth.orgId);
+  }
+
+  // Quien ya paga no pasa por un checkout nuevo: eso creaba una segunda
+  // suscripción y se cobraban las dos. El cambio de plan se hace sobre la
+  // suscripción vigente, en el portal, que muestra el prorrateo y pide
+  // confirmación. El plan nuevo lo guarda el webhook (sale del precio).
+  if (org.stripe_customer_id) {
+    const live = await findLiveSubscription(org.stripe_customer_id);
+    if (live) {
+      const url = await planChangeUrl(live, priceId, org.stripe_customer_id, successUrl, cancelUrl, auth.orgId);
+      return NextResponse.json({ url });
+    }
   }
 
   // Create the Checkout Session

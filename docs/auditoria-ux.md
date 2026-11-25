@@ -120,8 +120,14 @@ tiene su landing. Ver `docs/landings-por-rubro.md`.
 - **Respuestas automáticas con `{nombre}`**: la UI prometía sustituir el nombre
   y `lib/engagement-executor.ts` envía el texto literal. Se cambió el texto de
   la UI; implementar la sustitución es una decisión de producto.
-- **Cambio de plan de un cliente que ya paga**: hoy pasa por un checkout nuevo
-  y podría acabar con dos suscripciones; conviene llevarlo al portal de Stripe.
+- **Cambio de plan de un cliente que ya paga**: resuelto. Si la organización
+  tiene una suscripción de Kefy viva en Stripe, `POST /api/billing/checkout`
+  no crea otra: devuelve el portal con el flujo `subscription_update_confirm`
+  (Stripe muestra el prorrateo y cambia el precio de la misma suscripción). Si
+  el portal no tiene habilitado el cambio de plan, cae al portal normal y lo
+  reporta a Sentry: **hay que habilitar «Customers can switch plans» en la
+  configuración del portal de Stripe**. El webhook toma el plan del precio y
+  no deja que un evento de una suscripción vieja pise la vigente.
 - **Reels antiguos solo con `mux_playback_id`** siguen mostrando «El video se
   está generando…» sin forma de regenerarlos desde la interfaz.
 
