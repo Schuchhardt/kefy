@@ -85,6 +85,13 @@ describe('BrandImageField', () => {
     expect(screen.getByRole('button', { name: 'Quitar imagen' })).toBeInTheDocument();
   });
 
+  it('sin permiso de edición (miembro) los botones quedan deshabilitados', () => {
+    state.activeBrand = { ...brand, avatar_url: 'https://cdn.test/a.png' };
+    render(<BrandImageField locale="es" canEdit={false} />);
+    expect(screen.getByRole('button', { name: 'Cambiar imagen' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Quitar imagen' })).toBeDisabled();
+  });
+
   it('sin marca activa no pinta nada', () => {
     state.activeBrand = null;
     const { container } = render(<BrandImageField locale="es" />);

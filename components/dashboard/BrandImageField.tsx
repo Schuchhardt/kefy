@@ -26,7 +26,7 @@ import enT from '@/locales/en/dashboard/brand';
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_BYTES = 5 * 1024 * 1024;
 
-export default function BrandImageField({ locale }: { locale: 'es' | 'en' }) {
+export default function BrandImageField({ locale, canEdit = true }: { locale: 'es' | 'en'; canEdit?: boolean }) {
   const { activeBrand, refresh } = useBrand();
   const t = (locale === 'en' ? enT : esT).brandImage;
   const helpId = `brand-image-${useId().replace(/:/g, '')}`;
@@ -113,7 +113,7 @@ export default function BrandImageField({ locale }: { locale: 'es' | 'en' }) {
           variant="secondary"
           icon={<Icon name="upload" size={16} />}
           loading={busy === 'upload'}
-          disabled={busy !== null}
+          disabled={!canEdit || busy !== null}
           aria-describedby={helpId}
           onClick={() => inputRef.current?.click()}
         >
@@ -125,7 +125,7 @@ export default function BrandImageField({ locale }: { locale: 'es' | 'en' }) {
             variant="danger-ghost"
             icon={<Icon name="trash" size={16} />}
             loading={busy === 'remove'}
-            disabled={busy !== null}
+            disabled={!canEdit || busy !== null}
             onClick={() => { void handleRemove(); }}
           >
             {t.remove}

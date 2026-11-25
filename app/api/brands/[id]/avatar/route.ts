@@ -21,6 +21,10 @@ export async function POST(
 ) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // Como el PATCH de la marca y set_brand_avatar: un miembro no la cambia.
+  if (auth.role !== 'owner' && auth.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { id } = await params;
 
@@ -68,6 +72,10 @@ export async function DELETE(
 ) {
   const auth = await getAuthFromRequest(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // Como el PATCH de la marca y set_brand_avatar: un miembro no la cambia.
+  if (auth.role !== 'owner' && auth.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { id } = await params;
   const ctx = serviceContext(auth, id, 'es', { brandScope: 'org', source: 'route' });

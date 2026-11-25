@@ -484,7 +484,7 @@ export default function BrandIdentityPage() {
           Brand Kit, más abajo. Va fuera del <form> porque se guarda sola al
           subirla, sin esperar a que se envíe el formulario. */}
       <div className={styles.block}>
-        <BrandImageField locale={locale} />
+        <BrandImageField locale={locale} canEdit={canEdit} />
       </div>
 
       <form id={formId} onSubmit={handleSave} noValidate aria-label={ti.title}>
