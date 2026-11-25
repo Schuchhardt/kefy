@@ -131,13 +131,16 @@ export default async function LangLayout({
             veía un destello oscuro en cada carga del dashboard. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
-      <body suppressHydrationWarning>
+      {/* Las variables de las fuentes van en <body>, no en un div interior:
+          globals.css le pone `font-family: var(--font-dm-sans)` al body, que
+          no ve las variables de sus hijos, y Modal se monta con un portal
+          directo en el body. Con el div, el texto corrido salía en la fuente
+          del sistema y los modales sin Syne ni DM Sans. */}
+      <body className={`${syne.variable} ${dmSans.variable}`} suppressHydrationWarning>
         <PwaUpdater />
-        <div className={`${syne.variable} ${dmSans.variable}`}>
-          <ThemeProvider>
-            {children}
-          </ThemeProvider>
-        </div>
+        <ThemeProvider>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

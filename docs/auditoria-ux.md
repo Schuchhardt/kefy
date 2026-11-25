@@ -110,6 +110,25 @@ se borraron); entran «Dos formas de tener tus redes al día» (plataforma o
 servicio gestionado) y «Hecho para tu rubro». Cada rubro de los correos SDR
 tiene su landing. Ver `docs/landings-por-rubro.md`.
 
+### Noviembre 2026: fuentes locales y DM Sans en el texto corrido
+
+- **Syne y DM Sans se sirven desde el repo** (`app/fonts`, `next/font/local`),
+  no desde Google. Un deploy de producción falló porque Turbopack no resolvió
+  `next/font/google` con el caché del build anterior; ahora el build no
+  descarga nada. Son las variables del subconjunto latino de
+  `@fontsource-variable` (OFL, licencia al lado): un archivo por familia con
+  todos los pesos, ~35 KB cada uno. Las variables CSS no cambiaron
+  (`--font-syne`, `--font-dm-sans`). Para actualizarlas, reemplazar los
+  `.woff2` por los de una versión nueva del mismo paquete.
+- **El texto corrido nunca había salido en DM Sans.** Las variables estaban en
+  un `div` dentro del `body` y `globals.css` le pone
+  `font-family: var(--font-dm-sans)` al `body`, que no ve las variables de sus
+  hijos: párrafos, listas y respuestas salían en la fuente del sistema (SF en
+  Mac, Segoe en Windows). `Modal`, que se monta con un portal en el `body`,
+  quedaba sin Syne ni DM Sans. Ahora las variables van en el `body`.
+- `assets/fonts/*.ttf` es otra cosa: las fuentes del texto quemado en las
+  imágenes (`docs/content-formats.md`). No se tocan.
+
 ### Pendiente
 
 - **Borrar el código muerto** del punto 7 del resumen (secciones de landing no
