@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 import esT from '@/locales/es/dashboard/content';
 import enT from '@/locales/en/dashboard/content';
 
-// Idioma del documento (lo fija SetLang en <html lang>). Quien no pasa `lang`
+// Idioma del documento (<html lang>, lo pone app/[lang]/layout.tsx). Quien no pasa `lang`
 // —NetworkPreview— recibía siempre «Generando imagen…» en español. Con
 // useSyncExternalStore la hidratación usa el valor del servidor ('es') y
 // después se corrige sin avisos de desajuste.

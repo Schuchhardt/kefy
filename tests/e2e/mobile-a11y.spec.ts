@@ -19,6 +19,10 @@ import { test, expect } from './fixtures/auth';
 
 const PUBLIC = [
   '/es', '/en', '/es/precios', '/en/pricing',
+  // Landings por rubro: una de servicio y la de agencias (plataforma).
+  '/es/para/clinicas-dentales', '/en/for/marketing-agencies',
+  // Con pie y datos estructurados desde la optimización SEO (docs/seo-aeo.md).
+  '/es/sobre-kefy', '/es/blog',
   '/es/access', '/en/access', '/es/login', '/en/login', '/es/register', '/es/forgot-password',
 ];
 

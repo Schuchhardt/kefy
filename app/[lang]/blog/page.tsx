@@ -1,4 +1,9 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import JsonLd from '@/components/seo/JsonLd';
+import { seoCopy } from '@/lib/content';
+import { SITE_URL } from '@/lib/share-metadata';
+import { ORGANIZATION_ID, breadcrumbJsonLd, graph, pageMetadata } from '@/lib/seo';
 import { createSupabaseServer } from '@/lib/supabase';
 import type { BlogPost } from '@/types/blog';
 import { KEFY_COPY } from '@/lib/content';
@@ -33,15 +38,45 @@ async function getPosts(lang: string): Promise<BlogPost[]> {
   }
 }
 
+export async function generateMetadata({ params }: { params: Promise<{ lang: string }> }): Promise<Metadata> {
+  const { lang } = await params;
+  const { title, description } = seoCopy(lang).pages.blog;
+  return pageMetadata(lang, { title, description, path: (l) => `/${l}/blog` });
+}
+
 export default async function BlogPage({ params }: { params: Promise<{ lang: string }> }) {
   const { lang } = await params;
   const labels = blogLabels[lang] ?? blogLabels['es'];
   const posts = await getPosts(lang);
 
   const copy = KEFY_COPY[lang] ?? KEFY_COPY['es'];
+  const seo = seoCopy(lang);
+  const url = `${SITE_URL}/${lang}/blog`;
+  const jsonLd = graph(
+    {
+      '@type': 'Blog',
+      '@id': `${url}#blog`,
+      name: seo.pages.blog.title,
+      description: seo.pages.blog.description,
+      url,
+      inLanguage: lang === 'en' ? 'en' : 'es',
+      publisher: { '@id': ORGANIZATION_ID },
+      blogPost: posts.map((post) => ({
+        '@type': 'BlogPosting',
+        headline: post.title,
+        datePublished: post.published_at,
+        url: `${url}/${post.slug}`,
+      })),
+    },
+    breadcrumbJsonLd([
+      { name: seo.breadcrumb.home, url: `${SITE_URL}/${lang}` },
+      { name: seo.breadcrumb.blog, url },
+    ]),
+  );
 
   return (
     <>
+      <JsonLd data={jsonLd} />
       <BlogNav lang={lang} nav={copy.nav} cta={copy.cta} />
       <div className="page-layout">
       <div className="container" style={{ maxWidth: '960px' }}>

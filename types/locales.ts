@@ -17,16 +17,12 @@ export interface HeroStat   { big: string; lbl: string; }
 export interface DemoOutput { channel: string; meta: string; body: string; }
 export interface DemoMessage { platform: string; from: string; text: string; type: string; pts: number; }
 export interface DemoDMMessage { sender: 'user' | 'brand'; text: string; }
-export interface Pain { num: string; t: string; d: string; }
 export interface StatCard { v: number; pre?: string; suf?: string; d: string; warm?: boolean; }
 export interface Step { n: string; ic: string; t: string; d: string; }
 export interface MultOutput { k: string; sub: string; }
-export interface BrandBullet { ic: string; t: string; }
 export interface KillerPoint { k: string; d: string; }
 export interface DashStat { lbl: string; v: string; d: string; }
 export interface DashPost { ic: string; text: string; eng: string; winner: boolean; boost: string; }
-export interface ApBullet { ic: string; t: string; }
-export interface CalDay { day: string; items: { ic: string; t: string }[]; }
 export interface FeatureItem { ic: string; t: string; d: string; }
 export interface FeatureLayer { name: string; badge: string; badgeColor?: string; items: string[]; }
 export interface WhoSegment { ic: string; t: string; d: string; }
@@ -125,21 +121,7 @@ export interface KefyCopy {
     linkSentTime: string;
     linkSentVia: string;
   };
-  problem: { tag: string; h2: string; pains: { num: string; t: string }[]; result: string; };
   how: { tag: string; h2: string; steps: Step[]; closer: string[]; };
-  brand: {
-    tag: string; h2: string[]; sub: string; bullets: BrandBullet[];
-    kit: {
-      title: string; status: string; brandName: string;
-      palette: string; type: string; logo: string; tone: string; toneV: string; typeV: string;
-      applied: string; formats: string[];
-    };
-  };
-  autopilot: {
-    tag: string; h2: string[]; sub: string; bullets: ApBullet[]; closer: string;
-    togglePilot: string; toggleManual: string; modeLabel: string;
-    calendarTitle: string; schedule: CalDay[];
-  };
   channels: { h3: string[]; sub: string; items: string[]; };
   testi: { tag: string; h2: string; sub: string; proof: ProofPoint[]; };
   pricing: {
@@ -183,6 +165,55 @@ export interface KefyCopy {
   who: { tag: string; h2: string[]; segments: WhoSegment[]; };
   cmp: { tag: string; h2: string; cols: string[]; rows: (string | string[])[]; partial: string; simpleMode?: boolean; withoutTitle?: string; withoutItems?: string[]; withTitle?: string; withItems?: string[]; };
   lang: { h2: string[]; em: string; sub: string; more: string; };
+}
+
+// ─── Landings por rubro (locales/*/niches.ts, lib/niches.ts) ──────────────────
+
+/** Un punto con título y una línea de detalle. */
+export interface NicheItem { t: string; d: string; }
+
+/** Copy de la página de un rubro. Ver docs/landings-por-rubro.md. */
+export interface NicheCopy {
+  /** Nombre del rubro: tarjeta de la home, migas y pie. */
+  name: string;
+  /** Una línea para la tarjeta del rubro en la home. */
+  card: string;
+  meta: { title: string; description: string };
+  hero: { tag: string; h1: string; em: string; sub: string };
+  /** Textos alternativos de las imágenes del rubro (lib/niches.ts, `nicheImage`). */
+  image: { alt: string; ideasAlt: string };
+  /**
+   * Preguntas como las haría alguien a un buscador o a un asistente de IA. Se
+   * muestran primero en la FAQ y sus respuestas se arman con `does` e `ideas`
+   * (sin promesas nuevas). Ver docs/seo-aeo.md.
+   */
+  aeo: { what: string; post: string };
+  /** Lo que pasa hoy en negocios del rubro (sale de los correos SDR). */
+  pains: { h2: string; items: NicheItem[] };
+  /** Qué hace Kefy por ellos. */
+  does: { h2: string; items: NicheItem[] };
+  /** Ejemplos concretos de publicaciones para el rubro. */
+  ideas: { h2: string; sub: string; items: string[] };
+  /** Preguntas propias del rubro; las comunes de la oferta se añaden después. */
+  faq: FaqItem[];
+  final: { h2: string; sub: string };
+  /** Primer mensaje de WhatsApp: dice de qué rubro viene la persona. */
+  whatsapp: string;
+}
+
+/** Tarjeta de una de las dos formas de trabajar con Kefy. */
+export interface OfferCopy {
+  label: string;
+  title: string;
+  /** «Desde», en pequeño antes del precio, si el precio es el del plan más barato. */
+  from?: string;
+  /** Precio con el número que da lib/plans.ts (`USD 200 / mes`). */
+  price: (usd: string) => string;
+  features: string[];
+  cta: string;
+  note: string;
+  /** Texto alternativo de la imagen de la tarjeta. */
+  imageAlt: string;
 }
 
 export interface CommonCopy {

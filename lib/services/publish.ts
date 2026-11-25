@@ -741,7 +741,7 @@ export async function syncScheduledPosts(ctx: ServiceContext, itemId: string): P
 // ─── Cancelar ────────────────────────────────────────────────────────────────
 
 /**
- * Cancela una publicación programada: en Zernio (best-effort) y en Kefy. Si
+ * Cancela una publicación programada: primero en Zernio y después en Kefy. Si
  * era la última programación del contenido, el contenido vuelve a 'approved'.
  */
 export async function cancelScheduledPost(
@@ -764,21 +764,41 @@ export async function cancelScheduledPost(
     throw new ServiceError('conflict', 409, 'Post was already deleted');
   }
 
-  // Cancelar en Zernio (best-effort)
+  // Cancelar en Zernio. Si Zernio ya no tiene el post (404/410) no hay nada que
+  // detener; cualquier otro fallo significa que sigue programado allá y saldrá
+  // a su hora, así que no se marca como cancelado en Kefy.
   if (post.zernio_post_id) {
     try {
       const { cancelPost } = await import('@/lib/zernio');
       await cancelPost(post.zernio_post_id);
     } catch (err) {
-      console.warn('Zernio cancel warning:', err instanceof Error ? err.message : err);
+      const statusCode = (err as { statusCode?: unknown })?.statusCode;
+      if (statusCode !== 404 && statusCode !== 410) {
+        reportError(err, {
+          route: 'lib/services/publish', service: 'zernio', auth: ctx.auth,
+          extra: { op: 'cancelScheduledPost', postId: post.id },
+        });
+        throw new ServiceError('provider_error', 502, msg(ctx.language,
+          'No se pudo cancelar la publicación en la red social; sigue programada. Inténtalo de nuevo.',
+          'The post could not be cancelled on the social network; it is still scheduled. Please try again.')).markReported();
+      }
     }
   }
 
-  await db
+  const { error: updateError } = await db
     .from('kefy_scheduled_posts')
     .update({ status: 'cancelled' })
     .eq('id', post.id)
     .eq('org_id', ctx.auth.orgId);
+  if (updateError) {
+    reportError(new Error(updateError.message), {
+      route: 'lib/services/publish', service: 'supabase', auth: ctx.auth,
+      extra: { op: 'cancelScheduledPost', postId: post.id },
+    });
+    throw new ServiceError('unavailable', 500, msg(ctx.language,
+      'La publicación se canceló en la red social, pero Kefy no pudo registrarlo.',
+      'The post was cancelled on the social network, but Kefy could not record it.')).markReported();
+  }
 
   // Vuelve a 'approved' si nada más sale o salió; si otra red ya lo publicó, queda publicado.
   const itemReverted = (await syncContentItemStatus(db, post.content_item_id)) === 'approved';

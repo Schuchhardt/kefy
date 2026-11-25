@@ -8,7 +8,7 @@ import { appUrl } from '@/lib/app-url';
 import { reportError } from '@/lib/observability';
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 import {
-  canManageTeam, generateInvitationToken, hasRoomForMember,
+  canManageTeam, currentTeamRole, generateInvitationToken, hasRoomForMember,
   isValidEmail, normalizeEmail, memberLimitFor, type InvitableRole,
 } from '@/lib/team';
 import TeamInvitation from '@/emails/TeamInvitation';
@@ -67,6 +67,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Solo el dueño o un administrador pueden invitar' }, { status: 403 });
   }
 
+  const db = createSupabaseServer();
+
+  // El rol del token puede estar desfasado (alguien a quien sacaron del equipo
+  // conserva su sesión hasta que caduca): se decide con la membresía vigente.
+  let rolActual: Awaited<ReturnType<typeof currentTeamRole>>;
+  try {
+    rolActual = await currentTeamRole(db, auth);
+  } catch (err) {
+    reportError(err, { route: 'POST /api/team/invitations', auth, service: 'supabase' });
+    return NextResponse.json({ error: 'No se pudo crear la invitación' }, { status: 500 });
+  }
+  if (!canManageTeam(rolActual)) {
+    return NextResponse.json({ error: 'Solo el dueño o un administrador pueden invitar' }, { status: 403 });
+  }
+
   // Cada invitación dispara un correo: sin freno, el endpoint sirve para
   // inundar bandejas ajenas usando nuestro dominio.
   const limite = await checkRateLimit({
@@ -93,8 +108,6 @@ export async function POST(req: NextRequest) {
 
   const role: InvitableRole = input.role === 'admin' ? 'admin' : 'member';
   const lang: 'es' | 'en' = input.lang === 'en' ? 'en' : 'es';
-
-  const db = createSupabaseServer();
 
   // ── Cupo del plan ──────────────────────────────────────────────────────────
   const [{ count: memberCount }, { count: pendingCount }] = await Promise.all([
