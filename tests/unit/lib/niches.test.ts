@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  NICHE_IDS, NICHE_OFFER, NICHE_SLUGS, nicheFromCampaign, nicheFromSlug, nicheImage, nichePath, nicheRedirectPath,
+  NICHE_IDS, NICHE_OFFER, NICHE_SLUGS, OFFER_IMAGES, nicheFromCampaign, nicheFromSlug, nicheImage, nichePath,
+  nicheRedirectPath,
 } from '@/lib/niches';
 import { switchLocalePath } from '@/lib/localized-paths';
 import { MANAGED_SERVICE_PRICE_USD, PLAN_LIMITS, PLAN_PRICES_USD } from '@/lib/plans';
@@ -60,9 +61,12 @@ describe('lib/niches: rutas', () => {
   // rubro nuevo sin imagen rompería el hero y la tarjeta de la home.
   it('cada rubro tiene su imagen y su imagen para compartir', () => {
     for (const id of NICHE_IDS) {
-      const { hero, og } = nicheImage(id);
-      expect(existsSync(join(process.cwd(), 'public', hero)), hero).toBe(true);
-      expect(existsSync(join(process.cwd(), 'public', og)), og).toBe(true);
+      for (const file of Object.values(nicheImage(id))) {
+        expect(existsSync(join(process.cwd(), 'public', file)), file).toBe(true);
+      }
+    }
+    for (const file of Object.values(OFFER_IMAGES)) {
+      expect(existsSync(join(process.cwd(), 'public', file)), file).toBe(true);
     }
   });
 
@@ -100,6 +104,7 @@ describe.each([['es', esNiches, esLanding], ['en', enNiches, enLanding]] as cons
       expect(n.faq.length, id).toBeGreaterThanOrEqual(2);
       expect(n.whatsapp.trim(), id).not.toBe('');
       expect(n.image.alt.trim(), id).not.toBe('');
+      expect(n.image.ideasAlt.trim(), id).not.toBe('');
     }
   });
 

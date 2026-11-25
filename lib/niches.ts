@@ -57,13 +57,23 @@ export const NICHE_SLUGS: Record<NicheId, Record<Locale, string>> = {
 
 /**
  * Imágenes de cada rubro (generadas con Higgsfield, ilustrativas: no son
- * clientes). `hero` es 4:5 para la página y las tarjetas de la home; `og`,
- * 1200×630 para cuando se comparte el enlace. Las genera y optimiza
- * scripts/optimize-niche-images.mjs a partir de los originales.
+ * clientes). `hero` es 4:5 para la página y las tarjetas de la home; `ideas`,
+ * 4:5 para la sección de ideas; `og`, 1200×630 para cuando se comparte el
+ * enlace. Las optimiza scripts/optimize-niche-images.mjs a partir de los originales.
  */
-export function nicheImage(id: NicheId): { hero: string; og: string; width: number; height: number } {
-  return { hero: `/landing/niches/${id}.webp`, og: `/landing/niches/${id}-og.jpg`, width: 1200, height: 1500 };
+export function nicheImage(id: NicheId): { hero: string; ideas: string; og: string } {
+  return {
+    hero: `/landing/niches/${id}.webp`,
+    ideas: `/landing/niches/${id}-ideas.webp`,
+    og: `/landing/niches/${id}-og.jpg`,
+  };
 }
+
+/** Imágenes de las tarjetas de las dos ofertas (3:2). */
+export const OFFER_IMAGES = {
+  platform: '/landing/offers/platform.webp',
+  service: '/landing/offers/service.webp',
+} as const;
 
 export function isNicheId(value: unknown): value is NicheId {
   return typeof value === 'string' && (NICHE_IDS as readonly string[]).includes(value);

@@ -1,21 +1,24 @@
 #!/usr/bin/env node
-// Optimiza las imágenes de las landings por rubro (docs/landings-por-rubro.md).
+// Optimiza las imágenes de las landings (docs/landings-por-rubro.md).
 //
-// Los originales salen de Higgsfield (gpt_image_2_6, 4:5, 1792×2240 PNG, unos
-// 6 MB cada uno) y no se suben al repo. Este script deja en
-// public/landing/niches/:
-//   <id>.webp     1200×1500, para el hero y las tarjetas de la home
-//                 (next/image genera los tamaños menores).
-//   <id>-og.jpg   1200×630, la imagen al compartir el enlace (WhatsApp, redes).
+// Los originales salen de Higgsfield (gpt_image_2_6, calidad alta, 2k; PNG de
+// unos 6 MB) y no se suben al repo. Según el nombre del original:
 //
-// Uso: node scripts/optimize-niche-images.mjs <carpeta con dental.png, estetica.png…>
+//   <rubro>.png          → public/landing/niches/<rubro>.webp     1200×1500 (hero y tarjeta de la home)
+//                        → public/landing/niches/<rubro>-og.jpg   1200×630  (al compartir el enlace)
+//   <rubro>-ideas.png    → public/landing/niches/<rubro>-ideas.webp 1200×1500 (sección «ideas»)
+//   offer-<oferta>.png   → public/landing/offers/<oferta>.webp    1200×800  (tarjetas de las dos ofertas)
+//
+// next/image genera los tamaños menores. Uso:
+//   node scripts/optimize-niche-images.mjs <carpeta con los originales>
 
 import { mkdir, readdir } from 'node:fs/promises';
 import { join, parse } from 'node:path';
 import sharp from 'sharp';
 
-const IDS = ['dental', 'estetica', 'fitness', 'academias', 'turismo', 'hogar', 'agencias'];
-const OUT = join(process.cwd(), 'public', 'landing', 'niches');
+const NICHES = ['dental', 'estetica', 'fitness', 'academias', 'turismo', 'hogar', 'agencias'];
+const OFFERS = ['platform', 'service'];
+const PUBLIC = join(process.cwd(), 'public', 'landing');
 
 const src = process.argv[2];
 if (!src) {
@@ -23,20 +26,28 @@ if (!src) {
   process.exit(1);
 }
 
-await mkdir(OUT, { recursive: true });
-const files = (await readdir(src)).filter((f) => IDS.includes(parse(f).name));
+await mkdir(join(PUBLIC, 'niches'), { recursive: true });
+await mkdir(join(PUBLIC, 'offers'), { recursive: true });
 
-for (const file of files) {
-  const id = parse(file).name;
+const webp = (input, w, h, out) => sharp(input).resize(w, h, { fit: 'cover' }).webp({ quality: 78 }).toFile(out);
+
+for (const file of await readdir(src)) {
+  const name = parse(file).name;
   const input = join(src, file);
-  await sharp(input).resize(1200, 1500, { fit: 'cover' }).webp({ quality: 78 }).toFile(join(OUT, `${id}.webp`));
-  // Recorte apaisado: `attention` centra lo más llamativo (la persona, el teléfono).
-  await sharp(input)
-    .resize(1200, 630, { fit: 'cover', position: sharp.strategy.attention })
-    .jpeg({ quality: 80, mozjpeg: true })
-    .toFile(join(OUT, `${id}-og.jpg`));
-  console.log(`✓ ${id}`);
-}
 
-const missing = IDS.filter((id) => !files.some((f) => parse(f).name === id));
-if (missing.length) console.warn(`Faltan originales: ${missing.join(', ')}`);
+  if (NICHES.includes(name)) {
+    await webp(input, 1200, 1500, join(PUBLIC, 'niches', `${name}.webp`));
+    // Recorte apaisado: `attention` centra lo más llamativo (la persona, el teléfono).
+    await sharp(input)
+      .resize(1200, 630, { fit: 'cover', position: sharp.strategy.attention })
+      .jpeg({ quality: 80, mozjpeg: true })
+      .toFile(join(PUBLIC, 'niches', `${name}-og.jpg`));
+  } else if (name.endsWith('-ideas') && NICHES.includes(name.slice(0, -'-ideas'.length))) {
+    await webp(input, 1200, 1500, join(PUBLIC, 'niches', `${name}.webp`));
+  } else if (name.startsWith('offer-') && OFFERS.includes(name.slice('offer-'.length))) {
+    await webp(input, 1200, 800, join(PUBLIC, 'offers', `${name.slice('offer-'.length)}.webp`));
+  } else {
+    continue;
+  }
+  console.log(`✓ ${name}`);
+}

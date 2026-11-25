@@ -8,7 +8,7 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { nichesCopy } from '@/lib/content';
 import { NICHE_IDS, NICHE_SEGMENT, NICHE_SLUGS, nicheImage, nichePath, nicheFromSlug } from '@/lib/niches';
-import { SITE_URL, shareMetadata } from '@/lib/share-metadata';
+import { pageMetadata } from '@/lib/seo';
 import type { Locale } from '@/types/i18n';
 import NicheLanding from './NicheLanding';
 
@@ -24,21 +24,13 @@ export function nicheMetadata({ lang, niche }: NicheRouteParams): Metadata {
   if (!id) return {};
   const copy = nichesCopy(lang).niches[id];
   const { title, description } = copy.meta;
-  const path = nichePath(id, lang);
-  return {
+  // Al compartir el enlace (WhatsApp, redes) se ve la foto del rubro.
+  return pageMetadata(lang, {
     title,
     description,
-    alternates: {
-      canonical: `${SITE_URL}${path}`,
-      languages: {
-        es: `${SITE_URL}${nichePath(id, 'es')}`,
-        en: `${SITE_URL}${nichePath(id, 'en')}`,
-        'x-default': `${SITE_URL}${nichePath(id, 'es')}`,
-      },
-    },
-    // Al compartir el enlace (WhatsApp, redes) se ve la foto del rubro.
-    ...shareMetadata(lang, { title, description, path, image: { url: nicheImage(id).og, alt: copy.image.alt } }),
-  };
+    path: (l) => nichePath(id, l),
+    image: { url: nicheImage(id).og, alt: copy.image.alt },
+  });
 }
 
 export function renderNichePage({ lang, niche }: NicheRouteParams, segment: string) {

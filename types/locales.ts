@@ -180,8 +180,14 @@ export interface NicheCopy {
   card: string;
   meta: { title: string; description: string };
   hero: { tag: string; h1: string; em: string; sub: string };
-  /** Texto alternativo de la imagen del rubro (lib/niches.ts, `nicheImage`). */
-  image: { alt: string };
+  /** Textos alternativos de las imágenes del rubro (lib/niches.ts, `nicheImage`). */
+  image: { alt: string; ideasAlt: string };
+  /**
+   * Preguntas como las haría alguien a un buscador o a un asistente de IA. Se
+   * muestran primero en la FAQ y sus respuestas se arman con `does` e `ideas`
+   * (sin promesas nuevas). Ver docs/seo-aeo.md.
+   */
+  aeo: { what: string; post: string };
   /** Lo que pasa hoy en negocios del rubro (sale de los correos SDR). */
   pains: { h2: string; items: NicheItem[] };
   /** Qué hace Kefy por ellos. */
@@ -206,6 +212,8 @@ export interface OfferCopy {
   features: string[];
   cta: string;
   note: string;
+  /** Texto alternativo de la imagen de la tarjeta. */
+  imageAlt: string;
 }
 
 export interface CommonCopy {

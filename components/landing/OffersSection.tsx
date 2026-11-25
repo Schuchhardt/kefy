@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
+import Image from 'next/image';
 import SignupButton from './SignupButton';
 import WhatsappLink from './WhatsappLink';
 import {
   MANAGED_SERVICE_PRICE_USD, PLAN_LIMITS, PLAN_PRICES_USD, formatPlanNumber, planHighlights, planName,
 } from '@/lib/plans';
+import { OFFER_IMAGES } from '@/lib/niches';
 import type { NichesCopy } from '@/locales/es/niches';
 import type { OfferCopy } from '@/types/locales';
 
@@ -32,15 +34,22 @@ interface Props {
 }
 
 function OfferCard({
-  offer, price, featured, action,
+  offer, price, featured, action, image,
 }: {
   offer: Pick<OfferCopy, 'label' | 'title' | 'features' | 'note' | 'from'>;
   price: string;
   featured: boolean;
   action: ReactNode;
+  /** Foto de cabecera (Higgsfield, ilustrativa). Las tarjetas de agencias no la llevan. */
+  image?: { src: string; alt: string };
 }) {
   return (
-    <div className={`plan offer${featured ? ' featured' : ''}`}>
+    <div className={`plan offer${featured ? ' featured' : ''}${image ? ' offer--media' : ''}`}>
+      {image && (
+        <div className="offer-media">
+          <Image src={image.src} alt={image.alt} fill sizes="(max-width: 760px) 100vw, 460px" />
+        </div>
+      )}
       <p className="plan-name">{offer.label}</p>
       <h3 className="offer-title">{offer.title}</h3>
       <p className="offer-price">
@@ -110,6 +119,7 @@ export default function OffersSection({ copy, variant, whatsapp, lang, more }: P
       offer={copy.offers.service}
       price={copy.offers.service.price(num(MANAGED_SERVICE_PRICE_USD))}
       featured={serviceFirst}
+      image={{ src: OFFER_IMAGES.service, alt: copy.offers.service.imageAlt }}
       action={(
         <WhatsappLink text={whatsapp} className={btn(serviceFirst)} newTabLabel={copy.ctas.newTab}>
           {copy.offers.service.cta}
@@ -123,6 +133,7 @@ export default function OffersSection({ copy, variant, whatsapp, lang, more }: P
       offer={copy.offers.platform}
       price={copy.offers.platform.price(num(PLAN_PRICES_USD.starter))}
       featured={!serviceFirst}
+      image={{ src: OFFER_IMAGES.platform, alt: copy.offers.platform.imageAlt }}
       action={<SignupButton className={btn(!serviceFirst)}>{copy.offers.platform.cta}</SignupButton>}
     />
   );

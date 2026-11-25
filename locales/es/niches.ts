@@ -32,6 +32,7 @@ const offers = {
     ],
     cta: 'Hablemos por WhatsApp',
     note: 'Partimos con una revisión de tus redes, sin costo.',
+    imageAlt: 'Una community manager responde de noche los mensajes de los clientes',
   } satisfies OfferCopy,
   platform: {
     label: 'Lo haces tú',
@@ -46,6 +47,7 @@ const offers = {
     ],
     cta: 'Probar gratis',
     note: '30 días gratis · Sin tarjeta · Cancela cuando quieras',
+    imageAlt: 'La dueña de una panadería aprueba una publicación desde su teléfono',
   } satisfies OfferCopy,
   agency: {
     h2: 'Un plan según cuántos clientes atiendes',
@@ -99,7 +101,11 @@ const niches = {
       em: 'Y cada consulta respondida, también de noche.',
       sub: 'Publicamos tus tratamientos y promociones, llevamos los anuncios que llevan a tu agenda y respondemos a quien pregunta por valores, cuotas o la evaluación. Tú atiendes pacientes.',
     },
-    image: { alt: 'Recepción de una clínica dental de noche, con un teléfono que recibe un mensaje' },
+    image: { alt: 'Recepción de una clínica dental de noche, con un teléfono que recibe un mensaje', ideasAlt: 'Teléfono con el perfil de una clínica dental: pacientes, equipo y tratamientos' },
+    aeo: {
+      what: '¿Qué hace Kefy por una clínica dental?',
+      post: '¿Qué publicar en las redes sociales de una clínica dental?',
+    },
     pains: {
       h2: 'Lo que vemos en muchas clínicas',
       items: [
@@ -148,7 +154,11 @@ const niches = {
       em: 'Y cada pregunta por precio, respondida.',
       sub: 'Publicamos tus tratamientos y campañas de temporada, llevamos los anuncios y respondemos a quien pregunta por valores o cuotas, para que llegue a la evaluación ya informada.',
     },
-    image: { alt: 'Sala de tratamiento de una clínica estética y un teléfono con publicaciones de tratamientos' },
+    image: { alt: 'Sala de tratamiento de una clínica estética y un teléfono con publicaciones de tratamientos', ideasAlt: 'Un teléfono en un trípode graba un tratamiento facial en una clínica estética' },
+    aeo: {
+      what: '¿Qué hace Kefy por una clínica estética?',
+      post: '¿Qué publicar en las redes sociales de una clínica estética?',
+    },
     pains: {
       h2: 'Lo que vemos en muchas clínicas',
       items: [
@@ -197,7 +207,11 @@ const niches = {
       em: 'Y cada pregunta por la clase de prueba, respondida.',
       sub: 'Publicamos tus clases, talleres y promociones, llevamos los anuncios y respondemos a quien quiere probar. Tú te dedicas a tus alumnos.',
     },
-    image: { alt: 'Instructora ajustando un reformer en un estudio de pilates' },
+    image: { alt: 'Instructora ajustando un reformer en un estudio de pilates', ideasAlt: 'Un teléfono en un trípode graba una clase de pilates en reformer' },
+    aeo: {
+      what: '¿Qué hace Kefy por un estudio de pilates, yoga o fitness?',
+      post: '¿Qué publicar en las redes de un estudio de pilates o yoga?',
+    },
     pains: {
       h2: 'Lo que vemos en muchos estudios',
       items: [
@@ -246,7 +260,11 @@ const niches = {
       em: 'Y que cada consulta tenga respuesta.',
       sub: 'Publicamos tus cursos con sus fechas y cupos, llevamos los anuncios para la matrícula y respondemos a quien pregunta por valores, horarios o sedes.',
     },
-    image: { alt: 'Clase en un instituto, con una profesora y un grupo de estudiantes' },
+    image: { alt: 'Clase en un instituto, con una profesora y un grupo de estudiantes', ideasAlt: 'Una joven revisa en su teléfono las publicaciones de los cursos de un instituto' },
+    aeo: {
+      what: '¿Qué hace Kefy por un instituto o una academia?',
+      post: '¿Qué publicar en las redes de un instituto para conseguir matrículas?',
+    },
     pains: {
       h2: 'Lo que vemos en muchos institutos',
       items: [
@@ -295,7 +313,11 @@ const niches = {
       em: 'Sin comisión de por medio.',
       sub: 'Mostramos tu lugar en cada temporada, llevamos los anuncios y respondemos a quien pregunta por fechas, con el enlace a tu motor de reservas o a tu WhatsApp.',
     },
-    image: { alt: 'Cabaña junto a un lago en el sur de Chile, con una tinaja en la terraza' },
+    image: { alt: 'Cabaña junto a un lago en el sur de Chile, con una tinaja en la terraza', ideasAlt: 'Una pareja planea un viaje mirando en el teléfono fotos de una cabaña y un lago' },
+    aeo: {
+      what: '¿Qué hace Kefy por una cabaña, un lodge o un hotel boutique?',
+      post: '¿Qué publicar en las redes de un alojamiento para conseguir reservas directas?',
+    },
     pains: {
       h2: 'Lo que vemos en muchos alojamientos',
       items: [
@@ -344,7 +366,11 @@ const niches = {
       em: 'Y cada cotización, con lo que necesitas saber.',
       sub: 'Publicamos tus proyectos con las fotos que ya tienes, llevamos los anuncios y respondemos cada consulta pidiendo comuna, medidas y tipo de proyecto. A ti te llega quien ya quiere la visita.',
     },
-    image: { alt: 'Un instalador fotografía con su teléfono un cierre de terraza recién terminado' },
+    image: { alt: 'Un instalador fotografía con su teléfono un cierre de terraza recién terminado', ideasAlt: 'Cocina remodelada con una tableta que muestra fotos del antes y el después' },
+    aeo: {
+      what: '¿Qué hace Kefy por una empresa de proyectos para el hogar?',
+      post: '¿Qué publicar en las redes de una empresa de cocinas, cierres o paisajismo?',
+    },
     pains: {
       h2: 'Lo que vemos en muchas empresas',
       items: [
@@ -393,7 +419,11 @@ const niches = {
       em: 'Kefy arma las piezas; tu equipo las corrige y las programa.',
       sub: 'Cada cliente queda como una marca con sus colores, su tono y su estrategia. El calendario del mes sale armado desde ahí, y tu diseñadora ajusta en vez de partir de cero.',
     },
-    image: { alt: 'Dos diseñadores de una agencia revisan publicaciones de varias marcas en un monitor' },
+    image: { alt: 'Dos diseñadores de una agencia revisan publicaciones de varias marcas en un monitor', ideasAlt: 'Laptop con el calendario de contenido de un mes y teléfonos con vistas previas de publicaciones' },
+    aeo: {
+      what: '¿Qué hace Kefy por una agencia de marketing?',
+      post: '¿Qué produce Kefy para cada cliente de una agencia?',
+    },
     pains: {
       h2: 'Lo que vemos en muchas agencias',
       items: [
@@ -445,6 +475,8 @@ const es = {
     ideas: 'Ideas',
     offers: 'Precios',
     faq: 'Preguntas frecuentes',
+    /** Antes de la lista de ideas en la respuesta «¿qué publicar?». */
+    examples: 'Por ejemplo: ',
   },
   ctas: {
     whatsapp: 'Hablemos por WhatsApp',

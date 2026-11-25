@@ -55,13 +55,22 @@ El número de WhatsApp es el de la firma de los correos. Se cambia con
   lo que pasa hoy → qué hacemos → ideas de publicaciones → precios → FAQ →
   CTA final. Sin vídeo ni demo animada: se llega desde el móvil. Lleva JSON-LD
   (`BreadcrumbList`, `Service` u `SoftwareApplication`, `FAQPage`).
-- **Imágenes**: una por rubro, generada con Higgsfield (`gpt_image_2_6`, 4:5,
-  calidad alta, 2k; 2 créditos cada una). Fotos ilustrativas, sin texto ni
-  logos: no son clientes ni casos. `scripts/optimize-niche-images.mjs` deja en
-  `public/landing/niches/` el `<id>.webp` (1200×1500, hero y tarjeta de la
-  home) y el `<id>-og.jpg` (1200×630, al compartir el enlace). Los originales
-  PNG no se suben. El texto alternativo está en `niches.<id>.image.alt`; si
-  cambias la imagen, revisa que siga describiéndola.
+- **Imágenes** (Higgsfield, `gpt_image_2_6`, calidad alta, 2k; 2 créditos cada
+  una): fotos editoriales ilustrativas, sin texto ni logos (no son clientes ni
+  casos), en tonos bajos que encajan en la landing oscura y con un acento verde
+  lima. Por rubro, dos: la del hero (también en la tarjeta de la home y, en
+  1200×630, al compartir el enlace) y la de la sección de ideas. Además, una por
+  oferta en las tarjetas de «Dos formas» (plataforma: dueña de una panadería
+  aprobando una publicación; servicio: community manager respondiendo de
+  noche). `scripts/optimize-niche-images.mjs` las deja en `public/landing/`;
+  los PNG originales no se suben. Los textos alternativos están en
+  `niches.<id>.image` y `offers.<oferta>.imageAlt`: si cambias una imagen,
+  revisa que sigan describiéndola.
+- **Migas de pan**: cada rubro enlaza arriba a la home y a la lista de rubros
+  (`/#niches`), y declara las mismas migas en JSON-LD.
+- **FAQ**: abre con dos preguntas como se las harían a un buscador (`aeo.what`,
+  `aeo.post`), respondidas con lo que ya dice la página («qué hacemos» e
+  «ideas»). Ver `docs/seo-aeo.md`.
 - **Correos ya enviados**: `proxy.ts` redirige la home con
   `utm_campaign=sdr_<rubro>` a la página del rubro, en un salto y con los utm
   (`nicheRedirectPath`). Solo desde `/`, `/es` y `/en`.
@@ -90,9 +99,11 @@ El número de WhatsApp es el de la firma de los correos. Se cambia con
 2. Añadir su copy en `locales/es/niches.ts` y `locales/en/niches.ts` (el tipo
    `Record<NicheId, NicheCopy>` obliga): 3 dolores, 3 «qué hacemos», 6 ideas,
    2 preguntas propias, mensaje de WhatsApp y texto alternativo de la imagen.
-3. Generar su imagen (mismo estilo: foto editorial, tonos bajos que encajen en
-   la landing oscura, un acento verde lima, sin texto ni logos) y pasarla por
-   `node scripts/optimize-niche-images.mjs <carpeta>`.
+3. Generar sus dos imágenes (`<id>.png` para el hero e `<id>-ideas.png` para
+   las ideas; mismo estilo: foto editorial, tonos bajos, un acento verde lima,
+   sin texto ni logos) y pasarlas por
+   `node scripts/optimize-niche-images.mjs <carpeta>`. Escribir sus textos
+   alternativos y las dos preguntas `aeo`.
 4. Enlazar los correos nuevos de ese rubro directo a su página.
 5. `npx vitest run tests/unit/lib/niches.test.ts tests/unit/locales tests/unit/proxy.test.ts`.
 

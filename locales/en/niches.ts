@@ -22,6 +22,7 @@ const offers = {
     ],
     cta: 'Chat with us on WhatsApp',
     note: 'We start with a review of your accounts, free of charge.',
+    imageAlt: 'A social media manager answering customer messages at night',
   } satisfies OfferCopy,
   platform: {
     label: 'You do it',
@@ -36,6 +37,7 @@ const offers = {
     ],
     cta: 'Try it free',
     note: '30 days free · No card · Cancel anytime',
+    imageAlt: 'A bakery owner approving a post from her phone',
   } satisfies OfferCopy,
   agency: {
     h2: 'A plan for how many clients you serve',
@@ -89,7 +91,11 @@ const niches = {
       em: 'And every enquiry answered, at night too.',
       sub: 'We post your treatments and promotions, run the ads that lead to your booking page and answer anyone asking about prices, payment plans or the first check-up. You look after patients.',
     },
-    image: { alt: 'A dental clinic reception at night, with a phone receiving a message' },
+    image: { alt: 'A dental clinic reception at night, with a phone receiving a message', ideasAlt: 'A phone showing a dental clinic’s profile: patients, team and treatments' },
+    aeo: {
+      what: 'What does Kefy do for a dental clinic?',
+      post: 'What should a dental clinic post on social media?',
+    },
     pains: {
       h2: 'What we see in many clinics',
       items: [
@@ -138,7 +144,11 @@ const niches = {
       em: 'And every price question answered.',
       sub: 'We post your treatments and seasonal campaigns, run the ads and answer anyone asking about prices or payment plans, so they arrive at the consultation already informed.',
     },
-    image: { alt: 'An aesthetic clinic treatment room and a phone showing treatment posts' },
+    image: { alt: 'An aesthetic clinic treatment room and a phone showing treatment posts', ideasAlt: 'A phone on a tripod films a facial treatment in an aesthetic clinic' },
+    aeo: {
+      what: 'What does Kefy do for an aesthetic clinic?',
+      post: 'What should an aesthetic clinic post on social media?',
+    },
     pains: {
       h2: 'What we see in many clinics',
       items: [
@@ -187,7 +197,11 @@ const niches = {
       em: 'And every question about the trial class answered.',
       sub: 'We post your classes, workshops and promotions, run the ads and answer anyone who wants to try. You focus on your students.',
     },
-    image: { alt: 'An instructor adjusting a reformer in a pilates studio' },
+    image: { alt: 'An instructor adjusting a reformer in a pilates studio', ideasAlt: 'A phone on a tripod records a reformer pilates class' },
+    aeo: {
+      what: 'What does Kefy do for a pilates, yoga or fitness studio?',
+      post: 'What should a pilates or yoga studio post on social media?',
+    },
     pains: {
       h2: 'What we see in many studios',
       items: [
@@ -236,7 +250,11 @@ const niches = {
       em: 'And make sure every enquiry gets an answer.',
       sub: 'We post your courses with their dates and spots, run the enrolment ads and answer anyone asking about prices, schedules or locations.',
     },
-    image: { alt: 'A class at an institute, with a teacher and a group of students' },
+    image: { alt: 'A class at an institute, with a teacher and a group of students', ideasAlt: 'A young woman browsing an institute’s course posts on her phone' },
+    aeo: {
+      what: 'What does Kefy do for a school or academy?',
+      post: 'What should a school post on social media to get enrolments?',
+    },
     pains: {
       h2: 'What we see in many schools',
       items: [
@@ -285,7 +303,11 @@ const niches = {
       em: 'No commission in between.',
       sub: 'We show your place in every season, run the ads and answer anyone asking about dates, with the link to your booking engine or your WhatsApp.',
     },
-    image: { alt: 'A cabin by a lake in southern Chile, with a wood-fired hot tub on the deck' },
+    image: { alt: 'A cabin by a lake in southern Chile, with a wood-fired hot tub on the deck', ideasAlt: 'A couple planning a trip looking at photos of a cabin and a lake on a phone' },
+    aeo: {
+      what: 'What does Kefy do for a cabin, lodge or boutique hotel?',
+      post: 'What should a vacation rental post on social media to get direct bookings?',
+    },
     pains: {
       h2: 'What we see in many properties',
       items: [
@@ -334,7 +356,11 @@ const niches = {
       em: 'And every quote request with what you need to know.',
       sub: 'We post your projects with the photos you already have, run the ads and answer every enquiry asking for location, measurements and project type. You only get people who want the site visit.',
     },
-    image: { alt: 'An installer photographs a newly finished terrace enclosure with his phone' },
+    image: { alt: 'An installer photographs a newly finished terrace enclosure with his phone', ideasAlt: 'A remodeled kitchen with a tablet showing before-and-after photos' },
+    aeo: {
+      what: 'What does Kefy do for a home improvement company?',
+      post: 'What should a kitchen, enclosure or landscaping company post on social media?',
+    },
     pains: {
       h2: 'What we see in many companies',
       items: [
@@ -383,7 +409,11 @@ const niches = {
       em: 'Kefy drafts the pieces; your team edits and schedules them.',
       sub: 'Each client becomes a brand with its colors, tone and strategy. The month’s calendar comes out of it, and your designer adjusts instead of starting from scratch.',
     },
-    image: { alt: 'Two agency designers reviewing posts for several brands on a monitor' },
+    image: { alt: 'Two agency designers reviewing posts for several brands on a monitor', ideasAlt: 'A laptop with a month’s content calendar and phones showing post previews' },
+    aeo: {
+      what: 'What does Kefy do for a marketing agency?',
+      post: 'What does Kefy produce for each agency client?',
+    },
     pains: {
       h2: 'What we see in many agencies',
       items: [
@@ -434,6 +464,8 @@ const en: NichesCopy = {
     ideas: 'Ideas',
     offers: 'Pricing',
     faq: 'FAQ',
+    /** Antes de la lista de ideas en la respuesta «¿qué publicar?». */
+    examples: 'For example: ',
   },
   ctas: {
     whatsapp: 'Chat with us on WhatsApp',
