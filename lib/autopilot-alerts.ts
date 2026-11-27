@@ -30,6 +30,8 @@ export interface AutopilotAlert {
   detail: string;
   /** Pausa por créditos: cuándo se reanuda sola. */
   resumesAt?: Date;
+  /** Ruta propia del botón (sin idioma, p. ej. '/dashboard/settings'). Por defecto, el autopilot. */
+  path?: string;
 }
 
 async function recipient(orgId: string, userId: string | null): Promise<string | null> {
@@ -76,7 +78,7 @@ export async function sendAutopilotAlert(alert: AutopilotAlert): Promise<boolean
       ruleName: alert.ruleName,
       detail: alert.detail.slice(0, 600),
       resumesOn,
-      href: absoluteUrl(`/${lang}/dashboard/automations/autopilot`),
+      href: absoluteUrl(`/${lang}${alert.path ?? '/dashboard/automations/autopilot'}`),
     }));
 
     await new Resend(apiKey).emails.send({

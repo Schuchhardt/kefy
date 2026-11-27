@@ -14,13 +14,13 @@ import { detachAccountFromRules } from '@/lib/services/social-integrity';
 
 /** Columnas que ve la UI (las mismas que devolvía la ruta). */
 const ROUTE_SELECT =
-  'id, platform, external_id, username, avatar_url, zernio_account_id, status, status_reason, token_expires_at, created_at';
+  'id, platform, external_id, username, avatar_url, zernio_account_id, status, status_reason, status_detail, token_expires_at, created_at';
 
 /**
  * Columnas para las herramientas: nunca tokens, zernio_account_id ni
  * external_id. Solo lo necesario para elegir a qué cuenta publicar.
  */
-const TOOL_SELECT = 'id, platform, username, avatar_url, status, status_reason';
+const TOOL_SELECT = 'id, platform, username, avatar_url, status, status_reason, status_detail';
 
 export interface ToolSocialAccount {
   id: string;
@@ -28,8 +28,10 @@ export interface ToolSocialAccount {
   username: string | null;
   avatar_url: string | null;
   status: string;
-  /** Por qué se revocó al compararla con Zernio; hay que reconectarla. */
+  /** Por qué se revocó (missing_in_zernio, account_mismatch, disconnected); hay que reconectarla. */
   status_reason: string | null;
+  /** Motivo que dio la red o Zernio al desconectarla. */
+  status_detail: string | null;
 }
 
 /** Una fila revocada por la comparación no se muestra si ya se reconectó esa cuenta. */

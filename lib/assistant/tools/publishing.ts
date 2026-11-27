@@ -167,9 +167,15 @@ const listSocialAccountsTool = defineTool({
   title: { es: 'Ver cuentas conectadas', en: 'List connected accounts' },
   kind: 'read',
   description:
-    "Lists the brand's connected social accounts (id, platform, username, status), which can be targeted for publishing. " +
-    'Only accounts with status "active" can be published to. To connect a new one, use get_connect_account_link. ' +
-    'Costs no credits.',
+    "Lists the brand's connected social accounts (id, platform, username, status, status_reason, status_detail), which " +
+    'can be targeted for publishing. Only accounts with status "active" can be published to. A "revoked" account needs ' +
+    'action: status_reason "disconnected" means the network disconnected it (permission expired or revoked; ' +
+    'status_detail has the network\'s reason) and "missing_in_zernio" that the connection was lost; both are fixed by ' +
+    'reconnecting it: give the link from get_connect_account_link for that platform, or tell the user to open ' +
+    'Settings → Social accounts and click "Reconnect" on it, then authorize it while signed in to that same account. ' +
+    'Autopilot rules get the account back on their own after reconnecting. "account_mismatch" means the connection ' +
+    'points to another profile: disconnect it and connect it again signed in to the right account. ' +
+    'To connect a new one, use get_connect_account_link. Costs no credits.',
   input: z.object({}).strict(),
   confirm: 'never',
   // El selector de cuentas de la tarjeta de revisión.
@@ -192,8 +198,9 @@ const getConnectAccountLinkTool = defineTool({
   title: { es: 'Link para conectar una cuenta', en: 'Link to connect an account' },
   kind: 'read',
   description:
-    'Returns a direct link that, opened by a logged-in Kefy user, starts connecting a new social account of the ' +
-    'given network to this brand (it opens Settings and launches the network\'s authorization). Share the link; the ' +
+    'Returns a direct link that, opened by a logged-in Kefy user, starts connecting a social account of the ' +
+    'given network to this brand (it opens Settings and launches the network\'s authorization). Use it also to ' +
+    'reconnect an account that was disconnected: authorizing the same account again reactivates it. Share the link; the ' +
     'person has to finish the authorization in their browser. Also returns the accounts of that network the brand ' +
     'already has. Costs no credits.',
   input: z.object({

@@ -34,6 +34,7 @@ import {
   type PublishTarget, type TargetAccount, type TargetPost,
 } from '@/lib/publish-targets';
 import { syncContentItemStatus } from '@/lib/services/content-status';
+import { isDisconnectedError, markAccountDisconnected } from '@/lib/services/social-integrity';
 import { getChannelLabel } from '@/lib/channels';
 import { manualRemovalSteps } from '@/lib/post-removal';
 import type { Channel } from '@/types/channels';
@@ -389,6 +390,16 @@ export async function publishContent(
       const errorMessage = err instanceof Error ? err.message : fallback;
       console.error(`${tag} ✗ account ${account.id} platform=${account.platform} error:`, errorMessage);
       if (err instanceof Error && err.stack) console.error(`${tag} stack:`, err.stack);
+
+      // Zernio rechazó porque la cuenta está desconectada: se marca en Kefy para
+      // que deje de ofrecerse y la interfaz y el asistente pidan reconectarla.
+      if (isDisconnectedError(errorMessage)) {
+        try {
+          await markAccountDisconnected(db, { accountId: account.id }, errorMessage);
+        } catch (markErr) {
+          reportError(markErr, { route, auth: ctx.auth, service: 'supabase', extra: { accountId: account.id } });
+        }
+      }
 
       if (mode === 'now') {
         await db.from('kefy_scheduled_posts').insert({

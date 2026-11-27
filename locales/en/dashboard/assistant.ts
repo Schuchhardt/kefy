@@ -150,6 +150,7 @@ const en = {
     save_autopilot_rule: 'Saving the rule…',
     delete_autopilot_rule: 'Deleting the rule…',
     run_autopilot_now: 'Running autopilot…',
+    report_issue: 'Filing your report…',
     publish_content: 'Publishing…',
     list_scheduled_posts: 'Checking scheduled posts…',
     reschedule_scheduled_post: 'Changing the date…',
@@ -278,6 +279,7 @@ const en = {
       return `Edit the autopilot rule ${name}`;
     },
     delete_autopilot_rule: (_i, p) => `Delete the autopilot rule ${quote(str(p.name))}`,
+    report_issue: (i) => `${i.type === 'bug' ? 'Report the bug' : 'Send the idea'} ${quote(str(i.title))} to the Kefy team`,
     run_autopilot_now: (i) => {
       const n = Array.isArray(i.rule_ids) ? i.rule_ids.length : 1;
       return n === 1 ? 'Run an autopilot rule now (generates and schedules a piece)' : `Run ${n} autopilot rules now`;
@@ -420,6 +422,9 @@ const en = {
     story_delay_minutes: 'Story after',
     credits_per_run: 'Credits per run',
     credits_per_month: 'Credits per month (approx.)',
+    issue_type: 'Type',
+    issue_title: 'Title',
+    details: 'Details',
   } as Record<string, string>,
   fieldLabels,
   statusLabels,

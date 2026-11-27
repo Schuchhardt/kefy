@@ -39,6 +39,8 @@ export interface SocialAccount {
   status?:            string;
   /** Por qué se revocó al compararla con Zernio (docs/zernio.md). */
   status_reason?:     string | null;
+  /** Motivo que dio la red o Zernio al desconectarla («access token is no longer valid…»). */
+  status_detail?:     string | null;
   zernio_account_id?: string;
   token_expires_at?:  string | null;
 }
@@ -52,6 +54,8 @@ export interface ZernioAccount {
   username:          string;
   /** Nombre visible; en Facebook y LinkedIn puede ser lo que Kefy guardó como usuario. */
   displayName?:      string | null;
+  /** false = Zernio la tiene desconectada (token vencido o revocado); hay que reconectarla. */
+  isActive?:         boolean;
   avatar_url:        string | null;
   access_token:      string;
   refresh_token:     string | null;

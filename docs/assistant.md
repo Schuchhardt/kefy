@@ -159,7 +159,7 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Scope | Permite |
 |---|---|
 | `read` | Herramientas de lectura: contenido, calendario, analytics, bandeja, marca y sus assets, estrategia, cuentas conectadas, link para conectar una cuenta, reglas de autopilot y de respuesta automática, leads |
-| `write` | Crear y editar borradores, generar con IA (gasta créditos), convertir de formato, sincronizar, cambiar perfil/estrategia, assets, avatar, crear y archivar marcas, crear estrategias propias, desconectar cuentas, leads, borrar reglas de autopilot y de respuesta automática |
+| `write` | Crear y editar borradores, generar con IA (gasta créditos), convertir de formato, sincronizar, cambiar perfil/estrategia, assets, avatar, crear y archivar marcas, crear estrategias propias, desconectar cuentas, leads, borrar reglas de autopilot y de respuesta automática, reportar errores e ideas |
 | `publish` | Publicar y programar en redes, cancelar publicaciones, responder DMs y comentarios, crear / editar / pausar / reanudar / ejecutar reglas de autopilot, crear / editar / pausar reglas de respuesta automática |
 
 ### Qué se puede hacer desde fuera (API y MCP)
@@ -177,8 +177,9 @@ Se gestionan en **Ajustes → API keys** (solo dueño y administradores) o con
 | Ver dónde está un contenido y en qué otras cuentas compatibles se puede publicar (borrador, programado o publicado) | `list_publish_targets` (`publish_content` devuelve además `also_available`); ver `docs/zernio.md`, *Publicar el mismo contenido en otras redes* | read |
 | Estrategias (catálogo y propias) | `get_strategy_catalog`, `preview_strategy`, `save_custom_strategy`, `set_active_strategy`, `get_content_ideas` | read / write |
 | Estadísticas de contenido | `get_analytics_overview`, `list_post_performance`, `sync_social_data` | read / write |
-| Cuentas conectadas | `list_social_accounts` (read) · `disconnect_social_account` (write; borra en cascada sus publicaciones, DMs y comentarios y la quita de las reglas de autopilot) | read / write |
-| Conectar una cuenta nueva | `get_connect_account_link` → link directo (una persona con sesión termina el OAuth de la red) | read |
+| Cuentas conectadas | `list_social_accounts` (read; `status_reason`/`status_detail` dicen si hay que reconectarla) · `disconnect_social_account` (write; borra en cascada sus publicaciones, DMs y comentarios y la quita de las reglas de autopilot) | read / write |
+| Conectar o reconectar una cuenta | `get_connect_account_link` → link directo (una persona con sesión termina el OAuth de la red; autorizar de nuevo la misma cuenta la reactiva) | read |
+| Reportar un error o pedir una función | `report_issue` → issue de GitHub con etiqueta `bug` o `enhancement` y `reportado-por-usuario` (siempre con confirmación en el chat) | write |
 | Autopilot | `list_autopilot_rules`, `save_autopilot_rule`, `delete_autopilot_rule`, `run_autopilot_now` | read / publish / write |
 | Respuestas automáticas a comentarios y DMs | `list_engagement_rules` (read), `save_engagement_rule` (publish), `delete_engagement_rule` (write) | read / publish / write |
 | Leads | `list_leads`, `get_lead_scoring` (read), `save_lead`, `delete_lead`, `update_lead_scoring` (write) | read / write |
@@ -193,6 +194,25 @@ navegador de esa red, así que ninguna herramienta la conecta sola:
 `https://<host>/<lang>/dashboard/settings?connect=<red>&brand=<marca>`. Al
 abrirlo con sesión, Kefy cambia a esa marca y lanza la autorización; sin
 sesión, pasa por el login (`?next=`) y sigue después.
+
+**Cuenta desconectada.** Cuando la red desconecta una cuenta (token vencido o
+revocado), Kefy la marca `revoked` con `status_reason = 'disconnected'` y el
+motivo en `status_detail` (ver `docs/zernio.md`, *Cuenta desconectada en
+Zernio*). El snapshot del chat la lista en `accounts_to_reconnect` y el prompt
+le dice al asistente que lo explique y dé el link de
+`get_connect_account_link`: autorizar de nuevo la misma cuenta la reactiva y
+las reglas de autopilot la recuperan solas.
+
+**Reportar errores y pedir funciones.** `report_issue` (servicio
+`lib/services/feedback.ts`, cliente `lib/github-issues.ts`) crea un issue en
+`GITHUB_FEEDBACK_REPO` con `GITHUB_FEEDBACK_TOKEN` (fine-grained, solo «Issues:
+read and write» sobre ese repo). Etiquetas: `bug` o `enhancement`, más
+`reportado-por-usuario`. El texto se limpia de correos, teléfonos, tokens y
+menciones (`@usuario` notificaría a esa cuenta) y de la cuenta solo van ids
+(organización, marca), plan, rol, idioma y origen: el repo puede ser público.
+Límite: 5 por hora por persona y 20 al día por organización. Sin las variables
+responde `unavailable`. No gasta créditos ni exige suscripción activa: un
+reporte de quien ya no puede crear también sirve.
 
 **Respuestas automáticas.** Las reglas nuevas son de la marca (`brand_id`); las
 antiguas sin marca valen para toda la organización y una key atada a una marca

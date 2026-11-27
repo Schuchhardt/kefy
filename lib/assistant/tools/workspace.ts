@@ -18,6 +18,7 @@ import type { ToolContext } from '@/lib/assistant/types';
 import { listBrands } from '@/lib/services/brands';
 import { getBrandStrategy } from '@/lib/services/strategy';
 import { getInboxSummary } from '@/lib/services/inbox';
+import { listSocialAccounts, type ToolSocialAccount } from '@/lib/services/social';
 
 // ─── Snapshot ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,11 @@ export interface WorkspaceSnapshot {
   /** La estrategia activa de `brand` (cada marca tiene la suya). */
   strategy: { objective: string | null; industry: string | null; framework: string | null } | null;
   connected_accounts: number | null;
+  /**
+   * Cuentas de la marca que dejaron de servir para publicar y hay que
+   * reconectar (la red las desconectó o se perdió la conexión).
+   */
+  accounts_to_reconnect: { platform: string; username: string | null; reason: string; detail: string | null }[] | null;
   inbox: { unread_dms: number; unreplied_comments: number } | null;
 }
 
@@ -59,7 +65,7 @@ export async function buildWorkspaceSnapshot(ctx: ToolContext): Promise<Workspac
   const hasBrand = !!ctx.brandId;
   const none = async () => null;
 
-  const [org, brandList, entitlement, strategy, connectedAccounts, inbox] = await Promise.all([
+  const [org, brandList, entitlement, strategy, connectedAccounts, toReconnect, inbox] = await Promise.all([
     part(ctx, 'org', async () => {
       const { data } = await db
         .from('kefy_organizations')
@@ -80,6 +86,12 @@ export async function buildWorkspaceSnapshot(ctx: ToolContext): Promise<Workspac
         .eq('status', 'active');
       if (error) throw new Error(error.message);
       return count ?? 0;
+    }) : none(),
+    hasBrand ? part(ctx, 'accounts_to_reconnect', async () => {
+      const { accounts } = await listSocialAccounts(ctx, { forTool: true });
+      return (accounts as unknown as ToolSocialAccount[])
+        .filter((a) => a.status !== 'active' && (a.status_reason === 'disconnected' || a.status_reason === 'missing_in_zernio'))
+        .map((a) => ({ platform: a.platform, username: a.username, reason: a.status_reason as string, detail: a.status_detail }));
     }) : none(),
     hasBrand ? part(ctx, 'inbox', () => getInboxSummary(ctx)) : none(),
   ]);
@@ -102,6 +114,7 @@ export async function buildWorkspaceSnapshot(ctx: ToolContext): Promise<Workspac
     credits: usage ? { used: usage.used, limit: usage.limit, remaining: usage.remaining } : null,
     strategy: strategy?.selection && strategy.names ? strategy.names : null,
     connected_accounts: connectedAccounts,
+    accounts_to_reconnect: toReconnect,
     inbox,
   };
 }
@@ -115,8 +128,9 @@ const getWorkspaceContextTool = defineTool({
   description:
     'Start here. Returns the organization (name, plan, subscription state, AI credits left — credits are shared by ' +
     'all its brands), the caller role, the list of brands (id and name: pass one as brand_id to every other tool) ' +
-    'and, for the brand of this call, its active content strategy, connected social accounts and unread DM / ' +
-    'unreplied comment counts. Works without brand_id even when the organization has several brands: then `brand` ' +
+    'and, for the brand of this call, its active content strategy, connected social accounts, the accounts that ' +
+    'must be reconnected (accounts_to_reconnect: the network disconnected them, so nothing can be published there ' +
+    'until the user reconnects them) and unread DM / unreplied comment counts. Works without brand_id even when the organization has several brands: then `brand` ' +
     'and the per-brand fields are null. Costs no credits.',
   input: z.object({}).strict(),
   brandOptional: true,

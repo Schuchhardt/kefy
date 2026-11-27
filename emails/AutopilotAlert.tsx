@@ -5,7 +5,8 @@ import {
 // Aviso del autopilot al dueño de la regla: la regla se pausó por falta de
 // créditos, o el video de un reel no se pudo producir. Ver lib/autopilot-alerts.ts.
 
-export type AutopilotAlertKind = 'paused_credits' | 'paused_no_accounts' | 'video_failed' | 'publish_failed';
+export type AutopilotAlertKind =
+  | 'paused_credits' | 'paused_no_accounts' | 'video_failed' | 'publish_failed' | 'publish_failed_disconnected';
 
 export interface AutopilotAlertProps {
   kind: AutopilotAlertKind;
@@ -15,7 +16,7 @@ export interface AutopilotAlertProps {
   detail: string;
   /** Para la pausa: cuándo se reanuda sola (fecha ya formateada). */
   resumesOn?: string;
-  /** Link absoluto al autopilot (o a la pieza). */
+  /** Link absoluto al autopilot (o a la pieza, o a Ajustes para reconectar). */
   href: string;
 }
 
@@ -57,6 +58,15 @@ const COPY = {
         'El video quedó listo y está en tu biblioteca, pero la red social rechazó la publicación. '
         + 'Revisa que la cuenta siga conectada y publícalo a mano.',
     },
+    publish_failed_disconnected: {
+      badge: 'Piloto automático · Cuenta desconectada',
+      title: (name: string) => `No pudimos publicar el reel de «${name}»: la cuenta se desconectó`,
+      body: () =>
+        'El video quedó listo y está en tu biblioteca, pero la red social ya no acepta publicaciones de esta cuenta '
+        + '(suele pasar cuando vence o se revoca el permiso). Ve a Ajustes → Redes sociales, pulsa «Reconectar» en '
+        + 'la cuenta y vuelve a autorizarla. Después publica el reel a mano; la regla vuelve a usar la cuenta sola.',
+      cta: 'Reconectar la cuenta',
+    },
     detail: 'Detalle:',
     cta: 'Abrir piloto automático',
     footer: 'Te avisamos como mucho una vez cada 12 horas por regla.',
@@ -90,6 +100,15 @@ const COPY = {
       body: () =>
         'The video is ready and in your library, but the social network rejected the post. '
         + 'Check that the account is still connected and publish it by hand.',
+    },
+    publish_failed_disconnected: {
+      badge: 'Autopilot · Account disconnected',
+      title: (name: string) => `We couldn't publish the reel for “${name}”: the account got disconnected`,
+      body: () =>
+        'The video is ready and in your library, but the social network no longer accepts posts from this account '
+        + '(this usually happens when its permission expires or is revoked). Go to Settings → Social accounts, click '
+        + '“Reconnect” on the account and authorize it again. Then publish the reel by hand; the rule picks the account up again on its own.',
+      cta: 'Reconnect the account',
     },
     detail: 'Details:',
     cta: 'Open Autopilot',
@@ -148,7 +167,7 @@ export default function AutopilotAlert({ kind, language, ruleName, detail, resum
               href={href}
               style={{ backgroundColor: accent, color: bg, borderRadius: '10px', padding: '12px 20px', fontWeight: 700, fontSize: '14px', textDecoration: 'none' }}
             >
-              {t.cta}
+              {'cta' in k ? k.cta : t.cta}
             </Button>
 
             <Hr style={{ borderColor: '#1E1E24', margin: '28px 0 20px' }} />

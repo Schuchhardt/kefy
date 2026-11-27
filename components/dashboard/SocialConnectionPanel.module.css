@@ -49,5 +49,7 @@
 .accountMeta { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
 /* Si no cabe en la fila, baja alineado a la derecha. */
 .accountAction { margin-left: auto; }
+.accountActions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.problemDetail { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 6px 0 0; overflow-wrap: anywhere; }
 .hint { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 8px 0 0; }
 .link { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
