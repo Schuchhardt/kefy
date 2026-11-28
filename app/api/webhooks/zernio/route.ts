@@ -4,7 +4,7 @@ import { executeEngagementRules } from '@/lib/engagement-executor';
 import { safePostUrl } from '@/lib/zernio';
 import { reportError } from '@/lib/observability';
 import { syncContentItemStatus } from '@/lib/services/content-status';
-import { detachAccountFromRules, restoreAccountToRules } from '@/lib/services/social-integrity';
+import { isDisconnectedError, markAccountDisconnected, restoreAccountToRules } from '@/lib/services/social-integrity';
 import { createHmac, timingSafeEqual } from 'crypto';
 
 // ─── POST /api/webhooks/zernio ─────────────────────────────────────────────────
@@ -12,6 +12,10 @@ import { createHmac, timingSafeEqual } from 'crypto';
 //
 // Security: HMAC-SHA256 using ZERNIO_WEBHOOK_SECRET.
 // Header: x-zernio-signature: sha256=<hex>
+//
+// Zernio solo entrega los eventos que el webhook tiene suscritos: la lista
+// obligatoria está en lib/zernio-webhook-events.ts y se revisa con
+// `npx tsx scripts/zernio-webhook-events.ts` (docs/zernio.md, «Eventos suscritos»).
 //
 // Handled events:
 //   Posts:    post.scheduled, post.published, post.failed, post.partial,
@@ -33,12 +37,18 @@ import { createHmac, timingSafeEqual } from 'crypto';
 function normalizePayload(raw: Record<string, unknown>): Data {
   const d: Data = {};
 
-  // account: { id, platform, username }
+  // account: { accountId, profileId, platform, username, displayName,
+  //            disconnectionType, reason, reasonCode, reconnected }
+  // El id va en `accountId` (docs.zernio.com/webhooks/accounts). `id` lo repite
+  // solo «por compatibilidad» y no figura en el esquema de account.disconnected:
+  // antes se leía únicamente `id` y la desconexión no llegaba a la fila.
   if (raw.account && typeof raw.account === 'object') {
     const a = raw.account as Record<string, unknown>;
-    d.account_id = a.id;
-    d.platform   = a.platform;
-    d.username   = a.username;
+    d.account_id         = a.accountId ?? a.id ?? a._id;
+    d.platform           = a.platform;
+    d.username           = a.username;
+    d.disconnection_type = a.disconnectionType;
+    d.reason             = a.reason;
   }
 
   // post: { id, content, status, publishedAt, platforms: [{ platform, accountId,
@@ -69,6 +79,11 @@ function normalizePayload(raw: Record<string, unknown>): Data {
     // del calendario.
     if (p.scheduledFor) d.scheduled_at = p.scheduledFor;
     if (p.content)    d.content    = p.content;
+    // Motivo de una falla (post.failed / post.platform.failed): primero el del
+    // target que cambió, luego el del post.
+    const error = [changed.errorMessage, changed.error, target.errorMessage, target.error, p.errorMessage, p.error]
+      .find((v) => typeof v === 'string' && v.trim());
+    if (error) d.error = error;
     const url = safePostUrl(changed.publishedUrl ?? target.publishedUrl ?? target.platformPostUrl ?? p.url);
     if (url)          d.platform_post_url = url;
   }
@@ -254,8 +269,22 @@ async function handlePostFailed(db: DB, data: Data) {
     .eq('zernio_post_id', zernioPostId)
     .neq('status', 'published')
     .neq('status', 'deleted')
-    .select('content_item_id');
+    .select('content_item_id, social_account_id');
   await syncItemsOf(db, rows);
+  await markDisconnectedFromFailure(db, rows, errorMessage);
+}
+
+/**
+ * Un post rechazado porque la cuenta está desconectada es la señal más
+ * temprana: Zernio manda account.disconnected, pero si ese evento no llega
+ * (o el webhook no lo tiene suscrito) la cuenta seguía «Activa» en Kefy.
+ */
+async function markDisconnectedFromFailure(db: DB, rows: unknown, errorMessage: string) {
+  if (!isDisconnectedError(errorMessage) || !Array.isArray(rows)) return;
+  const ids = new Set(
+    (rows as Array<{ social_account_id?: string | null }>).map((r) => r.social_account_id).filter((id): id is string => !!id),
+  );
+  for (const accountId of ids) await markAccountDisconnected(db, { accountId }, errorMessage);
 }
 
 // post.partial: some platforms failed — map to 'failed' with an informative message
@@ -335,8 +364,9 @@ async function handlePostPlatformFailed(db: DB, data: Data) {
     .eq('zernio_post_id', zernioPostId)
     .neq('status', 'published')
     .neq('status', 'deleted')
-    .select('content_item_id');
+    .select('content_item_id, social_account_id');
   await syncItemsOf(db, rows);
+  await markDisconnectedFromFailure(db, rows, errorMessage);
 }
 
 // ─── Account handlers ──────────────────────────────────────────────────────────
@@ -347,7 +377,7 @@ async function handleAccountConnected(db: DB, data: Data) {
   const zernioAccountId = str(data.account_id);
   if (!zernioAccountId) return;
 
-  const updates: Record<string, unknown> = { status: 'active', status_reason: null };
+  const updates: Record<string, unknown> = { status: 'active', status_reason: null, status_detail: null };
   if (str(data.username))         updates.username         = data.username;
   if (str(data.avatar_url))       updates.avatar_url       = data.avatar_url;
   if (str(data.access_token))     updates.access_token     = data.access_token;
@@ -370,22 +400,20 @@ async function handleAccountConnected(db: DB, data: Data) {
   }
 }
 
+// account.disconnected: `unintentional` (token vencido o revocado, acceso
+// perdido) deja la cuenta en Zernio, inactiva, hasta reconectarla con el mismo
+// accountId; `intentional` (DELETE o paso al plan Free) la borra en una hora
+// si no se reconecta. En los dos casos ya no se puede publicar: la fila queda
+// revocada con status_reason 'disconnected' y el motivo, para que la interfaz y
+// el asistente pidan reconectarla. Igual que la reconciliación diaria, se
+// quita de sus reglas y se recuerda en lost_accounts para devolverla después.
 async function handleAccountDisconnected(db: DB, data: Data) {
   const zernioAccountId = str(data.account_id);
-  if (!zernioAccountId) return;
-
-  const before = await accountsByZernioId(db, zernioAccountId);
-  const { error } = await db
-    .from('kefy_social_accounts')
-    .update({ status: 'revoked' })
-    .eq('zernio_account_id', zernioAccountId);
-  if (error) throw new Error(`account.disconnected: ${error.message}`);
-
-  // Igual que la reconciliación diaria: se quita de sus reglas y se recuerda
-  // en lost_accounts para devolverla al reconectar.
-  for (const row of before) {
-    if (row.status === 'active') await detachAccountFromRules(db, row, 'es');
+  if (!zernioAccountId) {
+    reportError(new Error('account.disconnected sin accountId'), { route: '/api/webhooks/zernio', service: 'zernio' });
+    return;
   }
+  await markAccountDisconnected(db, { zernioAccountId }, str(data.reason) ?? null);
 }
 
 async function accountsByZernioId(db: DB, zernioAccountId: string) {

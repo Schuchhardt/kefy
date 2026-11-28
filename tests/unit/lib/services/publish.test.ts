@@ -164,6 +164,26 @@ describe('publishContent (now)', () => {
     expect(item().status).toBe('approved');
   });
 
+  it('si Zernio dice que la cuenta está desconectada, la marca así en Kefy', async () => {
+    zernio.publishPost.mockRejectedValue(new Error(
+      'Account 6adfd4430f388a8148773d4e (instagram "acme") is disconnected and cannot be posted to. '
+      + 'Your instagram access token is no longer valid. Please reconnect your account.',
+    ));
+
+    await publishContent(strict, { itemId: ITEM, accountIds: [ACC, ACC_2], mode: 'now' });
+
+    const rows = db.rows('kefy_social_accounts');
+    expect(rows.find((a) => a.id === ACC)).toMatchObject({ status: 'revoked', status_reason: 'disconnected' });
+    expect(rows.find((a) => a.id === ACC)!.status_detail).toContain('access token is no longer valid');
+    expect(rows.find((a) => a.id === ACC_OTHER_BRAND)!.status).toBe('active');
+  });
+
+  it('otra falla no toca la cuenta', async () => {
+    zernio.publishPost.mockRejectedValue(new Error('Zernio down'));
+    await publishContent(strict, { itemId: ITEM, accountIds: [ACC], mode: 'now' });
+    expect(db.rows('kefy_social_accounts').find((a) => a.id === ACC)!.status).toBe('active');
+  });
+
   it('un fallo parcial no aborta el resto', async () => {
     zernio.publishPost
       .mockRejectedValueOnce(new Error('rate limited'))

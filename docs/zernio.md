@@ -224,6 +224,53 @@ cuenta y publicar en un perfil distinto del que muestra.
 - **Al desconectar:** si otra fila usa el mismo id de Zernio, no se llama a
   `DELETE`, porque le cortaría la cuenta a la otra marca.
 
+### Cuenta desconectada en Zernio
+
+Una red puede desconectar una cuenta sola: token vencido o revocado, acceso
+perdido. Zernio la deja **inactiva, con el mismo `accountId`**, hasta que se
+reconecta, y rechaza publicar en ella con un error como:
+
+> Account 6adf… (instagram "acme") is disconnected and cannot be posted to.
+> Your instagram access token is no longer valid. Please reconnect your account.
+> After reconnecting, refresh your account IDs from GET /v1/accounts.
+
+En Kefy la fila queda `status = 'revoked'`, `status_reason = 'disconnected'` y
+el motivo (sin el id ni la instrucción para desarrolladores) en
+`status_detail`. Se quita de sus reglas de autopilot (`lost_accounts`). Llega
+por cuatro caminos, del más temprano al más tardío:
+
+| Señal | Dónde |
+|---|---|
+| Publicar ahora falla con ese error | `publishContent` (`lib/services/publish.ts`) → `markAccountDisconnected` |
+| `post.failed` / `post.platform.failed` con ese error | `app/api/webhooks/zernio/route.ts` (`markDisconnectedFromFailure`) |
+| Webhook `account.disconnected` | Lee el id en **`account.accountId`** (también acepta `account.id` y `_id`) y guarda `account.reason` |
+| Cron diario: `isActive: false` en `GET /v1/accounts` | `reconcileSocialAccounts` (`accountProblem` → `'disconnected'`) |
+
+`isDisconnectedError` (`lib/services/social-integrity.ts`) reconoce el mensaje.
+Zernio documenta que `account.disconnected` (`disconnectionType:
+'unintentional'`) solo sale cuando una operación real (publicar, sincronizar
+analytics) recibe un error de autenticación definitivo, y que la sonda de salud
+(`GET /v1/accounts/{id}/health`, `tokenStatus.valid`) no desconecta nada.
+
+**Reconectar:** Ajustes → Redes sociales → «Reconectar» (lanza el OAuth de esa
+red) o el link de `get_connect_account_link`. Zernio conserva el `accountId`,
+el callback hace upsert sobre la misma fila (`brand_id, platform,
+external_id`) y `account.connected` la deja `active` y limpia
+`status_reason`/`status_detail`; las reglas que la perdieron la recuperan. El
+cron no reactiva una fila marcada `disconnected` salvo que Zernio diga
+`isActive: true` explícitamente.
+
+**Aviso:** si falla un reel del piloto automático por esto, el correo es
+`publish_failed_disconnected` («la cuenta se desconectó», botón a Ajustes) en
+vez del genérico. El asistente ve la cuenta en `accounts_to_reconnect` del
+snapshot y en `list_social_accounts`, y explica cómo reconectarla.
+
+**Incidente del 27 de noviembre de 2026:** el token de Instagram de
+`aitickets.cl` venció; Zernio rechazó el reel del piloto automático, pero la
+cuenta siguió «Activa» en Kefy. El handler leía `account.id`, que el esquema
+de `account.disconnected` no trae (el id va en `accountId`), y además conviene
+confirmar que el webhook tenga el evento suscrito (ver *Eventos suscritos*).
+
 ### Desconectar cuenta
 
 ```
@@ -944,6 +991,13 @@ intentos de entrega con `GET /v1/webhooks/logs?webhookId=…`.
   `next/server`, después de responder. El mensaje o comentario se guarda antes
   de responder; si las reglas fallan, se reporta con `reportError` y no se
   reintenta.
+- **Eventos suscritos:** Zernio solo entrega los eventos que lista el webhook
+  (`events`, obligatorio; no hay comodín ni lista por defecto). La lista que
+  Kefy necesita está en `lib/zernio-webhook-events.ts` (un test exige que cada
+  uno tenga su `case` en el handler). Para revisarla y añadir los que falten:
+  `ZERNIO_API_KEY=… npx tsx scripts/zernio-webhook-events.ts [--apply]`. Sin
+  `account.connected` y `account.disconnected`, una cuenta desconectada sigue
+  «Activa» hasta el cron diario.
 - **Reactivar:** cuando el endpoint ya responde, activar el webhook en el
   dashboard de Zernio (o `isActive: true`) y probarlo con `POST /v1/webhooks/test`.
   Un evento que quedó sin entregar se vuelve a mandar con

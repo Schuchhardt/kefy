@@ -15,7 +15,14 @@ import type { ZernioAccount } from '@/types/social';
 
 type Db = ReturnType<typeof createSupabaseServer>;
 
-export type AccountProblem = 'missing_in_zernio' | 'account_mismatch';
+/**
+ * Por qué una cuenta dejó de servir para publicar:
+ * - missing_in_zernio: el id ya no existe en Zernio.
+ * - account_mismatch: el id es de otra cuenta.
+ * - disconnected: Zernio la tiene desconectada (token vencido o revocado,
+ *   acceso perdido en la red). Se arregla reconectándola.
+ */
+export type AccountProblem = 'missing_in_zernio' | 'account_mismatch' | 'disconnected';
 export type ConnectError = 'oauth_failed' | 'account_ambiguous' | 'save_failed';
 
 /** Una vuelta con más de esta fracción de ids perdidos parece un fallo de Zernio. */
@@ -29,6 +36,77 @@ const normalize = (name: string | null | undefined) => (name ?? '').trim().repla
 export function matchesZernioAccount(label: string | null | undefined, account: Pick<ZernioAccount, 'username' | 'displayName'>): boolean {
   const name = normalize(label);
   return name !== '' && (name === normalize(account.username) || name === normalize(account.displayName));
+}
+
+// ─── Cuenta desconectada en Zernio ───────────────────────────────────────────
+
+/**
+ * Mensajes con los que Zernio (o la red, a través de Zernio) rechaza publicar
+ * en una cuenta desconectada. Ejemplo real:
+ * «Account 6adf… (instagram "acme") is disconnected and cannot be posted to.
+ * Your instagram access token is no longer valid. Please reconnect your account.»
+ */
+const DISCONNECTED_PATTERNS = [
+  /is disconnected and cannot be posted to/i,
+  /access token is no longer valid/i,
+  /please reconnect (your|the) account/i,
+  /account (needs|requires) (to be )?reconnect/i,
+];
+
+export function isDisconnectedError(message: string | null | undefined): boolean {
+  return !!message && DISCONNECTED_PATTERNS.some((re) => re.test(message));
+}
+
+/**
+ * El motivo para mostrar: sin el id de Zernio ni las instrucciones para
+ * desarrolladores («refresh your account IDs from GET /v1/accounts»).
+ */
+export function disconnectDetail(message: string | null | undefined): string | null {
+  if (!message) return null;
+  const clean = message
+    .replace(/^Account [0-9a-f]{12,}\s*/i, 'Account ')
+    .replace(/\s*After reconnecting,[^.]*\.?/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean ? clean.slice(0, 500) : null;
+}
+
+type AccountFilter = { zernioAccountId: string } | { accountId: string };
+
+/**
+ * Marca como desconectadas las filas de una cuenta de Zernio (o una fila de
+ * Kefy): dejan de ofrecerse para publicar, la interfaz y el asistente piden
+ * reconectarlas y las reglas de autopilot la sueltan hasta entonces. Una fila
+ * revocada por `account_mismatch` no se toca: ese problema manda.
+ */
+export async function markAccountDisconnected(
+  db: Db,
+  filter: AccountFilter,
+  detail: string | null,
+  now: Date = new Date(),
+): Promise<number> {
+  let q = db
+    .from('kefy_social_accounts')
+    .select('id, org_id, brand_id, platform, username, status, status_reason');
+  q = 'zernioAccountId' in filter ? q.eq('zernio_account_id', filter.zernioAccountId) : q.eq('id', filter.accountId);
+  const { data, error } = await q;
+  if (error) throw new Error(`kefy_social_accounts: ${error.message}`);
+
+  let marked = 0;
+  for (const row of (data ?? []) as Array<AccountRef & { status: string; status_reason: string | null }>) {
+    if (row.status_reason === 'account_mismatch') continue;
+    const { error: updateError } = await db
+      .from('kefy_social_accounts')
+      .update({ status: 'revoked', status_reason: 'disconnected', status_detail: disconnectDetail(detail) })
+      .eq('id', row.id);
+    if (updateError) {
+      reportError(new Error(updateError.message), { route: 'lib/services/social-integrity', service: 'supabase', extra: { accountId: row.id } });
+      continue;
+    }
+    marked++;
+    if (row.status === 'active') await detachAccountFromRules(db, row, 'es', now);
+  }
+  return marked;
 }
 
 // ─── Reglas de autopilot ─────────────────────────────────────────────────────
@@ -247,7 +325,10 @@ export interface ReconcileResult {
 
 export function accountProblem(row: Pick<AccountRow, 'platform' | 'username'>, zernio: ZernioAccount | undefined): AccountProblem | null {
   if (!zernio) return 'missing_in_zernio';
-  return zernio.platform === row.platform && matchesZernioAccount(row.username, zernio) ? null : 'account_mismatch';
+  if (zernio.platform !== row.platform || !matchesZernioAccount(row.username, zernio)) return 'account_mismatch';
+  // Una desconexión no intencional deja la cuenta en Zernio, inactiva, hasta
+  // que se reconecta. Solo cuenta un `false` explícito.
+  return zernio.isActive === false ? 'disconnected' : null;
 }
 
 /**
@@ -272,7 +353,15 @@ export async function reconcileSocialAccounts(now: Date = new Date()): Promise<R
   const result: ReconcileResult = { checked: rows.length, revoked: [], restored: [] };
 
   const byId = new Map(accounts.map((a) => [a.id, a]));
-  const problems = rows.map((row) => ({ row, problem: accountProblem(row, byId.get(row.zernio_account_id)) }));
+  const problems = rows.map((row) => {
+    const zernio = byId.get(row.zernio_account_id);
+    let problem = accountProblem(row, zernio);
+    // Lo marcó desconectado un webhook o una publicación rechazada: solo se
+    // reactiva si Zernio dice explícitamente que vuelve a estar activa (o
+    // cuando llegue account.connected al reconectarla).
+    if (!problem && row.status_reason === 'disconnected' && zernio?.isActive !== true) problem = 'disconnected';
+    return { row, problem };
+  });
   const missing = problems.filter((p) => p.problem === 'missing_in_zernio').length;
 
   if (accounts.length === 0 && rows.length > 0) result.skipped = 'empty_listing';
@@ -287,7 +376,9 @@ export async function reconcileSocialAccounts(now: Date = new Date()): Promise<R
   for (const { row, problem } of problems) {
     if (problem === row.status_reason && (problem !== null || row.status === 'active')) continue;
 
-    const patch = problem ? { status: 'revoked', status_reason: problem } : { status: 'active', status_reason: null };
+    const patch = problem
+      ? { status: 'revoked', status_reason: problem }
+      : { status: 'active', status_reason: null, status_detail: null };
     const { error: updateError } = await db.from('kefy_social_accounts').update(patch).eq('id', row.id);
     if (updateError) {
       reportError(new Error(updateError.message), { route, service: 'supabase', extra: { accountId: row.id } });

@@ -360,11 +360,68 @@ describe('POST /api/webhooks/zernio — cuentas y reglas de autopilot', () => {
     expect(rule()).toMatchObject({ status: 'active', paused_reason: null, social_account_ids: ['acc1'] });
   });
 
+  // Forma documentada (docs.zernio.com/webhooks/accounts): el id va en
+  // `account.accountId`, sin `id`. Antes solo se leía `id` y la cuenta seguía
+  // «Activa» en Kefy con el token de Instagram ya vencido.
+  it('account.disconnected con accountId (sin id) revoca la cuenta con el motivo', async () => {
+    const reason = 'Your instagram access token is no longer valid. Please reconnect your account.';
+    await send({
+      event: 'account.disconnected',
+      account: { accountId: 'z1', profileId: 'p1', platform: 'instagram', username: 'cafe', disconnectionType: 'unintentional', reason },
+    });
+    expect(db.rows('kefy_social_accounts')[0]).toMatchObject({
+      status: 'revoked', status_reason: 'disconnected', status_detail: reason,
+    });
+    expect(rule()).toMatchObject({ status: 'paused', paused_reason: 'no_accounts', social_account_ids: [] });
+
+    await send({ event: 'account.connected', account: { accountId: 'z1', platform: 'instagram', username: 'cafe', reconnected: true } });
+    expect(db.rows('kefy_social_accounts')[0]).toMatchObject({ status: 'active', status_reason: null, status_detail: null });
+    expect(rule()).toMatchObject({ status: 'active', social_account_ids: ['acc1'] });
+  });
+
+  it('no pisa una cuenta revocada por apuntar a otra', async () => {
+    Object.assign(db.rows('kefy_social_accounts')[0], { status: 'revoked', status_reason: 'account_mismatch' });
+    await send({ event: 'account.disconnected', account: { accountId: 'z1', platform: 'instagram', username: 'cafe', reason: 'x' } });
+    expect(db.rows('kefy_social_accounts')[0].status_reason).toBe('account_mismatch');
+  });
+
+  it('un post rechazado porque la cuenta está desconectada la marca así', async () => {
+    db.seed('kefy_scheduled_posts', [{ id: 'sp1', zernio_post_id: 'zp1', social_account_id: 'acc1', status: 'scheduled' }]);
+    const error = 'Account 6adfd4430f388a8148773d4e (instagram "cafe") is disconnected and cannot be posted to. '
+      + 'Your instagram access token is no longer valid. Please reconnect your account. '
+      + 'After reconnecting, refresh your account IDs from GET /v1/accounts.';
+    await send({ event: 'post.failed', post: { id: 'zp1', platforms: [{ platform: 'instagram', accountId: 'z1', status: 'failed', errorMessage: error }] } });
+
+    expect(db.rows('kefy_scheduled_posts')[0]).toMatchObject({ status: 'failed', error_message: error });
+    const acc = db.rows('kefy_social_accounts')[0];
+    expect(acc).toMatchObject({ status: 'revoked', status_reason: 'disconnected' });
+    expect(acc.status_detail).not.toMatch(/6adfd4430f388a8148773d4e|GET \/v1\/accounts/);
+    expect(rule()).toMatchObject({ status: 'paused', paused_reason: 'no_accounts' });
+  });
+
+  it('otra falla de publicación no toca la cuenta', async () => {
+    db.seed('kefy_scheduled_posts', [{ id: 'sp1', zernio_post_id: 'zp1', social_account_id: 'acc1', status: 'scheduled' }]);
+    await send({ event: 'post.failed', post: { id: 'zp1', platforms: [{ errorMessage: 'Video too long for Reels' }] } });
+    expect(db.rows('kefy_social_accounts')[0].status).toBe('active');
+  });
+
   it('no reanuda reglas pausadas por otro motivo', async () => {
     db.rows('kefy_social_accounts')[0].status = 'revoked';
     Object.assign(rule(), { status: 'paused', paused_reason: 'credits_exhausted' });
 
     await send({ event: 'account.connected', account: { id: 'z1', platform: 'instagram', username: 'cafe' } });
     expect(rule()).toMatchObject({ status: 'paused', paused_reason: 'credits_exhausted' });
+  });
+});
+
+describe('eventos suscritos en Zernio', () => {
+  // Zernio solo entrega lo que el webhook lista: cada evento obligatorio tiene
+  // que tener su handler, y la lista es la que revisa scripts/zernio-webhook-events.ts.
+  it('cada evento obligatorio tiene su case en el handler', async () => {
+    const { readFileSync } = await import('fs');
+    const { REQUIRED_ZERNIO_WEBHOOK_EVENTS } = await import('@/lib/zernio-webhook-events');
+    const source = readFileSync('app/api/webhooks/zernio/route.ts', 'utf8');
+    for (const event of REQUIRED_ZERNIO_WEBHOOK_EVENTS) expect(source).toContain(`case '${event}':`);
+    expect(REQUIRED_ZERNIO_WEBHOOK_EVENTS).toContain('account.disconnected');
   });
 });

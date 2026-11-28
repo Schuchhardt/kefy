@@ -328,20 +328,38 @@ export default function SocialConnectionPanel({
                           <p className={styles.accountName}>{acc.username || network}</p>
                           <p className={styles.accountMeta}>{meta}</p>
                         </div>
-                        <Button
-                          variant="danger-ghost"
-                          size="sm"
-                          className={styles.accountAction}
-                          onClick={() => void handleDisconnect(acc)}
-                          loading={disconnecting === acc.id}
-                          disabled={disconnecting !== null}
-                          aria-label={t.disconnectAria(acc.username || network, network)}
-                        >
-                          {t.disconnect}
-                        </Button>
+                        <div className={styles.accountActions}>
+                          {/* Desconectada en la red o perdida en Zernio: se
+                              arregla volviendo a autorizarla. Zernio conserva
+                              el id y la misma fila vuelve a quedar activa. */}
+                          {(acc.status_reason === 'disconnected' || acc.status_reason === 'missing_in_zernio') && (
+                            <Button
+                              size="sm"
+                              onClick={() => void handleConnectPlatform(acc.platform)}
+                              loading={connecting === acc.platform}
+                              disabled={connecting !== null}
+                              aria-label={t.reconnectAria(acc.username || network, network)}
+                            >
+                              {t.reconnect}
+                            </Button>
+                          )}
+                          <Button
+                            variant="danger-ghost"
+                            size="sm"
+                            onClick={() => void handleDisconnect(acc)}
+                            loading={disconnecting === acc.id}
+                            disabled={disconnecting !== null}
+                            aria-label={t.disconnectAria(acc.username || network, network)}
+                          >
+                            {t.disconnect}
+                          </Button>
+                        </div>
                       </div>
                       {acc.status_reason && t.accountProblem[acc.status_reason] && (
-                        <Notice tone="warning" live={false}>{t.accountProblem[acc.status_reason]}</Notice>
+                        <Notice tone="warning" live={false}>
+                          {t.accountProblem[acc.status_reason]}
+                          {acc.status_detail && <span className={styles.problemDetail}> {t.problemDetail(acc.status_detail)}</span>}
+                        </Notice>
                       )}
                       {/* Zernio's API has no sensitivity flag — X decides from the
                           account's own "may be sensitive" setting, so point the

@@ -21,7 +21,8 @@ import { ACCESS_COOKIE } from '@/lib/auth';
 import { serviceContext } from '@/lib/services/context';
 import { disconnectSocialAccount, listSocialAccounts } from '@/lib/services/social';
 import {
-  accountProblem, connectOAuthAccount, matchesZernioAccount, pickConnectedAccount, reconcileSocialAccounts,
+  accountProblem, connectOAuthAccount, disconnectDetail, isDisconnectedError, matchesZernioAccount,
+  pickConnectedAccount, reconcileSocialAccounts,
 } from '@/lib/services/social-integrity';
 import type { ZernioAccount } from '@/types/social';
 
@@ -249,11 +250,54 @@ describe('reconcileSocialAccounts', () => {
     expect(accounts().every((a) => a.status === 'active')).toBe(true);
   });
 
+  it('una cuenta inactiva en Zernio (token vencido) queda desconectada', async () => {
+    seedAccount();
+    seedRule();
+    expect(accountProblem({ platform: 'instagram', username: 'acme' }, zAccount('z-1', 'acme', { isActive: false }))).toBe('disconnected');
+    zernio.listAccounts.mockResolvedValue([zAccount('z-1', 'acme', { isActive: false })]);
+    const out = await reconcileSocialAccounts();
+    expect(out.revoked).toEqual([{ id: ACC, reason: 'disconnected' }]);
+    expect(accounts()[0]).toMatchObject({ status: 'revoked', status_reason: 'disconnected' });
+    expect(rule()).toMatchObject({ status: 'paused', paused_reason: 'no_accounts' });
+  });
+
+  it('lo que marcó desconectado el webhook solo se reactiva si Zernio dice isActive: true', async () => {
+    seedAccount({ status: 'revoked', status_reason: 'disconnected', status_detail: 'token vencido' });
+    zernio.listAccounts.mockResolvedValue([zAccount('z-1', 'acme')]);
+    await reconcileSocialAccounts();
+    expect(accounts()[0]).toMatchObject({ status: 'revoked', status_reason: 'disconnected' });
+
+    zernio.listAccounts.mockResolvedValue([zAccount('z-1', 'acme', { isActive: true })]);
+    const out = await reconcileSocialAccounts();
+    expect(out.restored).toEqual([ACC]);
+    expect(accounts()[0]).toMatchObject({ status: 'active', status_reason: null, status_detail: null });
+  });
+
   it('el cron exige el secreto', async () => {
     vi.stubEnv('CRON_SECRET', 's3');
     const res = await reconcileRoute(new NextRequest('http://localhost/api/social/accounts/reconcile'));
     expect(res.status).toBe(401);
     vi.unstubAllEnvs();
+  });
+});
+
+describe('cuenta desconectada en Zernio', () => {
+  const zernioError = 'Account 6adfd4430f388a8148773d4e (instagram "aitickets.cl") is disconnected and cannot be posted to. '
+    + 'Your instagram access token is no longer valid. Please reconnect your account. '
+    + 'After reconnecting, refresh your account IDs from GET /v1/accounts.';
+
+  it('reconoce el rechazo de Zernio y no otras fallas', () => {
+    expect(isDisconnectedError(zernioError)).toBe(true);
+    expect(isDisconnectedError('Your facebook access token is no longer valid')).toBe(true);
+    expect(isDisconnectedError('Video duration exceeds 90 seconds')).toBe(false);
+    expect(isDisconnectedError(null)).toBe(false);
+  });
+
+  it('el motivo para mostrar va sin el id de Zernio ni instrucciones de API', () => {
+    expect(disconnectDetail(zernioError)).toBe(
+      'Account (instagram "aitickets.cl") is disconnected and cannot be posted to. '
+      + 'Your instagram access token is no longer valid. Please reconnect your account.',
+    );
   });
 });
 

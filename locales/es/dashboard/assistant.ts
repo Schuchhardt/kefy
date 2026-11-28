@@ -153,6 +153,7 @@ const es = {
     save_autopilot_rule: 'Guardando la regla…',
     delete_autopilot_rule: 'Borrando la regla…',
     run_autopilot_now: 'Ejecutando el autopilot…',
+    report_issue: 'Registrando tu reporte…',
     publish_content: 'Publicando…',
     list_scheduled_posts: 'Revisando publicaciones programadas…',
     reschedule_scheduled_post: 'Cambiando la fecha…',
@@ -281,6 +282,7 @@ const es = {
       return `Editar la regla de autopilot ${name}`;
     },
     delete_autopilot_rule: (_i, p) => `Borrar la regla de autopilot ${quote(str(p.name))}`,
+    report_issue: (i) => `${i.type === 'bug' ? 'Reportar el error' : 'Enviar la idea'} ${quote(str(i.title))} al equipo de Kefy`,
     run_autopilot_now: (i) => {
       const n = Array.isArray(i.rule_ids) ? i.rule_ids.length : 1;
       return n === 1 ? 'Ejecutar ahora una regla de autopilot (genera y programa una pieza)' : `Ejecutar ahora ${n} reglas de autopilot`;
@@ -424,6 +426,9 @@ const es = {
     story_delay_minutes: 'Historia después de',
     credits_per_run: 'Créditos por ejecución',
     credits_per_month: 'Créditos al mes (aprox.)',
+    issue_type: 'Tipo',
+    issue_title: 'Título',
+    details: 'Detalle',
   } as Record<string, string>,
   fieldLabels,
   statusLabels,

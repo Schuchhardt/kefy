@@ -44,6 +44,7 @@ import { generateStory } from '@/lib/services/story';
 import { generateRendition } from '@/lib/services/renditions';
 import { produceVideo } from '@/lib/services/video';
 import { publishContent } from '@/lib/services/publish';
+import { disconnectDetail, isDisconnectedError } from '@/lib/services/social-integrity';
 import type { JWTPayload } from '@/types/auth';
 import type { AutopilotLastRun, Frequency } from '@/types/automations';
 
@@ -1193,9 +1194,15 @@ export async function publishReadyAutopilotReels(now: Date = new Date()): Promis
       const error = err instanceof Error ? err.message : 'Publish failed';
       reportError(err, { route: ROUTE, service: 'zernio', extra: { itemId: item.id, ruleId: pending.rule_id } });
       await close('failed', { error });
+      // La cuenta se desconectó en la red: publishContent ya la marcó en Kefy;
+      // el aviso dice cómo reconectarla en vez de «revisa la cuenta».
+      const disconnected = isDisconnectedError(error);
       await sendAutopilotAlert({
-        kind: 'publish_failed', orgId: ruleRow.org_id, ruleId: ruleRow.id, ruleName: ruleRow.name,
-        userId: ruleRow.created_by, language: ctx.language, detail: error,
+        kind: disconnected ? 'publish_failed_disconnected' : 'publish_failed',
+        orgId: ruleRow.org_id, ruleId: ruleRow.id, ruleName: ruleRow.name,
+        userId: ruleRow.created_by, language: ctx.language,
+        detail: (disconnected ? disconnectDetail(error) : null) ?? error,
+        ...(disconnected ? { path: '/dashboard/settings' } : {}),
       });
       results.push({ ...base, status: 'failed', error });
     }
