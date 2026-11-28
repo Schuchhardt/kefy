@@ -29,6 +29,8 @@ function networkLabel(platform: string): string {
   return CHANNEL_LABELS[platform as Channel] ?? platform.charAt(0).toUpperCase() + platform.slice(1);
 }
 
+const SUCCESS_NOTICE_MS = 6000;
+
 interface Props {
   locale: Locale;
   mode: Mode;
@@ -86,9 +88,21 @@ export default function SocialConnectionPanel({
     setLoadingAccounts(false);
   }, [onAccountsChange]);
 
+  // Al cambiar de marca se vuelven a pedir: la lista es de la marca activa y,
+  // sin esto, seguía mostrando las cuentas (o la falta de cuentas) de la anterior.
+  const activeBrandId = activeBrand?.id;
   useEffect(() => {
+    setLoadingAccounts(true);
     void fetchAccounts();
-  }, [fetchAccounts]);
+  }, [fetchAccounts, activeBrandId]);
+
+  // El aviso de «conectado correctamente» se va solo: antes quedaba fijo hasta
+  // otra acción y parecía que la conexión seguía en curso.
+  useEffect(() => {
+    if (!connectSuccess) return;
+    const id = setTimeout(() => setConnectSuccess(null), SUCCESS_NOTICE_MS);
+    return () => clearTimeout(id);
+  }, [connectSuccess]);
 
   // Vuelta del OAuth: ?connected=<red> o ?error=…
   useEffect(() => {
