@@ -214,6 +214,23 @@ describe('SocialConnectionPanel — enlace directo ?connect=', () => {
     expect(oauthCalls()).toHaveLength(0);
     expect(replace).toHaveBeenCalledWith('/es/dashboard/settings');
   });
+
+  it('el aviso de conectado se va solo', async () => {
+    renderPanel('connected=instagram');
+    expect(await screen.findByText(/Instagram conectado correctamente/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Instagram conectado correctamente/)).not.toBeInTheDocument(), { timeout: 7000 });
+  }, 10000);
+
+  it('al cambiar de marca vuelve a pedir las cuentas', async () => {
+    const view = renderPanel('', { autoConnect: false });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/social/accounts', expect.anything()));
+    const before = fetchMock.mock.calls.filter(([u]) => String(u) === '/api/social/accounts').length;
+
+    brandState = { ...brandState, activeBrand: brands[1] };
+    view.rerender(<SocialConnectionPanel locale="es" mode="settings" autoConnectFromQuery={false} />);
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/social/accounts').length).toBe(before + 1));
+  });
 });
 
 // ─── Botones de red y desconexión ─────────────────────────────────────────────

@@ -71,6 +71,23 @@ ramas ven la conexión. Es un environment aparte del `Production` que crea
 Vercel: Vercel registra sus deploys con el SHA del commit y una regla de rama
 en ese environment podría bloquearlos.
 
+### El deploy de Vercel no espera a la migración
+
+Vercel despliega `main` en cuanto se mergea; el job de producción aplica la
+migración unos minutos después (corre tras los tests). En ese hueco el código
+nuevo ya está vivo contra el esquema viejo. Si lee o escribe una columna que
+la migración crea, falla: el 28 de noviembre de 2026 `status_detail` no existía
+durante ~7 minutos y `GET /api/social/accounts` y `account.connected` dieron
+error (Sentry KEFY-K); el panel mostraba las cuentas como si no hubiera
+ninguna.
+
+Por eso, cuando el código depende de una columna o tabla nueva:
+
+- **Dos PRs:** primero la migración sola; cuando el job la aplicó, el código
+  que la usa.
+- O un solo PR solo si el código tolera que todavía no exista (no la pide en
+  un `select` fijo ni la escribe).
+
 ### Configuración (una sola vez)
 
 1. GitHub → Settings → Environments → `supabase-production` (ya creado), con
